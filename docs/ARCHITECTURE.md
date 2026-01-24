@@ -1,5 +1,7 @@
 # Val Ark - Architecture
 
+[Back to Docs](README.md) | [Back to Project Root](../README.md)
+
 ## Architecture Overview
 
 ```mermaid
@@ -16,6 +18,12 @@ graph TB
         style Entry fill:#1a2230,stroke:#4ade80
         START["start.sh<br/>Interactive Menu + CLI"]
         CRON["Cron Job<br/>Weekly Auto-Update"]
+    end
+
+    subgraph WebServer["Web Server"]
+        style WebServer fill:#1a2230,stroke:#60a5fa
+        SERVER["server.js<br/>Express API + Static UI<br/>Port 3000"]
+        KIWIX["kiwix-serve<br/>Offline Wikipedia<br/>Port 8888"]
     end
 
     subgraph Scripts["Core Scripts"]
@@ -35,6 +43,7 @@ graph TB
         SOURCES["sources/<br/>Build-from-Source"]
         ASSETS["assets/<br/>Ollama Installers"]
         MODELS["~/.ollama/models<br/>AI Model Files"]
+        CONTENT["content/zim/<br/>ZIM Files (Wikipedia)"]
     end
 
     subgraph External["External Sources"]
@@ -44,6 +53,17 @@ graph TB
         OLLAMA_REG["Ollama Registry"]
         DIRECT["Direct URLs<br/>(SQLite, FFmpeg, EDB)"]
     end
+
+    subgraph Client["Web UI"]
+        style Client fill:#1a2230,stroke:#f472b6
+        BROWSER["Browser<br/>Dashboard + Controls"]
+    end
+
+    BROWSER -->|"API requests"| SERVER
+    SERVER -->|"spawns"| DOWNLOAD_T
+    SERVER -->|"spawns"| DOWNLOAD_M
+    SERVER -->|"auto-launches"| KIWIX
+    KIWIX -->|"serves"| CONTENT
 
     START --> SETUP
     START --> UPDATE
@@ -213,4 +233,78 @@ graph TB
     SYNC <-->|"Syncthing P2P<br/>(offline OK)"| PEER3
     PEER1 <-.->|"Direct LAN"| PEER2
     PEER2 <-.->|"Direct LAN"| PEER3
+```
+
+## Server Architecture
+
+The web UI is served by `server.js`, which provides a REST API for managing downloads
+and querying system status. Download operations are handled by spawning the relevant
+shell scripts as child processes, with progress streamed back to the browser via
+Server-Sent Events (SSE).
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a2230',
+  'primaryBorderColor': '#2a3545',
+  'primaryTextColor': '#e8edf4',
+  'lineColor': '#4da6ff',
+  'secondaryColor': '#131921',
+  'tertiaryColor': '#0a0e14'
+}}}%%
+sequenceDiagram
+    participant Browser
+    participant server.js
+    participant filesystem
+    participant download-tools.sh
+
+    Browser->>server.js: GET /api/status/tools
+    server.js->>filesystem: scan tools/ directory
+    filesystem-->>server.js: file listing + metadata
+    server.js-->>Browser: JSON response
+
+    Browser->>server.js: POST /api/download/tools {target: "ollama"}
+    server.js->>download-tools.sh: spawn child process
+    loop Progress updates
+        download-tools.sh-->>server.js: stdout/stderr output
+        server.js-->>Browser: SSE progress events
+    end
+    download-tools.sh-->>server.js: exit code
+    server.js-->>Browser: SSE completion event
+```
+
+## Content Serving
+
+On startup, `server.js` scans the `content/zim/` directory for ZIM files (offline
+Wikipedia archives). If ZIM files are found, it automatically spawns `kiwix-serve`
+on port 8888 to serve them. The web UI detects that kiwix-serve is running and
+displays a "Browse Wikipedia" banner linking users to the offline encyclopedia.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a2230',
+  'primaryBorderColor': '#2a3545',
+  'primaryTextColor': '#e8edf4',
+  'lineColor': '#4da6ff',
+  'secondaryColor': '#131921',
+  'tertiaryColor': '#0a0e14'
+}}}%%
+sequenceDiagram
+    participant server.js
+    participant filesystem
+    participant kiwix-serve
+    participant Browser
+
+    Note over server.js: Startup sequence
+    server.js->>filesystem: scan content/zim/ for .zim files
+    filesystem-->>server.js: ZIM files found
+    server.js->>kiwix-serve: spawn on port 8888 with ZIM library
+    kiwix-serve-->>server.js: listening on :8888
+
+    Note over Browser: User opens Web UI
+    Browser->>server.js: GET /api/status
+    server.js-->>Browser: {kiwix: {running: true, port: 8888}}
+    Note over Browser: Shows "Browse Wikipedia" banner
+
+    Browser->>kiwix-serve: GET /wikipedia/article
+    kiwix-serve-->>Browser: Wikipedia article (HTML)
 ```

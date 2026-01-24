@@ -2,7 +2,7 @@
 
 **Created by Matthew Valancy**
 
-Your favorite tools and AI models as an online-optional server.
+41 tools, AI models, and a web server -- online-optional.
 Local-first, peer-to-peer, offline-capable.
 
 ![Val Ark Web UI](docs/screenshots/web-ui-full.png)
@@ -39,6 +39,12 @@ graph TB
         CRON["Cron Job<br/>Weekly Auto-Update"]
     end
 
+    subgraph WebServer["Web Server (port 3000)"]
+        style WebServer fill:#1a2230,stroke:#fb923c
+        SERVER["server.js<br/>Node.js API + SSE"]
+        KIWIX["kiwix-serve<br/>Port 8888"]
+    end
+
     subgraph Scripts["Core Scripts"]
         style Scripts fill:#1a2230,stroke:#4da6ff
         UPDATE["update.sh<br/>Tools & Assets"]
@@ -51,15 +57,19 @@ graph TB
         TOOLS["tools/ — Binaries"]
         SOURCES["sources/ — Build from Source"]
         MODELS["models/ — AI Models"]
+        CONTENT["content/zim/ — Offline ZIMs"]
     end
 
     START --> UPDATE
     START --> DOWNLOAD_T
     START --> DOWNLOAD_M
+    START --> SERVER
+    SERVER --> KIWIX
     CRON --> UPDATE
     UPDATE --> TOOLS
     UPDATE --> SOURCES
     DOWNLOAD_M --> MODELS
+    KIWIX --> CONTENT
 ```
 
 ## Download Priority
@@ -85,17 +95,29 @@ flowchart TD
     M2 --> M3["8. Tier 3 Models ~300GB+"]
 ```
 
-## What's Included
+## What's Included (41 Tools)
 
 ### AI Engines
 llama.cpp, whisper.cpp, stable-diffusion.cpp, BitNet.cpp, Ollama, ONNX Runtime, Vosk, Piper TTS
 
-### Tools & Infrastructure
-Syncthing, btop, tmux, FFmpeg, InfluxDB, Tailscale, Mosquitto, MQTT Explorer,
-SQLite, Redis, PostgreSQL, Helix, VSCodium, Miniforge, python-build-standalone
+### AI Platforms
+Ollama, n8n, InfluxDB, Milvus, ComfyUI, Open WebUI
 
-### Dev CLI Bundle
+### Creative Tools
+Blender, FreeCAD, KiCad, Godot, GIMP, Inkscape, Audacity
+
+### Media
+FFmpeg, VLC, yt-dlp, Calibre
+
+### Tools & Infrastructure
+Syncthing, btop, tmux, Tailscale, Mosquitto, MQTT Explorer,
+SQLite, Redis, PostgreSQL, Helix, VSCodium, Miniforge, python-build-standalone, Coolify
+
+### Dev CLI Bundle (6 tools)
 ripgrep, fd, bat, jq, fzf, lazygit
+
+### Content Library
+Offline ZIM files served via Kiwix: Wikipedia Simple English (3.1GB), Full Wikipedia (111GB)
 
 ### AI Models (~500GB, downloaded by priority)
 - **Tier 1 (Edge/Mobile):** Small fast models for phones, tablets, IoT (~15GB)
@@ -144,6 +166,7 @@ graph LR
 
 ```bash
 ./start.sh                        # Interactive menu
+./start.sh serve                  # Launch web UI server (port 3000)
 ./start.sh setup                  # Install dependencies
 ./start.sh download tools         # Get tools (smallest first)
 ./start.sh download models tier1  # Edge/mobile models
@@ -182,12 +205,24 @@ graph TB
 
 Download once from the internet, then share across your LAN using Syncthing P2P. All tools and models work fully offline after initial download.
 
+## Web Server
+
+`./start.sh serve` launches a Node.js API server on port 3000 serving the web UI with:
+
+- Live tool status and disk space info
+- SSE-based download progress streaming
+- Software catalog and model browser
+- Content Library tab for offline ZIM files
+
+When valid ZIM files exist in `content/zim/`, the server automatically starts kiwix-serve on port 8888, providing offline Wikipedia browsing without internet access.
+
 ## Project Structure
 
 ```
 val-ark/
 ├── start.sh                  # Entry point: interactive menu + CLI
 ├── scripts/
+│   ├── server.js             # Web UI API server (port 3000)
 │   ├── update.sh             # Update tools, apps, assets, sources
 │   ├── download-tools.sh     # Download AI inference engines
 │   ├── download-models.sh    # Download AI models by tier
@@ -196,11 +231,14 @@ val-ark/
 │   ├── monitor.sh            # Watch active downloads
 │   ├── screenshots.sh        # Capture screenshots & recordings
 │   ├── release.sh            # Create git release tags
+│   ├── tools/                # Per-tool download scripts (41 tools)
 │   └── ...
 ├── web-ui/                   # Web interface + assets
+├── content/
+│   └── zim/                  # Offline ZIM files (Wikipedia, etc.)
 ├── tests/
 │   ├── run-all.sh            # Test runner
-│   ├── screenshots/          # Playwright screenshot tests
+│   ├── screenshots/          # 211 Playwright tests
 │   └── test-*.sh             # Validation scripts
 ├── docs/
 │   ├── ARCHITECTURE.md       # Mermaid diagrams
@@ -215,13 +253,14 @@ val-ark/
 
 ## Documentation
 
+- [docs/README.md](docs/README.md) - Documentation index
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System diagrams
-- [docs/TOOLS.md](docs/TOOLS.md) - Complete tools catalog
+- [docs/TOOLS.md](docs/TOOLS.md) - Complete tools catalog (41 tools)
 - [docs/PLATFORMS.md](docs/PLATFORMS.md) - Platform-specific notes
 - [docs/OFFLINE.md](docs/OFFLINE.md) - Offline and P2P guide
 - [docs/MODEL_INVENTORY.md](docs/MODEL_INVENTORY.md) - Model details
 
-## Testing
+## Testing (211 Playwright Tests)
 
 ```bash
 ./start.sh test               # Run via menu

@@ -1299,37 +1299,59 @@ link_tools() {
     # Link AI engine binaries from models/tools into project tools
     local arm64_dir="${TOOLS_DIR}/linux-arm64"
     local x86_dir="${TOOLS_DIR}/linux-x86_64"
-    mkdir -p "$arm64_dir" "$x86_dir"
+    local mac_dir="${TOOLS_DIR}/macos-arm64"
+    local win_dir="${TOOLS_DIR}/windows-x64"
+    mkdir -p "$arm64_dir" "$x86_dir" "$mac_dir" "$win_dir"
 
     # llama.cpp
     [ -f "${MODELS_TOOLS}/llama.cpp/linux-arm64/llama-server" ] && \
         ln -sf "${MODELS_TOOLS}/llama.cpp/linux-arm64/llama-server" "${arm64_dir}/llama-server" 2>/dev/null
     [ -f "${MODELS_TOOLS}/llama.cpp/linux-x86_64/llama-server" ] && \
         ln -sf "${MODELS_TOOLS}/llama.cpp/linux-x86_64/llama-server" "${x86_dir}/llama-server" 2>/dev/null
+    [ -f "${MODELS_TOOLS}/llama.cpp/macos-arm64/llama-server" ] && \
+        ln -sf "${MODELS_TOOLS}/llama.cpp/macos-arm64/llama-server" "${mac_dir}/llama-server" 2>/dev/null
+    [ -f "${MODELS_TOOLS}/llama.cpp/windows-x64/llama-server.exe" ] && \
+        ln -sf "${MODELS_TOOLS}/llama.cpp/windows-x64/llama-server.exe" "${win_dir}/llama-server.exe" 2>/dev/null
 
-    # whisper.cpp
+    # whisper.cpp (no linux prebuilt — source-only; Windows has prebuilt)
     [ -f "${MODELS_TOOLS}/whisper.cpp/linux-arm64/whisper-cli" ] && \
         ln -sf "${MODELS_TOOLS}/whisper.cpp/linux-arm64/whisper-cli" "${arm64_dir}/whisper-cli" 2>/dev/null
     [ -f "${MODELS_TOOLS}/whisper.cpp/linux-x86_64/whisper-cli" ] && \
         ln -sf "${MODELS_TOOLS}/whisper.cpp/linux-x86_64/whisper-cli" "${x86_dir}/whisper-cli" 2>/dev/null
+    [ -f "${MODELS_TOOLS}/whisper.cpp/windows-x64/whisper-cli.exe" ] && \
+        ln -sf "${MODELS_TOOLS}/whisper.cpp/windows-x64/whisper-cli.exe" "${win_dir}/whisper-cli.exe" 2>/dev/null
 
     # stable-diffusion.cpp
     [ -f "${MODELS_TOOLS}/stable-diffusion.cpp/linux-arm64/sd-cli" ] && \
         ln -sf "${MODELS_TOOLS}/stable-diffusion.cpp/linux-arm64/sd-cli" "${arm64_dir}/sd-cli" 2>/dev/null
     [ -f "${MODELS_TOOLS}/stable-diffusion.cpp/linux-x86_64/sd-cli" ] && \
         ln -sf "${MODELS_TOOLS}/stable-diffusion.cpp/linux-x86_64/sd-cli" "${x86_dir}/sd-cli" 2>/dev/null
+    [ -f "${MODELS_TOOLS}/stable-diffusion.cpp/macos-arm64/sd-cli" ] && \
+        ln -sf "${MODELS_TOOLS}/stable-diffusion.cpp/macos-arm64/sd-cli" "${mac_dir}/sd-cli" 2>/dev/null
+    [ -f "${MODELS_TOOLS}/stable-diffusion.cpp/windows-x64/sd-cli.exe" ] && \
+        ln -sf "${MODELS_TOOLS}/stable-diffusion.cpp/windows-x64/sd-cli.exe" "${win_dir}/sd-cli.exe" 2>/dev/null
 
     # onnxruntime
     [ -d "${MODELS_TOOLS}/onnxruntime/linux-arm64" ] && \
         ln -sfn "${MODELS_TOOLS}/onnxruntime/linux-arm64" "${arm64_dir}/onnxruntime" 2>/dev/null
     [ -d "${MODELS_TOOLS}/onnxruntime/linux-x86_64" ] && \
         ln -sfn "${MODELS_TOOLS}/onnxruntime/linux-x86_64" "${x86_dir}/onnxruntime" 2>/dev/null
+    [ -d "${MODELS_TOOLS}/onnxruntime/macos-arm64" ] && \
+        ln -sfn "${MODELS_TOOLS}/onnxruntime/macos-arm64" "${mac_dir}/onnxruntime" 2>/dev/null
+    [ -d "${MODELS_TOOLS}/onnxruntime/windows-x64" ] && \
+        ln -sfn "${MODELS_TOOLS}/onnxruntime/windows-x64" "${win_dir}/onnxruntime" 2>/dev/null
 
     # vosk
     [ -d "${MODELS_TOOLS}/vosk/linux-arm64" ] && \
         ln -sfn "${MODELS_TOOLS}/vosk/linux-arm64" "${arm64_dir}/vosk" 2>/dev/null
     [ -d "${MODELS_TOOLS}/vosk/linux-x86_64" ] && \
         ln -sfn "${MODELS_TOOLS}/vosk/linux-x86_64" "${x86_dir}/vosk" 2>/dev/null
+    [ -d "${MODELS_TOOLS}/vosk/windows-x64" ] && \
+        ln -sfn "${MODELS_TOOLS}/vosk/windows-x64" "${win_dir}/vosk" 2>/dev/null
+
+    # bitnet
+    [ -d "${MODELS_TOOLS}/bitnet/source" ] && \
+        ln -sfn "${MODELS_TOOLS}/bitnet/source" "${arm64_dir}/bitnet" 2>/dev/null
 
     # Web-UI symlinks (for the dev server to serve tools/sources/assets)
     local webui="${PROJECT_ROOT}/web-ui"

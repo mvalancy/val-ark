@@ -325,7 +325,7 @@ download_llama_cpp() {
 
     # macOS arm64 - prebuilt binary
     local mac_url="https://github.com/ggml-org/llama.cpp/releases/download/${TAG}/llama-${TAG}-bin-macos-arm64.tar.gz"
-    download_and_extract "$mac_url" "${LLAMA_DIR}/macos-arm64" "llama.cpp macOS arm64 (${TAG})"
+    download_and_extract "$mac_url" "${LLAMA_DIR}/macos-arm64" "llama.cpp macOS arm64 (${TAG})" 1
 
     # Windows x64 CPU - prebuilt binary
     local win_url="https://github.com/ggml-org/llama.cpp/releases/download/${TAG}/llama-${TAG}-bin-win-cpu-x64.zip"
@@ -339,10 +339,13 @@ download_llama_cpp() {
         log_warn "Could not find CUDA Windows binary for llama.cpp ${TAG}"
     fi
 
-    # Linux arm64 + Linux x86_64 - clone source for building (shared)
+    # Linux x86_64 - prebuilt binary
+    local linux_url="https://github.com/ggml-org/llama.cpp/releases/download/${TAG}/llama-${TAG}-bin-ubuntu-x64.tar.gz"
+    download_and_extract "$linux_url" "${LLAMA_DIR}/linux-x86_64" "llama.cpp Linux x86_64 (${TAG})" 1
+
+    # Linux arm64 - clone source for building (no prebuilt for Jetson/CUDA)
     clone_repo "https://github.com/ggml-org/llama.cpp.git" "$TAG" \
         "${LLAMA_DIR}/source" "llama.cpp source"
-    # Note: source is shared; build scripts output to linux-arm64/ or linux-x86_64/
 }
 
 download_whisper_cpp() {
@@ -424,7 +427,15 @@ download_stable_diffusion_cpp() {
         download_and_extract "$win_cuda_url" "${SD_DIR}/windows-x64-cuda" "sd.cpp Windows CUDA (${TAG})"
     fi
 
-    # Linux arm64 + Linux x86_64 - clone source (no prebuilt)
+    # Linux x86_64 - prebuilt binary (name includes Ubuntu version)
+    local linux_url=$(github_asset_url "leejet/stable-diffusion.cpp" "$TAG" "bin-Linux-Ubuntu.*x86_64.zip")
+    if [ -n "$linux_url" ]; then
+        download_and_extract "$linux_url" "${SD_DIR}/linux-x86_64" "sd.cpp Linux x86_64 (${TAG})"
+    else
+        log_warn "Could not find Linux x86_64 binary for stable-diffusion.cpp ${TAG}"
+    fi
+
+    # Linux arm64 - clone source for building (no prebuilt for arm64)
     clone_repo "https://github.com/leejet/stable-diffusion.cpp.git" "$TAG" \
         "${SD_DIR}/source" "stable-diffusion.cpp source"
 }

@@ -5,17 +5,21 @@
 Your favorite tools and AI models as an online-optional server.
 Local-first, peer-to-peer, offline-capable.
 
-## Screenshots
+![Val Ark Web UI](docs/screenshots/web-ui-full.png)
 
-Screenshots are generated automatically with Playwright and asciinema:
+<details>
+<summary>More Screenshots</summary>
 
-```bash
-./start.sh screenshots          # Capture all (web + terminal)
-./start.sh screenshots web      # Web UI only (Playwright)
-./start.sh screenshots terminal  # Terminal recordings (asciinema → SVG)
-```
+### Software Catalog
+![Software Page](docs/screenshots/software-page.png)
 
-Generated files are saved to `docs/screenshots/`.
+### Model Families
+![Model Cards](docs/screenshots/model-cards.png)
+
+### Tool Detail (BitNet.cpp)
+![Tool Detail](docs/screenshots/tool-detail.png)
+
+</details>
 
 ## Architecture
 

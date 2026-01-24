@@ -2689,6 +2689,43 @@ const TOOLS = [
         }
     },
     {
+        id: 'kdenlive', name: 'Kdenlive', category: 'creative', icon: 'K', iconBg: '#1d99f3', logo: 'logos/kdenlive.svg', downloadTarget: 'kdenlive',
+        desc: 'Professional non-linear video editor - multi-track timeline, effects, transitions, and titling for film and video production',
+        screenshots: ['screenshots/kdenlive-1.png'],
+        size: '~250 MB',
+        platforms: { jetson: 'package', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://invent.kde.org/multimedia/kdenlive',
+            releases: 'https://kdenlive.org/en/download/',
+            installHint: 'package',
+            binaries: {
+                'ubuntu': 'tools/linux-x86_64/kdenlive/',
+                'mac': 'tools/macos-arm64/kdenlive/',
+                'windows': 'tools/windows-x64/kdenlive/'
+            }
+        },
+        details: {
+            overview: 'Kdenlive is a professional non-linear video editor built on the MLT framework and FFmpeg. It provides a multi-track timeline with unlimited audio and video tracks, real-time preview with proxy editing support, and a comprehensive effects library including color correction, compositing, and audio processing.\n\nThe editor supports all formats handled by FFmpeg (H.264, H.265/HEVC, ProRes, VP9, AV1, and hundreds more) with flexible render profiles for any output target. Its titler creates animated titles, and keyframeable effects allow precise motion and parameter control throughout the timeline.\n\nKdenlive includes speech-to-text subtitling via Whisper/VOSK integration, nested timeline sequences, multicam editing, and audio mixing with per-track effects chains. The project files are XML-based and portable across platforms.',
+            features: [
+                'Unlimited video and audio tracks with drag-and-drop editing',
+                'Real-time preview with proxy clip support for 4K+ workflows',
+                'Keyframeable effects with bezier curve interpolation',
+                'Color correction: curves, levels, white balance, LUT support',
+                'Compositing with blend modes, rotoscoping, and motion tracking',
+                'Title editor with animations and template support',
+                'Speech-to-text subtitle generation (Whisper/VOSK)',
+                'Nested sequences for complex project organization',
+                'Render to any format via FFmpeg (H.264, HEVC, ProRes, AV1, etc.)',
+                'Cross-platform: Linux AppImage, macOS DMG, Windows installer'
+            ],
+            cli: [
+                {cmd: 'kdenlive project.kdenlive', desc: 'Open a project file'},
+                {cmd: 'melt project.kdenlive -consumer avformat:output.mp4', desc: 'Render from command line via MLT'},
+                {cmd: 'flatpak install flathub org.kde.kdenlive', desc: 'Install via Flatpak (ARM64)'}
+            ]
+        }
+    },
+    {
         id: 'gimp', name: 'GIMP', category: 'creative', icon: 'G', iconBg: '#5c5543', logo: 'logos/gimp.svg', downloadTarget: 'gimp',
         desc: 'Professional image editor - photo retouching, composition, and graphic design with scriptable automation',
         screenshots: ['screenshots/gimp-1.png'],
@@ -2925,6 +2962,7 @@ const TOOL_META = {
     'miniforge': { maker: 'conda-forge', website: 'https://github.com/conda-forge/miniforge', license: 'BSD-3-Clause', licenseUrl: 'https://github.com/conda-forge/miniforge/blob/main/LICENSE' },
     'python-standalone': { maker: 'Gregory Szorc', website: 'https://github.com/indygreg/python-build-standalone', license: 'MPL-2.0', licenseUrl: 'https://github.com/indygreg/python-build-standalone/blob/main/LICENSE' },
     'audacity': { maker: 'Audacity Team', website: 'https://www.audacityteam.org', license: 'GPL-3.0', licenseUrl: 'https://github.com/audacity/audacity/blob/master/LICENSE.txt' },
+    'kdenlive': { maker: 'KDE', website: 'https://kdenlive.org', license: 'GPL-3.0', licenseUrl: 'https://invent.kde.org/multimedia/kdenlive/-/blob/master/COPYING' },
     'gimp': { maker: 'GNOME Foundation', website: 'https://www.gimp.org', license: 'GPL-3.0', licenseUrl: 'https://www.gimp.org/about/COPYING' },
     'inkscape': { maker: 'Inkscape Project', website: 'https://inkscape.org', license: 'GPL-2.0+', licenseUrl: 'https://gitlab.com/inkscape/inkscape/-/blob/master/COPYING' },
     'yt-dlp': { maker: 'yt-dlp Contributors', website: 'https://github.com/yt-dlp/yt-dlp', license: 'Unlicense', licenseUrl: 'https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE' },

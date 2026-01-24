@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- Kdenlive logo - film strip with play button -->
+  <rect x="4" y="8" width="40" height="32" rx="3" fill="#1d99f3"/>
+  <!-- Film perforations -->
+  <rect x="7" y="11" width="4" height="3" rx="1" fill="#fff" opacity="0.6"/>
+  <rect x="7" y="17" width="4" height="3" rx="1" fill="#fff" opacity="0.6"/>
+  <rect x="7" y="23" width="4" height="3" rx="1" fill="#fff" opacity="0.6"/>
+  <rect x="7" y="29" width="4" height="3" rx="1" fill="#fff" opacity="0.6"/>
+  <rect x="7" y="35" width="4" height="3" rx="1" fill="#fff" opacity="0.6"/>
+  <rect x="37" y="11" width="4" height="3" rx="1" fill="#fff" opacity="0.6"/>
+  <rect x="37" y="17" width="4" height="3" rx="1" fill="#fff" opacity="0.6"/>
+  <rect x="37" y="23" width="4" height="3" rx="1" fill="#fff" opacity="0.6"/>
+  <rect x="37" y="29" width="4" height="3" rx="1" fill="#fff" opacity="0.6"/>
+  <rect x="37" y="35" width="4" height="3" rx="1" fill="#fff" opacity="0.6"/>
+  <!-- Play triangle -->
+  <polygon points="20,16 20,32 34,24" fill="#fff"/>
+</svg>

@@ -14,7 +14,7 @@ const TOOL_IDS = [
   'kiwix', 'tailscale', 'mosquitto', 'mqtt-explorer', 'redis',
   'postgresql', 'telegraf', 'btop', 'tmux', 'helix', 'vscodium',
   'sqlite', 'miniforge', 'python-standalone', 'dev-cli', 'claude-code',
-  'audacity', 'gimp', 'inkscape', 'yt-dlp', 'open-webui', 'calibre'
+  'audacity', 'kdenlive', 'gimp', 'inkscape', 'yt-dlp', 'open-webui', 'calibre'
 ];
 
 // All model slugs from the web UI

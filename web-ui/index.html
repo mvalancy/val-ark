@@ -1834,24 +1834,23 @@ async function checkInstalledTools() {
             return;
         }
 
-        const binPath = bins[currentPlat];
-        if (!binPath) {
-            // No binary for current platform - check if any binary exists in the ark
-            const anyPath = Object.values(bins).find(p => p);
-            if (anyPath) {
-                try {
-                    const r = await fetch(anyPath, {method:'HEAD'});
-                    INSTALLED_TOOLS[t.id] = r.ok ? 'installed' : 'missing';
-                } catch(e) { INSTALLED_TOOLS[t.id] = 'missing'; }
-            } else {
-                INSTALLED_TOOLS[t.id] = t.downloads.installHint || 'missing';
-            }
+        // Check all binary paths — tool is "in the ark" if ANY platform binary exists
+        const allPaths = Object.values(bins).filter(p => p);
+        if (allPaths.length === 0) {
+            INSTALLED_TOOLS[t.id] = t.downloads.installHint || 'missing';
             return;
         }
-        try {
-            const r = await fetch(binPath, {method:'HEAD'});
-            INSTALLED_TOOLS[t.id] = r.ok ? 'installed' : 'missing';
-        } catch(e) { INSTALLED_TOOLS[t.id] = 'missing'; }
+        // Try current platform first, then any other
+        const binPath = bins[currentPlat];
+        const pathsToTry = binPath ? [binPath, ...allPaths.filter(p => p !== binPath)] : allPaths;
+        let found = false;
+        for (const p of pathsToTry) {
+            try {
+                const r = await fetch(p, {method:'HEAD'});
+                if (r.ok) { found = true; break; }
+            } catch(e) {}
+        }
+        INSTALLED_TOOLS[t.id] = found ? 'installed' : 'missing';
     });
 
     // Also check source repos

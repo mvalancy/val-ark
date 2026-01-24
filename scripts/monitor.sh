@@ -3,7 +3,7 @@
 # Monitor download progress - run in a separate terminal
 ###############################################################################
 
-MODEL_ROOT="/home/uat-admin/models"
+MODEL_ROOT="${HOME}/models"
 
 while true; do
     clear

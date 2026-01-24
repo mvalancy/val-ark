@@ -9,7 +9,7 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 
-MODEL_ROOT="/home/uat-admin/models"
+MODEL_ROOT="${HOME}/models"
 TOOLS_ROOT="${MODEL_ROOT}/tools"
 
 # Colors

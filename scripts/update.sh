@@ -1345,7 +1345,7 @@ show_model_paths() {
 # Link AI engine binaries from models tools into project tools + web-ui symlinks
 ###############################################################################
 
-MODELS_TOOLS="/home/uat-admin/models/tools"
+MODELS_TOOLS="${HOME}/models/tools"
 
 link_tools() {
     log "============================================================"

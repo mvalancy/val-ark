@@ -1,16 +1,16 @@
-# Val Ark - Tools Catalog (41 Tools)
+# Val Ark - Tools Catalog (43 Tools)
 
 [Back to Docs](README.md) | [Back to Project Root](../README.md)
 
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'pie1': '#2563eb', 'pie2': '#7c3aed', 'pie3': '#e87d0d', 'pie4': '#16a34a', 'pie5': '#0891b2', 'pie6': '#6366f1'}}}%%
-pie title Tool Categories (41 Total)
+pie title Tool Categories (43 Total)
     "AI Inference (8)" : 8
-    "AI Platforms (6)" : 6
-    "Creative (6)" : 6
-    "Media (5)" : 5
-    "Infrastructure (8)" : 8
-    "Dev Tools (9)" : 9
+    "AI Platforms (4)" : 4
+    "Creative (8)" : 8
+    "Media (4)" : 4
+    "Infrastructure (13)" : 13
+    "Dev Tools (6)" : 6
 ```
 
 ---
@@ -28,90 +28,87 @@ Local inference engines for running AI models directly on hardware without cloud
 | 5 | **ONNX Runtime** | Inference runtime for Kokoro TTS, Silero VAD, Moonshine ASR, and ONNX models | arm64, x86_64, mac, windows | Prebuilt binary | MIT |
 | 6 | **Vosk** | Lightweight offline speech recognition (Kaldi-based), 30+ languages, streaming | arm64, x86_64, mac, windows | Prebuilt binary / pip | Apache-2.0 |
 | 7 | **BitNet.cpp** | 1-bit (ternary) LLM inference, 2-6x CPU speedup over FP16 | arm64, x86_64 | Source build (Python setup) | MIT |
-| 8 | **FFmpeg** | Audio/video processing, format conversion, Whisper audio prep, HW encoding | arm64, x86_64, mac, windows | Prebuilt binary | LGPL-2.1+ |
+| 8 | **Ollama** | Model manager and server for local LLMs with pull/run/serve workflow | arm64, x86_64, mac, windows | Prebuilt binary | MIT |
 
 ---
 
-## AI Platforms (6)
+## AI Platforms (4)
 
-Higher-level AI services, model managers, and workflow systems.
+Higher-level AI services, workflow systems, and model management interfaces.
 
 | # | Tool | Description | Platforms | Method | License |
 |---|------|-------------|-----------|--------|---------|
-| 9 | **Ollama** | Model manager and server for local LLMs with pull/run/serve workflow | arm64, x86_64, mac, windows | Prebuilt binary | MIT |
-| 10 | **n8n** | Workflow automation platform with AI nodes, connects to Ollama/llama.cpp | arm64, x86_64 | npm / Docker | Sustainable Use |
-| 11 | **InfluxDB** | Time-series database for metrics, inference telemetry, and IoT sensor data | arm64, x86_64, mac, windows | Prebuilt binary | MIT / Apache-2.0 |
-| 12 | **Milvus** | Vector database for embeddings, similarity search, and RAG pipelines | x86_64 | pip (Milvus Lite) / Docker | Apache-2.0 |
-| 13 | **ComfyUI** | Node-based image/video generation workflow editor using sd.cpp models | arm64, x86_64, mac, windows | pip / source (Python) | GPL-3.0 |
-| 14 | **Open WebUI** | ChatGPT-style web interface for Ollama and local LLMs with RAG support | arm64, x86_64, mac, windows | pip / Docker | MIT |
+| 9 | **n8n** | Workflow automation platform with AI nodes, connects to Ollama/llama.cpp | arm64, x86_64 | npm / Docker | Sustainable Use |
+| 10 | **Milvus** | Vector database for embeddings, similarity search, and RAG pipelines | x86_64 | pip (Milvus Lite) / Docker | Apache-2.0 |
+| 11 | **ComfyUI** | Node-based image/video generation workflow editor using sd.cpp models | arm64, x86_64, mac, windows | pip / source (Python) | GPL-3.0 |
+| 12 | **Open WebUI** | ChatGPT-style web interface for Ollama and local LLMs with RAG support | arm64, x86_64, mac, windows | pip / Docker | MIT |
 
 ---
 
-## Creative (6)
+## Creative (8)
 
-Design, modeling, and content creation tools with headless/scripting capabilities.
+Design, modeling, content creation, and editing tools with scripting capabilities.
 
 | # | Tool | Description | Platforms | Method | License |
 |---|------|-------------|-----------|--------|---------|
-| 15 | **Blender** | 3D modeling, animation, rendering with Python scripting API (bpy) | x86_64, mac, windows | Prebuilt binary | GPL-2.0+ |
-| 16 | **FreeCAD** | Parametric 3D CAD modeler with headless mode (FreeCADCmd) and Python API | x86_64, mac, windows | Prebuilt binary | LGPL-2.1+ |
-| 17 | **KiCad** | PCB/schematic EDA suite with kicad-cli for headless Gerber/BOM/DRC export | x86_64 | Prebuilt binary (AppImage) | GPL-3.0+ |
-| 18 | **Godot Engine** | 2D/3D game engine with GDScript, headless export, and CI integration | arm64, x86_64, mac, windows | Prebuilt binary | MIT |
-| 19 | **GIMP** | Raster image editor with batch processing via Script-Fu and Python-Fu | x86_64, mac, windows | Package manager / Flatpak | GPL-3.0 |
-| 20 | **Inkscape** | Vector graphics editor (SVG) with CLI export to PDF/PNG/EPS | x86_64 | Package manager | GPL-2.0+ |
+| 13 | **Blender** | 3D modeling, animation, rendering with Python scripting API (bpy) | x86_64, mac, windows | Prebuilt binary | GPL-2.0+ |
+| 14 | **FreeCAD** | Parametric 3D CAD modeler with headless mode (FreeCADCmd) and Python API | x86_64, mac, windows | Prebuilt binary | LGPL-2.1+ |
+| 15 | **KiCad** | PCB/schematic EDA suite with kicad-cli for headless Gerber/BOM/DRC export | x86_64 | Prebuilt binary (AppImage) | GPL-3.0+ |
+| 16 | **Godot Engine** | 2D/3D game engine with GDScript, headless export, and CI integration | arm64, x86_64, mac, windows | Prebuilt binary | MIT |
+| 17 | **GIMP** | Raster image editor with batch processing via Script-Fu and Python-Fu | x86_64, mac, windows | Package manager / Flatpak | GPL-3.0 |
+| 18 | **Inkscape** | Vector graphics editor (SVG) with CLI export to PDF/PNG/EPS | x86_64 | Package manager | GPL-2.0+ |
+| 19 | **Kdenlive** | Non-linear video editor with multi-track timeline, effects, and titling | x86_64, mac, windows | Prebuilt binary (AppImage/DMG/exe) | GPL-3.0 |
+| 20 | **Calibre** | E-book library manager, format converter, and content server | arm64, x86_64, mac, windows | Prebuilt binary | GPL-3.0 |
 
 ---
 
-## Media (5)
+## Media (4)
 
-Media playback, download, conversion, and library management.
+Media playback, recording, download, and conversion tools.
 
 | # | Tool | Description | Platforms | Method | License |
 |---|------|-------------|-----------|--------|---------|
 | 21 | **FFmpeg** | Audio/video processing, transcoding, streaming, and frame extraction | arm64, x86_64, mac, windows | Prebuilt binary | LGPL-2.1+ |
 | 22 | **VLC** | Universal media player with CLI transcoding and HTTP streaming (cvlc) | arm64, x86_64, mac, windows | Prebuilt binary | GPL-2.0+ |
-| 23 | **yt-dlp** | Video/audio downloader supporting 1000+ sites with format selection | arm64, x86_64, mac, windows | Prebuilt binary | Unlicense |
-| 24 | **Calibre** | E-book library manager, format converter, and content server | arm64, x86_64, mac, windows | Prebuilt binary | GPL-3.0 |
-| 25 | **Audacity** | Multi-track audio editor with recording, effects, and noise reduction | x86_64, mac, windows | Prebuilt binary / package manager | GPL-3.0 |
-
-Note: FFmpeg appears in both AI Inference and Media categories as it serves both roles (audio prep for Whisper and general media processing).
+| 23 | **Audacity** | Multi-track audio editor with recording, effects, and noise reduction | x86_64, mac, windows | Prebuilt binary / package manager | GPL-3.0 |
+| 24 | **yt-dlp** | Video/audio downloader supporting 1000+ sites with format selection | arm64, x86_64, mac, windows | Prebuilt binary | Unlicense |
 
 ---
 
-## Infrastructure (8)
+## Infrastructure (13)
 
-Networking, sync, databases, self-hosting, and IoT messaging.
+Networking, sync, databases, monitoring, self-hosting, and IoT messaging.
 
 | # | Tool | Description | Platforms | Method | License |
 |---|------|-------------|-----------|--------|---------|
-| 26 | **Syncthing** | Peer-to-peer continuous file synchronization across devices | arm64, x86_64, mac, windows | Prebuilt binary | MPL-2.0 |
-| 27 | **Coolify** | Self-hosted PaaS for deploying apps, databases, and services with Git push | x86_64 | Docker / install script | Apache-2.0 |
-| 28 | **Kiwix** | Offline content server for ZIM archives (Wikipedia, StackOverflow, etc.) | arm64, x86_64, mac, windows | Prebuilt binary | GPL-3.0 |
-| 29 | **Tailscale** | Mesh VPN / overlay network with zero-config device connectivity | arm64, x86_64, mac, windows | Prebuilt binary | BSD-3-Clause |
-| 30 | **Mosquitto** | Lightweight MQTT broker and clients for IoT device messaging | arm64 | Source build (compiled) | EPL-2.0 / EDL-1.0 |
-| 31 | **MQTT Explorer** | Visual GUI MQTT client for browsing topics and debugging IoT data flows | x86_64 | Prebuilt binary (AppImage) | CC-BY-ND-4.0 |
-| 32 | **Redis** | In-memory key-value store for caching, pub/sub, and session management | arm64 | Source build (compiled) | RSALv2 / SSPLv1 |
-| 33 | **PostgreSQL** | Relational database with pgvector extension for AI embeddings | arm64 | Source build (compiled) | PostgreSQL License |
+| 25 | **Syncthing** | Peer-to-peer continuous file synchronization across devices | arm64, x86_64, mac, windows | Prebuilt binary | MPL-2.0 |
+| 26 | **Coolify** | Self-hosted PaaS for deploying apps, databases, and services with Git push | x86_64 | Docker / install script | Apache-2.0 |
+| 27 | **Kiwix** | Offline content server for ZIM archives (Wikipedia, StackOverflow, etc.) | arm64, x86_64, mac, windows | Prebuilt binary | GPL-3.0 |
+| 28 | **Tailscale** | Mesh VPN / overlay network with zero-config device connectivity | arm64, x86_64, mac, windows | Prebuilt binary | BSD-3-Clause |
+| 29 | **Mosquitto** | Lightweight MQTT broker and clients for IoT device messaging | arm64 | Source build (compiled) | EPL-2.0 / EDL-1.0 |
+| 30 | **MQTT Explorer** | Visual GUI MQTT client for browsing topics and debugging IoT data flows | x86_64 | Prebuilt binary (AppImage) | CC-BY-ND-4.0 |
+| 31 | **Redis** | In-memory key-value store for caching, pub/sub, and session management | arm64 | Source build (compiled) | RSALv2 / SSPLv1 |
+| 32 | **PostgreSQL** | Relational database with pgvector extension for AI embeddings | arm64 | Source build (compiled) | PostgreSQL License |
+| 33 | **InfluxDB** | Time-series database for metrics, inference telemetry, and IoT sensor data | arm64, x86_64 | Prebuilt binary | MIT / Apache-2.0 |
+| 34 | **Telegraf** | Metrics collection agent with 300+ plugins for system and app monitoring | arm64, x86_64, mac, windows | Prebuilt binary | MIT |
+| 35 | **SQLite** | Embedded SQL database CLI for experiment tracking, logs, and local storage | arm64, x86_64, windows | Prebuilt binary | Public Domain |
+| 36 | **btop** | Interactive system/resource monitor with CPU, GPU, memory, and process views | arm64, x86_64, mac, windows | Prebuilt binary | Apache-2.0 |
+| 37 | **tmux** | Terminal multiplexer with session persistence, splits, and remote attach | arm64, x86_64, mac | Prebuilt binary (static) | ISC |
 
 ---
 
-## Dev Tools (9)
+## Dev Tools (6)
 
-Editors, terminals, runtimes, CLI utilities, and AI coding assistants.
+Editors, runtimes, CLI utilities, and AI coding assistants.
 
 | # | Tool | Description | Platforms | Method | License |
 |---|------|-------------|-----------|--------|---------|
-| 34 | **btop** | Interactive system/resource monitor with CPU, GPU, memory, and process views | arm64, x86_64, mac, windows | Prebuilt binary | Apache-2.0 |
-| 35 | **tmux** | Terminal multiplexer with session persistence, splits, and remote attach | arm64, x86_64, mac | Prebuilt binary (static) | ISC |
-| 36 | **Helix** | Modal text editor (Rust) with built-in LSP, tree-sitter, and multi-cursor | arm64, x86_64, mac, windows | Prebuilt binary | MPL-2.0 |
-| 37 | **VSCodium** | Open-source VS Code (telemetry-free) with Open VSX extension registry | arm64, x86_64, mac, windows | Prebuilt binary | MIT |
-| 38 | **SQLite** | Embedded SQL database CLI for experiment tracking, logs, and local storage | arm64, x86_64, windows | Prebuilt binary | Public Domain |
-| 39 | **Miniforge** | Conda-forge distribution for managing Python environments and packages offline | arm64, x86_64, mac, windows | Prebuilt installer | BSD-3-Clause |
-| 40 | **Python Standalone** | Portable CPython build with no system dependencies, pip included | arm64, x86_64, mac, windows | Prebuilt binary | MPL-2.0 |
-| 41 | **Dev CLI Bundle** | ripgrep, fd, bat, jq, fzf, lazygit bundled as portable CLI dev tools | arm64, x86_64, mac, windows | Prebuilt binary | MIT / Apache-2.0 |
-| -- | **Claude Code** | Anthropic's agentic coding CLI, works offline via Ollama or llama.cpp backend | arm64, x86_64, mac, windows | npm | Proprietary |
-
-Note: Claude Code is bundled within the Dev Tools category but is listed separately as it requires an npm install rather than a direct binary download. The total unique tool count is 41 (FFmpeg shared between AI Inference and Media, Claude Code as part of Dev Tools).
+| 38 | **Helix** | Modal text editor (Rust) with built-in LSP, tree-sitter, and multi-cursor | arm64, x86_64, mac, windows | Prebuilt binary | MPL-2.0 |
+| 39 | **VSCodium** | Open-source VS Code (telemetry-free) with Open VSX extension registry | arm64, x86_64, mac, windows | Prebuilt binary | MIT |
+| 40 | **Miniforge** | Conda-forge distribution for managing Python environments and packages offline | arm64, x86_64, mac, windows | Prebuilt installer | BSD-3-Clause |
+| 41 | **Python Standalone** | Portable CPython build with no system dependencies, pip included | arm64, x86_64, mac, windows | Prebuilt binary | MPL-2.0 |
+| 42 | **Dev CLI Bundle** | ripgrep, fd, bat, jq, fzf, lazygit bundled as portable CLI dev tools | arm64, x86_64, mac, windows | Prebuilt binary | MIT / Apache-2.0 |
+| 43 | **Claude Code** | Anthropic's agentic coding CLI, works offline via Ollama or llama.cpp backend | arm64, x86_64, mac, windows | npm | Proprietary |
 
 ---
 

@@ -581,7 +581,7 @@ test.describe('Val Ark - Web UI Data Integrity', () => {
 });
 
 test.describe('Val Ark - Model File Verification', () => {
-  const MODELS_ROOT = path.resolve('/home/uat-admin/models');
+  const MODELS_ROOT = path.resolve(process.env.HOME || require('os').homedir(), 'models');
 
   test('LLM models directory exists and has content', () => {
     const llmDir = path.join(MODELS_ROOT, 'llm');

@@ -75,8 +75,8 @@ check_cmd pip3
 check_cmd jq
 
 # Check for HuggingFace CLI
-if [ -f "/home/uat-admin/.local/bin/hf" ]; then
-    echo -e "  ${GREEN}✓${NC} hf CLI (/home/uat-admin/.local/bin/hf)"
+if [ -f "${HOME}/.local/bin/hf" ]; then
+    echo -e "  ${GREEN}✓${NC} hf CLI (${HOME}/.local/bin/hf)"
 elif command -v huggingface-cli &>/dev/null; then
     echo -e "  ${GREEN}✓${NC} huggingface-cli"
 else

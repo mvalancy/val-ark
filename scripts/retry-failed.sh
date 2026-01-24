@@ -3,7 +3,7 @@
 # Retry failed downloads from a previous session
 ###############################################################################
 
-MODEL_ROOT="/home/uat-admin/models"
+MODEL_ROOT="${HOME}/models"
 FAILED_FILE="${MODEL_ROOT}/logs/failed_downloads.txt"
 
 if [ ! -f "$FAILED_FILE" ] || [ ! -s "$FAILED_FILE" ]; then

@@ -2,7 +2,7 @@
 
 **Created by Matthew Valancy**
 
-41 tools, AI models, and a web server -- online-optional.
+43 tools, AI models, and a web server -- online-optional.
 Local-first, peer-to-peer, offline-capable.
 
 ![Val Ark Web UI](docs/screenshots/web-ui-full.png)
@@ -95,26 +95,27 @@ flowchart TD
     M2 --> M3["8. Tier 3 Models ~300GB+"]
 ```
 
-## What's Included (41 Tools)
+## What's Included (43 Tools)
 
-### AI Engines
+### AI Inference
 llama.cpp, whisper.cpp, stable-diffusion.cpp, BitNet.cpp, Ollama, ONNX Runtime, Vosk, Piper TTS
 
 ### AI Platforms
-Ollama, n8n, InfluxDB, Milvus, ComfyUI, Open WebUI
+n8n, Milvus, ComfyUI, Open WebUI
 
-### Creative Tools
-Blender, FreeCAD, KiCad, Godot, GIMP, Inkscape, Audacity
+### Creative
+Blender, FreeCAD, KiCad, Godot, GIMP, Inkscape, Kdenlive, Calibre
 
 ### Media
-FFmpeg, VLC, yt-dlp, Calibre
+FFmpeg, VLC, Audacity, yt-dlp
 
-### Tools & Infrastructure
-Syncthing, btop, tmux, Tailscale, Mosquitto, MQTT Explorer,
-SQLite, Redis, PostgreSQL, Helix, VSCodium, Miniforge, python-build-standalone, Coolify
+### Infrastructure
+Syncthing, Coolify, Kiwix, Tailscale, Mosquitto, MQTT Explorer,
+Redis, PostgreSQL, InfluxDB, Telegraf, SQLite, btop, tmux
 
-### Dev CLI Bundle (6 tools)
-ripgrep, fd, bat, jq, fzf, lazygit
+### Dev Tools
+Helix, VSCodium, Miniforge, python-build-standalone, Claude Code,
+Dev CLI Bundle (ripgrep, fd, bat, jq, fzf, lazygit)
 
 ### Content Library
 Offline ZIM files served via Kiwix: Wikipedia Simple English (3.1GB), Full Wikipedia (111GB)
@@ -202,14 +203,14 @@ val-ark/
 │   ├── monitor.sh            # Watch active downloads
 │   ├── screenshots.sh        # Capture screenshots & recordings
 │   ├── release.sh            # Create git release tags
-│   ├── tools/                # Per-tool download scripts (41 tools)
+│   ├── tools/                # Per-tool download scripts (43 tools)
 │   └── ...
 ├── web-ui/                   # Web interface + assets
 ├── content/
 │   └── zim/                  # Offline ZIM files (Wikipedia, etc.)
 ├── tests/
 │   ├── run-all.sh            # Test runner
-│   ├── screenshots/          # 211 Playwright tests
+│   ├── screenshots/          # 213 Playwright tests
 │   └── test-*.sh             # Validation scripts
 ├── docs/
 │   ├── ARCHITECTURE.md       # Mermaid diagrams
@@ -226,12 +227,12 @@ val-ark/
 
 - [docs/README.md](docs/README.md) - Documentation index
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System diagrams
-- [docs/TOOLS.md](docs/TOOLS.md) - Complete tools catalog (41 tools)
+- [docs/TOOLS.md](docs/TOOLS.md) - Complete tools catalog (43 tools)
 - [docs/PLATFORMS.md](docs/PLATFORMS.md) - Platform-specific notes
 - [docs/OFFLINE.md](docs/OFFLINE.md) - Offline and P2P guide
 - [docs/MODEL_INVENTORY.md](docs/MODEL_INVENTORY.md) - Model details
 
-## Testing (211 Playwright Tests)
+## Testing (213 Playwright Tests)
 
 ```bash
 ./start.sh test               # Run via menu

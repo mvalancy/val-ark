@@ -17,12 +17,12 @@
 set -o pipefail
 
 # Configuration
-MODEL_ROOT="/home/uat-admin/models"
+MODEL_ROOT="${HOME}/models"
 LOG_DIR="${MODEL_ROOT}/logs"
 LOG_FILE="${LOG_DIR}/download_$(date +%Y%m%d_%H%M%S).log"
 MAX_RETRIES=5
 RETRY_DELAY=30
-HF_CLI="/home/uat-admin/.local/bin/hf"
+HF_CLI="${HOME}/.local/bin/hf"
 SCRIPT_START=$(date +%s)
 
 # Counters

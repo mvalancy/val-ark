@@ -31,16 +31,16 @@ Once downloaded, everything runs locally:
 ```bash
 # LLM inference (no internet needed)
 ./tools/llama.cpp/linux-arm64/llama-server \
-    -m /home/uat-admin/models/llm/llama-3.2-3b/Llama-3.2-3B-Instruct-Q8_0.gguf
+    -m ~/models/llm/llama-3.2-3b/Llama-3.2-3B-Instruct-Q8_0.gguf
 
 # Speech-to-text (no internet needed)
 ./tools/whisper.cpp/linux-arm64/whisper-cli \
-    -m /home/uat-admin/models/stt/whisper-ggml/ggml-base.en-q8_0.bin \
+    -m ~/models/stt/whisper-ggml/ggml-base.en-q8_0.bin \
     -f audio.wav
 
 # Text-to-speech (no internet needed)
 echo "Hello world" | ./tools/piper/linux-arm64/piper/piper \
-    --model /home/uat-admin/models/tts/piper-voices/v2/en/en_US/lessac/high/en_US-lessac-high.onnx \
+    --model ~/models/tts/piper-voices/v2/en/en_US/lessac/high/en_US-lessac-high.onnx \
     --output_file output.wav
 ```
 
@@ -55,7 +55,7 @@ echo "Hello world" | ./tools/piper/linux-arm64/piper/piper \
    ```
 
 2. **Share the models directory** between machines:
-   - Add `/home/uat-admin/models/` as a shared folder
+   - Add `~/models/` as a shared folder
    - Connect devices via their Device IDs
    - Models sync automatically over LAN
 
@@ -81,10 +81,10 @@ For fully air-gapped environments:
 ### USB Drive Method
 ```bash
 # On online machine: copy to USB
-rsync -av --progress /home/uat-admin/models/ /mnt/usb/models/
+rsync -av --progress ~/models/ /mnt/usb/models/
 
 # On offline machine: copy from USB
-rsync -av --progress /mnt/usb/models/ /home/uat-admin/models/
+rsync -av --progress /mnt/usb/models/ ~/models/
 ```
 
 ### Tarball Method
@@ -100,7 +100,7 @@ tar czf val-ark-tier1.tar.gz \
     models/tts/piper-voices
 
 # Transfer and unpack
-tar xzf val-ark-tier1.tar.gz -C /home/uat-admin/
+tar xzf val-ark-tier1.tar.gz -C ~/
 ```
 
 ## Storage Recommendations

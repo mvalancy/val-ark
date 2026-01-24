@@ -28,7 +28,7 @@ echo "  - PID files and lock files"
 echo "  - Log files"
 echo ""
 echo -e "${GREEN}This will NOT remove:${NC}"
-echo "  - Downloaded models (in /home/uat-admin/models/)"
+echo "  - Downloaded models (in ${HOME}/models/)"
 echo "  - Downloaded tools (in ${PROJECT_ROOT}/tools/)"
 echo "  - Source repos (in ${PROJECT_ROOT}/sources/)"
 echo "  - The Val Ark project directory itself"
@@ -58,7 +58,7 @@ if [ -f "${PROJECT_ROOT}/.download_pid" ]; then
 fi
 
 # Remove log files
-MODEL_ROOT="/home/uat-admin/models"
+MODEL_ROOT="${HOME}/models"
 if [ -d "${MODEL_ROOT}/logs" ]; then
     echo -n "  Remove log files in ${MODEL_ROOT}/logs/? [y/N]: "
     read -r answer

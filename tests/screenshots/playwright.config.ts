@@ -14,4 +14,10 @@ export default defineConfig({
       use: { browserName: 'chromium' },
     },
   ],
+  webServer: {
+    command: 'PATH="$HOME/.local/node/bin:$PATH" node ../../scripts/server.js 3001',
+    port: 3001,
+    timeout: 10000,
+    reuseExistingServer: true,
+  },
 });

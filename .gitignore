@@ -3,6 +3,7 @@
 
 # Downloaded tools and binaries (large, re-downloadable)
 tools/
+!scripts/tools/
 
 # Offline content (ZIM files, very large)
 content/

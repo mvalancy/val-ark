@@ -688,6 +688,143 @@ a.card, a.nav-logo, a.nav-link, a.related-link {
     text-decoration: none;
     color: inherit;
 }
+
+/* Disk Space Bar */
+.nav-disk {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75em;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.nav-disk-bar {
+    width: 80px;
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.nav-disk-fill {
+    height: 100%;
+    background: var(--green);
+    border-radius: 3px;
+    transition: width 0.3s;
+}
+.nav-disk-fill.warn { background: var(--yellow); }
+.nav-disk-fill.critical { background: var(--red); }
+
+/* Download Progress Panel */
+.dl-panel {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 340px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    z-index: 200;
+    overflow: hidden;
+    display: none;
+}
+.dl-panel.visible { display: block; }
+.dl-panel.success { border-color: var(--green); animation: flash-green 1s; }
+@keyframes flash-green {
+    0%, 100% { box-shadow: var(--shadow); }
+    50% { box-shadow: 0 0 20px rgba(74,222,128,0.3); }
+}
+.dl-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85em;
+    font-weight: 600;
+}
+.dl-panel-body { padding: 12px 14px; }
+.dl-item {
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+}
+.dl-item:last-child { margin-bottom: 0; border-bottom: none; }
+.dl-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 0.82em;
+}
+.dl-item-type { font-weight: 600; text-transform: capitalize; }
+.dl-progress-bar {
+    width: 100%;
+    height: 4px;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 4px;
+}
+.dl-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s;
+}
+.dl-item-line {
+    font-size: 0.72em;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.dl-cancel-btn {
+    background: none;
+    border: none;
+    color: var(--red);
+    cursor: pointer;
+    font-size: 0.75em;
+    padding: 2px 6px;
+}
+.dl-cancel-btn:hover { text-decoration: underline; }
+
+/* Download Action Button */
+.dl-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 600;
+    transition: opacity 0.2s;
+}
+.dl-action-btn:hover { opacity: 0.85; }
+.dl-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.dl-action-btn.secondary {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+}
+
+/* Last Updated Label */
+.last-updated {
+    font-size: 0.7em;
+    color: var(--text-muted);
+    display: block;
+    margin-top: 2px;
+}
+
+@media (max-width: 768px) {
+    .nav-disk { display: none; }
+    .dl-panel { width: calc(100% - 24px); right: 12px; bottom: 12px; }
+}
 </style>
 </head>
 <body>
@@ -758,7 +895,7 @@ const TOOL_CATEGORIES = {
 // =============================================================================
 const TOOLS = [
     {
-        id: 'llama-cpp', name: 'llama.cpp', category: 'ai-inference', icon: 'L', iconBg: '#2563eb', logo: 'logos/llama-cpp.png',
+        id: 'llama-cpp', name: 'llama.cpp', category: 'ai-inference', icon: 'L', iconBg: '#2563eb', logo: 'logos/llama-cpp.png', downloadTarget: 'llama-cpp',
         desc: 'High-performance LLM inference in C/C++ with GPU acceleration',
         platforms: { jetson: 'build', ubuntu: 'build', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -829,7 +966,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'whisper-cpp', name: 'whisper.cpp', category: 'ai-inference', icon: 'W', iconBg: '#059669', logo: 'logos/whisper-cpp.png',
+        id: 'whisper-cpp', name: 'whisper.cpp', category: 'ai-inference', icon: 'W', iconBg: '#059669', logo: 'logos/whisper-cpp.png', downloadTarget: 'whisper-cpp',
         desc: 'Fast speech-to-text with OpenAI Whisper models in C/C++',
         platforms: { jetson: 'build', ubuntu: 'build', mac: 'build', windows: 'prebuilt' },
         downloads: {
@@ -891,7 +1028,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'piper-tts', name: 'Piper TTS', category: 'ai-inference', icon: 'P', iconBg: '#7c3aed', logo: 'logos/piper.png',
+        id: 'piper-tts', name: 'Piper TTS', category: 'ai-inference', icon: 'P', iconBg: '#7c3aed', logo: 'logos/piper.png', downloadTarget: 'piper',
         desc: 'Ultra-fast neural text-to-speech with 50+ language support',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -943,7 +1080,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'sd-cpp', name: 'stable-diffusion.cpp', category: 'ai-inference', icon: 'S', iconBg: '#dc2626', logo: 'logos/sd-cpp.png',
+        id: 'sd-cpp', name: 'stable-diffusion.cpp', category: 'ai-inference', icon: 'S', iconBg: '#dc2626', logo: 'logos/sd-cpp.png', downloadTarget: 'sd-cpp',
         desc: 'Image generation from text prompts with Stable Diffusion models',
         platforms: { jetson: 'build', ubuntu: 'build', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -996,7 +1133,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'ffmpeg', name: 'FFmpeg', category: 'media', icon: 'F', iconBg: '#16a34a', logo: 'logos/ffmpeg.png',
+        id: 'ffmpeg', name: 'FFmpeg', category: 'media', icon: 'F', iconBg: '#16a34a', logo: 'logos/ffmpeg.png', downloadTarget: 'ffmpeg',
         desc: 'Audio/video processing, format conversion, and hardware acceleration',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -1046,7 +1183,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'onnxruntime', name: 'ONNX Runtime', category: 'ai-inference', icon: 'O', iconBg: '#0891b2', logo: 'logos/onnxruntime.png',
+        id: 'onnxruntime', name: 'ONNX Runtime', category: 'ai-inference', icon: 'O', iconBg: '#0891b2', logo: 'logos/onnxruntime.png', downloadTarget: 'onnxruntime',
         desc: 'Cross-platform ML inference for TTS, vision, and specialized models',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -1112,7 +1249,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'vosk', name: 'Vosk', category: 'ai-inference', icon: 'V', iconBg: '#ea580c', logo: 'logos/vosk.png',
+        id: 'vosk', name: 'Vosk', category: 'ai-inference', icon: 'V', iconBg: '#ea580c', logo: 'logos/vosk.png', downloadTarget: 'vosk',
         desc: 'Lightweight offline speech recognition with streaming support',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'pip', windows: 'prebuilt' },
         downloads: {
@@ -1172,7 +1309,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'bitnet', name: 'BitNet.cpp', category: 'ai-inference', icon: 'B', iconBg: '#00d4aa', logo: 'logos/bitnet.svg',
+        id: 'bitnet', name: 'BitNet.cpp', category: 'ai-inference', icon: 'B', iconBg: '#00d4aa', logo: 'logos/bitnet.svg', downloadTarget: 'bitnet',
         desc: 'Microsoft\'s 1-bit LLM inference - run ternary models at extreme efficiency on CPUs',
         size: '~50 MB (source)',
         platforms: { jetson: 'build', ubuntu: 'build', mac: 'build', windows: 'build' },
@@ -1220,7 +1357,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'ollama', name: 'Ollama', category: 'ai-platform', icon: 'O', iconBg: '#1a1a2e', logo: 'logos/ollama.png',
+        id: 'ollama', name: 'Ollama', category: 'ai-platform', icon: 'O', iconBg: '#1a1a2e', logo: 'logos/ollama.png', downloadTarget: 'ollama',
         desc: 'Run LLMs locally with one command - OpenAI-compatible API, automatic GPU detection',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -1238,7 +1375,7 @@ const TOOLS = [
     // CREATIVE / ENGINEERING TOOLS
     // =========================================================================
     {
-        id: 'blender', name: 'Blender', category: 'creative', icon: 'B', iconBg: '#e87d0d', logo: 'logos/blender.png',
+        id: 'blender', name: 'Blender', category: 'creative', icon: 'B', iconBg: '#e87d0d', logo: 'logos/blender.png', downloadTarget: 'blender',
         desc: '3D modeling, animation, rendering, and scripting - with Python API for programmatic modeling',
         size: '~1.1 GB (portable)',
         platforms: { ubuntu: 'portable', mac: 'portable', windows: 'portable' },
@@ -1275,7 +1412,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'freecad', name: 'FreeCAD', category: 'creative', icon: 'C', iconBg: '#0b5394', logo: 'logos/freecad.svg',
+        id: 'freecad', name: 'FreeCAD', category: 'creative', icon: 'C', iconBg: '#0b5394', logo: 'logos/freecad.svg', downloadTarget: 'freecad',
         desc: 'Parametric 3D CAD modeler with Python scripting - headless mode for automated design',
         size: '~760 MB (AppImage)',
         platforms: { ubuntu: 'appimage', mac: 'dmg', windows: 'installer' },
@@ -1311,7 +1448,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'kicad', name: 'KiCad', category: 'creative', icon: 'K', iconBg: '#314cb6', logo: 'logos/kicad.png',
+        id: 'kicad', name: 'KiCad', category: 'creative', icon: 'K', iconBg: '#314cb6', logo: 'logos/kicad.png', downloadTarget: 'kicad',
         desc: 'Electronic design automation - schematic capture, PCB layout, and 3D visualization',
         size: '~212 MB (AppImage)',
         platforms: { ubuntu: 'prebuilt' },
@@ -1345,7 +1482,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'godot', name: 'Godot Engine', category: 'creative', icon: 'G', iconBg: '#478cbf', logo: 'logos/godot.svg',
+        id: 'godot', name: 'Godot Engine', category: 'creative', icon: 'G', iconBg: '#478cbf', logo: 'logos/godot.svg', downloadTarget: 'godot',
         desc: 'Open-source game engine with GDScript/C# - headless mode for procedural generation and simulation',
         size: '~50 MB (editor), ~700 MB (with export templates)',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1385,7 +1522,7 @@ const TOOLS = [
     // MEDIA TOOLS
     // =========================================================================
     {
-        id: 'vlc', name: 'VLC', category: 'media', icon: 'V', iconBg: '#ff8800', logo: 'logos/vlc.png',
+        id: 'vlc', name: 'VLC', category: 'media', icon: 'V', iconBg: '#ff8800', logo: 'logos/vlc.png', downloadTarget: 'vlc',
         desc: 'Universal media player and streaming server - CLI transcoding, streaming, and format conversion',
         size: '~50 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1421,7 +1558,7 @@ const TOOLS = [
     // AI PLATFORM TOOLS
     // =========================================================================
     {
-        id: 'n8n', name: 'n8n', category: 'ai-platform', icon: 'N', iconBg: '#ea4b71', logo: 'logos/n8n.png',
+        id: 'n8n', name: 'n8n', category: 'ai-platform', icon: 'N', iconBg: '#ea4b71', logo: 'logos/n8n.png', downloadTarget: 'n8n',
         desc: 'Workflow automation with 400+ integrations and native AI capabilities - fair-code licensed',
         size: '~500 MB (Docker)',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1454,7 +1591,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'influxdb', name: 'InfluxDB', category: 'ai-platform', icon: 'I', iconBg: '#22adf6', logo: 'logos/influxdb.png',
+        id: 'influxdb', name: 'InfluxDB', category: 'ai-platform', icon: 'I', iconBg: '#22adf6', logo: 'logos/influxdb.png', downloadTarget: 'influxdb',
         desc: 'Time-series database for metrics, events, and IoT data - OSS 2.7 with built-in dashboards',
         size: '~100 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1491,7 +1628,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'milvus', name: 'Milvus', category: 'ai-platform', icon: 'M', iconBg: '#00a0e4', logo: 'logos/milvus.svg',
+        id: 'milvus', name: 'Milvus', category: 'ai-platform', icon: 'M', iconBg: '#00a0e4', logo: 'logos/milvus.svg', downloadTarget: 'milvus',
         desc: 'Vector database for AI applications - similarity search, RAG, and embedding storage',
         size: '~570 MB (Docker) / ~100 MB (Lite)',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1524,7 +1661,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'comfyui', name: 'ComfyUI', category: 'ai-platform', icon: 'C', iconBg: '#2b2d30', logo: 'logos/comfyui.jpg',
+        id: 'comfyui', name: 'ComfyUI', category: 'ai-platform', icon: 'C', iconBg: '#2b2d30', logo: 'logos/comfyui.jpg', downloadTarget: 'comfyui',
         desc: 'Node-based AI image/video generation workflow editor - connects to stable-diffusion.cpp models',
         size: '~5 GB (with dependencies)',
         platforms: { jetson: 'build', ubuntu: 'build', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1564,7 +1701,7 @@ const TOOLS = [
     // INFRASTRUCTURE TOOLS
     // =========================================================================
     {
-        id: 'syncthing', name: 'Syncthing', category: 'infrastructure', icon: 'S', iconBg: '#0891b2', logo: 'logos/syncthing.svg',
+        id: 'syncthing', name: 'Syncthing', category: 'infrastructure', icon: 'S', iconBg: '#0891b2', logo: 'logos/syncthing.svg', downloadTarget: 'syncthing',
         desc: 'Continuous file synchronization - replicate your AI models and tools across servers',
         size: '~10 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1601,7 +1738,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'coolify', name: 'Coolify', category: 'infrastructure', icon: 'C', iconBg: '#6b21a8', logo: 'logos/coolify.png',
+        id: 'coolify', name: 'Coolify', category: 'infrastructure', icon: 'C', iconBg: '#6b21a8', logo: 'logos/coolify.png', downloadTarget: 'coolify',
         desc: 'Self-hosted PaaS - deploy apps, databases, and services with a simple UI (Heroku/Vercel alternative)',
         size: '~200 MB',
         platforms: { jetson: 'script', ubuntu: 'script', mac: 'docker', windows: 'docker' },
@@ -1634,7 +1771,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'kiwix', name: 'Kiwix', category: 'infrastructure', icon: 'K', iconBg: '#19a4c8', logo: 'logos/kiwix.svg',
+        id: 'kiwix', name: 'Kiwix', category: 'infrastructure', icon: 'K', iconBg: '#19a4c8', logo: 'logos/kiwix.svg', downloadTarget: 'kiwix',
         desc: 'Offline ZIM file server - serve Wikipedia, Khan Academy, Project Gutenberg, and more over your local network',
         size: '~20 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1671,7 +1808,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'tailscale', name: 'Tailscale', category: 'infrastructure', icon: 'T', iconBg: '#2b5ea7',
+        id: 'tailscale', name: 'Tailscale', category: 'infrastructure', icon: 'T', iconBg: '#2b5ea7', logo: 'logos/tailscale.svg', downloadTarget: 'tailscale',
         desc: 'Zero-config mesh VPN - connect your devices securely without port forwarding or firewall changes',
         size: '~30 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1708,7 +1845,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'mosquitto', name: 'Mosquitto', category: 'infrastructure', icon: 'M', iconBg: '#3C5280', logo: 'logos/mosquitto.png',
+        id: 'mosquitto', name: 'Mosquitto', category: 'infrastructure', icon: 'M', iconBg: '#3C5280', logo: 'logos/mosquitto.svg', downloadTarget: 'mosquitto',
         desc: 'Lightweight MQTT broker for IoT messaging - connect sensors, devices, and AI inference pipelines',
         size: '~2 MB',
         platforms: { jetson: 'source', ubuntu: 'apt', mac: 'brew', windows: 'installer' },
@@ -1742,7 +1879,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'mqtt-explorer', name: 'MQTT Explorer', category: 'infrastructure', icon: 'Q', iconBg: '#8b5cf6',
+        id: 'mqtt-explorer', name: 'MQTT Explorer', category: 'infrastructure', icon: 'Q', iconBg: '#8b5cf6', logo: 'logos/mqtt-explorer.svg', downloadTarget: 'mqtt-explorer',
         desc: 'Visual MQTT client - browse topics, publish messages, and debug IoT data flows',
         size: '~58 MB (AppImage)',
         platforms: { ubuntu: 'prebuilt', mac: 'installer', windows: 'installer' },
@@ -1772,7 +1909,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'redis', name: 'Redis', category: 'infrastructure', icon: 'R', iconBg: '#dc382d', logo: 'logos/redis.svg',
+        id: 'redis', name: 'Redis', category: 'infrastructure', icon: 'R', iconBg: '#dc382d', logo: 'logos/redis.svg', downloadTarget: 'redis',
         desc: 'In-memory data store - caching, pub/sub, and session storage for AI applications',
         size: '~17 MB (compiled)',
         platforms: { jetson: 'source', ubuntu: 'apt', mac: 'brew', windows: 'n/a' },
@@ -1806,7 +1943,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'postgresql', name: 'PostgreSQL', category: 'infrastructure', icon: 'P', iconBg: '#336791', logo: 'logos/postgresql.svg',
+        id: 'postgresql', name: 'PostgreSQL', category: 'infrastructure', icon: 'P', iconBg: '#336791', logo: 'logos/postgresql.svg', downloadTarget: 'postgresql',
         desc: 'Relational database with JSON and vector support - store structured data and embeddings',
         size: '~34 MB (compiled)',
         platforms: { jetson: 'source', ubuntu: 'apt', mac: 'brew', windows: 'installer' },
@@ -1843,7 +1980,7 @@ const TOOLS = [
     // DEV TOOLS
     // =========================================================================
     {
-        id: 'btop', name: 'btop', category: 'dev-tools', icon: 'B', iconBg: '#6366f1', logo: 'logos/btop.png',
+        id: 'btop', name: 'btop', category: 'dev-tools', icon: 'B', iconBg: '#6366f1', logo: 'logos/btop.png', downloadTarget: 'btop',
         desc: 'Resource monitor with CPU, memory, disks, network, and process stats - GPU monitoring support',
         size: '~2 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1880,7 +2017,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'tmux', name: 'tmux', category: 'dev-tools', icon: 'T', iconBg: '#1b8c2d',
+        id: 'tmux', name: 'tmux', category: 'dev-tools', icon: 'T', iconBg: '#1b8c2d', logo: 'logos/tmux.svg', downloadTarget: 'tmux',
         desc: 'Terminal multiplexer - persistent sessions for long-running AI inference and training',
         size: '~2 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'n/a' },
@@ -1917,7 +2054,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'helix', name: 'Helix', category: 'dev-tools', icon: 'H', iconBg: '#a855f7',
+        id: 'helix', name: 'Helix', category: 'dev-tools', icon: 'H', iconBg: '#a855f7', logo: 'logos/helix.svg', downloadTarget: 'helix',
         desc: 'Post-modern modal text editor - built-in LSP, tree-sitter, and multiple cursors out of the box',
         size: '~20 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1954,7 +2091,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'vscodium', name: 'VSCodium', category: 'dev-tools', icon: 'V', iconBg: '#2196F3', logo: 'logos/vscodium.svg',
+        id: 'vscodium', name: 'VSCodium', category: 'dev-tools', icon: 'V', iconBg: '#2196F3', logo: 'logos/vscodium.svg', downloadTarget: 'vscodium',
         desc: 'VS Code without telemetry - full IDE experience with extensions, debugging, and terminal',
         size: '~430 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1991,7 +2128,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'sqlite', name: 'SQLite', category: 'dev-tools', icon: 'S', iconBg: '#003B57', logo: 'logos/sqlite.svg',
+        id: 'sqlite', name: 'SQLite', category: 'dev-tools', icon: 'S', iconBg: '#003B57', logo: 'logos/sqlite.svg', downloadTarget: 'sqlite',
         desc: 'Self-contained SQL database engine - zero-config, serverless, used by most applications',
         size: '~2 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'built-in', windows: 'prebuilt' },
@@ -2027,7 +2164,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'miniforge', name: 'Miniforge', category: 'dev-tools', icon: 'M', iconBg: '#43b049', logo: 'logos/conda.svg',
+        id: 'miniforge', name: 'Miniforge', category: 'dev-tools', icon: 'M', iconBg: '#43b049', logo: 'logos/conda.svg', downloadTarget: 'miniforge',
         desc: 'Conda-forge Python distribution - manage Python environments and scientific packages offline',
         size: '~80 MB (installer)',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -2064,7 +2201,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'python-standalone', name: 'Python Standalone', category: 'dev-tools', icon: 'P', iconBg: '#3776ab', logo: 'logos/python.svg',
+        id: 'python-standalone', name: 'Python Standalone', category: 'dev-tools', icon: 'P', iconBg: '#3776ab', logo: 'logos/python.svg', downloadTarget: 'python-standalone',
         desc: 'Portable Python build - no system dependencies, works anywhere with no install step',
         size: '~88 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -2101,7 +2238,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'dev-cli', name: 'Dev CLI Bundle', category: 'dev-tools', icon: 'D', iconBg: '#737373',
+        id: 'dev-cli', name: 'Dev CLI Bundle', category: 'dev-tools', icon: 'D', iconBg: '#737373', logo: 'logos/dev-cli.svg', downloadTarget: 'dev-cli',
         desc: 'Essential CLI tools: ripgrep, fd, bat, jq, fzf, lazygit - all as static ARM64/x86_64 binaries',
         size: '~25 MB total',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -2139,8 +2276,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'claude-code', name: 'Claude Code', category: 'dev-tools', icon: 'C', iconBg: '#d97706',
-        logo: 'logos/claude-code.svg',
+        id: 'claude-code', name: 'Claude Code', category: 'dev-tools', icon: 'C', iconBg: '#d97706', logo: 'logos/claude-code.svg', downloadTarget: 'claude-code',
         desc: 'Anthropic\'s agentic coding CLI - works offline with Ollama or llama.cpp as backend',
         size: '~50 MB',
         platforms: { jetson: 'npm', ubuntu: 'npm', mac: 'npm', windows: 'npm' },
@@ -2268,9 +2404,73 @@ const CONTENT_LIBRARY = [
 // Installation status for current instance (Jetson ARM64)
 // Dynamic install status - checked against server on page load
 const INSTALLED_TOOLS = {};
+const TOOL_INFO = {}; // {toolId: {lastModified, size}}
 
-// Check tool availability by probing binary paths on the server
+// Check tool availability - tries API first, falls back to HEAD requests
 async function checkInstalledTools() {
+    try {
+        const resp = await fetch('/api/status/tools');
+        if (resp.ok) {
+            const toolsData = await resp.json();
+            checkInstalledToolsFromAPI(toolsData);
+            scheduleRender();
+            return;
+        }
+    } catch (e) {}
+    await checkInstalledToolsFallback();
+    scheduleRender();
+}
+
+function checkInstalledToolsFromAPI(toolsData) {
+    // Map server tool directory names to TOOLS ids
+    const toolDirMap = {};
+    for (const t of TOOLS) {
+        if (!t.downloads || !t.downloads.binaries) continue;
+        const bins = t.downloads.binaries;
+        for (const [, binPath] of Object.entries(bins)) {
+            if (!binPath) continue;
+            // Extract dir/file name from path like "tools/linux-arm64/llama-server"
+            const parts = binPath.split('/');
+            if (parts.length >= 3) {
+                const dirName = parts.slice(2).join('/');
+                toolDirMap[dirName] = t.id;
+                // Also try just the last segment
+                toolDirMap[parts[parts.length - 1]] = t.id;
+            }
+        }
+    }
+
+    for (const [dirName, platforms] of Object.entries(toolsData)) {
+        const toolId = toolDirMap[dirName];
+        if (!toolId) continue;
+        INSTALLED_TOOLS[toolId] = 'installed';
+        // Store metadata for the newest platform entry
+        let newest = null;
+        for (const [, info] of Object.entries(platforms)) {
+            if (!newest || (info.lastModified && info.lastModified > newest.lastModified)) {
+                newest = info;
+            }
+        }
+        if (newest) {
+            TOOL_INFO[toolId] = { lastModified: newest.lastModified, size: newest.size };
+        }
+    }
+
+    // Check source entries
+    if (toolsData['llama-cpp']) { if (!INSTALLED_TOOLS['llama-cpp']) INSTALLED_TOOLS['llama-cpp'] = 'source'; }
+    if (toolsData['whisper-cpp']) { if (!INSTALLED_TOOLS['whisper-cpp']) INSTALLED_TOOLS['whisper-cpp'] = 'source'; }
+    if (toolsData['stable-diffusion-cpp']) { if (!INSTALLED_TOOLS['sd-cpp']) INSTALLED_TOOLS['sd-cpp'] = 'source'; }
+    if (toolsData['BitNet']) { if (!INSTALLED_TOOLS['bitnet']) INSTALLED_TOOLS['bitnet'] = 'source'; }
+
+    // Mark remaining tools
+    for (const t of TOOLS) {
+        if (!INSTALLED_TOOLS[t.id]) {
+            INSTALLED_TOOLS[t.id] = t.downloads?.installHint || 'missing';
+        }
+    }
+}
+
+async function checkInstalledToolsFallback() {
     const currentPlat = currentPlatform;
 
     const checks = TOOLS.map(async (t) => {
@@ -2281,19 +2481,16 @@ async function checkInstalledTools() {
         const bins = t.downloads.binaries || {};
         const hasBinaries = Object.keys(bins).length > 0;
 
-        // If no binaries defined, use installHint as the status
         if (!hasBinaries) {
             INSTALLED_TOOLS[t.id] = t.downloads.installHint || 'missing';
             return;
         }
 
-        // Check all binary paths — tool is "in the ark" if ANY platform binary exists
         const allPaths = Object.values(bins).filter(p => p);
         if (allPaths.length === 0) {
             INSTALLED_TOOLS[t.id] = t.downloads.installHint || 'missing';
             return;
         }
-        // Try current platform first, then any other
         const binPath = bins[currentPlat];
         const pathsToTry = binPath ? [binPath, ...allPaths.filter(p => p !== binPath)] : allPaths;
         let found = false;
@@ -2306,7 +2503,6 @@ async function checkInstalledTools() {
         INSTALLED_TOOLS[t.id] = found ? 'installed' : 'missing';
     });
 
-    // Also check source repos
     const sourceChecks = [
         {id:'llama-cpp', path:'sources/llama.cpp/CMakeLists.txt'},
         {id:'whisper-cpp', path:'sources/whisper.cpp/CMakeLists.txt'},
@@ -2322,25 +2518,31 @@ async function checkInstalledTools() {
     });
 
     await Promise.all([...checks, ...sourceChecks]);
-    // Re-render to update badges
-    router();
 }
 
 function getInstallBadge(toolId) {
     const status = INSTALLED_TOOLS[toolId] || 'checking';
+    let badge = '';
     switch(status) {
-        case 'installed': return '<span class="badge badge-installed">Installed</span>';
-        case 'system': return '<span class="badge badge-installed">System</span>';
-        case 'source': return '<span class="badge badge-source">Source Only</span>';
-        case 'bundled': return '<span class="badge badge-installed">Bundled</span>';
-        case 'npm': return '<span class="badge badge-hint">npm install</span>';
-        case 'pip': return '<span class="badge badge-hint">pip install</span>';
-        case 'docker': return '<span class="badge badge-hint">Docker</span>';
-        case 'package': return '<span class="badge badge-hint">System Package</span>';
-        case 'python': return '<span class="badge badge-hint">Python</span>';
-        case 'checking': return '<span class="badge badge-checking">Checking...</span>';
-        default: return '<span class="badge badge-missing">Not Installed</span>';
+        case 'installed': badge = '<span class="badge badge-installed">Installed</span>'; break;
+        case 'system': badge = '<span class="badge badge-installed">System</span>'; break;
+        case 'source': badge = '<span class="badge badge-source">Source Only</span>'; break;
+        case 'bundled': badge = '<span class="badge badge-installed">Bundled</span>'; break;
+        case 'npm': badge = '<span class="badge badge-hint">npm install</span>'; break;
+        case 'pip': badge = '<span class="badge badge-hint">pip install</span>'; break;
+        case 'docker': badge = '<span class="badge badge-hint">Docker</span>'; break;
+        case 'package': badge = '<span class="badge badge-hint">System Package</span>'; break;
+        case 'python': badge = '<span class="badge badge-hint">Python</span>'; break;
+        case 'checking': badge = '<span class="badge badge-checking">Checking...</span>'; break;
+        default: badge = '<span class="badge badge-missing">Not Installed</span>'; break;
     }
+    const info = TOOL_INFO[toolId];
+    if (info && info.lastModified) {
+        const d = new Date(info.lastModified);
+        const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        badge += `<span class="last-updated">Updated: ${dateStr}</span>`;
+    }
+    return badge;
 }
 
 // Model family license metadata
@@ -3095,6 +3297,7 @@ function renderNav(route) {
             <a href="#/content" class="nav-link ${activeSection === 'content' ? 'active' : ''}">Content</a>
             <a href="#/quickstart" class="nav-link ${activeSection === 'quickstart' ? 'active' : ''}">Getting Started</a>
         </div>
+        <div class="nav-disk" id="nav-disk">${renderDiskBar()}</div>
     </nav>`;
 }
 
@@ -3343,7 +3546,9 @@ function renderToolDetail(toolId) {
     // Category badge + install status
     const toolCat = TOOL_CATEGORIES[tool.category];
     if (toolCat) {
-        html += `<div style="margin-bottom:16px"><span class="tag" style="background:var(--accent-dim);color:var(--accent);font-size:0.85em;padding:4px 12px">${toolCat.label}</span>${tool.size ? `<span class="tag" style="background:var(--purple-dim);color:var(--purple);font-size:0.85em;padding:4px 12px;margin-left:6px">${tool.size}</span>` : ''}${getInstallBadge(tool.id)}</div>`;
+        const dlBtn = (INSTALLED_TOOLS[tool.id] === 'missing' && _apiAvailable && tool.downloadTarget)
+            ? `<button class="dl-action-btn" onclick="triggerDownload('tools','${tool.downloadTarget}')" style="margin-left:10px">Install</button>` : '';
+        html += `<div style="margin-bottom:16px"><span class="tag" style="background:var(--accent-dim);color:var(--accent);font-size:0.85em;padding:4px 12px">${toolCat.label}</span>${tool.size ? `<span class="tag" style="background:var(--purple-dim);color:var(--purple);font-size:0.85em;padding:4px 12px;margin-left:6px">${tool.size}</span>` : ''}${getInstallBadge(tool.id)}${dlBtn}</div>`;
     }
 
     // Attribution / License
@@ -3820,7 +4025,11 @@ function renderContentDetail(contentId) {
     html += `<tr><td>Status</td><td><span style="color:${statusColor};font-weight:600">${statusLabel}</span></td></tr>`;
     html += `<tr><td>Source</td><td><a href="${item.source}" target="_blank">${item.source}</a></td></tr>`;
     html += `<tr><td>File</td><td><code>${item.file}</code></td></tr>`;
-    html += '</table></div>';
+    html += '</table>';
+    if (statusClass !== 'installed' && _apiAvailable) {
+        html += `<button class="dl-action-btn" onclick="triggerDownload('content','${item.id}')" style="margin-top:12px">Install</button>`;
+    }
+    html += '</div>';
 
     if (item.details) {
         html += `<div class="detail-section"><h3>Overview</h3><p>${item.details.overview}</p></div>`;
@@ -3844,25 +4053,42 @@ function renderContentDetail(contentId) {
 
 // Check content download status
 const CONTENT_STATUS = {};
+const CONTENT_INFO = {}; // {filename: {size, lastModified}}
+
 async function checkContentStatus() {
-    for (const item of CONTENT_LIBRARY) {
+    try {
+        const resp = await fetch('/api/status/content');
+        if (resp.ok) {
+            const contentData = await resp.json();
+            for (const item of CONTENT_LIBRARY) {
+                const relPath = item.file.replace(/^content\//, '');
+                if (contentData[relPath]) {
+                    CONTENT_STATUS[item.id] = 'installed';
+                    CONTENT_INFO[item.id] = contentData[relPath];
+                } else {
+                    CONTENT_STATUS[item.id] = 'missing';
+                }
+            }
+            scheduleRender();
+            return;
+        }
+    } catch (e) {}
+    // Fallback: parallel HEAD requests
+    await Promise.all(CONTENT_LIBRARY.map(async (item) => {
         try {
             const resp = await fetch(item.file, { method: 'HEAD' });
-            if (resp.ok) {
-                CONTENT_STATUS[item.id] = 'installed';
-            } else {
-                CONTENT_STATUS[item.id] = 'missing';
-            }
-        } catch {
-            CONTENT_STATUS[item.id] = 'missing';
-        }
-    }
+            CONTENT_STATUS[item.id] = resp.ok ? 'installed' : 'missing';
+        } catch { CONTENT_STATUS[item.id] = 'missing'; }
+    }));
+    scheduleRender();
 }
 
 // =============================================================================
 // QUICK START
 // =============================================================================
 function renderQuickStart() {
+    const p = PLATFORMS[currentPlatform];
+    const s = p.sep;
     let html = '<div class="container">';
     html += renderBreadcrumb([{label: 'Getting Started'}]);
     html += `<h1 style="font-size:1.6em;margin-bottom:8px">Getting Started</h1>`;
@@ -4385,12 +4611,211 @@ function setPlatform(platform) {
     router();
 }
 
+// =============================================================================
+// API / SSE / DOWNLOAD MANAGEMENT
+// =============================================================================
+let _apiAvailable = false;
+let _sseConnection = null;
+let _sseReconnectDelay = 1000;
+let _diskData = null;
+const _activeDownloads = new Map();
+
+// Debounced router: prevents multiple rapid full-page re-renders
+let _routerTimer = null;
+function scheduleRender() {
+    if (_routerTimer) return;
+    _routerTimer = requestAnimationFrame(() => { _routerTimer = null; router(); });
+}
+
+function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return (bytes / Math.pow(1024, i)).toFixed(i > 1 ? 1 : 0) + ' ' + units[i];
+}
+
+// Fetch all status in a single request, populate all state, render once
+async function initFromAPI() {
+    try {
+        const resp = await fetch('/api/status/all');
+        if (!resp.ok) return false;
+        _apiAvailable = true;
+        const data = await resp.json();
+
+        // Populate disk
+        _diskData = data.disk;
+
+        // Populate tools
+        if (data.tools) checkInstalledToolsFromAPI(data.tools);
+
+        // Populate content
+        if (data.content) {
+            for (const item of CONTENT_LIBRARY) {
+                const relPath = item.file.replace(/^content\//, '');
+                if (data.content[relPath]) {
+                    CONTENT_STATUS[item.id] = 'installed';
+                    CONTENT_INFO[item.id] = data.content[relPath];
+                } else {
+                    CONTENT_STATUS[item.id] = 'missing';
+                }
+            }
+        }
+
+        // Single render after all data populated
+        scheduleRender();
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function renderDiskBar() {
+    if (!_diskData) return '';
+    const pct = _diskData.total > 0 ? ((_diskData.total - _diskData.available) / _diskData.total * 100) : 0;
+    const cls = pct > 90 ? 'critical' : pct > 75 ? 'warn' : '';
+    return `<div class="nav-disk-bar"><div class="nav-disk-fill ${cls}" style="width:${pct.toFixed(1)}%"></div></div>
+        <span>${formatBytes(_diskData.available)} free / ${formatBytes(_diskData.total)}</span>`;
+}
+
+function connectSSE() {
+    if (_sseConnection) return;
+    try {
+        _sseConnection = new EventSource('/api/downloads/stream');
+        _sseConnection.addEventListener('init', () => { _sseReconnectDelay = 1000; });
+        _sseConnection.addEventListener('start', (e) => {
+            const data = JSON.parse(e.data);
+            _activeDownloads.set(data.id, { ...data, progress: 0, lastLine: '', status: 'running' });
+            renderProgressPanel();
+        });
+        _sseConnection.addEventListener('progress', (e) => {
+            const data = JSON.parse(e.data);
+            const dl = _activeDownloads.get(data.id);
+            if (dl) {
+                dl.progress = data.progress;
+                dl.lastLine = data.line;
+                renderProgressPanel();
+            }
+        });
+        _sseConnection.addEventListener('complete', (e) => {
+            const data = JSON.parse(e.data);
+            const dl = _activeDownloads.get(data.id);
+            if (dl) {
+                dl.status = data.status;
+                renderProgressPanel();
+                if (data.status === 'complete') {
+                    const panel = document.getElementById('dl-panel');
+                    if (panel) { panel.classList.add('success'); setTimeout(() => panel.classList.remove('success'), 1500); }
+                    // Refresh all status in one call
+                    initFromAPI();
+                }
+                setTimeout(() => { _activeDownloads.delete(data.id); renderProgressPanel(); }, 5000);
+            }
+        });
+        _sseConnection.onerror = () => {
+            _sseConnection.close();
+            _sseConnection = null;
+            // Exponential backoff: 1s, 2s, 4s, 8s... max 30s
+            setTimeout(connectSSE, _sseReconnectDelay);
+            _sseReconnectDelay = Math.min(_sseReconnectDelay * 2, 30000);
+        };
+    } catch (e) {}
+}
+
+async function triggerDownload(type, target) {
+    if (!_apiAvailable) return;
+    // Check disk space
+    if (_diskData && _diskData.available < 1024 * 1024 * 1024) {
+        alert('Insufficient disk space (less than 1 GB free)');
+        return;
+    }
+
+    const endpoint = type === 'update' ? '/api/download/update' :
+                     type === 'content' ? '/api/download/content' :
+                     type === 'models' ? '/api/download/models' :
+                     '/api/download/tools';
+    const body = type === 'content' ? { target } :
+                 type === 'models' ? { tier: target } :
+                 { target };
+    try {
+        const resp = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const result = await resp.json();
+        if (result.error) {
+            alert(result.error);
+        }
+    } catch (e) {
+        alert('Failed to start download: ' + e.message);
+    }
+}
+
+async function cancelDownload(id) {
+    try {
+        await fetch('/api/download/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id }),
+        });
+    } catch (e) {}
+}
+
+function renderProgressPanel() {
+    let panel = document.getElementById('dl-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'dl-panel';
+        panel.className = 'dl-panel';
+        document.body.appendChild(panel);
+    }
+
+    if (_activeDownloads.size === 0) {
+        panel.classList.remove('visible');
+        return;
+    }
+
+    panel.classList.add('visible');
+    let html = '<div class="dl-panel-header"><span>Downloads</span><span style="font-size:0.75em;color:var(--text-muted)">' + _activeDownloads.size + ' active</span></div>';
+    html += '<div class="dl-panel-body">';
+    for (const [id, dl] of _activeDownloads) {
+        const statusIcon = dl.status === 'complete' ? ' &#x2713;' :
+                          dl.status === 'failed' ? ' &#x2717;' :
+                          dl.status === 'cancelled' ? ' &#x2014;' : '';
+        html += `<div class="dl-item">
+            <div class="dl-item-header">
+                <span class="dl-item-type">${dl.type}${statusIcon}</span>
+                ${dl.status === 'running' ? `<button class="dl-cancel-btn" onclick="cancelDownload('${id}')">Cancel</button>` : ''}
+            </div>
+            <div class="dl-progress-bar"><div class="dl-progress-fill" style="width:${dl.progress}%"></div></div>
+            <div class="dl-item-line">${dl.lastLine || (dl.status === 'running' ? 'Starting...' : dl.status)}</div>
+        </div>`;
+    }
+    html += '</div>';
+    panel.innerHTML = html;
+}
+
 window.addEventListener('hashchange', router);
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
     if (!window.location.hash) window.location.hash = '#/';
     router();
-    checkInstalledTools();
-    checkContentStatus();
+
+    // Try combined API first (single request, single re-render)
+    const apiOk = await initFromAPI();
+    if (apiOk) {
+        connectSSE();
+    } else {
+        // Fallback: HEAD-request probing (no API server)
+        await checkInstalledToolsFallback();
+        // Parallelize content HEAD checks
+        await Promise.all(CONTENT_LIBRARY.map(async (item) => {
+            try {
+                const resp = await fetch(item.file, { method: 'HEAD' });
+                CONTENT_STATUS[item.id] = resp.ok ? 'installed' : 'missing';
+            } catch { CONTENT_STATUS[item.id] = 'missing'; }
+        }));
+        scheduleRender();
+    }
 });
 </script>
 </body>

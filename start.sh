@@ -99,6 +99,7 @@ show_help() {
     echo "  monitor                  Watch active downloads"
     echo "  status                   Show what's installed"
     echo "  test                     Run validation suite"
+    echo "  serve [port]             Start web UI server (default: port 3000)"
     echo "  screenshots [web|terminal]  Capture screenshots and terminal recordings"
     echo "  cron install             Install weekly auto-update cron job"
     echo "  cron remove              Remove cron job"
@@ -112,6 +113,8 @@ show_help() {
     echo "  ./start.sh download models tier1"
     echo "  ./start.sh download all"
     echo "  ./start.sh cron install"
+    echo "  ./start.sh serve"
+    echo "  ./start.sh serve 8080"
     echo "  ./start.sh screenshots"
     echo ""
 }
@@ -169,12 +172,13 @@ interactive_menu() {
         echo "  5) Status      Show what's installed"
         echo "  6) Test        Run validation suite"
         echo "  7) Uninstall   Remove Val Ark configuration"
-        echo "  8) Help        Show detailed help"
-        echo "  9) Cron        Manage auto-update schedule"
+        echo "  8) Serve       Start web UI server"
+        echo "  9) Help        Show detailed help"
+        echo "  10) Cron       Manage auto-update schedule"
         echo ""
         echo "  0) Exit"
         echo ""
-        echo -n "  Enter choice [0-9]: "
+        echo -n "  Enter choice [0-10]: "
         read -r choice
 
         case "$choice" in
@@ -185,8 +189,19 @@ interactive_menu() {
             5) exec bash "${SCRIPTS}/status.sh" ;;
             6) exec bash "${TESTS}/run-all.sh" ;;
             7) exec bash "${SCRIPTS}/uninstall.sh" ;;
-            8) show_help ;;
-            9) cron_menu ;;
+            8)
+                local port=""
+                echo -n "  Port [3000]: "
+                read -r port
+                port="${port:-3000}"
+                local NODE="$HOME/.local/node/bin/node"
+                [ ! -x "$NODE" ] && NODE=$(which node 2>/dev/null)
+                if [ -z "$NODE" ]; then echo -e "  ${RED}Node.js not found${NC}"; continue; fi
+                echo -e "  ${GREEN}http://localhost:${port}${NC}"
+                exec "$NODE" "${SCRIPTS}/server.js" "$port"
+                ;;
+            9) show_help ;;
+            10) cron_menu ;;
             0|"") echo ""; exit 0 ;;
             *) echo -e "  ${RED}Invalid choice${NC}" ;;
         esac
@@ -260,6 +275,14 @@ case "${1:-}" in
         ;;
     screenshots)
         exec bash "${SCRIPTS}/screenshots.sh" "${2:-all}"
+        ;;
+    serve)
+        _port="${2:-3000}"
+        _node="$HOME/.local/node/bin/node"
+        [ ! -x "$_node" ] && _node=$(which node 2>/dev/null)
+        if [ -z "$_node" ]; then echo -e "${RED}Node.js not found${NC}"; exit 1; fi
+        echo -e "  ${GREEN}http://localhost:${_port}${NC}"
+        exec "$_node" "${SCRIPTS}/server.js" "$_port"
         ;;
     help|--help|-h)
         show_help

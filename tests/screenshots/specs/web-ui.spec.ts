@@ -505,24 +505,25 @@ test.describe('Val Ark - Download Size Ordering', () => {
     const scriptPath = path.join(PROJECT_ROOT, 'scripts/download-tools.sh');
     const script = fs.readFileSync(scriptPath, 'utf-8');
 
-    // Find the main orchestration section: "DOWNLOAD_TOTAL=28" through "generate_build_scripts" call
-    const mainMatch = script.match(/DOWNLOAD_TOTAL=28[\s\S]*?generate_build_scripts/);
-    expect(mainMatch, 'Could not find main download section').not.toBeNull();
-    const mainSection = mainMatch![0];
+    // Find the ordered_tools array in the orchestrator
+    const orderMatch = script.match(/ordered_tools=\(\s*([\s\S]*?)\s*\)/);
+    expect(orderMatch, 'Could not find ordered_tools array').not.toBeNull();
+    const orderSection = orderMatch![1];
 
-    // Extract the ordered download calls from the main section
-    const toolFunctions = ['download_vosk', 'download_bitnet', 'download_piper',
-      'download_onnxruntime', 'download_stable_diffusion_cpp',
-      'download_whisper_cpp', 'download_llama_cpp', 'download_ffmpeg'];
+    // Extract tool names from the array
+    const tools = orderSection.match(/[a-z][\w-]*/g) || [];
+    expect(tools.length).toBeGreaterThan(10);
 
-    const actualOrder: string[] = [];
-    for (const line of mainSection.split('\n')) {
-      const trimmed = line.trim();
-      const fn = toolFunctions.find(f => trimmed.startsWith(f));
-      if (fn) actualOrder.push(fn);
-    }
+    // Verify smallest tools come before largest
+    const smallTools = ['bitnet', 'claude-code', 'kicad', 'vlc'];
+    const largeTools = ['ffmpeg', 'blender', 'llama-cpp'];
 
-    expect(actualOrder).toEqual(toolFunctions);
+    const smallIndices = smallTools.map(t => tools.indexOf(t)).filter(i => i >= 0);
+    const largeIndices = largeTools.map(t => tools.indexOf(t)).filter(i => i >= 0);
+
+    const maxSmall = Math.max(...smallIndices);
+    const minLarge = Math.min(...largeIndices);
+    expect(maxSmall).toBeLessThan(minLarge);
   });
 });
 

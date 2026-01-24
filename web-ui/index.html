@@ -1987,6 +1987,10 @@ const MODEL_TESTIMONIALS = {
     'whisper': [
         {quote: 'Whisper large-v3-turbo achieves near large-v2 accuracy with 8x faster inference. Only 809M parameters vs 1.55B for full large models.', source: 'Hugging Face', date: '2024', url: 'https://huggingface.co/openai/whisper-large-v3-turbo'},
         {quote: 'Supports 99 languages with automatic detection. Quantized Q5_0 models reduce size by 45% while maintaining similar WER.', source: 'whisper.cpp Models', date: '2025', url: 'https://github.com/ggml-org/whisper.cpp/blob/master/models/README.md'}
+    ],
+    'nvidia': [
+        {quote: 'PersonaPlex outperforms other open-source and commercial systems on conversational dynamics, response and interruption latency, and task adherence in both QA assistant and customer service roles.', source: 'NVIDIA Research (ICASSP 2026)', date: 'Jan 2026', url: 'https://research.nvidia.com/labs/adlr/personaplex/'},
+        {quote: 'PersonaPlex enables natural conversational dynamics including interruptions, barge-ins, overlaps, and rapid turn-taking — all in real-time on a single GPU.', source: 'NVIDIA ADLR', date: 'Jan 2026', url: 'https://huggingface.co/nvidia/personaplex-7b-v1'}
     ]
 };
 
@@ -2388,18 +2392,20 @@ const MODEL_FAMILIES = [
     },
     {
         category: 'NVIDIA', family: 'NVIDIA Specialized', slug: 'nvidia', logo: 'logos/nvidia.png',
-        desc: 'NVIDIA models: Canary ASR, Parakeet ASR, Cosmos reasoning',
-        overview: 'NVIDIA provides specialized models through the NeMo framework. Canary-1B is a multilingual ASR model with built-in translation capabilities. Parakeet-TDT achieves state-of-the-art English transcription accuracy (lower WER than Whisper large-v3). Cosmos-Reason1 is a physical AI reasoning model for robotics and spatial understanding. All require the NeMo toolkit and benefit from NVIDIA GPU acceleration.',
+        desc: 'NVIDIA models: PersonaPlex S2S, Canary ASR, Parakeet ASR, Cosmos reasoning',
+        overview: 'NVIDIA provides specialized models for advanced AI tasks. PersonaPlex-7B is a real-time full-duplex speech-to-speech model enabling natural conversations with interruptions, barge-ins, and rapid turn-taking — built on the Moshi architecture with Helium LLM backbone. Canary-1B is a multilingual ASR model with built-in translation. Parakeet-TDT achieves state-of-the-art English transcription accuracy. Cosmos-Reason1 is a physical AI reasoning model for robotics and spatial understanding.',
         usageTips: [
-            'Requires NVIDIA NeMo toolkit: pip install nemo_toolkit[all]',
+            'PersonaPlex-7B: pip install moshi/. then run: python -m moshi.server --ssl $(mktemp -d)',
+            'PersonaPlex supports full-duplex conversation — users can interrupt and overlap naturally',
+            'PersonaPlex requires NVIDIA Ampere (A100) or Hopper (H100) GPUs and HuggingFace auth token',
             'Canary-1B supports ASR + translation in a single model (4 languages)',
             'Parakeet-TDT is the most accurate English STT model available (sub-3% WER)',
             'Cosmos-Reason1 is designed for physical world reasoning - robotics, navigation, spatial tasks',
-            'All models benefit significantly from NVIDIA GPU acceleration (10x+ faster than CPU)',
-            'NeMo models use .nemo format - convert to ONNX for deployment without NeMo dependency'
+            'All models benefit significantly from NVIDIA GPU acceleration (10x+ faster than CPU)'
         ],
         format: 'NeMo/PyTorch', tool: 'nemo/python',
         variants: [
+            {name: 'PersonaPlex-7B-v1', quant: '-', size: '14 GB', note: 'Real-time full-duplex speech-to-speech', file: 'nvidia/personaplex-7b-v1/', topPick: true},
             {name: 'Canary-1B', quant: '-', size: '2 GB', note: 'Multilingual ASR + translation', file: 'nvidia/canary-1b/'},
             {name: 'Parakeet-TDT-0.6B-v2', quant: '-', size: '1.5 GB', note: 'NVIDIA SOTA English ASR', file: 'nvidia/parakeet-tdt/'},
             {name: 'Cosmos-Reason1-7B', quant: '-', size: '14 GB', note: 'Physical AI reasoning', file: 'nvidia/cosmos-reason1-7b/'}
@@ -2416,7 +2422,7 @@ const STORAGE_DATA = [
     {label: 'Vision', size: 40, color: '#f472b6'},
     {label: 'STT/ASR', size: 20, color: '#4ade80'},
     {label: 'TTS', size: 15, color: '#fbbf24'},
-    {label: 'NVIDIA', size: 10, color: '#22d3ee'},
+    {label: 'NVIDIA', size: 24, color: '#22d3ee'},
     {label: 'Tools', size: 3, color: '#f87171'}
 ];
 

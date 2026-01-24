@@ -427,6 +427,7 @@ validate_all_urls() {
         "nvidia/canary-1b"
         "nvidia/Cosmos-0.1-Tokenizer-CI8x8"
         "nvidia/Cosmos-Reason1-7B"
+        "nvidia/personaplex-7b-v1"
     )
 
     for repo in "${hf_repos[@]}"; do
@@ -858,7 +859,7 @@ download_image_gen_models() {
 }
 
 ###############################################################################
-# Category 6: NVIDIA Special Models - ~10GB
+# Category 6: NVIDIA Special Models - ~24GB
 ###############################################################################
 
 download_nvidia_special() {
@@ -884,6 +885,10 @@ download_nvidia_special() {
     # --- NVIDIA Cosmos Reason ---
     log_info "=== NVIDIA Cosmos Reason ==="
     hf_download_repo "nvidia/Cosmos-Reason1-7B" "${NV_DIR}/cosmos-reason1-7b"
+
+    # --- NVIDIA PersonaPlex (full-duplex speech-to-speech) ---
+    log_info "=== NVIDIA PersonaPlex-7B ==="
+    hf_download_repo "nvidia/personaplex-7b-v1" "${NV_DIR}/personaplex-7b-v1"
 
     log_success "NVIDIA special models category complete"
 }
@@ -1309,6 +1314,7 @@ download_tier3() {
     hf_download_repo "nvidia/canary-1b" "${NV_DIR}/canary-1b"
     hf_download_repo "nvidia/Cosmos-0.1-Tokenizer-CI8x8" "${NV_DIR}/cosmos-tokenizer"
     hf_download_repo "nvidia/Cosmos-Reason1-7B" "${NV_DIR}/cosmos-reason1-7b"
+    hf_download_repo "nvidia/personaplex-7b-v1" "${NV_DIR}/personaplex-7b-v1"
 
     # --- VLMs (remaining) ---
     log_info "=== Additional VLMs ==="
@@ -1419,7 +1425,7 @@ case "${1:-all}" in
         echo "    stt       - Speech-to-Text models (~20GB)"
         echo "    vision    - Vision Language Models (~40GB)"
         echo "    image     - Image Generation (~40GB)"
-        echo "    nvidia    - NVIDIA Special models (~10GB)"
+        echo "    nvidia    - NVIDIA Special models (~24GB)"
         echo "    extra     - Additional quality models (~75GB)"
         echo "    bitnet    - BitNet 1-bit models only (~14GB)"
         echo ""

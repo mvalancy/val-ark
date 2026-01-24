@@ -126,35 +126,6 @@ Offline ZIM files served via Kiwix: Wikipedia Simple English (3.1GB), Full Wikip
 
 ## Platforms
 
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a2230',
-  'primaryBorderColor': '#2a3545',
-  'primaryTextColor': '#e8edf4',
-  'lineColor': '#4da6ff',
-  'secondaryColor': '#131921',
-  'tertiaryColor': '#0a0e14'
-}}}%%
-graph LR
-    subgraph Platforms
-        style Platforms fill:#1a2230,stroke:#4ade80
-        J["Jetson arm64"]
-        L["Linux x86_64"]
-        M["macOS arm64"]
-        W["Windows x64"]
-    end
-    subgraph Methods
-        style Methods fill:#1a2230,stroke:#4da6ff
-        P["Prebuilt"]
-        S["Source"]
-        I["Installer"]
-    end
-    J --> P & S & I
-    L --> P & S & I
-    M --> P & S & I
-    W --> P & I
-```
-
 | Platform | Arch | Notes |
 |----------|------|-------|
 | NVIDIA Jetson | arm64 | Orin/Xavier, CUDA builds |

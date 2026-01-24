@@ -149,51 +149,6 @@ flowchart TD
     BUDGET2 -->|Exceeded| DONE
 ```
 
-## Platform Support Matrix
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a2230',
-  'primaryBorderColor': '#2a3545',
-  'primaryTextColor': '#e8edf4',
-  'lineColor': '#4da6ff',
-  'secondaryColor': '#131921',
-  'tertiaryColor': '#0a0e14'
-}}}%%
-graph LR
-    subgraph Platforms["Supported Platforms"]
-        style Platforms fill:#1a2230,stroke:#4ade80
-        JETSON["NVIDIA Jetson<br/>arm64 / CUDA"]
-        LINUX["Linux Desktop<br/>x86_64 / CUDA optional"]
-        MACOS["macOS<br/>arm64 / Metal"]
-        WIN["Windows<br/>x64 / CUDA optional"]
-    end
-
-    subgraph Delivery["Delivery Methods"]
-        style Delivery fill:#1a2230,stroke:#4da6ff
-        PREBUILT["Prebuilt Binaries<br/>GitHub Releases, Direct URLs"]
-        SOURCE["Build from Source<br/>llama.cpp, whisper.cpp, BitNet.cpp, Redis"]
-        INSTALLER["Installers<br/>Ollama, Miniforge"]
-        APPIMAGE["AppImage<br/>MQTT Explorer (x86_64)"]
-    end
-
-    JETSON --> SOURCE
-    JETSON --> PREBUILT
-    JETSON --> INSTALLER
-
-    LINUX --> PREBUILT
-    LINUX --> SOURCE
-    LINUX --> INSTALLER
-    LINUX --> APPIMAGE
-
-    MACOS --> PREBUILT
-    MACOS --> SOURCE
-    MACOS --> INSTALLER
-
-    WIN --> PREBUILT
-    WIN --> INSTALLER
-```
-
 ## Offline & P2P Topology
 
 ```mermaid

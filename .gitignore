@@ -4,6 +4,9 @@
 # Downloaded tools and binaries (large, re-downloadable)
 tools/
 
+# Offline content (ZIM files, very large)
+content/
+
 # Cloned source repositories (re-cloneable)
 sources/
 
@@ -32,9 +35,12 @@ dist/
 web-ui/tools
 web-ui/sources
 web-ui/assets
+web-ui/content
 
 # Playwright screenshot tests
 tests/screenshots/node_modules/
+test-results/
+docs/screenshots/.last-run.json
 
 # Logs
 *.log

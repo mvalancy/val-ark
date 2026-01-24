@@ -1409,12 +1409,13 @@ link_tools() {
     [ -d "${MODELS_TOOLS}/bitnet/source" ] && \
         ln -sfn "${MODELS_TOOLS}/bitnet/source" "${arm64_dir}/bitnet" 2>/dev/null
 
-    # Web-UI symlinks (for the dev server to serve tools/sources/assets)
+    # Web-UI symlinks (for the dev server to serve tools/sources/assets/content)
     local webui="${PROJECT_ROOT}/web-ui"
     [ -d "$webui" ] && {
         ln -sfn ../tools "$webui/tools" 2>/dev/null
         ln -sfn ../sources "$webui/sources" 2>/dev/null
         ln -sfn ../assets "$webui/assets" 2>/dev/null
+        ln -sfn ../content "$webui/content" 2>/dev/null
     }
 
     log_ok "Tool symlinks updated"

@@ -2217,6 +2217,54 @@ const TOOL_META = {
     'python-standalone': { maker: 'Gregory Szorc', website: 'https://github.com/indygreg/python-build-standalone', license: 'MPL-2.0', licenseUrl: 'https://github.com/indygreg/python-build-standalone/blob/main/LICENSE' }
 };
 
+// =============================================================================
+// CONTENT LIBRARY — Offline ZIM files served by Kiwix
+// =============================================================================
+const CONTENT_LIBRARY = [
+    {
+        id: 'wikipedia-simple', name: 'Wikipedia Simple English', category: 'encyclopedia',
+        icon: 'W', iconBg: '#1a73e8',
+        desc: 'All Simple English Wikipedia articles with images — accessible knowledge for all reading levels',
+        size: '3.1 GB',
+        file: 'content/zim/wikipedia_en_simple_all_maxi_2025-11.zim',
+        source: 'https://en.wikipedia.org/wiki/Simple_English_Wikipedia',
+        articles: '~240,000',
+        updated: '2025-11',
+        details: {
+            overview: 'The Simple English Wikipedia uses basic vocabulary and shorter sentences to explain topics. Ideal for English learners, children, and quick reference. Includes all articles with images.',
+            features: [
+                'All Simple English Wikipedia articles',
+                'Full images included',
+                '~240,000 articles',
+                'Accessible language for all reading levels',
+                'Searchable via kiwix-serve',
+                'Browsable from any device on the network'
+            ]
+        }
+    },
+    {
+        id: 'wikipedia-full', name: 'Wikipedia English (Full)', category: 'encyclopedia',
+        icon: 'W', iconBg: '#1a73e8',
+        desc: 'Complete English Wikipedia — all 6.8M articles with all images, the full human knowledge base',
+        size: '111 GB',
+        file: 'content/zim/wikipedia_en_all_maxi_2025-08.zim',
+        source: 'https://en.wikipedia.org',
+        articles: '~6,800,000',
+        updated: '2025-08',
+        details: {
+            overview: 'The complete English Wikipedia with all articles and all images. This is the largest and most comprehensive offline knowledge base available — the entire sum of human knowledge accessible without internet.',
+            features: [
+                'All 6.8 million English Wikipedia articles',
+                'All images included (maxi version)',
+                'Full-text search via kiwix-serve',
+                'Browsable from any device on the local network',
+                'Updated August 2025',
+                'The definitive offline reference'
+            ]
+        }
+    }
+];
+
 // Installation status for current instance (Jetson ARM64)
 // Dynamic install status - checked against server on page load
 const INSTALLED_TOOLS = {};
@@ -3000,6 +3048,11 @@ function router() {
     } else if (route.startsWith('/models/')) {
         const slug = route.replace('/models/', '');
         html += renderModelDetail(slug);
+    } else if (route === '/content') {
+        html += renderContentLibrary();
+    } else if (route.startsWith('/content/')) {
+        const contentId = route.replace('/content/', '');
+        html += renderContentDetail(contentId);
     } else if (route === '/quickstart') {
         html += renderQuickStart();
     } else {
@@ -3029,6 +3082,7 @@ function renderNav(route) {
     const activeSection = route === '/' ? 'home' :
         route.startsWith('/tools') ? 'tools' :
         route.startsWith('/models') ? 'models' :
+        route.startsWith('/content') ? 'content' :
         route.startsWith('/quickstart') ? 'quickstart' : 'home';
 
     return `
@@ -3038,6 +3092,7 @@ function renderNav(route) {
             <a href="#/" class="nav-link ${activeSection === 'home' ? 'active' : ''}">Home</a>
             <a href="#/tools" class="nav-link ${activeSection === 'tools' ? 'active' : ''}">Software</a>
             <a href="#/models" class="nav-link ${activeSection === 'models' ? 'active' : ''}">Models</a>
+            <a href="#/content" class="nav-link ${activeSection === 'content' ? 'active' : ''}">Content</a>
             <a href="#/quickstart" class="nav-link ${activeSection === 'quickstart' ? 'active' : ''}">Getting Started</a>
         </div>
     </nav>`;
@@ -3691,6 +3746,120 @@ function renderModelDetail(slug) {
 }
 
 // =============================================================================
+// CONTENT LIBRARY (ZIM files)
+// =============================================================================
+function renderContentLibrary() {
+    let html = '<div class="container">';
+    html += renderBreadcrumb([{label: 'Content Library'}]);
+    html += '<h1>Offline Content Library</h1>';
+    html += '<p class="section-desc">Pre-downloaded knowledge bases served by <a href="#/tools/kiwix">Kiwix</a>. Browse Wikipedia, textbooks, and reference material from any device on your network — no internet required.</p>';
+    html += '<div class="card-grid">';
+
+    for (const item of CONTENT_LIBRARY) {
+        const statusClass = CONTENT_STATUS[item.id] || 'unknown';
+        const statusLabel = statusClass === 'installed' ? 'Downloaded' :
+            statusClass === 'partial' ? 'Downloading...' : 'Not Downloaded';
+        const statusColor = statusClass === 'installed' ? 'var(--green)' :
+            statusClass === 'partial' ? 'var(--accent)' : 'var(--text-muted)';
+
+        html += `<a href="#/content/${item.id}" class="card">
+            <div class="card-icon" style="background:${item.iconBg}">${item.icon}</div>
+            <div class="card-body">
+                <div class="card-title">${esc(item.name)}</div>
+                <div class="card-desc">${esc(item.desc)}</div>
+                <div class="card-meta" style="margin-top:6px">
+                    <span>${item.size}</span>
+                    <span style="color:${statusColor};font-weight:600">${statusLabel}</span>
+                </div>
+            </div>
+        </a>`;
+    }
+
+    html += '</div>';
+
+    // Serve instructions
+    html += `<div class="detail-section" style="margin-top:2rem">
+        <h3>Serving Content</h3>
+        <p>Start the Kiwix server to make all downloaded content browsable from any device:</p>
+        <div class="code-block"><code>./scripts/download-zims.sh serve</code></div>
+        <p style="margin-top:0.5rem;color:var(--text-muted)">Then open <code>http://&lt;server-ip&gt;:8888</code> in any browser on your network.</p>
+    </div>`;
+
+    html += '</div>';
+    return html;
+}
+
+function renderContentDetail(contentId) {
+    const item = CONTENT_LIBRARY.find(c => c.id === contentId);
+    if (!item) return '<div class="container"><h1>Content not found</h1></div>';
+
+    let html = '<div class="container">';
+    html += renderBreadcrumb([
+        {label: 'Content', href: '#/content'},
+        {label: item.name}
+    ]);
+
+    const statusClass = CONTENT_STATUS[item.id] || 'unknown';
+    const statusLabel = statusClass === 'installed' ? 'Downloaded' :
+        statusClass === 'partial' ? 'Downloading...' : 'Not Downloaded';
+    const statusColor = statusClass === 'installed' ? 'var(--green)' :
+        statusClass === 'partial' ? 'var(--accent)' : 'var(--text-muted)';
+
+    html += `<div class="detail-header">
+        <div class="card-icon" style="background:${item.iconBg};width:48px;height:48px;font-size:24px">${item.icon}</div>
+        <div>
+            <h1 style="margin:0">${esc(item.name)}</h1>
+            <p style="color:var(--text-muted);margin:4px 0">${esc(item.desc)}</p>
+        </div>
+    </div>`;
+
+    html += '<div class="detail-section"><h3>Details</h3><table class="detail-table">';
+    html += `<tr><td>Size</td><td>${item.size}</td></tr>`;
+    html += `<tr><td>Articles</td><td>${item.articles}</td></tr>`;
+    html += `<tr><td>Updated</td><td>${item.updated}</td></tr>`;
+    html += `<tr><td>Status</td><td><span style="color:${statusColor};font-weight:600">${statusLabel}</span></td></tr>`;
+    html += `<tr><td>Source</td><td><a href="${item.source}" target="_blank">${item.source}</a></td></tr>`;
+    html += `<tr><td>File</td><td><code>${item.file}</code></td></tr>`;
+    html += '</table></div>';
+
+    if (item.details) {
+        html += `<div class="detail-section"><h3>Overview</h3><p>${item.details.overview}</p></div>`;
+        if (item.details.features) {
+            html += '<div class="detail-section"><h3>What\'s Included</h3><ul>';
+            for (const f of item.details.features) {
+                html += `<li>${esc(f)}</li>`;
+            }
+            html += '</ul></div>';
+        }
+    }
+
+    html += `<div class="detail-section"><h3>Usage</h3>`;
+    html += `<div class="code-block"><code>kiwix-serve --port 8888 ${item.file}</code></div>`;
+    html += `<p style="margin-top:0.5rem;color:var(--text-muted)">Or serve all ZIMs: <code>./scripts/download-zims.sh serve</code></p>`;
+    html += '</div>';
+
+    html += '</div>';
+    return html;
+}
+
+// Check content download status
+const CONTENT_STATUS = {};
+async function checkContentStatus() {
+    for (const item of CONTENT_LIBRARY) {
+        try {
+            const resp = await fetch(item.file, { method: 'HEAD' });
+            if (resp.ok) {
+                CONTENT_STATUS[item.id] = 'installed';
+            } else {
+                CONTENT_STATUS[item.id] = 'missing';
+            }
+        } catch {
+            CONTENT_STATUS[item.id] = 'missing';
+        }
+    }
+}
+
+// =============================================================================
 // QUICK START
 // =============================================================================
 function renderQuickStart() {
@@ -4221,6 +4390,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!window.location.hash) window.location.hash = '#/';
     router();
     checkInstalledTools();
+    checkContentStatus();
 });
 </script>
 </body>

@@ -629,3 +629,49 @@ test.describe('Val Ark - Model File Verification', () => {
     expect(oversized, `Bloated model directories: ${oversized.join(', ')}`).toHaveLength(0);
   });
 });
+
+// Content Library IDs
+const CONTENT_IDS = ['wikipedia-simple', 'wikipedia-full'];
+
+test.describe('Val Ark - Content Library', () => {
+  test('Content page loads and shows all content cards', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/content`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.card', { timeout: 5000 });
+    const cards = page.locator('a.card[href*="#/content/"]');
+    const count = await cards.count();
+    expect(count).toBe(CONTENT_IDS.length);
+  });
+
+  test('Content nav link exists and navigates', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    const contentLink = page.locator('a.nav-link:has-text("Content")');
+    await expect(contentLink).toBeVisible();
+    await contentLink.click();
+    await page.waitForTimeout(300);
+    expect(page.url()).toContain('#/content');
+  });
+
+  for (const contentId of CONTENT_IDS) {
+    test(`content detail page: ${contentId}`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('h1', { timeout: 5000 });
+      const heading = await page.locator('h1').first().textContent();
+      expect(heading).toBeTruthy();
+    });
+  }
+
+  test('download-zims.sh script exists and is executable', () => {
+    const scriptPath = path.join(PROJECT_ROOT, 'scripts/download-zims.sh');
+    expect(fs.existsSync(scriptPath), 'download-zims.sh should exist').toBe(true);
+    const stats = fs.statSync(scriptPath);
+    expect(stats.mode & 0o111, 'download-zims.sh should be executable').toBeGreaterThan(0);
+  });
+
+  test('ZIM content directory exists', () => {
+    const zimDir = path.join(PROJECT_ROOT, 'content/zim');
+    expect(fs.existsSync(zimDir), 'content/zim directory should exist').toBe(true);
+  });
+});

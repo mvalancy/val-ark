@@ -15,4 +15,4 @@ echo "Retrying $(wc -l < "$FAILED_FILE") failed downloads..."
 echo ""
 
 # Just re-run the main script - it skips already-downloaded files
-exec "$(dirname "$0")/download-all-models.sh" all
+exec "$(dirname "$0")/download-models.sh" all

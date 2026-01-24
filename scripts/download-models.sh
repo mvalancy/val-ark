@@ -908,14 +908,372 @@ download_extra_models() {
 }
 
 ###############################################################################
+# Priority Tier Downloads
+###############################################################################
+
+# Tier 1: Phone/tablet/edge models - small, fast, go everywhere (~15GB)
+download_tier1() {
+    log "============================================================"
+    log "TIER 1: Edge/Mobile Models (small, fast)"
+    log "============================================================"
+
+    local LLM_DIR="${MODEL_ROOT}/llm"
+    local STT_DIR="${MODEL_ROOT}/stt"
+    local TTS_DIR="${MODEL_ROOT}/tts"
+    local VLM_DIR="${MODEL_ROOT}/vlm"
+    ensure_dir "$LLM_DIR" "$STT_DIR" "$TTS_DIR" "$VLM_DIR"
+
+    # --- Small LLMs ---
+    log_info "=== Small LLMs (edge-friendly) ==="
+
+    # Llama-3.2-1B Q8_0 (~1.3 GB)
+    hf_download_file "bartowski/Llama-3.2-1B-Instruct-GGUF" \
+        "Llama-3.2-1B-Instruct-Q8_0.gguf" \
+        "${LLM_DIR}/llama-3.2-1b"
+
+    # Llama-3.2-3B Q8_0 (~3.4 GB)
+    hf_download_file "bartowski/Llama-3.2-3B-Instruct-GGUF" \
+        "Llama-3.2-3B-Instruct-Q8_0.gguf" \
+        "${LLM_DIR}/llama-3.2-3b"
+
+    # Nemotron-Mini-4B Q8_0
+    hf_download_file "bartowski/Nemotron-Mini-4B-Instruct-GGUF" \
+        "Nemotron-Mini-4B-Instruct-Q8_0.gguf" \
+        "${LLM_DIR}/nemotron-mini-4b"
+
+    # --- Small Whisper models ---
+    log_info "=== Whisper (tiny/base/small) ==="
+    local WHISPER_DIR="${STT_DIR}/whisper-ggml"
+    ensure_dir "$WHISPER_DIR"
+    local WHISPER_BASE="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+
+    download_url "${WHISPER_BASE}/ggml-tiny.en-q8_0.bin" "${WHISPER_DIR}/ggml-tiny.en-q8_0.bin"
+    download_url "${WHISPER_BASE}/ggml-base.en-q8_0.bin" "${WHISPER_DIR}/ggml-base.en-q8_0.bin"
+    download_url "${WHISPER_BASE}/ggml-small.en-q8_0.bin" "${WHISPER_DIR}/ggml-small.en-q8_0.bin"
+    download_url "${WHISPER_BASE}/ggml-small-q8_0.bin" "${WHISPER_DIR}/ggml-small-q8_0.bin"
+
+    # --- Piper TTS voices ---
+    log_info "=== Piper TTS Voices ==="
+    local PIPER_DIR="${TTS_DIR}/piper-voices"
+    ensure_dir "$PIPER_DIR"
+
+    local dl_start=$(date +%s)
+    log_info "Downloading Piper voices via hf CLI (5 voices)"
+    local cmd_output
+    cmd_output=$($HF_CLI download "rhasspy/piper-voices" --local-dir "$PIPER_DIR" \
+        --include "v2/en/en_US/lessac/high/*" \
+        --include "v2/en/en_US/lessac/medium/*" \
+        --include "v2/en/en_US/amy/medium/*" \
+        --include "v2/en/en_US/ljspeech/high/*" \
+        --include "v2/en/en_GB/alba/medium/*" 2>&1)
+    local cmd_status=$?
+    echo "$cmd_output" | tail -10 >> "$LOG_FILE" 2>/dev/null || true
+    if [ $cmd_status -eq 0 ]; then
+        local size=$(du -sh "$PIPER_DIR" 2>/dev/null | cut -f1)
+        log_success "Downloaded Piper voices (${size}) in $(elapsed_since $dl_start)"
+        DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
+    else
+        log_error "FAILED: Piper voices download"
+        DOWNLOAD_FAILED=$((DOWNLOAD_FAILED + 1))
+    fi
+    print_progress
+
+    # --- Moondream 2 (tiny VLM) ---
+    log_info "=== Moondream 2 (edge VLM) ==="
+    hf_download_repo "vikhyatk/moondream2" "${VLM_DIR}/moondream2"
+
+    # --- Vosk (ultra-lightweight offline ASR) ---
+    log_info "=== Vosk (offline ASR) ==="
+    local VOSK_DIR="${STT_DIR}/vosk"
+    ensure_dir "$VOSK_DIR"
+    download_url "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip" \
+        "${VOSK_DIR}/vosk-model-small-en-us-0.15.zip"
+
+    log_success "Tier 1 (edge/mobile) complete"
+}
+
+# Tier 2: Balanced workstation models (~150GB)
+download_tier2() {
+    log "============================================================"
+    log "TIER 2: Balanced Workstation Models"
+    log "============================================================"
+
+    local LLM_DIR="${MODEL_ROOT}/llm"
+    local STT_DIR="${MODEL_ROOT}/stt"
+    local TTS_DIR="${MODEL_ROOT}/tts"
+    local IMG_DIR="${MODEL_ROOT}/image-gen"
+    local VLM_DIR="${MODEL_ROOT}/vlm"
+    ensure_dir "$LLM_DIR" "$STT_DIR" "$TTS_DIR" "$IMG_DIR" "$VLM_DIR"
+
+    # --- Medium LLMs ---
+    log_info "=== Medium LLMs ==="
+
+    # Llama-3.1-8B Q8_0 (~8.5 GB)
+    hf_download_file "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF" \
+        "Meta-Llama-3.1-8B-Instruct-Q8_0.gguf" \
+        "${LLM_DIR}/llama-3.1-8b"
+
+    # Gemma-2-9B Q8_0
+    hf_download_file "bartowski/gemma-2-9b-it-GGUF" \
+        "gemma-2-9b-it-Q8_0.gguf" \
+        "${LLM_DIR}/gemma-2-9b"
+
+    # Qwen2.5-14B Q8_0 (~15.7 GB)
+    hf_download_file "bartowski/Qwen2.5-14B-Instruct-GGUF" \
+        "Qwen2.5-14B-Instruct-Q8_0.gguf" \
+        "${LLM_DIR}/qwen2.5-14b"
+
+    # Qwen2.5-14B Q6_K
+    hf_download_file "bartowski/Qwen2.5-14B-Instruct-GGUF" \
+        "Qwen2.5-14B-Instruct-Q6_K.gguf" \
+        "${LLM_DIR}/qwen2.5-14b"
+
+    # Mistral-Nemo-12B Q8_0
+    hf_download_file "bartowski/Mistral-Nemo-Instruct-2407-GGUF" \
+        "Mistral-Nemo-Instruct-2407-Q8_0.gguf" \
+        "${LLM_DIR}/mistral-nemo-12b"
+
+    # Mistral-Nemo-12B Q6_K
+    hf_download_file "bartowski/Mistral-Nemo-Instruct-2407-GGUF" \
+        "Mistral-Nemo-Instruct-2407-Q6_K.gguf" \
+        "${LLM_DIR}/mistral-nemo-12b"
+
+    # DeepSeek-R1-14B Q8_0
+    hf_download_file "bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF" \
+        "DeepSeek-R1-Distill-Qwen-14B-Q8_0.gguf" \
+        "${LLM_DIR}/deepseek-r1-14b"
+
+    # DeepSeek-R1-14B Q6_K
+    hf_download_file "bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF" \
+        "DeepSeek-R1-Distill-Qwen-14B-Q6_K.gguf" \
+        "${LLM_DIR}/deepseek-r1-14b"
+
+    # Phi-4 Q8_0
+    hf_download_file "bartowski/phi-4-GGUF" \
+        "phi-4-Q8_0.gguf" \
+        "${LLM_DIR}/phi-4"
+
+    # Phi-4-reasoning Q8_0
+    hf_download_file "bartowski/microsoft_Phi-4-reasoning-GGUF" \
+        "microsoft_Phi-4-reasoning-Q8_0.gguf" \
+        "${LLM_DIR}/phi-4-reasoning"
+
+    # Phi-4-reasoning-plus Q8_0
+    hf_download_file "bartowski/microsoft_Phi-4-reasoning-plus-GGUF" \
+        "microsoft_Phi-4-reasoning-plus-Q8_0.gguf" \
+        "${LLM_DIR}/phi-4-reasoning-plus"
+
+    # Nemotron-Nano-9B-v2 Q8_0
+    hf_download_file "bartowski/nvidia_NVIDIA-Nemotron-Nano-9B-v2-GGUF" \
+        "nvidia_NVIDIA-Nemotron-Nano-9B-v2-Q8_0.gguf" \
+        "${LLM_DIR}/nemotron-nano-9b-v2"
+
+    # Nemotron-Nano-12B-v2 Q8_0
+    hf_download_file "bartowski/nvidia_NVIDIA-Nemotron-Nano-12B-v2-GGUF" \
+        "nvidia_NVIDIA-Nemotron-Nano-12B-v2-Q8_0.gguf" \
+        "${LLM_DIR}/nemotron-nano-12b-v2"
+
+    # --- Whisper medium/large-turbo ---
+    log_info "=== Whisper (medium/large-turbo) ==="
+    local WHISPER_DIR="${STT_DIR}/whisper-ggml"
+    ensure_dir "$WHISPER_DIR"
+    local WHISPER_BASE="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+
+    download_url "${WHISPER_BASE}/ggml-medium-q5_0.bin" "${WHISPER_DIR}/ggml-medium-q5_0.bin"
+    download_url "${WHISPER_BASE}/ggml-medium.en-q5_0.bin" "${WHISPER_DIR}/ggml-medium.en-q5_0.bin"
+    download_url "${WHISPER_BASE}/ggml-medium-q8_0.bin" "${WHISPER_DIR}/ggml-medium-q8_0.bin"
+    download_url "${WHISPER_BASE}/ggml-large-v3-turbo.bin" "${WHISPER_DIR}/ggml-large-v3-turbo.bin"
+    download_url "${WHISPER_BASE}/ggml-large-v3-turbo-q5_0.bin" "${WHISPER_DIR}/ggml-large-v3-turbo-q5_0.bin"
+    download_url "${WHISPER_BASE}/ggml-large-v3-turbo-q8_0.bin" "${WHISPER_DIR}/ggml-large-v3-turbo-q8_0.bin"
+
+    # --- Distil-Whisper ---
+    log_info "=== Distil-Whisper ==="
+    hf_download_file "distil-whisper/distil-large-v3.5-ggml" \
+        "ggml-model.bin" \
+        "${STT_DIR}/distil-whisper-v3.5"
+    hf_download_file "distil-whisper/distil-large-v3-ggml" \
+        "ggml-distil-large-v3.bin" \
+        "${STT_DIR}/distil-whisper-v3"
+
+    # --- Kokoro TTS ---
+    log_info "=== Kokoro TTS ==="
+    hf_download_repo "hexgrad/Kokoro-82M" "${TTS_DIR}/kokoro-82m"
+    hf_download_repo "onnx-community/Kokoro-82M-v1.0-ONNX" "${TTS_DIR}/kokoro-82m-onnx"
+
+    # --- OuteTTS ---
+    log_info "=== OuteTTS ==="
+    hf_download_repo "OuteAI/OuteTTS-1.0-0.6B-GGUF" "${TTS_DIR}/outetts-1.0-gguf"
+
+    # --- SDXL Turbo ---
+    log_info "=== SDXL Turbo ==="
+    hf_download_repo "stabilityai/sdxl-turbo" "${IMG_DIR}/sdxl-turbo"
+
+    # --- VLMs ---
+    log_info "=== Vision Language Models ==="
+    hf_download_file "cjpais/llava-1.6-mistral-7b-gguf" \
+        "llava-v1.6-mistral-7b.Q4_K_M.gguf" \
+        "${VLM_DIR}/llava-1.6-mistral"
+    hf_download_file "cjpais/llava-1.6-mistral-7b-gguf" \
+        "mmproj-model-f16.gguf" \
+        "${VLM_DIR}/llava-1.6-mistral"
+    hf_download_file "bartowski/Qwen2-VL-7B-Instruct-GGUF" \
+        "Qwen2-VL-7B-Instruct-Q4_K_M.gguf" \
+        "${VLM_DIR}/qwen2-vl-7b"
+
+    log_success "Tier 2 (workstation) complete"
+}
+
+# Tier 3: Large models - as space allows (~300GB+)
+download_tier3() {
+    log "============================================================"
+    log "TIER 3: Large Models (space permitting)"
+    log "============================================================"
+
+    local LLM_DIR="${MODEL_ROOT}/llm"
+    local STT_DIR="${MODEL_ROOT}/stt"
+    local TTS_DIR="${MODEL_ROOT}/tts"
+    local IMG_DIR="${MODEL_ROOT}/image-gen"
+    local VLM_DIR="${MODEL_ROOT}/vlm"
+    local NV_DIR="${MODEL_ROOT}/nvidia-special"
+    ensure_dir "$LLM_DIR" "$STT_DIR" "$TTS_DIR" "$IMG_DIR" "$VLM_DIR" "$NV_DIR"
+
+    # --- 32B Models ---
+    log_info "=== 32B Models ==="
+
+    hf_download_file "bartowski/Qwen2.5-32B-Instruct-GGUF" \
+        "Qwen2.5-32B-Instruct-Q4_K_M.gguf" \
+        "${LLM_DIR}/qwen2.5-32b"
+
+    hf_download_file "bartowski/Qwen2.5-Coder-32B-Instruct-GGUF" \
+        "Qwen2.5-Coder-32B-Instruct-Q4_K_M.gguf" \
+        "${LLM_DIR}/qwen2.5-coder-32b"
+
+    hf_download_file "bartowski/Qwen_QwQ-32B-GGUF" \
+        "Qwen_QwQ-32B-Q4_K_M.gguf" \
+        "${LLM_DIR}/qwq-32b"
+
+    hf_download_file "bartowski/DeepSeek-R1-Distill-Qwen-32B-GGUF" \
+        "DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf" \
+        "${LLM_DIR}/deepseek-r1-32b"
+
+    # --- 27B-30B Models ---
+    log_info "=== 27B-30B Models ==="
+
+    hf_download_file "bartowski/gemma-2-27b-it-GGUF" \
+        "gemma-2-27b-it-Q4_K_M.gguf" \
+        "${LLM_DIR}/gemma-2-27b"
+
+    hf_download_file "bartowski/google_gemma-3-27b-it-GGUF" \
+        "google_gemma-3-27b-it-Q4_K_M.gguf" \
+        "${LLM_DIR}/gemma-3-27b"
+
+    hf_download_file "unsloth/Nemotron-3-Nano-30B-A3B-GGUF" \
+        "Nemotron-3-Nano-30B-A3B-Q4_K_M.gguf" \
+        "${LLM_DIR}/nemotron-3-nano-30b"
+
+    hf_download_file "unsloth/Nemotron-3-Nano-30B-A3B-GGUF" \
+        "Nemotron-3-Nano-30B-A3B-Q8_0.gguf" \
+        "${LLM_DIR}/nemotron-3-nano-30b"
+
+    # --- Higher quant 32B models ---
+    log_info "=== Higher quality quants ==="
+
+    hf_download_file "bartowski/Qwen2.5-32B-Instruct-GGUF" \
+        "Qwen2.5-32B-Instruct-Q5_K_M.gguf" \
+        "${LLM_DIR}/qwen2.5-32b"
+
+    hf_download_file "bartowski/DeepSeek-R1-Distill-Qwen-32B-GGUF" \
+        "DeepSeek-R1-Distill-Qwen-32B-Q5_K_M.gguf" \
+        "${LLM_DIR}/deepseek-r1-32b"
+
+    # --- 70B IQ2 variants ---
+    log_info "=== 70B Models (aggressive quants) ==="
+
+    hf_download_file "bartowski/Llama-3.1-Nemotron-70B-Instruct-HF-GGUF" \
+        "Llama-3.1-Nemotron-70B-Instruct-HF-IQ2_XXS.gguf" \
+        "${LLM_DIR}/nemotron-70b"
+
+    hf_download_file "bartowski/nvidia_Llama-3_3-Nemotron-Super-49B-v1_5-GGUF" \
+        "nvidia_Llama-3_3-Nemotron-Super-49B-v1_5-IQ3_XXS.gguf" \
+        "${LLM_DIR}/nemotron-super-49b"
+
+    hf_download_file "bartowski/Llama-3.3-70B-Instruct-GGUF" \
+        "Llama-3.3-70B-Instruct-IQ2_XXS.gguf" \
+        "${LLM_DIR}/llama-3.3-70b"
+
+    # --- Full Whisper large models ---
+    log_info "=== Whisper large (full precision) ==="
+    local WHISPER_DIR="${STT_DIR}/whisper-ggml"
+    ensure_dir "$WHISPER_DIR"
+    local WHISPER_BASE="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+
+    download_url "${WHISPER_BASE}/ggml-large-v2-q5_0.bin" "${WHISPER_DIR}/ggml-large-v2-q5_0.bin"
+    download_url "${WHISPER_BASE}/ggml-large-v3-q5_0.bin" "${WHISPER_DIR}/ggml-large-v3-q5_0.bin"
+    download_url "${WHISPER_BASE}/ggml-large-v2.bin" "${WHISPER_DIR}/ggml-large-v2.bin"
+    download_url "${WHISPER_BASE}/ggml-large-v3.bin" "${WHISPER_DIR}/ggml-large-v3.bin"
+
+    # --- Full TTS suite ---
+    log_info "=== Full TTS suite ==="
+    hf_download_repo "coqui/XTTS-v2" "${TTS_DIR}/xtts-v2"
+    hf_download_repo "parler-tts/parler-tts-mini-v1.1" "${TTS_DIR}/parler-tts-mini"
+    hf_download_repo "yl4579/StyleTTS2-LibriTTS" "${TTS_DIR}/styletts2-libritts"
+    hf_download_repo "suno/bark-small" "${TTS_DIR}/bark-small"
+
+    # --- Full image generation ---
+    log_info "=== Full image generation ==="
+    hf_download_repo "PixArt-alpha/PixArt-Sigma-XL-2-1024-MS" "${IMG_DIR}/pixart-sigma-1024"
+    hf_download_file "stabilityai/stable-diffusion-xl-base-1.0" \
+        "sd_xl_base_1.0.safetensors" \
+        "${IMG_DIR}/sdxl-base"
+
+    # --- Faster-Whisper CTranslate2 ---
+    log_info "=== Faster-Whisper ==="
+    hf_download_repo "Systran/faster-whisper-large-v3" "${STT_DIR}/faster-whisper-large-v3"
+    hf_download_repo "deepdml/faster-whisper-large-v3-turbo-ct2" "${STT_DIR}/faster-whisper-large-v3-turbo"
+
+    # --- Vosk full models ---
+    log_info "=== Vosk (full models) ==="
+    local VOSK_DIR="${STT_DIR}/vosk"
+    ensure_dir "$VOSK_DIR"
+    download_url "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip" \
+        "${VOSK_DIR}/vosk-model-en-us-0.22.zip"
+    download_url "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip" \
+        "${VOSK_DIR}/vosk-model-en-us-0.22-lgraph.zip"
+
+    # --- Moonshine ONNX ---
+    log_info "=== Moonshine (edge ASR) ==="
+    hf_download_repo "UsefulSensors/moonshine" "${STT_DIR}/moonshine" "onnx/**"
+
+    # --- NVIDIA Parakeet ---
+    log_info "=== NVIDIA Parakeet ==="
+    hf_download_repo "nvidia/parakeet-tdt-0.6b-v2" "${STT_DIR}/parakeet-tdt-0.6b-v2"
+
+    # --- NVIDIA Special ---
+    log_info "=== NVIDIA Special Models ==="
+    hf_download_repo "nvidia/Audio2Face-3D-v3.0" "${NV_DIR}/audio2face-3d-v3"
+    hf_download_repo "nvidia/canary-1b" "${NV_DIR}/canary-1b"
+    hf_download_repo "nvidia/Cosmos-0.1-Tokenizer-CI8x8" "${NV_DIR}/cosmos-tokenizer"
+    hf_download_repo "nvidia/Cosmos-Reason1-7B" "${NV_DIR}/cosmos-reason1-7b"
+
+    # --- VLMs (remaining) ---
+    log_info "=== Additional VLMs ==="
+    hf_download_repo "nvidia/Llama-3.1-Nemotron-Nano-VL-8B-V1" "${VLM_DIR}/nemotron-nano-vl-8b"
+
+    log_success "Tier 3 (large) complete"
+}
+
+###############################################################################
 # Main Execution
 ###############################################################################
 
-main() {
+run_session() {
+    local tier_label="$1"
+    shift
+
     echo ""
     echo "=================================================================="
     echo "  Val Ark - AI Model Download Suite"
-    echo "  Target: ~500GB across LLMs, TTS, STT, Vision, Image Generation"
+    echo "  Mode: ${tier_label}"
     echo "=================================================================="
     echo ""
 
@@ -924,7 +1282,7 @@ main() {
     ensure_dir "$LOG_DIR"
     : > "${LOG_DIR}/failed_downloads.txt"
 
-    log "Starting download session"
+    log "Starting download session (${tier_label})"
     log "Model root: ${MODEL_ROOT}"
     log "Log file: ${LOG_FILE}"
 
@@ -932,21 +1290,11 @@ main() {
     local avail_gb
     avail_gb=$(df -BG "$MODEL_ROOT" 2>/dev/null | tail -1 | awk '{print $4}' | sed 's/G//') || avail_gb="unknown"
     log_info "Available disk space: ${avail_gb} GB"
-    if [ "$avail_gb" != "unknown" ] && [ "$avail_gb" -lt 500 ] 2>/dev/null; then
-        log_warn "Less than 500GB available. Some downloads may not fit."
-    fi
 
-    # Count total expected downloads for progress tracking
-    DOWNLOAD_TOTAL=63  # Approximate total number of download operations
-
-    # Run all categories - each function handles its own errors
-    download_llm_models
-    download_tts_models
-    download_stt_models
-    download_vision_models
-    download_image_gen_models
-    download_nvidia_special
-    download_extra_models
+    # Run requested tier functions
+    for tier_fn in "$@"; do
+        "$tier_fn"
+    done
 
     # Final Summary
     echo ""
@@ -974,29 +1322,42 @@ main() {
     log_info "Models are stored in: ${MODEL_ROOT}"
 }
 
-# Allow running individual categories or validation
+# Allow running by tier, individual category, or validation
+ensure_dir "$LOG_DIR"
+LOG_FILE="${LOG_DIR}/download_$(date +%Y%m%d_%H%M%S).log"
+
 case "${1:-all}" in
-    llm)        ensure_dir "$LOG_DIR"; LOG_FILE="${LOG_DIR}/download_$(date +%Y%m%d_%H%M%S).log"; download_llm_models ;;
-    tts)        ensure_dir "$LOG_DIR"; LOG_FILE="${LOG_DIR}/download_$(date +%Y%m%d_%H%M%S).log"; download_tts_models ;;
-    stt)        ensure_dir "$LOG_DIR"; LOG_FILE="${LOG_DIR}/download_$(date +%Y%m%d_%H%M%S).log"; download_stt_models ;;
-    vision)     ensure_dir "$LOG_DIR"; LOG_FILE="${LOG_DIR}/download_$(date +%Y%m%d_%H%M%S).log"; download_vision_models ;;
-    image)      ensure_dir "$LOG_DIR"; LOG_FILE="${LOG_DIR}/download_$(date +%Y%m%d_%H%M%S).log"; download_image_gen_models ;;
-    nvidia)     ensure_dir "$LOG_DIR"; LOG_FILE="${LOG_DIR}/download_$(date +%Y%m%d_%H%M%S).log"; download_nvidia_special ;;
-    extra)      ensure_dir "$LOG_DIR"; LOG_FILE="${LOG_DIR}/download_$(date +%Y%m%d_%H%M%S).log"; download_extra_models ;;
-    validate)   ensure_dir "$LOG_DIR"; LOG_FILE="${LOG_DIR}/validate_$(date +%Y%m%d_%H%M%S).log"; validate_all_urls ;;
-    all)        main ;;
+    tier1)      run_session "Tier 1 (edge/mobile)" download_tier1 ;;
+    tier2)      run_session "Tier 2 (workstation)" download_tier2 ;;
+    tier3)      run_session "Tier 3 (large)" download_tier3 ;;
+    all)        run_session "All tiers" download_tier1 download_tier2 download_tier3 ;;
+    llm)        download_llm_models ;;
+    tts)        download_tts_models ;;
+    stt)        download_stt_models ;;
+    vision)     download_vision_models ;;
+    image)      download_image_gen_models ;;
+    nvidia)     download_nvidia_special ;;
+    extra)      download_extra_models ;;
+    validate)   LOG_FILE="${LOG_DIR}/validate_$(date +%Y%m%d_%H%M%S).log"; validate_all_urls ;;
     *)
-        echo "Usage: $0 [all|llm|tts|stt|vision|image|nvidia|extra|validate]"
+        echo "Usage: $0 [tier1|tier2|tier3|all|llm|tts|stt|vision|image|nvidia|extra|validate]"
         echo ""
-        echo "  all       - Download everything (~500GB)"
-        echo "  llm       - LLM models only (~300GB)"
-        echo "  tts       - Text-to-Speech models (~15GB)"
-        echo "  stt       - Speech-to-Text models (~20GB)"
-        echo "  vision    - Vision Language Models (~40GB)"
-        echo "  image     - Image Generation (~40GB)"
-        echo "  nvidia    - NVIDIA Special models (~10GB)"
-        echo "  extra     - Additional quality models (~75GB)"
-        echo "  validate  - Pre-check all URLs without downloading"
+        echo "  Priority tiers (recommended):"
+        echo "    tier1     - Edge/mobile models (~15GB) - small, fast"
+        echo "    tier2     - Workstation models (~150GB) - balanced quality/speed"
+        echo "    tier3     - Large models (~300GB+) - highest quality"
+        echo "    all       - Download all tiers (~500GB)"
+        echo ""
+        echo "  By category:"
+        echo "    llm       - LLM models only (~300GB)"
+        echo "    tts       - Text-to-Speech models (~15GB)"
+        echo "    stt       - Speech-to-Text models (~20GB)"
+        echo "    vision    - Vision Language Models (~40GB)"
+        echo "    image     - Image Generation (~40GB)"
+        echo "    nvidia    - NVIDIA Special models (~10GB)"
+        echo "    extra     - Additional quality models (~75GB)"
+        echo ""
+        echo "  validate    - Pre-check all URLs without downloading"
         exit 1
         ;;
 esac

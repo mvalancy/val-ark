@@ -818,7 +818,7 @@ const TOOL_CATEGORIES = {
 // =============================================================================
 const TOOLS = [
     {
-        id: 'llama-cpp', name: 'llama.cpp', category: 'ai-inference', icon: 'L', iconBg: '#2563eb', logo: 'assets/logos/llama-cpp.png',
+        id: 'llama-cpp', name: 'llama.cpp', category: 'ai-inference', icon: 'L', iconBg: '#2563eb', logo: 'logos/llama-cpp.png',
         desc: 'High-performance LLM inference in C/C++ with GPU acceleration',
         platforms: { jetson: 'build', ubuntu: 'build', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -889,7 +889,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'whisper-cpp', name: 'whisper.cpp', category: 'ai-inference', icon: 'W', iconBg: '#059669', logo: 'assets/logos/whisper-cpp.png',
+        id: 'whisper-cpp', name: 'whisper.cpp', category: 'ai-inference', icon: 'W', iconBg: '#059669', logo: 'logos/whisper-cpp.png',
         desc: 'Fast speech-to-text with OpenAI Whisper models in C/C++',
         platforms: { jetson: 'build', ubuntu: 'build', mac: 'build', windows: 'prebuilt' },
         downloads: {
@@ -951,7 +951,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'piper-tts', name: 'Piper TTS', category: 'ai-inference', icon: 'P', iconBg: '#7c3aed', logo: 'assets/logos/piper.png',
+        id: 'piper-tts', name: 'Piper TTS', category: 'ai-inference', icon: 'P', iconBg: '#7c3aed', logo: 'logos/piper.png',
         desc: 'Ultra-fast neural text-to-speech with 50+ language support',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -1003,7 +1003,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'sd-cpp', name: 'stable-diffusion.cpp', category: 'ai-inference', icon: 'S', iconBg: '#dc2626', logo: 'assets/logos/sd-cpp.png',
+        id: 'sd-cpp', name: 'stable-diffusion.cpp', category: 'ai-inference', icon: 'S', iconBg: '#dc2626', logo: 'logos/sd-cpp.png',
         desc: 'Image generation from text prompts with Stable Diffusion models',
         platforms: { jetson: 'build', ubuntu: 'build', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -1056,7 +1056,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'ffmpeg', name: 'FFmpeg', category: 'media', icon: 'F', iconBg: '#16a34a', logo: 'assets/logos/ffmpeg.png',
+        id: 'ffmpeg', name: 'FFmpeg', category: 'media', icon: 'F', iconBg: '#16a34a', logo: 'logos/ffmpeg.png',
         desc: 'Audio/video processing, format conversion, and hardware acceleration',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -1106,7 +1106,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'onnxruntime', name: 'ONNX Runtime', category: 'ai-inference', icon: 'O', iconBg: '#0891b2', logo: 'assets/logos/onnxruntime.png',
+        id: 'onnxruntime', name: 'ONNX Runtime', category: 'ai-inference', icon: 'O', iconBg: '#0891b2', logo: 'logos/onnxruntime.png',
         desc: 'Cross-platform ML inference for TTS, vision, and specialized models',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -1172,7 +1172,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'vosk', name: 'Vosk', category: 'ai-inference', icon: 'V', iconBg: '#ea580c', logo: 'assets/logos/vosk.png',
+        id: 'vosk', name: 'Vosk', category: 'ai-inference', icon: 'V', iconBg: '#ea580c', logo: 'logos/vosk.png',
         desc: 'Lightweight offline speech recognition with streaming support',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'pip', windows: 'prebuilt' },
         downloads: {
@@ -1232,7 +1232,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'ollama', name: 'Ollama', category: 'ai-platform', icon: 'O', iconBg: '#1a1a2e', logo: 'assets/logos/ollama.png',
+        id: 'ollama', name: 'Ollama', category: 'ai-platform', icon: 'O', iconBg: '#1a1a2e', logo: 'logos/ollama.png',
         desc: 'Run LLMs locally with one command - OpenAI-compatible API, automatic GPU detection',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -1250,7 +1250,7 @@ const TOOLS = [
     // CREATIVE / ENGINEERING TOOLS
     // =========================================================================
     {
-        id: 'blender', name: 'Blender', category: 'creative', icon: 'B', iconBg: '#e87d0d', logo: 'assets/logos/blender.svg',
+        id: 'blender', name: 'Blender', category: 'creative', icon: 'B', iconBg: '#e87d0d', logo: 'logos/blender.svg',
         desc: '3D modeling, animation, rendering, and scripting - with Python API for programmatic modeling',
         size: '~300 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1288,7 +1288,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'freecad', name: 'FreeCAD', category: 'creative', icon: 'C', iconBg: '#0b5394', logo: 'assets/logos/freecad.svg',
+        id: 'freecad', name: 'FreeCAD', category: 'creative', icon: 'C', iconBg: '#0b5394', logo: 'logos/freecad.svg',
         desc: 'Parametric 3D CAD modeler with Python scripting - headless mode for automated design',
         size: '~200 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1325,7 +1325,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'kicad', name: 'KiCad', category: 'creative', icon: 'K', iconBg: '#314cb6', logo: 'assets/logos/kicad.png',
+        id: 'kicad', name: 'KiCad', category: 'creative', icon: 'K', iconBg: '#314cb6', logo: 'logos/kicad.png',
         desc: 'Electronic design automation - schematic capture, PCB layout, and 3D visualization',
         size: '~1.5 GB (with libraries)',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1362,7 +1362,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'godot', name: 'Godot Engine', category: 'creative', icon: 'G', iconBg: '#478cbf', logo: 'assets/logos/godot.svg',
+        id: 'godot', name: 'Godot Engine', category: 'creative', icon: 'G', iconBg: '#478cbf', logo: 'logos/godot.svg',
         desc: 'Open-source game engine with GDScript/C# - headless mode for procedural generation and simulation',
         size: '~50 MB (editor), ~700 MB (with export templates)',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1402,7 +1402,7 @@ const TOOLS = [
     // MEDIA TOOLS
     // =========================================================================
     {
-        id: 'vlc', name: 'VLC', category: 'media', icon: 'V', iconBg: '#ff8800', logo: 'assets/logos/vlc.png',
+        id: 'vlc', name: 'VLC', category: 'media', icon: 'V', iconBg: '#ff8800', logo: 'logos/vlc.png',
         desc: 'Universal media player and streaming server - CLI transcoding, streaming, and format conversion',
         size: '~50 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1442,7 +1442,7 @@ const TOOLS = [
     // AI PLATFORM TOOLS
     // =========================================================================
     {
-        id: 'n8n', name: 'n8n', category: 'ai-platform', icon: 'N', iconBg: '#ea4b71', logo: 'assets/logos/n8n.png',
+        id: 'n8n', name: 'n8n', category: 'ai-platform', icon: 'N', iconBg: '#ea4b71', logo: 'logos/n8n.png',
         desc: 'Workflow automation with 400+ integrations and native AI capabilities - fair-code licensed',
         size: '~500 MB (Docker)',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1479,7 +1479,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'influxdb', name: 'InfluxDB', category: 'ai-platform', icon: 'I', iconBg: '#22adf6', logo: 'assets/logos/influxdb.png',
+        id: 'influxdb', name: 'InfluxDB', category: 'ai-platform', icon: 'I', iconBg: '#22adf6', logo: 'logos/influxdb.png',
         desc: 'Time-series database for metrics, events, and IoT data - OSS 2.7 with built-in dashboards',
         size: '~100 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1516,7 +1516,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'milvus', name: 'Milvus', category: 'ai-platform', icon: 'M', iconBg: '#00a0e4', logo: 'assets/logos/milvus.png',
+        id: 'milvus', name: 'Milvus', category: 'ai-platform', icon: 'M', iconBg: '#00a0e4', logo: 'logos/milvus.png',
         desc: 'Vector database for AI applications - similarity search, RAG, and embedding storage',
         size: '~570 MB (Docker) / ~100 MB (Lite)',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1553,7 +1553,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'comfyui', name: 'ComfyUI', category: 'ai-platform', icon: 'C', iconBg: '#2b2d30', logo: 'assets/logos/comfyui.jpg',
+        id: 'comfyui', name: 'ComfyUI', category: 'ai-platform', icon: 'C', iconBg: '#2b2d30', logo: 'logos/comfyui.jpg',
         desc: 'Node-based AI image/video generation workflow editor - connects to stable-diffusion.cpp models',
         size: '~5 GB (with dependencies)',
         platforms: { jetson: 'build', ubuntu: 'build', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1593,7 +1593,7 @@ const TOOLS = [
     // INFRASTRUCTURE TOOLS
     // =========================================================================
     {
-        id: 'syncthing', name: 'Syncthing', category: 'infrastructure', icon: 'S', iconBg: '#0891b2', logo: 'assets/logos/syncthing.svg',
+        id: 'syncthing', name: 'Syncthing', category: 'infrastructure', icon: 'S', iconBg: '#0891b2', logo: 'logos/syncthing.svg',
         desc: 'Continuous file synchronization - replicate your AI models and tools across servers',
         size: '~10 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1630,7 +1630,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'coolify', name: 'Coolify', category: 'infrastructure', icon: 'C', iconBg: '#6b21a8', logo: 'assets/logos/coolify.png',
+        id: 'coolify', name: 'Coolify', category: 'infrastructure', icon: 'C', iconBg: '#6b21a8', logo: 'logos/coolify.png',
         desc: 'Self-hosted PaaS - deploy apps, databases, and services with a simple UI (Heroku/Vercel alternative)',
         size: '~200 MB',
         platforms: { jetson: 'script', ubuntu: 'script', mac: 'docker', windows: 'docker' },
@@ -1662,7 +1662,7 @@ const TOOLS = [
         }
     },
     {
-        id: 'btop', name: 'btop', category: 'dev-tools', icon: 'B', iconBg: '#6366f1', logo: 'assets/logos/btop.png',
+        id: 'btop', name: 'btop', category: 'dev-tools', icon: 'B', iconBg: '#6366f1', logo: 'logos/btop.png',
         desc: 'Resource monitor with CPU, memory, disks, network, and process stats - GPU monitoring support',
         size: '~2 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1775,7 +1775,7 @@ const TOOLS = [
     },
     {
         id: 'claude-code', name: 'Claude Code', category: 'dev-tools', icon: 'C', iconBg: '#d97706',
-        logo: 'assets/logos/claude-code.svg',
+        logo: 'logos/claude-code.svg',
         desc: 'Anthropic\'s agentic coding CLI - works offline with Ollama or llama.cpp as backend',
         size: '~50 MB',
         platforms: { jetson: 'npm', ubuntu: 'npm', mac: 'npm', windows: 'npm' },
@@ -2031,7 +2031,7 @@ const MODEL_PATHS = {
 // =============================================================================
 const MODEL_FAMILIES = [
     {
-        category: 'LLM', family: 'Nemotron', slug: 'nemotron', topPick: true, logo: 'assets/logos/nvidia.png',
+        category: 'LLM', family: 'Nemotron', slug: 'nemotron', topPick: true, logo: 'logos/nvidia.png',
         desc: 'NVIDIA Nemotron family - MoE and hybrid architectures for efficient inference',
         overview: 'Nemotron is NVIDIA\'s family of open-weight models optimized for inference efficiency. The standout Nano-30B-A3B uses Mixture of Experts (MoE) architecture, activating only 3.2B of its 30B parameters per token - giving near-30B quality at 3B inference cost. The 12B Nano uses a hybrid Mamba-2 + Attention architecture for linear-time sequence processing. All models run on llama.cpp with full CUDA acceleration.',
         usageTips: [
@@ -2053,7 +2053,7 @@ const MODEL_FAMILIES = [
         ]
     },
     {
-        category: 'LLM', family: 'Qwen', slug: 'qwen', topPick: true, logo: 'assets/logos/qwen.png',
+        category: 'LLM', family: 'Qwen', slug: 'qwen', topPick: true, logo: 'logos/qwen.png',
         desc: 'Alibaba Qwen2.5 family - top-performing open-weight models for general and code tasks',
         overview: 'Qwen2.5 from Alibaba consistently ranks as one of the best open-weight model families. The 32B Instruct model matches or exceeds GPT-4 on many benchmarks, while the Coder variant is the top open-source coding model. QwQ-32B is their reasoning model that competes with o1-mini. All sizes support 128K context length and excel at multilingual tasks (especially Chinese/English).',
         usageTips: [
@@ -2074,7 +2074,7 @@ const MODEL_FAMILIES = [
         ]
     },
     {
-        category: 'LLM', family: 'DeepSeek', slug: 'deepseek', topPick: true, logo: 'assets/logos/deepseek.png',
+        category: 'LLM', family: 'DeepSeek', slug: 'deepseek', topPick: true, logo: 'logos/deepseek.png',
         desc: 'DeepSeek R1 distillations - state-of-the-art reasoning models',
         overview: 'DeepSeek R1 represents a breakthrough in open-source reasoning models. The original R1 uses reinforcement learning to develop chain-of-thought reasoning capabilities that rival OpenAI o1. These distilled versions transfer that reasoning ability into smaller Qwen-based models (14B and 32B) that run efficiently on consumer hardware. They excel at math, science, logic puzzles, and complex multi-step problems.',
         usageTips: [
@@ -2093,7 +2093,7 @@ const MODEL_FAMILIES = [
         ]
     },
     {
-        category: 'LLM', family: 'Phi', slug: 'phi', logo: 'assets/logos/microsoft.png',
+        category: 'LLM', family: 'Phi', slug: 'phi', logo: 'logos/microsoft.png',
         desc: 'Microsoft Phi-4 family - excellent reasoning, math, and code capabilities',
         overview: 'Microsoft Phi-4 is a 14B parameter model that punches far above its weight class. It outperforms many 70B models on reasoning, math (MATH benchmark), and coding tasks through careful training data curation and synthetic data generation. The reasoning-plus variant adds explicit chain-of-thought training. Phi-4 is one of the best models you can run on 16 GB of VRAM.',
         usageTips: [
@@ -2111,7 +2111,7 @@ const MODEL_FAMILIES = [
         ]
     },
     {
-        category: 'LLM', family: 'Llama', slug: 'llama', topPick: true, logo: 'assets/logos/meta.png',
+        category: 'LLM', family: 'Llama', slug: 'llama', topPick: true, logo: 'logos/meta.png',
         desc: 'Meta Llama 3 family - versatile foundation models from 1B to 70B',
         overview: 'Meta\'s Llama 3 family is the most widely-used open-weight foundation model series. Llama 3.2 introduced efficient 1B and 3B sizes perfect for edge devices, while Llama 3.1 8B remains the gold standard for balanced performance. Llama 3.3 70B brings frontier-class quality. All models support 128K context and have been fine-tuned for instruction following, tool use, and multilingual tasks.',
         usageTips: [
@@ -2130,7 +2130,7 @@ const MODEL_FAMILIES = [
         ]
     },
     {
-        category: 'LLM', family: 'Mistral', slug: 'mistral', logo: 'assets/logos/mistral.png',
+        category: 'LLM', family: 'Mistral', slug: 'mistral', logo: 'logos/mistral.png',
         desc: 'Mistral Nemo - 128K context with Apache 2.0 license',
         overview: 'Mistral Nemo is a 12B parameter model developed jointly by Mistral AI and NVIDIA. It features a 128K context window and uses the Tekken tokenizer for improved multilingual performance (especially European languages). Released under Apache 2.0, it\'s one of the most permissive high-quality models available. Nemo excels at conversational tasks and has strong instruction-following capabilities.',
         usageTips: [
@@ -2147,7 +2147,7 @@ const MODEL_FAMILIES = [
         ]
     },
     {
-        category: 'LLM', family: 'Gemma', slug: 'gemma', logo: 'assets/logos/google.png',
+        category: 'LLM', family: 'Gemma', slug: 'gemma', logo: 'logos/google.png',
         desc: 'Google Gemma family - strong creative and general capabilities',
         overview: 'Google Gemma models are distilled from Gemini technology. Gemma 3 (27B) is the latest generation with multimodal capabilities and a 128K context window. Gemma 2 models are well-known for strong creative writing, summarization, and general knowledge. They use a unique sliding window attention mechanism for efficient long-context processing.',
         usageTips: [
@@ -2181,7 +2181,7 @@ const MODEL_FAMILIES = [
         ]
     },
     {
-        category: 'TTS', family: 'Piper', slug: 'piper', topPick: true, logo: 'assets/logos/piper.png',
+        category: 'TTS', family: 'Piper', slug: 'piper', topPick: true, logo: 'logos/piper.png',
         desc: 'Ultra-fast edge TTS - <700ms latency, 51 languages, ONNX format',
         overview: 'Piper is the de facto standard for edge TTS deployment. With 100+ voices across 51 languages and quality levels from x_low to high, it covers virtually any TTS use case. Each voice is a self-contained ~60 MB ONNX model that synthesizes 10-20x faster than real-time even on ARM processors. Used by Home Assistant, accessibility tools, and embedded systems worldwide.',
         usageTips: [
@@ -2251,7 +2251,7 @@ const MODEL_FAMILIES = [
         ]
     },
     {
-        category: 'STT', family: 'Whisper', slug: 'whisper', topPick: true, logo: 'assets/logos/whisper-cpp.png',
+        category: 'STT', family: 'Whisper', slug: 'whisper', topPick: true, logo: 'logos/whisper-cpp.png',
         desc: 'OpenAI Whisper models via whisper.cpp - 99 languages, multiple sizes',
         overview: 'OpenAI Whisper is the most accurate open-source speech recognition model, supporting 99 languages with automatic language detection. Via whisper.cpp, these models run efficiently on CPUs and GPUs without Python. The large-v3-turbo model offers the best speed/quality tradeoff, while the base model is ultra-fast for real-time applications. Quantized versions reduce model size by 45% with minimal accuracy loss.',
         usageTips: [
@@ -2292,7 +2292,7 @@ const MODEL_FAMILIES = [
         ]
     },
     {
-        category: 'STT', family: 'Vosk', slug: 'vosk-models', logo: 'assets/logos/vosk.png',
+        category: 'STT', family: 'Vosk', slug: 'vosk-models', logo: 'logos/vosk.png',
         desc: 'Lightweight streaming ASR - 40MB to 1.8GB, 30+ languages',
         overview: 'Vosk provides real-time streaming speech recognition with models as small as 40 MB. Based on Kaldi, it excels at low-latency applications like live captioning, voice commands, and keyword spotting. Unlike Whisper (which processes complete audio files), Vosk provides partial results as audio streams in, making it ideal for interactive applications. Supports 30+ languages with no GPU required.',
         usageTips: [
@@ -2353,7 +2353,7 @@ const MODEL_FAMILIES = [
         ]
     },
     {
-        category: 'NVIDIA', family: 'NVIDIA Specialized', slug: 'nvidia', logo: 'assets/logos/nvidia.png',
+        category: 'NVIDIA', family: 'NVIDIA Specialized', slug: 'nvidia', logo: 'logos/nvidia.png',
         desc: 'NVIDIA models: Canary ASR, Parakeet ASR, Cosmos reasoning',
         overview: 'NVIDIA provides specialized models through the NeMo framework. Canary-1B is a multilingual ASR model with built-in translation capabilities. Parakeet-TDT achieves state-of-the-art English transcription accuracy (lower WER than Whisper large-v3). Cosmos-Reason1 is a physical AI reasoning model for robotics and spatial understanding. All require the NeMo toolkit and benefit from NVIDIA GPU acceleration.',
         usageTips: [

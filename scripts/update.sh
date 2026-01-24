@@ -20,8 +20,9 @@
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ASSETS_DIR="${SCRIPT_DIR}/assets"
-OLLAMA_DIR="${ASSETS_DIR}/ollama"
+PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
+ASSETS_DIR="${PROJECT_ROOT}/web-ui"
+OLLAMA_DIR="${PROJECT_ROOT}/assets/ollama"
 LOGOS_DIR="${ASSETS_DIR}/logos"
 SAMPLES_DIR="${ASSETS_DIR}/samples"
 
@@ -162,7 +163,7 @@ update_ollama() {
 # Tool Binary Updates (prebuilt binaries for each platform)
 ###############################################################################
 
-TOOLS_DIR="${SCRIPT_DIR}/tools"
+TOOLS_DIR="${PROJECT_ROOT}/tools"
 
 update_tools() {
     log "============================================================"
@@ -330,7 +331,7 @@ update_tools() {
 # Source Repos (clone/pull for build-from-source tools)
 ###############################################################################
 
-SOURCES_DIR="${SCRIPT_DIR}/sources"
+SOURCES_DIR="${PROJECT_ROOT}/sources"
 
 clone_sources() {
     log "============================================================"
@@ -394,7 +395,7 @@ clone_sources() {
 DISK_BUFFER_GB=200
 
 check_disk_space() {
-    local avail_kb=$(df --output=avail "${SCRIPT_DIR}" 2>/dev/null | tail -1)
+    local avail_kb=$(df --output=avail "${PROJECT_ROOT}" 2>/dev/null | tail -1)
     local avail_gb=$((avail_kb / 1024 / 1024))
     local budget_gb=$((avail_gb - DISK_BUFFER_GB))
     echo "$budget_gb"
@@ -405,7 +406,7 @@ DISK_HARD_MIN_GB=50  # Absolute minimum: never go below this
 require_disk_space() {
     local needed_mb="$1"
     local label="$2"
-    local avail_kb=$(df --output=avail "${SCRIPT_DIR}" 2>/dev/null | tail -1)
+    local avail_kb=$(df --output=avail "${PROJECT_ROOT}" 2>/dev/null | tail -1)
     local avail_mb=$((avail_kb / 1024))
     local hard_min_mb=$((DISK_HARD_MIN_GB * 1024))
 
@@ -681,6 +682,326 @@ update_apps() {
         fi
     }
 
+    # --- Tailscale (~20MB) ---
+    require_disk_space 25 "Tailscale" && {
+        local ts_dir="${plat_dir}/tailscale"
+        if [ ! -f "${ts_dir}/tailscale" ]; then
+            local ts_arch="arm64"
+            [ "$arm64" != true ] && ts_arch="amd64"
+            local ts_url
+            ts_url=$(curl -sS "https://api.github.com/repos/tailscale/tailscale/releases/latest" 2>/dev/null \
+                | grep "browser_download_url.*tailscale_.*_${ts_arch}\.tgz\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
+            if [ -n "$ts_url" ]; then
+                log_info "Downloading Tailscale (${arch_label})..."
+                curl -L -o /tmp/tailscale.tgz "$ts_url" 2>/dev/null
+                mkdir -p "${ts_dir}"
+                tar -xzf /tmp/tailscale.tgz -C /tmp/ 2>/dev/null
+                find /tmp -name 'tailscale' -type f -perm /111 -exec mv {} "${ts_dir}/tailscale" \; 2>/dev/null
+                find /tmp -name 'tailscaled' -type f -perm /111 -exec mv {} "${ts_dir}/tailscaled" \; 2>/dev/null
+                rm -f /tmp/tailscale.tgz
+                rm -rf /tmp/tailscale_*
+                [ -f "${ts_dir}/tailscale" ] && log_ok "Tailscale: $(du -h "${ts_dir}/tailscale" | cut -f1)" || log_err "Tailscale extract failed"
+            else
+                log_warn "Could not find Tailscale release URL"
+            fi
+        else
+            log_info "Already have: Tailscale"
+        fi
+    }
+
+    # --- Mosquitto (~5MB, compile from source) ---
+    require_disk_space 10 "Mosquitto" && {
+        local mosq_dir="${plat_dir}/mosquitto"
+        if [ ! -f "${mosq_dir}/mosquitto" ]; then
+            log_info "Downloading Mosquitto source..."
+            local mosq_ver
+            mosq_ver=$(curl -sS "https://api.github.com/repos/eclipse-mosquitto/mosquitto/releases/latest" 2>/dev/null \
+                | grep '"tag_name"' | head -1 | sed 's/.*"v\([^"]*\)".*/\1/')
+            if [ -n "$mosq_ver" ]; then
+                local mosq_url="https://mosquitto.org/files/source/mosquitto-${mosq_ver}.tar.gz"
+                curl -L -o /tmp/mosquitto.tar.gz "$mosq_url" 2>/dev/null
+                if [ -f /tmp/mosquitto.tar.gz ] && [ $(stat -c%s /tmp/mosquitto.tar.gz 2>/dev/null || echo 0) -gt 1000 ]; then
+                    mkdir -p /tmp/mosquitto-build
+                    tar -xzf /tmp/mosquitto.tar.gz -C /tmp/mosquitto-build --strip-components=1 2>/dev/null
+                    if command -v make >/dev/null 2>&1 && command -v gcc >/dev/null 2>&1; then
+                        (cd /tmp/mosquitto-build && make WITH_TLS=no WITH_CJSON=no WITH_DOCS=no -j$(nproc) 2>/dev/null)
+                        mkdir -p "${mosq_dir}"
+                        [ -f /tmp/mosquitto-build/src/mosquitto ] && mv /tmp/mosquitto-build/src/mosquitto "${mosq_dir}/mosquitto"
+                        [ -f /tmp/mosquitto-build/client/mosquitto_pub ] && mv /tmp/mosquitto-build/client/mosquitto_pub "${mosq_dir}/mosquitto_pub"
+                        [ -f /tmp/mosquitto-build/client/mosquitto_sub ] && mv /tmp/mosquitto-build/client/mosquitto_sub "${mosq_dir}/mosquitto_sub"
+                        chmod +x "${mosq_dir}/"* 2>/dev/null
+                        [ -f "${mosq_dir}/mosquitto" ] && log_ok "Mosquitto ${mosq_ver}: $(du -h "${mosq_dir}/mosquitto" | cut -f1)" || log_err "Mosquitto build failed"
+                    else
+                        log_warn "Mosquitto: gcc/make not found, skipping build (source saved)"
+                        mkdir -p "${mosq_dir}"
+                        mv /tmp/mosquitto-build "${mosq_dir}/source"
+                    fi
+                else
+                    log_err "Mosquitto download failed"
+                fi
+                rm -f /tmp/mosquitto.tar.gz
+                rm -rf /tmp/mosquitto-build
+            else
+                log_warn "Could not determine Mosquitto version"
+            fi
+        else
+            log_info "Already have: Mosquitto"
+        fi
+    }
+
+    # --- MQTT Explorer (~100MB, x86_64 AppImage only) ---
+    if [ "$arm64" != true ]; then
+        require_disk_space 110 "MQTT Explorer" && {
+            local mqtt_dir="${plat_dir}/mqtt-explorer"
+            if [ ! -f "${mqtt_dir}/MQTT-Explorer.AppImage" ]; then
+                local mqtt_url
+                mqtt_url=$(curl -sS "https://api.github.com/repos/thomasnordquist/MQTT-Explorer/releases/latest" 2>/dev/null \
+                    | grep "browser_download_url.*AppImage\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
+                if [ -n "$mqtt_url" ]; then
+                    log_info "Downloading MQTT Explorer (x86_64 AppImage)..."
+                    mkdir -p "${mqtt_dir}"
+                    curl -L -o "${mqtt_dir}/MQTT-Explorer.AppImage" "$mqtt_url" 2>/dev/null
+                    chmod +x "${mqtt_dir}/MQTT-Explorer.AppImage"
+                    [ -s "${mqtt_dir}/MQTT-Explorer.AppImage" ] && log_ok "MQTT Explorer: $(du -h "${mqtt_dir}/MQTT-Explorer.AppImage" | cut -f1)" || log_err "MQTT Explorer download failed"
+                else
+                    log_warn "Could not find MQTT Explorer release URL"
+                fi
+            else
+                log_info "Already have: MQTT Explorer"
+            fi
+        }
+    fi
+
+    # --- SQLite CLI (~2MB) ---
+    require_disk_space 5 "SQLite" && {
+        local sqlite_dir="${plat_dir}/sqlite"
+        if [ ! -f "${sqlite_dir}/sqlite3" ]; then
+            mkdir -p "${sqlite_dir}"
+            if [ "$arm64" != true ]; then
+                # Prebuilt CLI available for x86_64
+                local sqlite_url="https://www.sqlite.org/2024/sqlite-tools-linux-x64-3470200.zip"
+                log_info "Downloading SQLite CLI (x86_64)..."
+                curl -L -o /tmp/sqlite.zip "$sqlite_url" 2>/dev/null
+                if [ -f /tmp/sqlite.zip ] && [ $(stat -c%s /tmp/sqlite.zip 2>/dev/null || echo 0) -gt 1000 ]; then
+                    unzip -o /tmp/sqlite.zip -d /tmp/sqlite-tmp 2>/dev/null
+                    find /tmp/sqlite-tmp -name 'sqlite3' -type f -exec mv {} "${sqlite_dir}/sqlite3" \; 2>/dev/null
+                    chmod +x "${sqlite_dir}/sqlite3" 2>/dev/null
+                fi
+                rm -f /tmp/sqlite.zip
+                rm -rf /tmp/sqlite-tmp
+            else
+                # Compile amalgamation for arm64
+                log_info "Downloading SQLite amalgamation (arm64, will compile)..."
+                local sqlite_amal_url="https://www.sqlite.org/2024/sqlite-amalgamation-3470200.zip"
+                curl -L -o /tmp/sqlite-amal.zip "$sqlite_amal_url" 2>/dev/null
+                if [ -f /tmp/sqlite-amal.zip ] && command -v gcc >/dev/null 2>&1; then
+                    unzip -o /tmp/sqlite-amal.zip -d /tmp/sqlite-amal 2>/dev/null
+                    local amal_dir=$(find /tmp/sqlite-amal -name 'shell.c' -printf '%h\n' 2>/dev/null | head -1)
+                    if [ -n "$amal_dir" ]; then
+                        gcc -O2 -o "${sqlite_dir}/sqlite3" "${amal_dir}/shell.c" "${amal_dir}/sqlite3.c" -lpthread -ldl -lm 2>/dev/null
+                    fi
+                fi
+                rm -f /tmp/sqlite-amal.zip
+                rm -rf /tmp/sqlite-amal
+            fi
+            [ -f "${sqlite_dir}/sqlite3" ] && log_ok "SQLite: $(du -h "${sqlite_dir}/sqlite3" | cut -f1)" || log_err "SQLite install failed"
+        else
+            log_info "Already have: SQLite"
+        fi
+    }
+
+    # --- Redis (~5MB, compile from source) ---
+    require_disk_space 10 "Redis" && {
+        local redis_dir="${plat_dir}/redis"
+        if [ ! -f "${redis_dir}/redis-server" ]; then
+            local redis_ver
+            redis_ver=$(curl -sS "https://api.github.com/repos/redis/redis/releases/latest" 2>/dev/null \
+                | grep '"tag_name"' | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
+            if [ -n "$redis_ver" ]; then
+                local redis_url="https://github.com/redis/redis/archive/refs/tags/${redis_ver}.tar.gz"
+                log_info "Downloading Redis ${redis_ver} source..."
+                curl -L -o /tmp/redis.tar.gz "$redis_url" 2>/dev/null
+                if [ -f /tmp/redis.tar.gz ] && command -v make >/dev/null 2>&1 && command -v gcc >/dev/null 2>&1; then
+                    mkdir -p /tmp/redis-build
+                    tar -xzf /tmp/redis.tar.gz -C /tmp/redis-build --strip-components=1 2>/dev/null
+                    log_info "Compiling Redis (this may take a moment)..."
+                    (cd /tmp/redis-build && make -j$(nproc) MALLOC=libc 2>/dev/null)
+                    mkdir -p "${redis_dir}"
+                    for bin in redis-server redis-cli redis-benchmark; do
+                        [ -f "/tmp/redis-build/src/${bin}" ] && mv "/tmp/redis-build/src/${bin}" "${redis_dir}/${bin}"
+                    done
+                    chmod +x "${redis_dir}/"* 2>/dev/null
+                    [ -f "${redis_dir}/redis-server" ] && log_ok "Redis ${redis_ver}: $(du -h "${redis_dir}/redis-server" | cut -f1)" || log_err "Redis build failed"
+                else
+                    log_warn "Redis: gcc/make not found or download failed"
+                fi
+                rm -f /tmp/redis.tar.gz
+                rm -rf /tmp/redis-build
+            else
+                log_warn "Could not determine Redis version"
+            fi
+        else
+            log_info "Already have: Redis"
+        fi
+    }
+
+    # --- PostgreSQL (~50MB) ---
+    require_disk_space 60 "PostgreSQL" && {
+        local pg_dir="${plat_dir}/postgresql"
+        if [ ! -f "${pg_dir}/bin/postgres" ] && [ ! -f "${pg_dir}/postgres" ]; then
+            mkdir -p "${pg_dir}"
+            if [ "$arm64" != true ]; then
+                # EDB portable binaries for x86_64
+                local pg_ver="17.2.0"
+                local pg_url="https://get.enterprisedb.com/postgresql/postgresql-${pg_ver}-1-linux-x64-binaries.tar.gz"
+                log_info "Downloading PostgreSQL ${pg_ver} (x86_64 binaries)..."
+                curl -L -o /tmp/postgresql.tar.gz "$pg_url" 2>/dev/null
+                if [ -f /tmp/postgresql.tar.gz ] && [ $(stat -c%s /tmp/postgresql.tar.gz 2>/dev/null || echo 0) -gt 1000 ]; then
+                    tar -xzf /tmp/postgresql.tar.gz -C "${plat_dir}/" 2>/dev/null
+                    # EDB extracts to pgsql/, move to postgresql/
+                    if [ -d "${plat_dir}/pgsql" ]; then
+                        rm -rf "${pg_dir}"
+                        mv "${plat_dir}/pgsql" "${pg_dir}"
+                    fi
+                    [ -f "${pg_dir}/bin/postgres" ] && log_ok "PostgreSQL ${pg_ver}: $(du -sh "${pg_dir}" | cut -f1)" || log_err "PostgreSQL extract failed"
+                else
+                    log_err "PostgreSQL download failed"
+                fi
+                rm -f /tmp/postgresql.tar.gz
+            else
+                # ARM64: provide INSTALL instructions
+                log_info "PostgreSQL: no prebuilt arm64 binaries available"
+                cat > "${pg_dir}/INSTALL.txt" << 'PGEOF'
+PostgreSQL on ARM64 - Install from package manager:
+
+  # Debian/Ubuntu:
+  sudo apt-get install postgresql postgresql-client
+
+  # Or compile from source:
+  curl -L https://ftp.postgresql.org/pub/source/v17.2/postgresql-17.2.tar.gz | tar xz
+  cd postgresql-17.2
+  ./configure --prefix=$HOME/postgresql
+  make -j$(nproc) && make install
+PGEOF
+                log_info "PostgreSQL: INSTALL.txt created in ${pg_dir}"
+            fi
+        else
+            log_info "Already have: PostgreSQL"
+        fi
+    }
+
+    # --- Helix Editor (~15MB) ---
+    require_disk_space 20 "Helix" && {
+        local hx_dir="${plat_dir}/helix"
+        if [ ! -f "${hx_dir}/hx" ]; then
+            local hx_arch="aarch64"
+            [ "$arm64" != true ] && hx_arch="x86_64"
+            local hx_url
+            hx_url=$(curl -sS "https://api.github.com/repos/helix-editor/helix/releases/latest" 2>/dev/null \
+                | grep "browser_download_url.*${hx_arch}.*linux.*tar.xz\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
+            if [ -n "$hx_url" ]; then
+                log_info "Downloading Helix (${arch_label})..."
+                curl -L -o /tmp/helix.tar.xz "$hx_url" 2>/dev/null
+                mkdir -p "${hx_dir}"
+                tar -xJf /tmp/helix.tar.xz -C /tmp/ 2>/dev/null
+                find /tmp -name 'hx' -type f -perm /111 -exec mv {} "${hx_dir}/hx" \; 2>/dev/null
+                # Also grab runtime directory if present
+                local hx_runtime=$(find /tmp -type d -name 'runtime' -path '*/helix*' 2>/dev/null | head -1)
+                [ -d "$hx_runtime" ] && cp -r "$hx_runtime" "${hx_dir}/runtime"
+                rm -f /tmp/helix.tar.xz
+                rm -rf /tmp/helix-*
+                [ -f "${hx_dir}/hx" ] && log_ok "Helix: $(du -h "${hx_dir}/hx" | cut -f1)" || log_err "Helix extract failed"
+            else
+                log_warn "Could not find Helix release URL"
+            fi
+        else
+            log_info "Already have: Helix"
+        fi
+    }
+
+    # --- VSCodium (~100MB) ---
+    require_disk_space 120 "VSCodium" && {
+        local vsc_dir="${plat_dir}/vscodium"
+        if [ ! -f "${vsc_dir}/bin/codium" ]; then
+            local vsc_arch="arm64"
+            [ "$arm64" != true ] && vsc_arch="x64"
+            local vsc_url
+            vsc_url=$(curl -sS "https://api.github.com/repos/VSCodium/vscodium/releases/latest" 2>/dev/null \
+                | grep "browser_download_url.*VSCodium-linux-${vsc_arch}.*tar.gz\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
+            if [ -n "$vsc_url" ]; then
+                log_info "Downloading VSCodium (${arch_label})..."
+                curl -L -o /tmp/vscodium.tar.gz "$vsc_url" 2>/dev/null
+                if [ -f /tmp/vscodium.tar.gz ] && [ $(stat -c%s /tmp/vscodium.tar.gz 2>/dev/null || echo 0) -gt 1000 ]; then
+                    mkdir -p "${vsc_dir}"
+                    tar -xzf /tmp/vscodium.tar.gz -C "${vsc_dir}/" 2>/dev/null
+                    [ -f "${vsc_dir}/bin/codium" ] && log_ok "VSCodium: $(du -sh "${vsc_dir}" | cut -f1)" || log_err "VSCodium extract failed"
+                else
+                    log_err "VSCodium download failed"
+                fi
+                rm -f /tmp/vscodium.tar.gz
+            else
+                log_warn "Could not find VSCodium release URL"
+            fi
+        else
+            log_info "Already have: VSCodium"
+        fi
+    }
+
+    # --- Miniforge (~80MB, .sh installer) ---
+    require_disk_space 100 "Miniforge" && {
+        local mf_dir="${plat_dir}/miniforge"
+        if [ ! -f "${mf_dir}/bin/conda" ]; then
+            local mf_arch="aarch64"
+            [ "$arm64" != true ] && mf_arch="x86_64"
+            local mf_url
+            mf_url=$(curl -sS "https://api.github.com/repos/conda-forge/miniforge/releases/latest" 2>/dev/null \
+                | grep "browser_download_url.*Miniforge3-Linux-${mf_arch}\.sh\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
+            if [ -n "$mf_url" ]; then
+                log_info "Downloading Miniforge installer (${arch_label})..."
+                curl -L -o /tmp/miniforge.sh "$mf_url" 2>/dev/null
+                if [ -f /tmp/miniforge.sh ] && [ $(stat -c%s /tmp/miniforge.sh 2>/dev/null || echo 0) -gt 1000 ]; then
+                    bash /tmp/miniforge.sh -b -p "${mf_dir}" 2>/dev/null
+                    [ -f "${mf_dir}/bin/conda" ] && log_ok "Miniforge: $(du -sh "${mf_dir}" | cut -f1)" || log_err "Miniforge install failed"
+                else
+                    log_err "Miniforge download failed"
+                fi
+                rm -f /tmp/miniforge.sh
+            else
+                log_warn "Could not find Miniforge release URL"
+            fi
+        else
+            log_info "Already have: Miniforge"
+        fi
+    }
+
+    # --- python-build-standalone (~30MB) ---
+    require_disk_space 40 "python-build-standalone" && {
+        local pbs_dir="${plat_dir}/python-standalone"
+        if [ ! -f "${pbs_dir}/bin/python3" ]; then
+            local pbs_arch="aarch64"
+            [ "$arm64" != true ] && pbs_arch="x86_64"
+            local pbs_url
+            pbs_url=$(curl -sS "https://api.github.com/repos/indygreg/python-build-standalone/releases/latest" 2>/dev/null \
+                | grep "browser_download_url.*install_only.*${pbs_arch}.*linux.*tar.gz\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
+            if [ -n "$pbs_url" ]; then
+                log_info "Downloading python-build-standalone (${arch_label})..."
+                curl -L -o /tmp/python-standalone.tar.gz "$pbs_url" 2>/dev/null
+                if [ -f /tmp/python-standalone.tar.gz ] && [ $(stat -c%s /tmp/python-standalone.tar.gz 2>/dev/null || echo 0) -gt 1000 ]; then
+                    mkdir -p "${pbs_dir}"
+                    tar -xzf /tmp/python-standalone.tar.gz -C "${pbs_dir}/" --strip-components=1 2>/dev/null
+                    [ -f "${pbs_dir}/bin/python3" ] && log_ok "Python standalone: $(du -sh "${pbs_dir}" | cut -f1)" || log_err "python-build-standalone extract failed"
+                else
+                    log_err "python-build-standalone download failed"
+                fi
+                rm -f /tmp/python-standalone.tar.gz
+            else
+                log_warn "Could not find python-build-standalone release URL"
+            fi
+        else
+            log_info "Already have: python-build-standalone"
+        fi
+    }
+
     # --- Disk space summary ---
     echo ""
     local budget=$(check_disk_space)
@@ -883,14 +1204,14 @@ case "${1:-all}" in
     paths)   show_model_paths ;;
     disk)
         budget=$(check_disk_space)
-        avail_kb=$(df --output=avail "${SCRIPT_DIR}" 2>/dev/null | tail -1)
+        avail_kb=$(df --output=avail "${PROJECT_ROOT}" 2>/dev/null | tail -1)
         avail_gb=$((avail_kb / 1024 / 1024))
         echo "Available: ${avail_gb}GB | Buffer: ${DISK_BUFFER_GB}GB | Budget: ${budget}GB"
-        du -sh "${SCRIPT_DIR}"/*/
+        du -sh "${PROJECT_ROOT}"/*/
         ;;
     cron)
         # Install weekly cron job
-        CRON_LINE="0 3 * * 0 cd ${SCRIPT_DIR} && ./update.sh all >> /var/log/ai-ark-update.log 2>&1"
+        CRON_LINE="0 3 * * 0 cd ${PROJECT_ROOT} && ./start.sh update >> /var/log/val-ark-update.log 2>&1"
         (crontab -l 2>/dev/null | grep -v "ai-ark-update"; echo "$CRON_LINE") | crontab -
         log_ok "Weekly cron job installed (Sundays at 3 AM)"
         echo "    ${CRON_LINE}"

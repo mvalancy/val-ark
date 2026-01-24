@@ -50,12 +50,12 @@ while true; do
         # Latest log entry
         echo ""
         echo "Latest log entries:"
-        local latest_log=$(ls -t ${MODEL_ROOT}/logs/download_*.log 2>/dev/null | head -1)
+        latest_log=$(ls -t ${MODEL_ROOT}/logs/download_*.log 2>/dev/null | head -1)
         if [ -n "$latest_log" ]; then
             tail -3 "$latest_log"
         fi
     else
-        echo "No downloads started yet. Run: ./download-all-models.sh all"
+        echo "No downloads started yet. Run: ./start.sh download models"
     fi
 
     sleep 10

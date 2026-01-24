@@ -1,0 +1,33 @@
+# Runtime files
+.download_pid
+
+# Downloaded tools and binaries (large, re-downloadable)
+tools/
+
+# Cloned source repositories (re-cloneable)
+sources/
+
+# Large binary assets (Ollama installers)
+assets/ollama/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Build artifacts
+build/
+dist/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+
+# Logs
+*.log
+logs/

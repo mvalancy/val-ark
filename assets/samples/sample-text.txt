@@ -1,0 +1,4 @@
+Welcome to AI Ark, the complete offline AI toolkit.
+This is a sample text for testing text-to-speech engines.
+Piper TTS can synthesize this at 10 to 20 times faster than real-time.
+Try different voices and languages for your applications.

@@ -91,7 +91,7 @@ flowchart TD
         T3["Networking & IoT<br/>Tailscale, Mosquitto<br/>~25MB"]
         T4["Databases<br/>SQLite, Redis<br/>~10MB"]
         T5["Editors<br/>Helix, VSCodium<br/>~115MB"]
-        T6["AI Engines<br/>llama.cpp, whisper.cpp, Piper<br/>~200MB"]
+        T6["AI Engines<br/>llama.cpp, whisper.cpp, BitNet.cpp, Piper<br/>~250MB"]
         T1 --> T2 --> T3 --> T4 --> T5 --> T6
     end
 
@@ -152,7 +152,7 @@ graph LR
     subgraph Delivery["Delivery Methods"]
         style Delivery fill:#1a2230,stroke:#4da6ff
         PREBUILT["Prebuilt Binaries<br/>GitHub Releases, Direct URLs"]
-        SOURCE["Build from Source<br/>llama.cpp, whisper.cpp, Redis"]
+        SOURCE["Build from Source<br/>llama.cpp, whisper.cpp, BitNet.cpp, Redis"]
         INSTALLER["Installers<br/>Ollama, Miniforge"]
         APPIMAGE["AppImage<br/>MQTT Explorer (x86_64)"]
     end

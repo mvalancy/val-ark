@@ -1,4 +1,4 @@
-# AI Model Inventory for NVIDIA Jetson
+# AI Model Inventory
 
 ## Quick Start
 
@@ -14,6 +14,7 @@
 ./download-all-models.sh image    # Image Generation (~40GB)
 ./download-all-models.sh nvidia   # NVIDIA Special (~10GB)
 ./download-all-models.sh extra    # Additional quality models (~75GB)
+./download-all-models.sh bitnet   # BitNet 1-bit models (~14GB)
 ```
 
 ## Category 1: LLM Models (GGUF for llama.cpp) - ~300GB
@@ -74,6 +75,15 @@
 | Gemma-2-27B-IT | Q4_K_M | 16.6 GB | Strong creative/general |
 | Gemma-2-9B-IT | Q8_0 | ~9.8 GB | Fast, good quality |
 | Gemma-3-27B-IT | Q4_K_M | ~17 GB | Latest generation |
+
+### BitNet 1-bit Models (I2_S for BitNet.cpp)
+| Model | Quant | Size | Notes |
+|-------|-------|------|-------|
+| BitNet-b1.58-2B-4T | I2_S | 1.2 GB | Official Microsoft, trained on 4T tokens |
+| Falcon3-1B-Instruct-1.58bit | I2_S | 1.3 GB | Ultra-fast edge, TII UAE |
+| Falcon3-3B-Instruct-1.58bit | I2_S | 2.1 GB | Best edge balance |
+| Falcon3-7B-Instruct-1.58bit | I2_S | 3.1 GB | Near full-precision quality |
+| Falcon3-10B-Instruct-1.58bit | I2_S | 3.8 GB | Best 1-bit quality available |
 
 ---
 

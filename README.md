@@ -7,25 +7,15 @@ Local-first, peer-to-peer, offline-capable.
 
 ## Screenshots
 
-![Val Ark Web UI](docs/screenshots/web-ui-full.png)
+Screenshots are generated automatically with Playwright and asciinema:
 
-<details>
-<summary>More screenshots</summary>
+```bash
+./start.sh screenshots          # Capture all (web + terminal)
+./start.sh screenshots web      # Web UI only (Playwright)
+./start.sh screenshots terminal  # Terminal recordings (asciinema → SVG)
+```
 
-### Platform Selector
-![Platform Selector](docs/screenshots/platform-selector.png)
-
-### Search
-![Search Results](docs/screenshots/search-results.png)
-
-### Model Cards
-![Model Cards](docs/screenshots/model-cards.png)
-
-### Terminal
-![Terminal Menu](docs/screenshots/terminal-menu.svg)
-![Terminal Status](docs/screenshots/terminal-status.svg)
-
-</details>
+Generated files are saved to `docs/screenshots/`.
 
 ## Architecture
 
@@ -94,7 +84,7 @@ flowchart TD
 ## What's Included
 
 ### AI Engines
-llama.cpp, whisper.cpp, stable-diffusion.cpp, Ollama, ONNX Runtime, Vosk, Piper TTS
+llama.cpp, whisper.cpp, stable-diffusion.cpp, BitNet.cpp, Ollama, ONNX Runtime, Vosk, Piper TTS
 
 ### Tools & Infrastructure
 Syncthing, btop, tmux, FFmpeg, InfluxDB, Tailscale, Mosquitto, MQTT Explorer,

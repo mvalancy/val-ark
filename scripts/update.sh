@@ -461,21 +461,40 @@ download_gh_binary() {
 }
 
 update_apps() {
-    log "============================================================"
-    log "Updating Apps & Dev Tools"
-    log "============================================================"
+    # Accept optional platform override: linux-arm64, linux-x86_64, macos-arm64, windows-x64
+    local target_platform="${1:-}"
 
     local arch=$(uname -m)
     local arm64=false
-    [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ] && arm64=true
+    local is_native=true
+    local can_compile=true
 
-    if [ "$arm64" = true ]; then
-        local plat_dir="${TOOLS_DIR}/linux-arm64"
-        local arch_label="linux-arm64"
+    if [ -n "$target_platform" ]; then
+        # Use specified platform
+        case "$target_platform" in
+            linux-arm64)  arm64=true;  is_native=false ;;
+            linux-x86_64) arm64=false; is_native=false ;;
+            macos-arm64)  arm64=true;  is_native=false; can_compile=false ;;
+            windows-x64)  arm64=false; is_native=false; can_compile=false ;;
+        esac
+        # Check if target matches native platform
+        if { [ "$target_platform" = "linux-arm64" ] && { [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; }; } ||
+           { [ "$target_platform" = "linux-x86_64" ] && [ "$arch" = "x86_64" ]; }; then
+            is_native=true
+        fi
     else
-        local plat_dir="${TOOLS_DIR}/linux-x86_64"
-        local arch_label="linux-x86_64"
+        # Auto-detect
+        [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ] && arm64=true
+        target_platform="linux-arm64"
+        [ "$arm64" != true ] && target_platform="linux-x86_64"
     fi
+
+    local plat_dir="${TOOLS_DIR}/${target_platform}"
+    local arch_label="${target_platform}"
+
+    log "============================================================"
+    log "Updating Apps & Dev Tools (${arch_label})"
+    log "============================================================"
 
     mkdir -p "$plat_dir"
 
@@ -682,41 +701,50 @@ update_apps() {
         fi
     }
 
-    # --- Tailscale (~20MB) ---
+    # --- Tailscale (~20MB) --- downloads from pkgs.tailscale.com (no GitHub release assets)
     require_disk_space 25 "Tailscale" && {
         local ts_dir="${plat_dir}/tailscale"
         if [ ! -f "${ts_dir}/tailscale" ]; then
             local ts_arch="arm64"
             [ "$arm64" != true ] && ts_arch="amd64"
-            local ts_url
-            ts_url=$(curl -sS "https://api.github.com/repos/tailscale/tailscale/releases/latest" 2>/dev/null \
-                | grep "browser_download_url.*tailscale_.*_${ts_arch}\.tgz\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
-            if [ -n "$ts_url" ]; then
-                log_info "Downloading Tailscale (${arch_label})..."
+            # Get latest version from GitHub tag, download from pkgs.tailscale.com
+            local ts_ver
+            ts_ver=$(curl -sS "https://api.github.com/repos/tailscale/tailscale/releases/latest" 2>/dev/null \
+                | grep '"tag_name"' | head -1 | sed 's/.*"v\([^"]*\)".*/\1/')
+            if [ -n "$ts_ver" ]; then
+                local ts_url="https://pkgs.tailscale.com/stable/tailscale_${ts_ver}_${ts_arch}.tgz"
+                log_info "Downloading Tailscale ${ts_ver} (${arch_label})..."
                 curl -L -o /tmp/tailscale.tgz "$ts_url" 2>/dev/null
-                mkdir -p "${ts_dir}"
-                tar -xzf /tmp/tailscale.tgz -C /tmp/ 2>/dev/null
-                find /tmp -name 'tailscale' -type f -perm /111 -exec mv {} "${ts_dir}/tailscale" \; 2>/dev/null
-                find /tmp -name 'tailscaled' -type f -perm /111 -exec mv {} "${ts_dir}/tailscaled" \; 2>/dev/null
-                rm -f /tmp/tailscale.tgz
-                rm -rf /tmp/tailscale_*
-                [ -f "${ts_dir}/tailscale" ] && log_ok "Tailscale: $(du -h "${ts_dir}/tailscale" | cut -f1)" || log_err "Tailscale extract failed"
+                if [ -f /tmp/tailscale.tgz ] && [ $(stat -c%s /tmp/tailscale.tgz 2>/dev/null || echo 0) -gt 1000 ]; then
+                    mkdir -p "${ts_dir}"
+                    tar -xzf /tmp/tailscale.tgz -C /tmp/ 2>/dev/null
+                    find /tmp -name 'tailscale' -type f -perm /111 -exec mv {} "${ts_dir}/tailscale" \; 2>/dev/null
+                    find /tmp -name 'tailscaled' -type f -perm /111 -exec mv {} "${ts_dir}/tailscaled" \; 2>/dev/null
+                    rm -f /tmp/tailscale.tgz
+                    rm -rf /tmp/tailscale_*
+                    [ -f "${ts_dir}/tailscale" ] && log_ok "Tailscale ${ts_ver}: $(du -h "${ts_dir}/tailscale" | cut -f1)" || log_err "Tailscale extract failed"
+                else
+                    log_err "Tailscale download failed from ${ts_url}"
+                    rm -f /tmp/tailscale.tgz
+                fi
             else
-                log_warn "Could not find Tailscale release URL"
+                log_warn "Could not determine Tailscale version"
             fi
         else
             log_info "Already have: Tailscale"
         fi
     }
 
-    # --- Mosquitto (~5MB, compile from source) ---
-    require_disk_space 10 "Mosquitto" && {
+    # --- Mosquitto (~5MB, compile from source) --- requires native platform
+    [ "$is_native" != true ] && log_info "Skipping Mosquitto (requires native compile)"
+    [ "$is_native" = true ] && require_disk_space 10 "Mosquitto" && {
         local mosq_dir="${plat_dir}/mosquitto"
         if [ ! -f "${mosq_dir}/mosquitto" ]; then
             log_info "Downloading Mosquitto source..."
             local mosq_ver
-            mosq_ver=$(curl -sS "https://api.github.com/repos/eclipse-mosquitto/mosquitto/releases/latest" 2>/dev/null \
-                | grep '"tag_name"' | head -1 | sed 's/.*"v\([^"]*\)".*/\1/')
+            # Use tags endpoint (Mosquitto doesn't use GitHub Releases)
+            mosq_ver=$(curl -sS "https://api.github.com/repos/eclipse-mosquitto/mosquitto/tags" 2>/dev/null \
+                | grep '"name"' | grep -v 'rc\|alpha\|beta' | head -1 | sed 's/.*"v\([^"]*\)".*/\1/')
             if [ -n "$mosq_ver" ]; then
                 local mosq_url="https://mosquitto.org/files/source/mosquitto-${mosq_ver}.tar.gz"
                 curl -L -o /tmp/mosquitto.tar.gz "$mosq_url" 2>/dev/null
@@ -790,19 +818,23 @@ update_apps() {
                 rm -f /tmp/sqlite.zip
                 rm -rf /tmp/sqlite-tmp
             else
-                # Compile amalgamation for arm64
-                log_info "Downloading SQLite amalgamation (arm64, will compile)..."
-                local sqlite_amal_url="https://www.sqlite.org/2024/sqlite-amalgamation-3470200.zip"
-                curl -L -o /tmp/sqlite-amal.zip "$sqlite_amal_url" 2>/dev/null
-                if [ -f /tmp/sqlite-amal.zip ] && command -v gcc >/dev/null 2>&1; then
-                    unzip -o /tmp/sqlite-amal.zip -d /tmp/sqlite-amal 2>/dev/null
-                    local amal_dir=$(find /tmp/sqlite-amal -name 'shell.c' -printf '%h\n' 2>/dev/null | head -1)
-                    if [ -n "$amal_dir" ]; then
-                        gcc -O2 -o "${sqlite_dir}/sqlite3" "${amal_dir}/shell.c" "${amal_dir}/sqlite3.c" -lpthread -ldl -lm 2>/dev/null
+                # Compile amalgamation for arm64 (only on native platform)
+                if [ "$is_native" = true ]; then
+                    log_info "Downloading SQLite amalgamation (arm64, will compile)..."
+                    local sqlite_amal_url="https://www.sqlite.org/2024/sqlite-amalgamation-3470200.zip"
+                    curl -L -o /tmp/sqlite-amal.zip "$sqlite_amal_url" 2>/dev/null
+                    if [ -f /tmp/sqlite-amal.zip ] && command -v gcc >/dev/null 2>&1; then
+                        unzip -o /tmp/sqlite-amal.zip -d /tmp/sqlite-amal 2>/dev/null
+                        local amal_dir=$(find /tmp/sqlite-amal -name 'shell.c' -printf '%h\n' 2>/dev/null | head -1)
+                        if [ -n "$amal_dir" ]; then
+                            gcc -O2 -o "${sqlite_dir}/sqlite3" "${amal_dir}/shell.c" "${amal_dir}/sqlite3.c" -lpthread -ldl -lm 2>/dev/null
+                        fi
                     fi
+                    rm -f /tmp/sqlite-amal.zip
+                    rm -rf /tmp/sqlite-amal
+                else
+                    log_info "SQLite: skipping ARM64 compile (not on native platform)"
                 fi
-                rm -f /tmp/sqlite-amal.zip
-                rm -rf /tmp/sqlite-amal
             fi
             [ -f "${sqlite_dir}/sqlite3" ] && log_ok "SQLite: $(du -h "${sqlite_dir}/sqlite3" | cut -f1)" || log_err "SQLite install failed"
         else
@@ -810,8 +842,9 @@ update_apps() {
         fi
     }
 
-    # --- Redis (~5MB, compile from source) ---
-    require_disk_space 10 "Redis" && {
+    # --- Redis (~5MB, compile from source) --- requires native platform
+    [ "$is_native" != true ] && log_info "Skipping Redis (requires native compile)"
+    [ "$is_native" = true ] && require_disk_space 10 "Redis" && {
         local redis_dir="${plat_dir}/redis"
         if [ ! -f "${redis_dir}/redis-server" ]; then
             local redis_ver
@@ -845,34 +878,31 @@ update_apps() {
         fi
     }
 
-    # --- PostgreSQL (~50MB) ---
-    require_disk_space 60 "PostgreSQL" && {
+    # --- PostgreSQL (~50MB, compile from source) --- requires native platform
+    [ "$is_native" != true ] && log_info "Skipping PostgreSQL (requires native compile)"
+    [ "$is_native" = true ] && require_disk_space 60 "PostgreSQL" && {
         local pg_dir="${plat_dir}/postgresql"
-        if [ ! -f "${pg_dir}/bin/postgres" ] && [ ! -f "${pg_dir}/postgres" ]; then
-            mkdir -p "${pg_dir}"
-            if [ "$arm64" != true ]; then
-                # EDB portable binaries for x86_64
-                local pg_ver="17.2.0"
-                local pg_url="https://get.enterprisedb.com/postgresql/postgresql-${pg_ver}-1-linux-x64-binaries.tar.gz"
-                log_info "Downloading PostgreSQL ${pg_ver} (x86_64 binaries)..."
-                curl -L -o /tmp/postgresql.tar.gz "$pg_url" 2>/dev/null
+        if [ ! -f "${pg_dir}/bin/postgres" ]; then
+            local pg_ver="17.2"
+            if [ "$is_native" = true ] && command -v make >/dev/null 2>&1 && command -v gcc >/dev/null 2>&1; then
+                log_info "Downloading PostgreSQL ${pg_ver} source..."
+                curl -L -o /tmp/postgresql.tar.gz "https://ftp.postgresql.org/pub/source/v${pg_ver}/postgresql-${pg_ver}.tar.gz" 2>/dev/null
                 if [ -f /tmp/postgresql.tar.gz ] && [ $(stat -c%s /tmp/postgresql.tar.gz 2>/dev/null || echo 0) -gt 1000 ]; then
-                    tar -xzf /tmp/postgresql.tar.gz -C "${plat_dir}/" 2>/dev/null
-                    # EDB extracts to pgsql/, move to postgresql/
-                    if [ -d "${plat_dir}/pgsql" ]; then
-                        rm -rf "${pg_dir}"
-                        mv "${plat_dir}/pgsql" "${pg_dir}"
-                    fi
-                    [ -f "${pg_dir}/bin/postgres" ] && log_ok "PostgreSQL ${pg_ver}: $(du -sh "${pg_dir}" | cut -f1)" || log_err "PostgreSQL extract failed"
+                    mkdir -p /tmp/pg-build
+                    tar -xzf /tmp/postgresql.tar.gz -C /tmp/pg-build --strip-components=1 2>/dev/null
+                    log_info "Compiling PostgreSQL ${pg_ver} (this may take a moment)..."
+                    (cd /tmp/pg-build && ./configure --prefix="${pg_dir}" --without-icu --without-readline 2>/dev/null && make -j$(nproc) 2>/dev/null && make install 2>/dev/null)
+                    [ -f "${pg_dir}/bin/postgres" ] && log_ok "PostgreSQL ${pg_ver}: $(du -sh "${pg_dir}" | cut -f1)" || log_err "PostgreSQL compile failed"
                 else
-                    log_err "PostgreSQL download failed"
+                    log_err "PostgreSQL source download failed"
                 fi
                 rm -f /tmp/postgresql.tar.gz
+                rm -rf /tmp/pg-build
             else
-                # ARM64: provide INSTALL instructions
-                log_info "PostgreSQL: no prebuilt arm64 binaries available"
+                mkdir -p "${pg_dir}"
+                log_info "PostgreSQL: saving INSTALL instructions (compile on target)"
                 cat > "${pg_dir}/INSTALL.txt" << 'PGEOF'
-PostgreSQL on ARM64 - Install from package manager:
+PostgreSQL - Install from package manager or compile:
 
   # Debian/Ubuntu:
   sudo apt-get install postgresql postgresql-client
@@ -950,9 +980,9 @@ PGEOF
     # --- Miniforge (~80MB, .sh installer) ---
     require_disk_space 100 "Miniforge" && {
         local mf_dir="${plat_dir}/miniforge"
-        if [ ! -f "${mf_dir}/bin/conda" ]; then
-            local mf_arch="aarch64"
-            [ "$arm64" != true ] && mf_arch="x86_64"
+        local mf_arch="aarch64"
+        [ "$arm64" != true ] && mf_arch="x86_64"
+        if [ ! -f "${mf_dir}/bin/conda" ] && [ ! -f "${mf_dir}/Miniforge3-Linux-${mf_arch}.sh" ]; then
             local mf_url
             mf_url=$(curl -sS "https://api.github.com/repos/conda-forge/miniforge/releases/latest" 2>/dev/null \
                 | grep "browser_download_url.*Miniforge3-Linux-${mf_arch}\.sh\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
@@ -960,12 +990,21 @@ PGEOF
                 log_info "Downloading Miniforge installer (${arch_label})..."
                 curl -L -o /tmp/miniforge.sh "$mf_url" 2>/dev/null
                 if [ -f /tmp/miniforge.sh ] && [ $(stat -c%s /tmp/miniforge.sh 2>/dev/null || echo 0) -gt 1000 ]; then
-                    bash /tmp/miniforge.sh -b -p "${mf_dir}" 2>/dev/null
-                    [ -f "${mf_dir}/bin/conda" ] && log_ok "Miniforge: $(du -sh "${mf_dir}" | cut -f1)" || log_err "Miniforge install failed"
+                    if [ "$is_native" = true ]; then
+                        # Run installer on native platform
+                        bash /tmp/miniforge.sh -b -p "${mf_dir}" 2>/dev/null
+                        [ -f "${mf_dir}/bin/conda" ] && log_ok "Miniforge: $(du -sh "${mf_dir}" | cut -f1)" || log_err "Miniforge install failed"
+                    else
+                        # Cross-platform: save installer for target machine
+                        mkdir -p "${mf_dir}"
+                        mv /tmp/miniforge.sh "${mf_dir}/Miniforge3-Linux-${mf_arch}.sh"
+                        chmod +x "${mf_dir}/Miniforge3-Linux-${mf_arch}.sh"
+                        log_ok "Miniforge installer saved (run on target platform to install)"
+                    fi
                 else
                     log_err "Miniforge download failed"
                 fi
-                rm -f /tmp/miniforge.sh
+                rm -f /tmp/miniforge.sh 2>/dev/null
             else
                 log_warn "Could not find Miniforge release URL"
             fi
@@ -974,15 +1013,16 @@ PGEOF
         fi
     }
 
-    # --- python-build-standalone (~30MB) ---
+    # --- python-build-standalone (~30MB) --- repo: astral-sh/python-build-standalone
     require_disk_space 40 "python-build-standalone" && {
         local pbs_dir="${plat_dir}/python-standalone"
         if [ ! -f "${pbs_dir}/bin/python3" ]; then
             local pbs_arch="aarch64"
             [ "$arm64" != true ] && pbs_arch="x86_64"
             local pbs_url
-            pbs_url=$(curl -sS "https://api.github.com/repos/indygreg/python-build-standalone/releases/latest" 2>/dev/null \
-                | grep "browser_download_url.*install_only.*${pbs_arch}.*linux.*tar.gz\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
+            # Pattern: cpython-3.12.X+DATE-ARCH-unknown-linux-gnu-install_only_stripped.tar.gz
+            pbs_url=$(curl -sS -L "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest" 2>/dev/null \
+                | grep "browser_download_url.*3\.12.*${pbs_arch}.*linux-gnu.*install_only_stripped.*tar.gz\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
             if [ -n "$pbs_url" ]; then
                 log_info "Downloading python-build-standalone (${arch_label})..."
                 curl -L -o /tmp/python-standalone.tar.gz "$pbs_url" 2>/dev/null
@@ -1001,6 +1041,73 @@ PGEOF
             log_info "Already have: python-build-standalone"
         fi
     }
+
+    # --- Blender (~300MB, x86_64 only — no official arm64 Linux builds) ---
+    if [ "$arm64" != true ]; then
+        require_disk_space 350 "Blender" && {
+            local blender_dir="${plat_dir}/blender"
+            if [ ! -f "${blender_dir}/blender" ]; then
+                local blender_ver="4.4.0"
+                local blender_url="https://download.blender.org/release/Blender${blender_ver%.*}/blender-${blender_ver}-linux-x64.tar.xz"
+                log_info "Downloading Blender ${blender_ver} (linux-x86_64)..."
+                mkdir -p "${blender_dir}"
+                curl -L -o /tmp/blender.tar.xz "$blender_url" 2>/dev/null
+                if [ -f /tmp/blender.tar.xz ] && [ $(stat -c%s /tmp/blender.tar.xz 2>/dev/null || echo 0) -gt 10000 ]; then
+                    tar -xJf /tmp/blender.tar.xz -C /tmp/ 2>/dev/null
+                    # Move contents from extracted dir (blender-X.Y.Z-linux-x64/) into target
+                    local bdir=$(find /tmp -maxdepth 1 -name "blender-*-linux*" -type d | head -1)
+                    if [ -n "$bdir" ] && [ -f "${bdir}/blender" ]; then
+                        mv "${bdir}"/* "${blender_dir}/" 2>/dev/null
+                        rm -rf "${bdir}"
+                        chmod +x "${blender_dir}/blender" 2>/dev/null
+                        log_ok "Blender ${blender_ver}: $(du -sh "${blender_dir}" | cut -f1)"
+                    else
+                        log_err "Blender extraction failed"
+                    fi
+                    rm -f /tmp/blender.tar.xz
+                else
+                    log_err "Blender download failed"
+                    rm -f /tmp/blender.tar.xz
+                fi
+            else
+                log_info "Already have: Blender"
+            fi
+        }
+    else
+        log_info "Blender: no official arm64 Linux build — install via apt or snap on target"
+    fi
+
+    # --- FreeCAD (~700MB AppImage, x86_64 only) ---
+    if [ "$arm64" != true ]; then
+        require_disk_space 750 "FreeCAD" && {
+            local freecad_dir="${plat_dir}/FreeCAD"
+            if [ ! -f "${freecad_dir}/bin/FreeCADCmd" ] && [ ! -f "${freecad_dir}/FreeCAD.AppImage" ]; then
+                log_info "Downloading FreeCAD AppImage (linux-x86_64)..."
+                mkdir -p "${freecad_dir}/bin"
+                local freecad_url
+                freecad_url=$(curl -sS "https://api.github.com/repos/FreeCAD/FreeCAD-Bundle/releases/latest" 2>/dev/null \
+                    | grep "browser_download_url.*Linux-x86_64.*AppImage\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
+                if [ -n "$freecad_url" ]; then
+                    curl -L -o "${freecad_dir}/FreeCAD.AppImage" "$freecad_url" 2>/dev/null
+                    if [ -f "${freecad_dir}/FreeCAD.AppImage" ] && [ $(stat -c%s "${freecad_dir}/FreeCAD.AppImage" 2>/dev/null || echo 0) -gt 10000 ]; then
+                        chmod +x "${freecad_dir}/FreeCAD.AppImage"
+                        # Create symlink for bin/FreeCADCmd compatibility
+                        ln -sf ../FreeCAD.AppImage "${freecad_dir}/bin/FreeCADCmd" 2>/dev/null
+                        log_ok "FreeCAD: $(du -sh "${freecad_dir}/FreeCAD.AppImage" | cut -f1)"
+                    else
+                        log_err "FreeCAD download failed (file too small)"
+                        rm -f "${freecad_dir}/FreeCAD.AppImage"
+                    fi
+                else
+                    log_err "FreeCAD: could not resolve download URL from GitHub"
+                fi
+            else
+                log_info "Already have: FreeCAD"
+            fi
+        }
+    else
+        log_info "FreeCAD: no official arm64 Linux build — install via apt on target"
+    fi
 
     # --- Disk space summary ---
     echo ""
@@ -1191,6 +1298,63 @@ show_model_paths() {
 }
 
 ###############################################################################
+# Link AI engine binaries from models tools into project tools + web-ui symlinks
+###############################################################################
+
+MODELS_TOOLS="/home/uat-admin/models/tools"
+
+link_tools() {
+    log "============================================================"
+    log "Linking AI engine binaries & web-ui paths"
+    log "============================================================"
+
+    # Link AI engine binaries from models/tools into project tools
+    local arm64_dir="${TOOLS_DIR}/linux-arm64"
+    local x86_dir="${TOOLS_DIR}/linux-x86_64"
+    mkdir -p "$arm64_dir" "$x86_dir"
+
+    # llama.cpp
+    [ -f "${MODELS_TOOLS}/llama.cpp/linux-arm64/llama-server" ] && \
+        ln -sf "${MODELS_TOOLS}/llama.cpp/linux-arm64/llama-server" "${arm64_dir}/llama-server" 2>/dev/null
+    [ -f "${MODELS_TOOLS}/llama.cpp/linux-x86_64/llama-server" ] && \
+        ln -sf "${MODELS_TOOLS}/llama.cpp/linux-x86_64/llama-server" "${x86_dir}/llama-server" 2>/dev/null
+
+    # whisper.cpp
+    [ -f "${MODELS_TOOLS}/whisper.cpp/linux-arm64/whisper-cli" ] && \
+        ln -sf "${MODELS_TOOLS}/whisper.cpp/linux-arm64/whisper-cli" "${arm64_dir}/whisper-cli" 2>/dev/null
+    [ -f "${MODELS_TOOLS}/whisper.cpp/linux-x86_64/whisper-cli" ] && \
+        ln -sf "${MODELS_TOOLS}/whisper.cpp/linux-x86_64/whisper-cli" "${x86_dir}/whisper-cli" 2>/dev/null
+
+    # stable-diffusion.cpp
+    [ -f "${MODELS_TOOLS}/stable-diffusion.cpp/linux-arm64/sd-cli" ] && \
+        ln -sf "${MODELS_TOOLS}/stable-diffusion.cpp/linux-arm64/sd-cli" "${arm64_dir}/sd-cli" 2>/dev/null
+    [ -f "${MODELS_TOOLS}/stable-diffusion.cpp/linux-x86_64/sd-cli" ] && \
+        ln -sf "${MODELS_TOOLS}/stable-diffusion.cpp/linux-x86_64/sd-cli" "${x86_dir}/sd-cli" 2>/dev/null
+
+    # onnxruntime
+    [ -d "${MODELS_TOOLS}/onnxruntime/linux-arm64" ] && \
+        ln -sfn "${MODELS_TOOLS}/onnxruntime/linux-arm64" "${arm64_dir}/onnxruntime" 2>/dev/null
+    [ -d "${MODELS_TOOLS}/onnxruntime/linux-x86_64" ] && \
+        ln -sfn "${MODELS_TOOLS}/onnxruntime/linux-x86_64" "${x86_dir}/onnxruntime" 2>/dev/null
+
+    # vosk
+    [ -d "${MODELS_TOOLS}/vosk/linux-arm64" ] && \
+        ln -sfn "${MODELS_TOOLS}/vosk/linux-arm64" "${arm64_dir}/vosk" 2>/dev/null
+    [ -d "${MODELS_TOOLS}/vosk/linux-x86_64" ] && \
+        ln -sfn "${MODELS_TOOLS}/vosk/linux-x86_64" "${x86_dir}/vosk" 2>/dev/null
+
+    # Web-UI symlinks (for the dev server to serve tools/sources/assets)
+    local webui="${PROJECT_ROOT}/web-ui"
+    [ -d "$webui" ] && {
+        ln -sfn ../tools "$webui/tools" 2>/dev/null
+        ln -sfn ../sources "$webui/sources" 2>/dev/null
+        ln -sfn ../assets "$webui/assets" 2>/dev/null
+    }
+
+    log_ok "Tool symlinks updated"
+}
+
+###############################################################################
 # Main
 ###############################################################################
 
@@ -1198,6 +1362,11 @@ case "${1:-all}" in
     ollama)  update_ollama ;;
     tools)   update_tools ;;
     apps)    update_apps ;;
+    apps-all)
+        # Download apps for all supported Linux platforms
+        update_apps "linux-arm64"
+        update_apps "linux-x86_64"
+        ;;
     sources) clone_sources ;;
     assets)  update_assets ;;
     check)   check_versions ;;
@@ -1212,29 +1381,34 @@ case "${1:-all}" in
     cron)
         # Install weekly cron job
         CRON_LINE="0 3 * * 0 cd ${PROJECT_ROOT} && ./start.sh update >> /var/log/val-ark-update.log 2>&1"
-        (crontab -l 2>/dev/null | grep -v "ai-ark-update"; echo "$CRON_LINE") | crontab -
+        (crontab -l 2>/dev/null | grep -v "val-ark-update"; echo "$CRON_LINE") | crontab -
         log_ok "Weekly cron job installed (Sundays at 3 AM)"
         echo "    ${CRON_LINE}"
         ;;
+    links)   link_tools ;;
     all)
         update_ollama
         update_tools
         update_apps
         clone_sources
         update_assets
+        link_tools
         check_versions
         show_model_paths
         echo ""
         log_ok "Update complete!"
         ;;
     *)
-        echo "Usage: $0 [all|ollama|tools|apps|sources|assets|check|paths|disk|cron]"
+        echo "Usage: $0 [all|ollama|tools|apps|apps-all|sources|assets|links|check|paths|disk|cron]"
         echo ""
-        echo "  all      - Run full update (Ollama + tools + sources + assets)"
+        echo "  all      - Run full update (Ollama + tools + apps + sources + assets + links)"
         echo "  ollama   - Download latest Ollama installers (append-only)"
         echo "  tools    - Download latest tool binaries (FFmpeg, Piper, Vosk, ONNX Runtime)"
+        echo "  apps     - Download apps & dev tools for current platform"
+        echo "  apps-all - Download apps for all Linux platforms (arm64 + x86_64)"
         echo "  sources  - Clone/pull llama.cpp, whisper.cpp, sd.cpp source repos"
         echo "  assets   - Update tool logos and sample files"
+        echo "  links    - Create symlinks (AI engine binaries + web-ui paths)"
         echo "  check    - Check for new tool versions (dry run)"
         echo "  paths    - Show model file paths for each platform/tool"
         echo "  cron     - Install weekly cron job (Sundays 3 AM)"

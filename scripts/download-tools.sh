@@ -527,6 +527,25 @@ VOSK_EOF
     fi
 }
 
+download_bitnet() {
+    log "============================================================"
+    log "TOOL: BitNet.cpp (1-bit LLM inference)"
+    log "============================================================"
+
+    local BITNET_DIR="${TOOLS_ROOT}/bitnet"
+
+    # BitNet is source-only (no prebuilt releases) - clone the repo
+    clone_repo "https://github.com/microsoft/BitNet.git" "main" \
+        "${BITNET_DIR}/source" "BitNet.cpp source"
+
+    # Also clone into the project sources directory for web-ui detection
+    local PROJECT_SOURCES="$(dirname "$(dirname "$(realpath "$0")")")/sources"
+    if [ -d "$PROJECT_SOURCES" ]; then
+        clone_repo "https://github.com/microsoft/BitNet.git" "main" \
+            "${PROJECT_SOURCES}/BitNet" "BitNet source (project)"
+    fi
+}
+
 ###############################################################################
 # Build Script Generators
 ###############################################################################
@@ -985,6 +1004,7 @@ main() {
     download_onnxruntime
     download_ffmpeg
     download_vosk
+    download_bitnet
     generate_build_scripts
 
     # Final Summary
@@ -1114,10 +1134,11 @@ case "${1:-all}" in
     onnx)       ensure_dir "$LOG_DIR"; LOG_FILE="${LOG_DIR}/tools_$(date +%Y%m%d_%H%M%S).log"; download_onnxruntime ;;
     ffmpeg)     ensure_dir "$LOG_DIR"; LOG_FILE="${LOG_DIR}/tools_$(date +%Y%m%d_%H%M%S).log"; download_ffmpeg ;;
     vosk)       ensure_dir "$LOG_DIR"; LOG_FILE="${LOG_DIR}/tools_$(date +%Y%m%d_%H%M%S).log"; download_vosk ;;
+    bitnet)     ensure_dir "$LOG_DIR"; LOG_FILE="${LOG_DIR}/tools_$(date +%Y%m%d_%H%M%S).log"; download_bitnet ;;
     build)      ensure_dir "$LOG_DIR"; LOG_FILE="${LOG_DIR}/tools_$(date +%Y%m%d_%H%M%S).log"; generate_build_scripts ;;
     all)        main ;;
     *)
-        echo "Usage: $0 [all|validate|llama|whisper|piper|sd|onnx|ffmpeg|vosk|build]"
+        echo "Usage: $0 [all|validate|llama|whisper|piper|sd|onnx|ffmpeg|vosk|bitnet|build]"
         echo ""
         echo "  all      - Download all tools for all platforms (~3.5GB)"
         echo "  validate - Check all download URLs with HEAD requests"
@@ -1128,6 +1149,7 @@ case "${1:-all}" in
         echo "  onnx     - ONNX Runtime only"
         echo "  ffmpeg   - FFmpeg only"
         echo "  vosk     - Vosk only"
+        echo "  bitnet   - BitNet.cpp only (1-bit LLM inference)"
         echo "  build    - Generate build-from-source scripts only"
         exit 1
         ;;

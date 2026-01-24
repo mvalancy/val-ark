@@ -610,6 +610,34 @@ download_llm_models() {
         "gemma-2-9b-it-Q8_0.gguf" \
         "${LLM_DIR}/gemma-2-9b"
 
+    # --- BitNet 1-bit Models (I2_S GGUF) ---
+    log_info "=== BitNet 1-bit Models ==="
+
+    # BitNet b1.58-2B-4T (~1.19 GB) - Official Microsoft model
+    hf_download_file "microsoft/bitnet-b1.58-2B-4T-gguf" \
+        "ggml-model-i2_s.gguf" \
+        "${LLM_DIR}/bitnet-2b-4t"
+
+    # Falcon3-1B-Instruct-1.58bit (~400 MB)
+    hf_download_file "tiiuae/Falcon3-1B-Instruct-1.58bit-GGUF" \
+        "ggml-model-i2_s.gguf" \
+        "${LLM_DIR}/falcon3-1b-1.58bit"
+
+    # Falcon3-3B-Instruct-1.58bit (~1.2 GB)
+    hf_download_file "tiiuae/Falcon3-3B-Instruct-1.58bit-GGUF" \
+        "ggml-model-i2_s.gguf" \
+        "${LLM_DIR}/falcon3-3b-1.58bit"
+
+    # Falcon3-7B-Instruct-1.58bit (~2.5 GB)
+    hf_download_file "tiiuae/Falcon3-7B-Instruct-1.58bit-GGUF" \
+        "ggml-model-i2_s.gguf" \
+        "${LLM_DIR}/falcon3-7b-1.58bit"
+
+    # Falcon3-10B-Instruct-1.58bit (~3.5 GB)
+    hf_download_file "tiiuae/Falcon3-10B-Instruct-1.58bit-GGUF" \
+        "ggml-model-i2_s.gguf" \
+        "${LLM_DIR}/falcon3-10b-1.58bit"
+
     log_success "LLM models category complete (${DOWNLOAD_SUCCESS} ok, ${DOWNLOAD_FAILED} failed)"
 }
 
@@ -941,6 +969,19 @@ download_tier1() {
         "Nemotron-Mini-4B-Instruct-Q8_0.gguf" \
         "${LLM_DIR}/nemotron-mini-4b"
 
+    # --- BitNet 1-bit Models (ultra-efficient CPU inference) ---
+    log_info "=== BitNet 1-bit Edge Models ==="
+
+    # BitNet b1.58-2B-4T (~1.19 GB) - Official Microsoft
+    hf_download_file "microsoft/bitnet-b1.58-2B-4T-gguf" \
+        "ggml-model-i2_s.gguf" \
+        "${LLM_DIR}/bitnet-2b-4t"
+
+    # Falcon3-1B-1.58bit (~400 MB) - Ultra-fast edge
+    hf_download_file "tiiuae/Falcon3-1B-Instruct-1.58bit-GGUF" \
+        "ggml-model-i2_s.gguf" \
+        "${LLM_DIR}/falcon3-1b-1.58bit"
+
     # --- Small Whisper models ---
     log_info "=== Whisper (tiny/base/small) ==="
     local WHISPER_DIR="${STT_DIR}/whisper-ggml"
@@ -1072,6 +1113,20 @@ download_tier2() {
     hf_download_file "bartowski/nvidia_NVIDIA-Nemotron-Nano-12B-v2-GGUF" \
         "nvidia_NVIDIA-Nemotron-Nano-12B-v2-Q8_0.gguf" \
         "${LLM_DIR}/nemotron-nano-12b-v2"
+
+    # --- BitNet 1-bit Medium Models ---
+    log_info "=== BitNet 1-bit Models (3B-10B) ==="
+    hf_download_file "tiiuae/Falcon3-3B-Instruct-1.58bit-GGUF" \
+        "ggml-model-i2_s.gguf" \
+        "${LLM_DIR}/falcon3-3b-1.58bit"
+
+    hf_download_file "tiiuae/Falcon3-7B-Instruct-1.58bit-GGUF" \
+        "ggml-model-i2_s.gguf" \
+        "${LLM_DIR}/falcon3-7b-1.58bit"
+
+    hf_download_file "tiiuae/Falcon3-10B-Instruct-1.58bit-GGUF" \
+        "ggml-model-i2_s.gguf" \
+        "${LLM_DIR}/falcon3-10b-1.58bit"
 
     # --- Whisper medium/large-turbo ---
     log_info "=== Whisper (medium/large-turbo) ==="
@@ -1338,9 +1393,19 @@ case "${1:-all}" in
     image)      download_image_gen_models ;;
     nvidia)     download_nvidia_special ;;
     extra)      download_extra_models ;;
+    bitnet)
+        LLM_DIR="${MODEL_ROOT}/llm"
+        ensure_dir "$LLM_DIR"
+        log_info "=== BitNet 1-bit Models (all) ==="
+        hf_download_file "microsoft/bitnet-b1.58-2B-4T-gguf" "ggml-model-i2_s.gguf" "${LLM_DIR}/bitnet-2b-4t"
+        hf_download_file "tiiuae/Falcon3-1B-Instruct-1.58bit-GGUF" "ggml-model-i2_s.gguf" "${LLM_DIR}/falcon3-1b-1.58bit"
+        hf_download_file "tiiuae/Falcon3-3B-Instruct-1.58bit-GGUF" "ggml-model-i2_s.gguf" "${LLM_DIR}/falcon3-3b-1.58bit"
+        hf_download_file "tiiuae/Falcon3-7B-Instruct-1.58bit-GGUF" "ggml-model-i2_s.gguf" "${LLM_DIR}/falcon3-7b-1.58bit"
+        hf_download_file "tiiuae/Falcon3-10B-Instruct-1.58bit-GGUF" "ggml-model-i2_s.gguf" "${LLM_DIR}/falcon3-10b-1.58bit"
+        ;;
     validate)   LOG_FILE="${LOG_DIR}/validate_$(date +%Y%m%d_%H%M%S).log"; validate_all_urls ;;
     *)
-        echo "Usage: $0 [tier1|tier2|tier3|all|llm|tts|stt|vision|image|nvidia|extra|validate]"
+        echo "Usage: $0 [tier1|tier2|tier3|all|llm|tts|stt|vision|image|nvidia|extra|bitnet|validate]"
         echo ""
         echo "  Priority tiers (recommended):"
         echo "    tier1     - Edge/mobile models (~15GB) - small, fast"
@@ -1356,6 +1421,7 @@ case "${1:-all}" in
         echo "    image     - Image Generation (~40GB)"
         echo "    nvidia    - NVIDIA Special models (~10GB)"
         echo "    extra     - Additional quality models (~75GB)"
+        echo "    bitnet    - BitNet 1-bit models only (~14GB)"
         echo ""
         echo "  validate    - Pre-check all URLs without downloading"
         exit 1

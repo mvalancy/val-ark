@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Milvus icon: stylized blue eye -->
+  <path d="M32 16C20 16 10.5 24.5 8 32c2.5 7.5 12 16 24 16s21.5-8.5 24-16c-2.5-7.5-12-16-24-16z" fill="none" stroke="#4FC3F7" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="32" cy="32" r="9" fill="#4FC3F7"/>
+  <circle cx="32" cy="32" r="4" fill="#fff"/>
+  <!-- Small play arrow accent -->
+  <path d="M52 32l6-4v8z" fill="#4FC3F7"/>
+</svg>

@@ -28,6 +28,11 @@ dist/
 *.dylib
 *.dll
 
+# Web UI runtime symlinks (created by update.sh link_tools)
+web-ui/tools
+web-ui/sources
+web-ui/assets
+
 # Playwright screenshot tests
 tests/screenshots/node_modules/
 

@@ -88,26 +88,6 @@ body {
 }
 .nav-link:hover { color: var(--text-primary); background: var(--bg-card); }
 .nav-link.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
-.nav-platform {
-    margin-left: auto;
-    display: flex;
-    gap: 6px;
-    flex-shrink: 0;
-}
-.nav-plat-btn {
-    padding: 5px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 0.78em;
-    font-weight: 500;
-    transition: all 0.2s;
-    white-space: nowrap;
-}
-.nav-plat-btn:hover { border-color: var(--accent); color: var(--text-secondary); }
-.nav-plat-btn.active { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
 
 /* Container */
 .container { max-width: 1440px; margin: 0 auto; padding: 20px 24px; }
@@ -253,35 +233,6 @@ body {
     gap: 6px;
     flex-wrap: wrap;
 }
-.card-download-row {
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-.card-dl {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 10px;
-    background: var(--accent-dim);
-    color: var(--accent);
-    border-radius: 4px;
-    font-size: 0.72em;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s, color 0.2s;
-    text-decoration: none;
-}
-.card-dl:hover { background: var(--accent); color: #fff; }
-.card-dl-more {
-    font-size: 0.7em;
-    color: var(--text-muted);
-    font-weight: 500;
-}
 .cat-btn {
     padding: 6px 14px;
     border: 1px solid var(--border);
@@ -299,6 +250,9 @@ body {
 .badge-installed { background: #16a34a22; color: #22c55e; }
 .badge-source { background: #eab30822; color: #eab308; }
 .badge-missing { background: #64748b22; color: #64748b; }
+.badge-hint { background: #6366f122; color: #a78bfa; }
+.badge-other { background: #f59e0b22; color: #f59e0b; }
+.badge-checking { background: #64748b11; color: #64748b; }
 .attribution-bar { display: flex; gap: 16px; flex-wrap: wrap; padding: 10px 14px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; font-size: 0.85em; }
 .attribution-bar .attr-item { color: var(--text-secondary); }
 .attribution-bar a { color: var(--accent); text-decoration: none; }
@@ -711,7 +665,6 @@ body {
 
 /* Responsive */
 @media (max-width: 900px) {
-    .nav-platform { display: none; }
     .top-nav { padding: 0 12px; gap: 12px; }
 }
 @media (max-width: 768px) {
@@ -731,19 +684,6 @@ body {
     .nav-links { display: none; }
 }
 
-/* Mobile platform selector (shown below nav on small screens) */
-.mobile-platform {
-    display: none;
-    padding: 10px 12px;
-    gap: 6px;
-    flex-wrap: wrap;
-    justify-content: center;
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
-}
-@media (max-width: 900px) {
-    .mobile-platform { display: flex; }
-}
 a.card, a.nav-logo, a.nav-link, a.related-link {
     text-decoration: none;
     color: inherit;
@@ -1232,6 +1172,54 @@ const TOOLS = [
         }
     },
     {
+        id: 'bitnet', name: 'BitNet.cpp', category: 'ai-inference', icon: 'B', iconBg: '#00d4aa', logo: 'logos/bitnet.svg',
+        desc: 'Microsoft\'s 1-bit LLM inference - run ternary models at extreme efficiency on CPUs',
+        size: '~50 MB (source)',
+        platforms: { jetson: 'build', ubuntu: 'build', mac: 'build', windows: 'build' },
+        downloads: {
+            source: 'https://github.com/microsoft/BitNet',
+            releases: 'https://github.com/microsoft/BitNet',
+            binaries: {
+                'jetson': 'sources/BitNet/run_inference.py',
+                'ubuntu': 'sources/BitNet/run_inference.py'
+            }
+        },
+        details: {
+            overview: 'BitNet.cpp is Microsoft\'s official inference framework for native 1-bit (ternary) LLMs. Models use weights of {-1, 0, +1} trained from scratch, achieving 2-6x speedups and 55-82% energy reduction compared to full-precision models on CPUs. It enables running 100B+ parameter models on a single CPU at human reading speed. Optimized kernels support ARM (Jetson, Apple Silicon) and x86 architectures.',
+            features: [
+                'Native ternary weight support ({-1, 0, +1}) - not post-training quantization',
+                '2-6x faster than FP16/INT8 on same hardware (CPU-optimized kernels)',
+                '55-82% energy reduction vs standard inference',
+                'Run 100B parameter models on CPU at 5-7 tokens/second',
+                'ARM64 optimized (NEON) - excellent on Jetson and Apple Silicon',
+                'x86_64 optimized (AVX2/AVX512) - 2.4-6.2x speedup',
+                'GPU inference kernels (CUDA) for even faster throughput',
+                'GGUF model format compatible',
+                'Supports BitNet b1.58-2B-4T, Falcon3, and Falcon-E model families',
+                'MIT licensed - fully open source'
+            ],
+            cli: [
+                {cmd: 'python setup_env.py -md models/BitNet-b1.58-2B-4T -q i2_s', desc: 'Build inference engine for model'},
+                {cmd: 'python run_inference.py -m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf -p "Hello" -cnv', desc: 'Run interactive chat'},
+                {cmd: 'python run_inference.py -m model.gguf -p "prompt" -n 128 -t 4', desc: 'Generate with 4 threads, 128 tokens'},
+                {cmd: 'python setup_env.py --hf-repo tiiuae/Falcon3-3B-Instruct-1.58bit -q i2_s', desc: 'Build for Falcon3 model'}
+            ],
+            models: [
+                {name: 'BitNet-b1.58-2B-4T', size: '1.19 GB', speed: '~50 tok/s (CPU)', quality: 'Good', note: 'Official Microsoft 2B model'},
+                {name: 'Falcon3-1B-1.58bit', size: '1.3 GB', speed: '~80 tok/s (CPU)', quality: 'Basic', note: 'Ultra-fast edge model'},
+                {name: 'Falcon3-3B-1.58bit', size: '2.1 GB', speed: '~40 tok/s (CPU)', quality: 'Good', note: 'Best 1-bit edge balance'},
+                {name: 'Falcon3-7B-1.58bit', size: '3.1 GB', speed: '~20 tok/s (CPU)', quality: 'Very Good', note: 'Near full-precision quality'},
+                {name: 'Falcon3-10B-1.58bit', size: '3.8 GB', speed: '~15 tok/s (CPU)', quality: 'Excellent', note: 'Best 1-bit quality'}
+            ],
+            performance: [
+                {platform: 'NVIDIA Jetson (ARM64)', model: 'BitNet-2B-4T', metric: '~40-60 tok/s (CPU), energy: 70% less than FP16'},
+                {platform: 'x86_64 Desktop (AVX2)', model: 'BitNet-2B-4T', metric: '~50-100 tok/s (CPU), 2.4-6.2x vs FP16'},
+                {platform: 'Apple M-series (ARM64)', model: 'BitNet-2B-4T', metric: '~60-100 tok/s (CPU), 1.4-5.1x vs FP16'},
+                {platform: 'Any CPU', model: '100B 1-bit model', metric: '~5-7 tok/s (human reading speed)'}
+            ]
+        }
+    },
+    {
         id: 'ollama', name: 'Ollama', category: 'ai-platform', icon: 'O', iconBg: '#1a1a2e', logo: 'logos/ollama.png',
         desc: 'Run LLMs locally with one command - OpenAI-compatible API, automatic GPU detection',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1250,15 +1238,14 @@ const TOOLS = [
     // CREATIVE / ENGINEERING TOOLS
     // =========================================================================
     {
-        id: 'blender', name: 'Blender', category: 'creative', icon: 'B', iconBg: '#e87d0d', logo: 'logos/blender.svg',
+        id: 'blender', name: 'Blender', category: 'creative', icon: 'B', iconBg: '#e87d0d', logo: 'logos/blender.png',
         desc: '3D modeling, animation, rendering, and scripting - with Python API for programmatic modeling',
-        size: '~300 MB',
-        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        size: '~1.1 GB (portable)',
+        platforms: { jetson: 'package', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/blender/blender',
             releases: 'https://www.blender.org/download/',
             binaries: {
-                'jetson': 'tools/linux-arm64/blender/blender',
                 'ubuntu': 'tools/linux-x86_64/blender/blender',
                 'mac': 'tools/macos-arm64/Blender.app',
                 'windows': 'tools/windows-x64/blender/blender.exe'
@@ -1290,13 +1277,12 @@ const TOOLS = [
     {
         id: 'freecad', name: 'FreeCAD', category: 'creative', icon: 'C', iconBg: '#0b5394', logo: 'logos/freecad.svg',
         desc: 'Parametric 3D CAD modeler with Python scripting - headless mode for automated design',
-        size: '~200 MB',
-        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        size: '~760 MB (AppImage)',
+        platforms: { jetson: 'package', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/FreeCAD/FreeCAD',
-            releases: 'https://github.com/FreeCAD/FreeCAD/releases',
+            releases: 'https://github.com/FreeCAD/FreeCAD-Bundle/releases',
             binaries: {
-                'jetson': 'tools/linux-arm64/FreeCAD/bin/FreeCADCmd',
                 'ubuntu': 'tools/linux-x86_64/FreeCAD/bin/FreeCADCmd',
                 'mac': 'tools/macos-arm64/FreeCAD.app',
                 'windows': 'tools/windows-x64/FreeCAD/bin/FreeCADCmd.exe'
@@ -1332,12 +1318,8 @@ const TOOLS = [
         downloads: {
             source: 'https://gitlab.com/kicad/code/kicad',
             releases: 'https://www.kicad.org/download/',
-            binaries: {
-                'jetson': 'tools/linux-arm64/kicad/bin/kicad-cli',
-                'ubuntu': 'tools/linux-x86_64/kicad/bin/kicad-cli',
-                'mac': 'tools/macos-arm64/KiCad.app',
-                'windows': 'tools/windows-x64/kicad/bin/kicad-cli.exe'
-            }
+            installHint: 'package',
+            binaries: {}
         },
         details: {
             overview: 'KiCad is a free, open-source EDA suite for schematic capture, PCB layout, and manufacturing output. Version 9+ includes kicad-cli for headless operations like DRC checks, Gerber generation, and BOM export - enabling AI-driven PCB design automation.',
@@ -1409,12 +1391,8 @@ const TOOLS = [
         downloads: {
             source: 'https://github.com/videolan/vlc',
             releases: 'https://www.videolan.org/vlc/',
-            binaries: {
-                'jetson': 'tools/linux-arm64/vlc/cvlc',
-                'ubuntu': 'tools/linux-x86_64/vlc/cvlc',
-                'mac': 'tools/macos-arm64/VLC.app',
-                'windows': 'tools/windows-x64/vlc/vlc.exe'
-            }
+            installHint: 'package',
+            binaries: {}
         },
         details: {
             overview: 'VLC is a free, open-source multimedia player and framework that plays most multimedia files and streaming protocols. Its command-line interface (cvlc) enables headless transcoding, streaming, and format conversion.',
@@ -1449,12 +1427,8 @@ const TOOLS = [
         downloads: {
             source: 'https://github.com/n8n-io/n8n',
             releases: 'https://github.com/n8n-io/n8n/releases',
-            binaries: {
-                'jetson': 'tools/linux-arm64/n8n/',
-                'ubuntu': 'tools/linux-x86_64/n8n/',
-                'mac': 'tools/macos-arm64/n8n/',
-                'windows': 'tools/windows-x64/n8n/'
-            }
+            installHint: 'npm',
+            binaries: {}
         },
         details: {
             overview: 'n8n is a workflow automation platform that connects AI models to real-world actions. With 400+ integrations, you can build AI agent workflows connecting Ollama/llama.cpp to databases, APIs, file systems, and more - all self-hosted.',
@@ -1516,19 +1490,15 @@ const TOOLS = [
         }
     },
     {
-        id: 'milvus', name: 'Milvus', category: 'ai-platform', icon: 'M', iconBg: '#00a0e4', logo: 'logos/milvus.png',
+        id: 'milvus', name: 'Milvus', category: 'ai-platform', icon: 'M', iconBg: '#00a0e4', logo: 'logos/milvus.svg',
         desc: 'Vector database for AI applications - similarity search, RAG, and embedding storage',
         size: '~570 MB (Docker) / ~100 MB (Lite)',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/milvus-io/milvus',
             releases: 'https://github.com/milvus-io/milvus/releases',
-            binaries: {
-                'jetson': 'tools/linux-arm64/milvus/milvus',
-                'ubuntu': 'tools/linux-x86_64/milvus/milvus',
-                'mac': 'tools/macos-arm64/milvus/',
-                'windows': 'tools/windows-x64/milvus/'
-            }
+            installHint: 'pip',
+            binaries: {}
         },
         details: {
             overview: 'Milvus is a high-performance vector database designed for AI applications like RAG (Retrieval-Augmented Generation), similarity search, and recommendation systems. Pair it with llama.cpp embeddings for fully local knowledge retrieval.',
@@ -1637,6 +1607,7 @@ const TOOLS = [
         downloads: {
             source: 'https://github.com/coollabsio/coolify',
             releases: 'https://github.com/coollabsio/coolify/releases',
+            installHint: 'docker',
             binaries: {}
         },
         details: {
@@ -1705,7 +1676,7 @@ const TOOLS = [
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'n/a' },
         downloads: {
             source: 'https://github.com/tmux/tmux',
-            releases: 'https://github.com/tmux/tmux-builds/releases',
+            releases: 'https://github.com/tmux/tmux/releases',
             binaries: {
                 'jetson': 'tools/linux-arm64/tmux/tmux',
                 'ubuntu': 'tools/linux-x86_64/tmux/tmux',
@@ -1742,7 +1713,7 @@ const TOOLS = [
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/BurntSushi/ripgrep',
-            releases: 'https://github.com/sharkdp/fd/releases',
+            releases: 'https://github.com/BurntSushi/ripgrep/releases',
             binaries: {
                 'jetson': 'tools/linux-arm64/dev-cli/',
                 'ubuntu': 'tools/linux-x86_64/dev-cli/',
@@ -1782,6 +1753,7 @@ const TOOLS = [
         downloads: {
             source: 'https://github.com/anthropics/claude-code',
             releases: 'https://www.npmjs.com/package/@anthropic-ai/claude-code',
+            installHint: 'npm',
             binaries: {}
         },
         details: {
@@ -1821,6 +1793,7 @@ const TOOL_META = {
     'ffmpeg': { maker: 'FFmpeg Project', website: 'https://ffmpeg.org', license: 'LGPL-2.1+', licenseUrl: 'https://github.com/FFmpeg/FFmpeg/blob/master/LICENSE.md' },
     'onnxruntime': { maker: 'Microsoft', website: 'https://onnxruntime.ai', license: 'MIT', licenseUrl: 'https://github.com/microsoft/onnxruntime/blob/main/LICENSE' },
     'vosk': { maker: 'Alpha Cephei', website: 'https://alphacephei.com/vosk/', license: 'Apache-2.0', licenseUrl: 'https://github.com/alphacep/vosk-api/blob/master/COPYING' },
+    'bitnet': { maker: 'Microsoft Research', website: 'https://github.com/microsoft/BitNet', license: 'MIT', licenseUrl: 'https://github.com/microsoft/BitNet/blob/main/LICENSE' },
     'ollama': { maker: 'Ollama', website: 'https://ollama.com', license: 'MIT', licenseUrl: 'https://github.com/ollama/ollama/blob/main/LICENSE' },
     'blender': { maker: 'Blender Foundation', website: 'https://www.blender.org', license: 'GPL-2.0+', licenseUrl: 'https://www.blender.org/about/license/' },
     'freecad': { maker: 'FreeCAD Community', website: 'https://www.freecad.org', license: 'LGPL-2.1+', licenseUrl: 'https://github.com/FreeCAD/FreeCAD/blob/main/LICENSE' },
@@ -1840,39 +1813,81 @@ const TOOL_META = {
 };
 
 // Installation status for current instance (Jetson ARM64)
-const INSTALLED_TOOLS = {
-    'llama-cpp': 'source',    // sources/llama.cpp/ (needs build)
-    'whisper-cpp': 'source',  // sources/whisper.cpp/ (needs build)
-    'piper-tts': 'installed', // tools/linux-arm64/piper/
-    'sd-cpp': 'source',      // sources/stable-diffusion.cpp/ (needs build)
-    'ffmpeg': 'installed',    // tools/linux-arm64/ffmpeg
-    'onnxruntime': 'bundled', // bundled with piper
-    'vosk': 'missing',
-    'ollama': 'system',       // /usr/local/bin/ollama
-    'blender': 'missing',
-    'freecad': 'missing',
-    'kicad': 'missing',
-    'godot': 'installed',     // tools/linux-arm64/godot/
-    'vlc': 'missing',
-    'n8n': 'missing',
-    'influxdb': 'installed',
-    'milvus': 'missing',
-    'comfyui': 'missing',
-    'syncthing': 'installed', // tools/linux-arm64/syncthing/
-    'coolify': 'missing',
-    'btop': 'installed',
-    'tmux': 'installed',      // tools/linux-arm64/tmux/
-    'dev-cli': 'installed',   // tools/linux-arm64/dev-cli/ (bat, fd, fzf, jq)
-    'claude-code': 'missing'
-};
+// Dynamic install status - checked against server on page load
+const INSTALLED_TOOLS = {};
+
+// Check tool availability by probing binary paths on the server
+async function checkInstalledTools() {
+    const currentPlat = currentPlatform;
+
+    const checks = TOOLS.map(async (t) => {
+        if (!t.downloads) {
+            INSTALLED_TOOLS[t.id] = 'missing';
+            return;
+        }
+        const bins = t.downloads.binaries || {};
+        const hasBinaries = Object.keys(bins).length > 0;
+
+        // If no binaries defined, use installHint as the status
+        if (!hasBinaries) {
+            INSTALLED_TOOLS[t.id] = t.downloads.installHint || 'missing';
+            return;
+        }
+
+        const binPath = bins[currentPlat];
+        if (!binPath) {
+            // No binary defined for current platform - check other platforms
+            const anyPath = Object.values(bins).find(p => p);
+            if (anyPath) {
+                try {
+                    const r = await fetch(anyPath, {method:'HEAD'});
+                    INSTALLED_TOOLS[t.id] = r.ok ? 'other-platform' : 'missing';
+                } catch(e) { INSTALLED_TOOLS[t.id] = 'missing'; }
+            } else {
+                INSTALLED_TOOLS[t.id] = t.downloads.installHint || 'missing';
+            }
+            return;
+        }
+        try {
+            const r = await fetch(binPath, {method:'HEAD'});
+            INSTALLED_TOOLS[t.id] = r.ok ? 'installed' : 'missing';
+        } catch(e) { INSTALLED_TOOLS[t.id] = 'missing'; }
+    });
+
+    // Also check source repos
+    const sourceChecks = [
+        {id:'llama-cpp', path:'sources/llama.cpp/CMakeLists.txt'},
+        {id:'whisper-cpp', path:'sources/whisper.cpp/CMakeLists.txt'},
+        {id:'sd-cpp', path:'sources/stable-diffusion.cpp/CMakeLists.txt'},
+        {id:'bitnet', path:'sources/BitNet/run_inference.py'}
+    ].map(async (s) => {
+        try {
+            const r = await fetch(s.path, {method:'HEAD'});
+            if (r.ok && INSTALLED_TOOLS[s.id] !== 'installed') {
+                INSTALLED_TOOLS[s.id] = 'source';
+            }
+        } catch(e) {}
+    });
+
+    await Promise.all([...checks, ...sourceChecks]);
+    // Re-render to update badges
+    router();
+}
 
 function getInstallBadge(toolId) {
-    const status = INSTALLED_TOOLS[toolId] || 'missing';
+    const status = INSTALLED_TOOLS[toolId] || 'checking';
     switch(status) {
         case 'installed': return '<span class="badge badge-installed">Installed</span>';
         case 'system': return '<span class="badge badge-installed">System</span>';
         case 'source': return '<span class="badge badge-source">Source Only</span>';
         case 'bundled': return '<span class="badge badge-installed">Bundled</span>';
+        case 'other-platform': return '<span class="badge badge-other">Other Platforms</span>';
+        case 'npm': return '<span class="badge badge-hint">npm install</span>';
+        case 'pip': return '<span class="badge badge-hint">pip install</span>';
+        case 'docker': return '<span class="badge badge-hint">Docker</span>';
+        case 'package': return '<span class="badge badge-hint">System Package</span>';
+        case 'python': return '<span class="badge badge-hint">Python</span>';
+        case 'checking': return '<span class="badge badge-checking">Checking...</span>';
         default: return '<span class="badge badge-missing">Not Installed</span>';
     }
 }
@@ -2162,6 +2177,27 @@ const MODEL_FAMILIES = [
             {name: '3-27B-IT', quant: 'Q4_K_M', size: '17 GB', note: 'Latest generation, multimodal-ready', file: 'llm/gemma-3-27b/Gemma-3-27B-IT-Q4_K_M.gguf'},
             {name: '2-27B-IT', quant: 'Q4_K_M', size: '16.6 GB', note: 'Strong creative/general tasks', file: 'llm/gemma-2-27b/Gemma-2-27B-IT-Q4_K_M.gguf'},
             {name: '2-9B-IT', quant: 'Q8_0', size: '9.8 GB', note: 'Fast, good quality', file: 'llm/gemma-2-9b/Gemma-2-9B-IT-Q8_0.gguf'}
+        ]
+    },
+    {
+        category: 'LLM', family: 'BitNet', slug: 'bitnet', topPick: true, logo: 'logos/bitnet.svg',
+        desc: 'Native 1-bit ternary LLMs - extreme CPU efficiency with near full-precision quality',
+        overview: 'BitNet models use native 1.58-bit ternary weights ({-1, 0, +1}) trained from scratch, not post-training quantization. This enables 2-6x faster inference and 55-82% less energy on CPUs compared to FP16 models of the same size. Microsoft\'s BitNet b1.58-2B-4T was trained on 4 trillion tokens and matches full-precision 2B models in quality. The Falcon3/Falcon-E families from TII extend 1-bit inference to 1B-10B parameter sizes. All models use the I2_S GGUF quantization format and require bitnet.cpp for efficient inference.',
+        usageTips: [
+            'BitNet models REQUIRE bitnet.cpp for efficiency gains - standard llama.cpp will NOT benefit',
+            'The 2B-4T model at 1.19 GB is the best starting point - trained on 4T tokens by Microsoft',
+            'Falcon3-3B-1.58bit offers the best quality/efficiency trade-off for edge devices',
+            'CPU inference is the primary use case - GPU kernels available but CPUs are the sweet spot',
+            'Build once per model architecture with setup_env.py, then run_inference.py for generation',
+            'These models are tiny: the 10B model is only ~3.5 GB vs ~10 GB for a Q4 GGUF equivalent'
+        ],
+        format: 'GGUF', tool: 'bitnet.cpp',
+        variants: [
+            {name: 'b1.58-2B-4T', quant: 'I2_S', size: '1.19 GB', note: 'Official Microsoft - trained on 4T tokens', file: 'llm/bitnet-2b-4t/ggml-model-i2_s.gguf', topPick: true},
+            {name: 'Falcon3-1B-Instruct', quant: 'I2_S', size: '1.3 GB', note: 'Ultra-fast edge - TII UAE', file: 'llm/falcon3-1b-1.58bit/ggml-model-i2_s.gguf'},
+            {name: 'Falcon3-3B-Instruct', quant: 'I2_S', size: '2.1 GB', note: 'Best edge balance', file: 'llm/falcon3-3b-1.58bit/ggml-model-i2_s.gguf'},
+            {name: 'Falcon3-7B-Instruct', quant: 'I2_S', size: '3.1 GB', note: 'Near full-precision quality', file: 'llm/falcon3-7b-1.58bit/ggml-model-i2_s.gguf'},
+            {name: 'Falcon3-10B-Instruct', quant: 'I2_S', size: '3.8 GB', note: 'Best 1-bit quality available', file: 'llm/falcon3-10b-1.58bit/ggml-model-i2_s.gguf'}
         ]
     },
     {
@@ -2587,10 +2623,6 @@ function renderNav(route) {
         route.startsWith('/models') ? 'models' :
         route.startsWith('/quickstart') ? 'quickstart' : 'home';
 
-    const platButtons = Object.values(PLATFORMS).map(p =>
-        `<button class="nav-plat-btn ${currentPlatform === p.id ? 'active' : ''}" onclick="setPlatform('${p.id}')">${p.label}</button>`
-    ).join('');
-
     return `
     <nav class="top-nav">
         <a href="#/" class="nav-logo">Val Ark</a>
@@ -2598,11 +2630,9 @@ function renderNav(route) {
             <a href="#/" class="nav-link ${activeSection === 'home' ? 'active' : ''}">Home</a>
             <a href="#/tools" class="nav-link ${activeSection === 'tools' ? 'active' : ''}">Software</a>
             <a href="#/models" class="nav-link ${activeSection === 'models' ? 'active' : ''}">Models</a>
-            <a href="#/quickstart" class="nav-link ${activeSection === 'quickstart' ? 'active' : ''}">Quick Start</a>
+            <a href="#/quickstart" class="nav-link ${activeSection === 'quickstart' ? 'active' : ''}">Getting Started</a>
         </div>
-        <div class="nav-platform">${platButtons}</div>
-    </nav>
-    <div class="mobile-platform">${platButtons}</div>`;
+    </nav>`;
 }
 
 function renderBreadcrumb(parts) {
@@ -2641,7 +2671,7 @@ function renderFooter() {
 
     // Quick Links column
     html += '<div class="footer-col"><h4>Quick Links</h4>';
-    html += '<a href="#/quickstart">Quick Start</a>';
+    html += '<a href="#/quickstart">Getting Started</a>';
     html += '<a href="#/tools/ollama">Ollama</a>';
     html += '<a href="#/tools/llama-cpp">llama.cpp</a>';
     html += '<a href="#/tools/comfyui">ComfyUI</a>';
@@ -2703,9 +2733,6 @@ function renderHome() {
             const cardIcon = t.logo
                 ? `<img src="${t.logo}" alt="${esc(t.name)}" style="width:40px;height:40px;border-radius:8px;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="card-icon" style="background:${t.iconBg};display:none">${t.icon}</div>`
                 : `<div class="card-icon" style="background:${t.iconBg}">${t.icon}</div>`;
-            const dlLink = (t.downloads && t.downloads.binaries && t.downloads.binaries[currentPlatform])
-                ? `<span class="card-dl" onclick="handleDownload(event,'${t.downloads.binaries[currentPlatform]}')">&#x2B07; Download</span>`
-                : '';
             const sizeTag = t.size ? `<span class="tag" style="background:var(--purple-dim);color:var(--purple);font-size:0.7em">${t.size}</span>` : '';
             html += `
             <a href="#/tools/${t.id}" class="card" data-search="${esc(t.name + ' ' + t.desc + ' ' + t.id + ' ' + catId)}">
@@ -2713,10 +2740,8 @@ function renderHome() {
                 <h3>${esc(t.name)}</h3>
                 <div class="card-desc">${esc(t.desc)}</div>
                 <div class="card-meta">
-                    <span class="tag tag-tool">${t.platforms[currentPlatform] || 'N/A'}</span>
                     ${sizeTag}
                     ${getInstallBadge(t.id)}
-                    ${dlLink}
                 </div>
             </a>`;
         });
@@ -2736,8 +2761,6 @@ function renderHome() {
             const hasTopPick = f.topPick || f.variants.some(v => v.topPick);
             const logoImg = f.logo ? `<img src="${f.logo}" alt="" style="width:28px;height:28px;border-radius:6px;object-fit:cover;margin-right:8px;vertical-align:middle" onerror="this.style.display='none'">` : '';
             const topVariant = f.variants.find(v => v.topPick) || f.variants[0];
-            const dlPath = 'models/' + topVariant.file;
-            const dlName = topVariant.file.split('/').pop();
             html += `
             <a href="#/models/${f.slug}" class="card" data-search="${esc(f.family + ' ' + f.desc + ' ' + f.format + ' ' + f.tool + ' ' + f.variants.map(v=>v.name+' '+v.note).join(' '))}">
                 ${hasTopPick ? '<span class="top-badge">TOP PICK</span>' : ''}
@@ -2747,9 +2770,6 @@ function renderHome() {
                     <span class="tag tag-format">${esc(f.format)}</span>
                     <span class="tag tag-tool">${esc(f.tool)}</span>
                     <span class="tag tag-count">${f.variants.length} variant${f.variants.length > 1 ? 's' : ''}</span>
-                </div>
-                <div class="card-download-row">
-                    <span class="card-dl" onclick="handleDownload(event,'${dlPath}')" title="${dlName}">&#x2B07; ${esc(topVariant.name)} (${esc(topVariant.size)})</span>
                 </div>
             </a>`;
         });
@@ -2809,9 +2829,6 @@ function renderToolsList() {
             const cardIcon = t.logo
                 ? `<img src="${t.logo}" alt="${esc(t.name)}" style="width:40px;height:40px;border-radius:8px;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="card-icon" style="background:${t.iconBg};display:none">${t.icon}</div>`
                 : `<div class="card-icon" style="background:${t.iconBg}">${t.icon}</div>`;
-            const dlLink = (t.downloads && t.downloads.binaries && t.downloads.binaries[currentPlatform])
-                ? `<span class="card-dl" onclick="handleDownload(event,'${t.downloads.binaries[currentPlatform]}')">&#x2B07; Download</span>`
-                : '';
             const sizeTag = t.size ? `<span class="tag" style="background:var(--purple-dim);color:var(--purple)">${t.size}</span>` : '';
             const meta = TOOL_META[t.id];
             const makerTag = meta ? `<span class="tag" style="font-size:0.7em;opacity:0.7">${esc(meta.maker)}</span>` : '';
@@ -2825,7 +2842,6 @@ function renderToolsList() {
                     ${getInstallBadge(t.id)}
                     ${makerTag}
                 </div>
-                ${dlLink ? `<div class="card-download-row">${dlLink}</div>` : ''}
             </a>`;
         });
         html += '</div>';
@@ -2850,8 +2866,6 @@ function renderToolDetail(toolId) {
     const logoHtml = tool.logo
         ? `<img src="${tool.logo}" alt="${esc(tool.name)}" style="width:56px;height:56px;border-radius:12px;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
         : '';
-    const currentDl = (tool.downloads && tool.downloads.binaries[currentPlatform]) ? tool.downloads.binaries[currentPlatform] : '';
-    const currentDlName = currentDl ? currentDl.split('/').pop() : '';
     html += `<div class="detail-header">
         ${logoHtml}<div class="detail-icon" style="background:${tool.iconBg};${tool.logo ? 'display:none' : ''}">${tool.icon}</div>
         <div class="detail-title-area">
@@ -2860,7 +2874,6 @@ function renderToolDetail(toolId) {
             <div class="detail-badges">
                 ${Object.entries(tool.platforms).map(([k,v]) => `<span class="platform-badge">${PLATFORMS[k].label}: ${v}</span>`).join('')}
             </div>
-            ${currentDl ? `<a href="${currentDl}" download class="download-btn" style="margin-top:10px" onclick="handleDownload(event,'${currentDl}')">&#x2B07; Download ${esc(currentDlName)} (${PLATFORMS[currentPlatform].label})</a>` : ''}
         </div>
     </div>`;
 
@@ -2890,20 +2903,33 @@ function renderToolDetail(toolId) {
     // Downloads
     if (tool.downloads) {
         const dl = tool.downloads;
-        html += '<div class="detail-section"><h2>Download</h2>';
-        html += '<div class="paths-grid">';
-        Object.entries(dl.binaries).forEach(([platId, path]) => {
-            const platLabel = PLATFORMS[platId] ? PLATFORMS[platId].fullLabel : platId;
-            const isActive = platId === currentPlatform;
-            const filename = path.split('/').pop();
-            html += `<div class="path-card" style="${isActive ? 'border-color:var(--accent);' : ''}">
-                <h4>${platLabel}${isActive ? ' (current)' : ''}</h4>
-                <a href="${path}" download class="download-btn" onclick="handleDownload(event,'${path}')">${filename}</a>
-                <p>Local path: <code>${path}</code></p>
-            </div>`;
-        });
-        html += '</div>';
-        html += `<p style="font-size:0.8em;color:var(--text-muted);margin-top:8px">Run <code>./update.sh</code> to download the latest version of all tools.</p>`;
+        html += '<div class="detail-section" id="download"><h2>Download</h2>';
+
+        // External links
+        if (dl.releases || dl.source) {
+            html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">';
+            if (dl.releases) html += `<a href="${dl.releases}" target="_blank" rel="noopener" class="download-btn" style="background:var(--green)">&#x2197; Official Releases</a>`;
+            if (dl.source) html += `<a href="${dl.source}" target="_blank" rel="noopener" class="download-btn" style="background:var(--bg-tertiary);border:1px solid var(--border)">&#x2197; Source Code</a>`;
+            html += '</div>';
+        }
+
+        // Platform picker for local server files
+        if (dl.binaries && Object.keys(dl.binaries).length > 0) {
+            html += '<h3 style="font-size:0.95em;margin-bottom:12px;color:var(--text-secondary)">Choose your platform:</h3>';
+            html += '<div class="paths-grid">';
+            Object.entries(dl.binaries).forEach(([platId, path]) => {
+                if (!path) return;
+                const platLabel = PLATFORMS[platId] ? PLATFORMS[platId].fullLabel : platId;
+                const filename = path.split('/').pop();
+                html += `<div class="path-card">
+                    <h4>${platLabel}</h4>
+                    <a href="${path}" download class="download-btn" onclick="handleDownload(event,'${path}')">${filename}</a>
+                    <p style="margin-top:6px"><code style="font-size:0.78em">${path}</code></p>
+                </div>`;
+            });
+            html += '</div>';
+            html += `<p style="font-size:0.8em;color:var(--text-muted);margin-top:12px">Local files are available when served from a Val Ark server. Run <code>./start.sh update</code> to download the latest versions.</p>`;
+        }
         html += '</div>';
     }
 
@@ -3098,8 +3124,6 @@ function renderModelsList() {
             const hasTopPick = f.topPick || f.variants.some(v => v.topPick);
             const logoImg = f.logo ? `<img src="${f.logo}" alt="" style="width:28px;height:28px;border-radius:6px;object-fit:cover;margin-right:8px;vertical-align:middle" onerror="this.style.display='none'">` : '';
             const topVariant = f.variants.find(v => v.topPick) || f.variants[0];
-            const dlPath = 'models/' + topVariant.file;
-            const dlName = topVariant.file.split('/').pop();
             html += `
             <a href="#/models/${f.slug}" class="card" data-search="${esc(f.family + ' ' + f.desc + ' ' + f.format + ' ' + f.tool + ' ' + f.variants.map(v=>v.name+' '+(v.note||'')).join(' '))}">
                 ${hasTopPick ? '<span class="top-badge">TOP PICK</span>' : ''}
@@ -3110,9 +3134,9 @@ function renderModelsList() {
                     <span class="tag tag-tool">${esc(f.tool)}</span>
                     <span class="tag tag-count">${f.variants.length} variant${f.variants.length > 1 ? 's' : ''}</span>
                 </div>
-                <div class="card-download-row">
-                    <span class="card-dl" onclick="handleDownload(event,'${dlPath}')" title="${dlName}">&#x2B07; ${esc(topVariant.name)} (${esc(topVariant.size)})</span>
-                    ${f.variants.length > 1 ? `<span class="card-dl-more">+ ${f.variants.length - 1} more</span>` : ''}
+                <div class="card-meta" style="margin-top:4px">
+                    <span class="tag" style="background:var(--accent-dim);color:var(--accent)">${esc(topVariant.name)} - ${esc(topVariant.size)}</span>
+                    ${f.variants.length > 1 ? `<span class="tag" style="background:var(--bg-tertiary);color:var(--text-muted)">+ ${f.variants.length - 1} more</span>` : ''}
                 </div>
             </a>`;
         });
@@ -3211,7 +3235,7 @@ function renderModelDetail(slug) {
 
     // Platform commands section
     html += '<div class="detail-section"><h2>Platform-Specific Commands</h2>';
-    html += `<p style="margin-bottom:12px;font-size:0.85em">Commands shown for: <strong>${PLATFORMS[currentPlatform].fullLabel}</strong> (change platform in nav bar)</p>`;
+    html += `<p style="margin-bottom:12px;font-size:0.85em">Commands shown for: <strong>${PLATFORMS[currentPlatform].fullLabel}</strong> (select a different platform on the <a href="#/quickstart" style="color:var(--accent)">Getting Started</a> page)</p>`;
     family.variants.forEach(v => {
         const cmd = getCommand(v, family);
         html += `<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>${esc(cmd)}</div>`;
@@ -3262,58 +3286,90 @@ function renderModelDetail(slug) {
 // QUICK START
 // =============================================================================
 function renderQuickStart() {
-    const p = PLATFORMS[currentPlatform];
-    const s = p.sep;
-
-    const starts = [
-        {title: 'Chat with an LLM', desc: 'Start a local OpenAI-compatible chat server with Llama 3.2 1B',
-         cmd: `${p.toolsBase}${s}${p.llamaBin} -m ${p.modelsBase}${s}llm${s}llama-3.2-1b${s}Llama-3.2-1B-Instruct-Q8_0.gguf ${p.gpuFlag} -c 2048 --port 8080`,
-         dlModel: 'models/llm/llama-3.2-1b/Llama-3.2-1B-Instruct-Q8_0.gguf', dlSize: '1.3 GB', dlTool: 'llama-cpp'},
-        {title: 'Transcribe Audio', desc: 'Convert speech to text with Whisper large-v3-turbo',
-         cmd: `${p.toolsBase}${s}${p.whisperBin} -m ${p.modelsBase}${s}stt${s}whisper-ggml${s}ggml-large-v3-turbo-q5_0.bin -f recording.wav`,
-         dlModel: 'models/stt/whisper-ggml/ggml-large-v3-turbo-q5_0.bin', dlSize: '574 MB', dlTool: 'whisper-cpp'},
-        {title: 'Text to Speech', desc: 'Generate natural speech with Piper TTS',
-         cmd: `echo "Welcome to Val Ark" | ${p.toolsBase}${s}${p.piperBin} --model ${p.modelsBase}${s}tts${s}piper${s}en_US-lessac-medium.onnx --output_file speech.wav`,
-         dlModel: 'models/tts/piper/en_US-lessac-medium.onnx', dlSize: '63 MB', dlTool: 'piper-tts'},
-        {title: 'Generate an Image', desc: 'Create images from text prompts with SDXL Turbo',
-         cmd: `${p.toolsBase}${s}${p.sdBin} -m ${p.modelsBase}${s}image${s}sdxl-turbo${s}sdxl_turbo.safetensors -p "cyberpunk city at night" -o city.png`,
-         dlModel: 'models/image/sdxl-turbo/sdxl_turbo.safetensors', dlSize: '6.9 GB', dlTool: 'sd-cpp'},
-        {title: 'Describe an Image', desc: 'Visual question answering with MiniCPM-V 2.6',
-         cmd: `${p.toolsBase}${s}${p.llamaBin} -m ${p.modelsBase}${s}vision${s}minicpm-v-2.6${s}MiniCPM-V-2.6-Q4_K_M.gguf ${p.gpuFlag} --mmproj mmproj.gguf -c 4096 --port 8080`,
-         dlModel: 'models/vision/minicpm-v-2.6/MiniCPM-V-2.6-Q4_K_M.gguf', dlSize: '4.9 GB', dlTool: 'llama-cpp'},
-        {title: 'Streaming STT', desc: 'Real-time speech recognition with Vosk (low latency)',
-         cmd: `python3 vosk_stream.py -m ${p.modelsBase}${s}stt${s}vosk${s}vosk-model-en-us-0.22`,
-         dlModel: 'models/stt/vosk/vosk-model-en-us-0.22/', dlSize: '1.8 GB', dlTool: 'vosk'},
-        {title: 'Prepare Audio for Whisper', desc: 'Convert any audio/video to 16kHz mono WAV',
-         cmd: `ffmpeg -i input.mp4 -ar 16000 -ac 1 -f wav output.wav`,
-         dlTool: 'ffmpeg'},
-        {title: 'Multi-User LLM Server', desc: 'Serve 4 users concurrently with continuous batching',
-         cmd: `${p.toolsBase}${s}${p.llamaBin} -m ${p.modelsBase}${s}llm${s}qwen2.5-32b${s}Qwen2.5-32B-Instruct-Q4_K_M.gguf ${p.gpuFlag} -c 8192 --parallel 4 --cont-batching --port 8080`,
-         dlModel: 'models/llm/qwen2.5-32b/Qwen2.5-32B-Instruct-Q4_K_M.gguf', dlSize: '19.9 GB', dlTool: 'llama-cpp'},
-        {title: 'Voice Cloning TTS', desc: 'Clone a voice with OuteTTS on llama.cpp',
-         cmd: `${p.toolsBase}${s}${p.llamaBin} -m ${p.modelsBase}${s}tts${s}ouetts${s}OuteTTS-1.0-0.6B-Q8_0.gguf ${p.gpuFlag} -c 4096 --port 8080`,
-         dlModel: 'models/tts/ouetts/OuteTTS-1.0-0.6B-Q8_0.gguf', dlSize: '644 MB', dlTool: 'llama-cpp'},
-        {title: 'Quantize a Model', desc: 'Convert F16 model to Q4_K_M for smaller size',
-         cmd: `${p.toolsBase}${s}llama-quantize model-f16.gguf model-q4km.gguf Q4_K_M`,
-         dlTool: 'llama-cpp'}
-    ];
-
     let html = '<div class="container">';
-    html += renderBreadcrumb([{label: 'Quick Start'}]);
-    html += `<h1 style="font-size:1.6em;margin-bottom:8px">Quick Start Guides</h1>`;
-    html += `<p style="color:var(--text-secondary);font-size:0.9em;margin-bottom:20px">Commands for: <strong>${PLATFORMS[currentPlatform].fullLabel}</strong> - change platform in nav bar</p>`;
-    html += '<div class="quickstart-grid">';
-    starts.forEach(qs => {
-        const modelDl = qs.dlModel ? `<a href="${qs.dlModel}" download class="card-dl" style="margin-top:8px" onclick="handleDownload(event,'${qs.dlModel}')">&#x2B07; Model (${esc(qs.dlSize)})</a>` : '';
-        const toolDl = qs.dlTool ? `<a href="#/tools/${qs.dlTool}" class="card-dl" style="margin-top:8px;background:var(--green-dim);color:var(--green)">&#x2699; ${esc(qs.dlTool)}</a>` : '';
-        html += `<div class="qs-card">
-            <h4>${esc(qs.title)}</h4>
-            <p>${esc(qs.desc)}</p>
-            <div class="cmd" onclick="copyText(this)">${esc(qs.cmd)}</div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">${modelDl}${toolDl}</div>
+    html += renderBreadcrumb([{label: 'Getting Started'}]);
+    html += `<h1 style="font-size:1.6em;margin-bottom:8px">Getting Started</h1>`;
+    html += `<p style="color:var(--text-secondary);font-size:0.9em;margin-bottom:24px">Download Val Ark, pick your platform, and start using AI tools offline.</p>`;
+
+    // Step 1: Get Val Ark
+    html += `<div class="detail-section">
+        <h2>1. Download Val Ark</h2>
+        <p style="margin-bottom:12px">Clone the repository or download the latest release:</p>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>git clone https://github.com/mvalancy/val-ark.git && cd val-ark</div>
+        <p style="font-size:0.85em;color:var(--text-secondary);margin-top:8px">Or <a href="https://github.com/mvalancy/val-ark/releases" style="color:var(--accent)" target="_blank">download a release</a> and extract it.</p>
+    </div>`;
+
+    // Step 2: Pick platform
+    html += `<div class="detail-section">
+        <h2>2. Choose Your Platform</h2>
+        <div class="paths-grid" style="margin-top:12px">`;
+    Object.values(PLATFORMS).forEach(p => {
+        html += `<div class="path-card" style="cursor:pointer" onclick="setPlatform('${p.id}');window.location.hash='#/quickstart'">
+            <h4>${p.fullLabel}</h4>
+            <p style="font-size:0.82em">${p.gpu} acceleration</p>
         </div>`;
     });
-    html += '</div>';
+    html += `</div></div>`;
+
+    // Step 3: Install & Download
+    html += `<div class="detail-section">
+        <h2>3. Install Dependencies & Download Tools</h2>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>./start.sh setup</div>
+        <div class="code-label">Installs required packages (curl, git, tar, etc.)</div>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>./start.sh download tools</div>
+        <div class="code-label">Downloads all tools (smallest first, ~500MB total)</div>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>./start.sh download models tier1</div>
+        <div class="code-label">Downloads edge/mobile AI models (~15GB)</div>
+    </div>`;
+
+    // Step 4: Run your first model
+    html += `<div class="detail-section">
+        <h2>4. Run Your First AI Model</h2>
+        <p style="margin-bottom:12px">Start a local LLM chat server:</p>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>./tools/linux-x86_64/llama-server -m ./models/llm/llama-3.2-1b/Llama-3.2-1B-Instruct-Q8_0.gguf -ngl 999 -c 2048 --port 8080</div>
+        <div class="code-label">Starts an OpenAI-compatible API at http://localhost:8080</div>
+        <p style="margin-top:12px;margin-bottom:12px">Test it with curl:</p>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>curl http://localhost:8080/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"llama","messages":[{"role":"user","content":"Hello!"}]}'</div>
+    </div>`;
+
+    // Step 5: Auto-update
+    html += `<div class="detail-section">
+        <h2>5. Keep Updated (Optional)</h2>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>./start.sh cron install</div>
+        <div class="code-label">Sets up weekly auto-update (Sundays at 3 AM)</div>
+    </div>`;
+
+    // What's Next
+    html += `<div class="detail-section">
+        <h2>What's Next?</h2>
+        <div class="related-links">
+            <a href="#/tools" class="related-link">Browse All Software</a>
+            <a href="#/models" class="related-link">Browse AI Models</a>
+            <a href="#/tools/ollama" class="related-link">Set Up Ollama</a>
+            <a href="#/tools/whisper-cpp" class="related-link">Speech to Text</a>
+            <a href="#/tools/piper-tts" class="related-link">Text to Speech</a>
+            <a href="#/tools/sd-cpp" class="related-link">Image Generation</a>
+        </div>
+    </div>`;
+
+    // CLI Reference (collapsed)
+    html += `<details style="margin-top:24px">
+        <summary style="cursor:pointer;color:var(--accent);font-weight:600;font-size:1.1em;margin-bottom:12px">CLI Command Reference</summary>`;
+    html += '<div class="quickstart-grid" style="margin-top:12px">';
+    const cliRef = [
+        {title: 'Interactive Menu', cmd: './start.sh'},
+        {title: 'Check Status', cmd: './start.sh status'},
+        {title: 'Update Everything', cmd: './start.sh update'},
+        {title: 'Download Tier 2 Models', cmd: './start.sh download models tier2'},
+        {title: 'Download Tier 3 Models', cmd: './start.sh download models tier3'},
+        {title: 'Monitor Downloads', cmd: './start.sh monitor'},
+        {title: 'Capture Screenshots', cmd: './start.sh screenshots'},
+        {title: 'Remove Cron Job', cmd: './start.sh cron remove'}
+    ];
+    cliRef.forEach(c => {
+        html += `<div class="qs-card"><h4>${esc(c.title)}</h4><div class="cmd" onclick="copyText(this)">${esc(c.cmd)}</div></div>`;
+    });
+    html += '</div></details>';
 
     // Expanded documentation sections
     html += `<div class="detail-section" style="margin-top:32px">
@@ -3756,6 +3812,7 @@ window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', () => {
     if (!window.location.hash) window.location.hash = '#/';
     router();
+    checkInstalledTools();
 });
 </script>
 </body>

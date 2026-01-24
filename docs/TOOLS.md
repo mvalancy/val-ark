@@ -10,6 +10,7 @@
 | ONNX Runtime | Kokoro TTS, Moonshine ASR | All | ~50MB/platform |
 | Piper TTS | Fast text-to-speech (ONNX) | All | ~30MB/platform |
 | Vosk | Lightweight offline ASR | All | ~10MB/platform |
+| BitNet.cpp | 1-bit LLM inference (ternary) | All (source) | ~50MB |
 
 ## Creative & Dev Tools
 

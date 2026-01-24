@@ -1313,13 +1313,14 @@ const TOOLS = [
     {
         id: 'kicad', name: 'KiCad', category: 'creative', icon: 'K', iconBg: '#314cb6', logo: 'logos/kicad.png',
         desc: 'Electronic design automation - schematic capture, PCB layout, and 3D visualization',
-        size: '~1.5 GB (with libraries)',
-        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        size: '~212 MB (AppImage)',
+        platforms: { ubuntu: 'prebuilt' },
         downloads: {
             source: 'https://gitlab.com/kicad/code/kicad',
             releases: 'https://www.kicad.org/download/',
-            installHint: 'package',
-            binaries: {}
+            binaries: {
+                'ubuntu': 'tools/linux-x86_64/kicad/KiCad.AppImage'
+            }
         },
         details: {
             overview: 'KiCad is a free, open-source EDA suite for schematic capture, PCB layout, and manufacturing output. Version 9+ includes kicad-cli for headless operations like DRC checks, Gerber generation, and BOM export - enabling AI-driven PCB design automation.',
@@ -2370,8 +2371,8 @@ const MODEL_FAMILIES = [
     },
     {
         category: 'ImageGen', family: 'Image Generation', slug: 'image-gen', topPick: true,
-        desc: 'Stable Diffusion models: SDXL, SD3.5, PixArt-Sigma',
-        overview: 'Image generation models create images from text descriptions. SDXL Turbo generates in 1 step (2-5 seconds), while standard SDXL produces higher quality in 20-30 steps. SD 3.5 Medium improves text rendering in images. PixArt-Sigma is a lightweight alternative at only 0.6B parameters supporting up to 4K resolution. All run via stable-diffusion.cpp with CUDA, Metal, or Vulkan acceleration.',
+        desc: 'Stable Diffusion models: SDXL Turbo, SDXL Lightning, SDXL Base, SD 3.5',
+        overview: 'Image generation models create images from text descriptions. SDXL Turbo generates in 1 step (2-5 seconds). SDXL Lightning produces high quality in 4 steps. Standard SDXL Base is compatible with thousands of LoRA style adapters. SD 3.5 Medium improves text rendering in images. All run via stable-diffusion.cpp with CUDA, Metal, or Vulkan acceleration.',
         usageTips: [
             'SDXL Turbo: use --steps 1 --cfg-scale 0 for fastest generation (distilled model)',
             'SDXL Lightning: use --steps 4 --cfg-scale 1.0 for fast high-quality output',
@@ -2383,11 +2384,10 @@ const MODEL_FAMILIES = [
         ],
         format: 'SafeTensors', tool: 'sd.cpp',
         variants: [
-            {name: 'SDXL Turbo', quant: '-', size: '7 GB', note: '1-step generation, very fast', file: 'image/sdxl-turbo/sdxl_turbo.safetensors', topPick: true},
-            {name: 'SDXL Lightning (4-step)', quant: '-', size: '7 GB', note: 'Fast high-quality generation', file: 'image/sdxl-lightning/sdxl_lightning_4step.safetensors'},
-            {name: 'SDXL Base 1.0', quant: '-', size: '7 GB', note: 'Full SDXL baseline, most LoRAs compatible', file: 'image/sdxl-base/sd_xl_base_1.0.safetensors'},
-            {name: 'SD 3.5 Medium', quant: '-', size: '5 GB', note: 'Latest SD, improved text in images', file: 'image/sd3.5-medium/sd3.5_medium.safetensors'},
-            {name: 'PixArt-Sigma 1024', quant: '-', size: '2.5 GB', note: '0.6B params, up to 4K resolution', file: 'image/pixart-sigma/pixart_sigma.safetensors'}
+            {name: 'SDXL Turbo', quant: 'fp16', size: '6.5 GB', note: '1-step generation, very fast', file: 'image-gen/sdxl-turbo/sd_xl_turbo_1.0_fp16.safetensors', topPick: true},
+            {name: 'SDXL Lightning (4-step)', quant: '-', size: '6.5 GB', note: 'Fast high-quality generation', file: 'image-gen/sdxl-lightning/sdxl_lightning_4step.safetensors'},
+            {name: 'SDXL Base 1.0', quant: '-', size: '6.5 GB', note: 'Full SDXL baseline, most LoRAs compatible', file: 'image-gen/sdxl-base/sd_xl_base_1.0.safetensors'},
+            {name: 'SD 3.5 Medium', quant: '-', size: '4.3 GB', note: 'Latest SD, improved text in images', file: 'image-gen/sd3.5-medium/sd3.5_medium.safetensors'}
         ]
     },
     {
@@ -2418,8 +2418,8 @@ const MODEL_FAMILIES = [
 // =============================================================================
 const STORAGE_DATA = [
     {label: 'LLM Models', size: 300, color: '#4da6ff'},
-    {label: 'Image Gen', size: 40, color: '#a78bfa'},
-    {label: 'Vision', size: 40, color: '#f472b6'},
+    {label: 'Image Gen', size: 24, color: '#a78bfa'},
+    {label: 'Vision', size: 30, color: '#f472b6'},
     {label: 'STT/ASR', size: 20, color: '#4ade80'},
     {label: 'TTS', size: 15, color: '#fbbf24'},
     {label: 'NVIDIA', size: 24, color: '#22d3ee'},

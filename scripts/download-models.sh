@@ -421,7 +421,8 @@ validate_all_urls() {
         "nvidia/Llama-3.1-Nemotron-Nano-VL-8B-V1"
         "bartowski/Qwen2-VL-7B-Instruct-GGUF"
         "stabilityai/sdxl-turbo"
-        "PixArt-alpha/PixArt-Sigma-XL-2-1024-MS"
+        "stabilityai/stable-diffusion-3.5-medium"
+        "ByteDance/SDXL-Lightning"
         "stabilityai/stable-diffusion-xl-base-1.0"
         "nvidia/Audio2Face-3D-v3.0"
         "nvidia/canary-1b"
@@ -841,13 +842,17 @@ download_image_gen_models() {
     local IMG_DIR="${MODEL_ROOT}/image-gen"
     ensure_dir "$IMG_DIR"
 
-    # --- SDXL Turbo (1-step generation) ---
+    # --- SDXL Turbo (1-step generation, fp16 single file only) ---
     log_info "=== SDXL Turbo ==="
-    hf_download_repo "stabilityai/sdxl-turbo" "${IMG_DIR}/sdxl-turbo"
+    hf_download_file "stabilityai/sdxl-turbo" \
+        "sd_xl_turbo_1.0_fp16.safetensors" \
+        "${IMG_DIR}/sdxl-turbo"
 
-    # --- PixArt-Sigma (0.6B params, 4K capable) ---
-    log_info "=== PixArt-Sigma ==="
-    hf_download_repo "PixArt-alpha/PixArt-Sigma-XL-2-1024-MS" "${IMG_DIR}/pixart-sigma-1024"
+    # --- SD 3.5 Medium (new architecture, sd.cpp compatible) ---
+    log_info "=== SD 3.5 Medium ==="
+    hf_download_file "stabilityai/stable-diffusion-3.5-medium" \
+        "sd3.5_medium.safetensors" \
+        "${IMG_DIR}/sd3.5-medium"
 
     # --- Stable Diffusion XL Base ---
     log_info "=== SDXL Base ==="
@@ -1164,9 +1169,11 @@ download_tier2() {
     log_info "=== OuteTTS ==="
     hf_download_repo "OuteAI/OuteTTS-1.0-0.6B-GGUF" "${TTS_DIR}/outetts-1.0-gguf"
 
-    # --- SDXL Turbo ---
+    # --- SDXL Turbo (fp16 single file only) ---
     log_info "=== SDXL Turbo ==="
-    hf_download_repo "stabilityai/sdxl-turbo" "${IMG_DIR}/sdxl-turbo"
+    hf_download_file "stabilityai/sdxl-turbo" \
+        "sd_xl_turbo_1.0_fp16.safetensors" \
+        "${IMG_DIR}/sdxl-turbo"
 
     # --- VLMs ---
     log_info "=== Vision Language Models ==="
@@ -1281,7 +1288,9 @@ download_tier3() {
 
     # --- Full image generation ---
     log_info "=== Full image generation ==="
-    hf_download_repo "PixArt-alpha/PixArt-Sigma-XL-2-1024-MS" "${IMG_DIR}/pixart-sigma-1024"
+    hf_download_file "ByteDance/SDXL-Lightning" \
+        "sdxl_lightning_4step.safetensors" \
+        "${IMG_DIR}/sdxl-lightning"
     hf_download_file "stabilityai/stable-diffusion-xl-base-1.0" \
         "sd_xl_base_1.0.safetensors" \
         "${IMG_DIR}/sdxl-base"

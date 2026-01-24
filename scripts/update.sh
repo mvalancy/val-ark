@@ -1097,6 +1097,27 @@ PGEOF
         fi
     }
 
+    # --- KiCad (~200MB AppImage, x86_64 — always download for the ark) ---
+    require_disk_space 250 "KiCad" && {
+        local kicad_dir="${TOOLS_DIR}/linux-x86_64/kicad"
+        if [ ! -f "${kicad_dir}/KiCad.AppImage" ]; then
+            local kicad_ver="8.0.9"
+            local kicad_url="https://sourceforge.net/projects/kicad-appimage/files/v8/KiCad-${kicad_ver}.glibc2.29-x86_64.AppImage/download"
+            log_info "Downloading KiCad ${kicad_ver} AppImage (linux-x86_64)..."
+            mkdir -p "${kicad_dir}"
+            curl -L -o "${kicad_dir}/KiCad.AppImage" "$kicad_url" 2>/dev/null
+            if [ -f "${kicad_dir}/KiCad.AppImage" ] && [ $(stat -c%s "${kicad_dir}/KiCad.AppImage" 2>/dev/null || echo 0) -gt 10000 ]; then
+                chmod +x "${kicad_dir}/KiCad.AppImage"
+                log_ok "KiCad ${kicad_ver}: $(du -h "${kicad_dir}/KiCad.AppImage" | cut -f1)"
+            else
+                log_err "KiCad download failed (file too small or missing)"
+                rm -f "${kicad_dir}/KiCad.AppImage"
+            fi
+        else
+            log_info "Already have: KiCad"
+        fi
+    }
+
     # --- Disk space summary ---
     echo ""
     local budget=$(check_disk_space)

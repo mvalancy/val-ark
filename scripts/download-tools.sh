@@ -1008,14 +1008,15 @@ main() {
 
     DOWNLOAD_TOTAL=28  # Approximate total operations (includes linux-x86_64)
 
-    download_llama_cpp
-    download_whisper_cpp
-    download_piper
-    download_stable_diffusion_cpp
-    download_onnxruntime
-    download_ffmpeg
-    download_vosk
-    download_bitnet
+    # Download smallest tools first for quick wins
+    download_vosk                   # ~100 MB
+    download_bitnet                 # ~120 MB
+    download_piper                  # ~173 MB
+    download_onnxruntime            # ~453 MB
+    download_stable_diffusion_cpp   # ~823 MB
+    download_whisper_cpp            # ~1.1 GB
+    download_llama_cpp              # ~1.5 GB
+    download_ffmpeg                 # ~1.8 GB
     generate_build_scripts
 
     # Final Summary

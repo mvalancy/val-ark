@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import path from 'path';
+import fs from 'fs';
 
 const OUTPUT_DIR = path.resolve(__dirname, '../../../docs/screenshots');
 const WEB_UI = path.resolve(__dirname, '../../../web-ui/index.html');
@@ -317,7 +318,7 @@ test.describe('Val Ark Web UI - Model Variants Table', () => {
 });
 
 test.describe('Val Ark Web UI - Full Page Navigation Flow', () => {
-  test('complete navigation flow: Home -> Software -> Tool -> Back -> Models -> Model -> Back -> Quickstart', async ({ page }) => {
+  test('complete navigation flow: Home -> Software -> Tool -> Back -> Models -> Model -> Back -> Getting Started', async ({ page }) => {
     // Start at home
     await page.goto(`file://${WEB_UI}`);
     await page.waitForTimeout(300);
@@ -352,5 +353,239 @@ test.describe('Val Ark Web UI - Full Page Navigation Flow', () => {
     // Return home via logo
     await page.click('a.nav-logo');
     await page.waitForTimeout(300);
+  });
+});
+
+// =============================================================================
+// REAL VERIFICATION: Binary presence on disk
+// =============================================================================
+
+const PROJECT_ROOT = path.resolve(__dirname, '../../..');
+const TOOLS_DIR = path.join(PROJECT_ROOT, 'tools');
+
+// Map of tool IDs to expected binary paths (at least one must exist)
+const TOOL_BINARIES: Record<string, string[]> = {
+  'llama-cpp': [
+    'tools/linux-x86_64/llama-server',
+    'tools/linux-arm64/llama-server',
+    'tools/macos-arm64/llama-server',
+  ],
+  'whisper-cpp': [
+    'tools/linux-arm64/whisper-cli',
+    'tools/linux-x86_64/whisper-cli',
+  ],
+  'piper-tts': [
+    'tools/linux-x86_64/piper/piper',
+    'tools/linux-arm64/piper/piper',
+  ],
+  'sd-cpp': [
+    'tools/linux-x86_64/sd-cli',
+    'tools/linux-arm64/sd-cli',
+  ],
+  'ffmpeg': [
+    'tools/linux-x86_64/ffmpeg',
+    'tools/linux-arm64/ffmpeg',
+  ],
+  'onnxruntime': [
+    'tools/linux-x86_64/onnxruntime',
+    'tools/linux-arm64/onnxruntime',
+  ],
+  'vosk': [
+    'tools/linux-x86_64/vosk',
+    'tools/linux-arm64/vosk',
+  ],
+  'bitnet': [
+    'tools/linux-arm64/bitnet',
+  ],
+  'blender': [
+    'tools/linux-x86_64/blender/blender',
+  ],
+  'freecad': [
+    'tools/linux-x86_64/FreeCAD/FreeCAD.AppImage',
+    'tools/linux-x86_64/FreeCAD/bin/FreeCADCmd',
+  ],
+  'kicad': [
+    'tools/linux-x86_64/kicad/KiCad.AppImage',
+  ],
+  'godot': [
+    'tools/linux-arm64/godot',
+    'tools/linux-x86_64/godot',
+  ],
+  'syncthing': [
+    'tools/linux-x86_64/syncthing/syncthing',
+    'tools/linux-arm64/syncthing/syncthing',
+  ],
+  'influxdb': [
+    'tools/linux-x86_64/influxdb',
+    'tools/linux-arm64/influxdb',
+  ],
+  'btop': [
+    'tools/linux-x86_64/btop/bin/btop',
+    'tools/linux-arm64/btop/bin/btop',
+  ],
+  'tmux': [
+    'tools/linux-x86_64/tmux/tmux',
+    'tools/linux-arm64/tmux/tmux',
+  ],
+  'dev-cli': [
+    'tools/linux-x86_64/dev-cli',
+    'tools/linux-arm64/dev-cli',
+  ],
+};
+
+// Tools that are intentionally not downloaded (package-managed)
+const PACKAGE_MANAGED_TOOLS = ['vlc', 'n8n', 'milvus', 'coolify', 'claude-code', 'ollama', 'comfyui'];
+
+test.describe('Val Ark - Binary Verification', () => {
+  for (const [toolId, paths] of Object.entries(TOOL_BINARIES)) {
+    test(`binary exists on disk: ${toolId}`, () => {
+      const found = paths.some(p => fs.existsSync(path.join(PROJECT_ROOT, p)));
+      expect(found, `Expected at least one binary for ${toolId} at: ${paths.join(', ')}`).toBe(true);
+    });
+  }
+
+  test('all downloadable tools have at least one binary', () => {
+    const missing: string[] = [];
+    for (const [toolId, paths] of Object.entries(TOOL_BINARIES)) {
+      const found = paths.some(p => fs.existsSync(path.join(PROJECT_ROOT, p)));
+      if (!found) missing.push(toolId);
+    }
+    expect(missing, `Missing binaries for: ${missing.join(', ')}`).toHaveLength(0);
+  });
+
+  test('package-managed tools are correctly excluded from binary checks', () => {
+    for (const toolId of PACKAGE_MANAGED_TOOLS) {
+      expect(TOOL_BINARIES[toolId], `${toolId} should not have binary paths defined`).toBeUndefined();
+    }
+  });
+});
+
+test.describe('Val Ark - Download Size Ordering', () => {
+  test('download-tools.sh orders downloads smallest-first', () => {
+    const scriptPath = path.join(PROJECT_ROOT, 'scripts/download-tools.sh');
+    const script = fs.readFileSync(scriptPath, 'utf-8');
+
+    // Find the main orchestration section: "DOWNLOAD_TOTAL=28" through "generate_build_scripts" call
+    const mainMatch = script.match(/DOWNLOAD_TOTAL=28[\s\S]*?generate_build_scripts/);
+    expect(mainMatch, 'Could not find main download section').not.toBeNull();
+    const mainSection = mainMatch![0];
+
+    // Extract the ordered download calls from the main section
+    const toolFunctions = ['download_vosk', 'download_bitnet', 'download_piper',
+      'download_onnxruntime', 'download_stable_diffusion_cpp',
+      'download_whisper_cpp', 'download_llama_cpp', 'download_ffmpeg'];
+
+    const actualOrder: string[] = [];
+    for (const line of mainSection.split('\n')) {
+      const trimmed = line.trim();
+      const fn = toolFunctions.find(f => trimmed.startsWith(f));
+      if (fn) actualOrder.push(fn);
+    }
+
+    expect(actualOrder).toEqual(toolFunctions);
+  });
+});
+
+test.describe('Val Ark - Web UI Data Integrity', () => {
+  test('Software page shows all tool cards', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.click('a.nav-link:has-text("Software")');
+    await page.waitForSelector('.card', { timeout: 5000 });
+
+    // Count tool cards with href to tool detail pages
+    const cardCount = await page.locator('a.card[href*="#/tools/"]').count();
+    expect(cardCount).toBe(TOOL_IDS.length);
+  });
+
+  test('Models page shows all model cards', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.click('a.nav-link:has-text("Models")');
+    await page.waitForSelector('.card', { timeout: 5000 });
+
+    const cardCount = await page.locator('a.card[href*="#/models/"]').count();
+    expect(cardCount).toBe(MODEL_SLUGS.length);
+  });
+
+  test('all tool detail pages have download/install information', async ({ page }) => {
+    for (const toolId of TOOL_IDS) {
+      await page.goto(`file://${WEB_UI}#/tools/${toolId}`);
+      await page.waitForSelector('#app-root h1, #app-root h2', { timeout: 5000 });
+      const content = await page.locator('#app-root').textContent();
+      // Every tool page should mention installation or download
+      const hasInstallInfo = content?.includes('Install') ||
+        content?.includes('Download') ||
+        content?.includes('pip') ||
+        content?.includes('npm') ||
+        content?.includes('docker') ||
+        content?.includes('AppImage') ||
+        content?.includes('.cpp') ||
+        content?.includes('binary');
+      expect(hasInstallInfo, `${toolId} page should have install/download info`).toBe(true);
+    }
+  });
+
+  test('model detail pages have variant information', async ({ page }) => {
+    for (const slug of MODEL_SLUGS) {
+      await page.goto(`file://${WEB_UI}#/models/${slug}`);
+      await page.waitForSelector('#app-root h1, #app-root h2', { timeout: 5000 });
+      // Each model page should show file sizes (GB/MB)
+      const content = await page.locator('#app-root').textContent();
+      const hasSizeInfo = content?.includes('GB') || content?.includes('MB');
+      expect(hasSizeInfo, `${slug} model page should show file sizes`).toBe(true);
+    }
+  });
+});
+
+test.describe('Val Ark - Model File Verification', () => {
+  const MODELS_ROOT = path.resolve('/home/uat-admin/models');
+
+  test('LLM models directory exists and has content', () => {
+    const llmDir = path.join(MODELS_ROOT, 'llm');
+    expect(fs.existsSync(llmDir), 'LLM models directory should exist').toBe(true);
+    const dirs = fs.readdirSync(llmDir);
+    expect(dirs.length).toBeGreaterThan(5);
+  });
+
+  test('image-gen models use single-file checkpoints (no bloat)', () => {
+    const imgDir = path.join(MODELS_ROOT, 'image-gen');
+    if (!fs.existsSync(imgDir)) return;
+    const dirs = fs.readdirSync(imgDir);
+    for (const d of dirs) {
+      const fullPath = path.join(imgDir, d);
+      if (!fs.statSync(fullPath).isDirectory()) continue;
+      const files = fs.readdirSync(fullPath);
+      // Should NOT have diffusers component directories (unet/, text_encoder/, etc.)
+      const hasDiffusersComponents = files.includes('unet') && files.includes('text_encoder');
+      expect(hasDiffusersComponents, `${d} should not have diffusers component dirs (bloat)`).toBe(false);
+    }
+  });
+
+  test('image-gen and vlm directories have no bloated repo downloads', () => {
+    // These categories had the worst bloat issues (full HF repo downloads)
+    const categories = ['vlm', 'image-gen'];
+    const oversized: string[] = [];
+    for (const cat of categories) {
+      const catDir = path.join(MODELS_ROOT, cat);
+      if (!fs.existsSync(catDir)) continue;
+      const dirs = fs.readdirSync(catDir);
+      for (const d of dirs) {
+        const fullPath = path.join(catDir, d);
+        if (!fs.statSync(fullPath).isDirectory()) continue;
+        const files = fs.readdirSync(fullPath);
+        // Check for diffusers component directories (sign of full repo download)
+        const hasDiffusersLayout = files.includes('unet') && files.includes('text_encoder');
+        // Check for excessive GGUF variants (should have max 2-3 per model)
+        const ggufFiles = files.filter(f => f.endsWith('.gguf'));
+        if (hasDiffusersLayout) {
+          oversized.push(`${cat}/${d} (has diffusers layout - bloated repo)`);
+        }
+        if (ggufFiles.length > 5) {
+          oversized.push(`${cat}/${d} (${ggufFiles.length} GGUF files - too many variants)`);
+        }
+      }
+    }
+    expect(oversized, `Bloated model directories: ${oversized.join(', ')}`).toHaveLength(0);
   });
 });

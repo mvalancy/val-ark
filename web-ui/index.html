@@ -385,6 +385,127 @@ body {
     line-height: 1.7;
 }
 
+/* Kiwix Banner */
+.kiwix-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(135deg, #1a3a5c 0%, #1a2744 100%);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    gap: 16px;
+}
+.kiwix-banner-content {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+.kiwix-banner-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    background: #1a73e8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5em;
+    font-weight: 700;
+    color: #fff;
+    flex-shrink: 0;
+}
+.kiwix-banner-title {
+    font-size: 1.1em;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+.kiwix-banner-desc {
+    font-size: 0.85em;
+    color: var(--text-secondary);
+}
+.kiwix-banner-btn {
+    background: var(--accent);
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    font-size: 0.9em;
+    white-space: nowrap;
+    text-decoration: none;
+    transition: opacity 0.2s;
+}
+.kiwix-banner-btn:hover { opacity: 0.85; }
+
+/* Screenshot Gallery */
+.screenshot-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+.screenshot-thumb {
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: transform 0.2s, border-color 0.2s;
+    aspect-ratio: 16/10;
+    background: var(--bg-tertiary);
+}
+.screenshot-thumb:hover {
+    transform: scale(1.02);
+    border-color: var(--accent);
+}
+.screenshot-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* Lightbox */
+.lightbox-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.92);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 20px;
+}
+.lightbox-overlay.active { display: flex; }
+.lightbox-overlay img {
+    max-width: 95vw;
+    max-height: 90vh;
+    border-radius: 8px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+}
+.lightbox-caption {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #fff;
+    font-size: 0.9em;
+    background: rgba(0,0,0,0.6);
+    padding: 6px 16px;
+    border-radius: 20px;
+}
+.lightbox-close {
+    position: fixed;
+    top: 20px;
+    right: 24px;
+    color: #fff;
+    font-size: 2em;
+    cursor: pointer;
+    z-index: 10000;
+    line-height: 1;
+}
+
 /* Code Blocks */
 .code-block {
     background: var(--bg-tertiary);
@@ -701,9 +822,9 @@ a.card, a.nav-logo, a.nav-link, a.related-link {
 }
 .nav-disk-bar {
     width: 80px;
-    height: 6px;
+    height: 4px;
     background: var(--bg-tertiary);
-    border-radius: 3px;
+    border-radius: 2px;
     overflow: hidden;
 }
 .nav-disk-fill {
@@ -725,7 +846,7 @@ a.card, a.nav-logo, a.nav-link, a.related-link {
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
-    z-index: 200;
+    z-index: 9999;
     overflow: hidden;
     display: none;
 }
@@ -813,6 +934,18 @@ a.card, a.nav-logo, a.nav-link, a.related-link {
     color: var(--text-primary);
 }
 
+/* Install Button Spinner */
+.dl-action-btn .spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: dl-spin 0.6s linear infinite;
+}
+@keyframes dl-spin { to { transform: rotate(360deg); } }
+
 /* Last Updated Label */
 .last-updated {
     font-size: 0.7em;
@@ -897,6 +1030,7 @@ const TOOLS = [
     {
         id: 'llama-cpp', name: 'llama.cpp', category: 'ai-inference', icon: 'L', iconBg: '#2563eb', logo: 'logos/llama-cpp.png', downloadTarget: 'llama-cpp',
         desc: 'High-performance LLM inference in C/C++ with GPU acceleration',
+        screenshots: ['screenshots/llama-cpp-1.png'],
         platforms: { jetson: 'build', ubuntu: 'build', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/ggml-org/llama.cpp',
@@ -968,6 +1102,7 @@ const TOOLS = [
     {
         id: 'whisper-cpp', name: 'whisper.cpp', category: 'ai-inference', icon: 'W', iconBg: '#059669', logo: 'logos/whisper-cpp.png', downloadTarget: 'whisper-cpp',
         desc: 'Fast speech-to-text with OpenAI Whisper models in C/C++',
+        screenshots: ['screenshots/whisper-cpp-1.png'],
         platforms: { jetson: 'build', ubuntu: 'build', mac: 'build', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/ggml-org/whisper.cpp',
@@ -1030,6 +1165,7 @@ const TOOLS = [
     {
         id: 'piper-tts', name: 'Piper TTS', category: 'ai-inference', icon: 'P', iconBg: '#7c3aed', logo: 'logos/piper.png', downloadTarget: 'piper',
         desc: 'Ultra-fast neural text-to-speech with 50+ language support',
+        screenshots: ['screenshots/piper-tts-1.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/rhasspy/piper',
@@ -1082,6 +1218,7 @@ const TOOLS = [
     {
         id: 'sd-cpp', name: 'stable-diffusion.cpp', category: 'ai-inference', icon: 'S', iconBg: '#dc2626', logo: 'logos/sd-cpp.png', downloadTarget: 'sd-cpp',
         desc: 'Image generation from text prompts with Stable Diffusion models',
+        screenshots: ['screenshots/sd-cpp-1.png'],
         platforms: { jetson: 'build', ubuntu: 'build', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/leejet/stable-diffusion.cpp',
@@ -1135,6 +1272,7 @@ const TOOLS = [
     {
         id: 'ffmpeg', name: 'FFmpeg', category: 'media', icon: 'F', iconBg: '#16a34a', logo: 'logos/ffmpeg.png', downloadTarget: 'ffmpeg',
         desc: 'Audio/video processing, format conversion, and hardware acceleration',
+        screenshots: ['screenshots/ffmpeg-1.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/FFmpeg/FFmpeg',
@@ -1185,6 +1323,7 @@ const TOOLS = [
     {
         id: 'onnxruntime', name: 'ONNX Runtime', category: 'ai-inference', icon: 'O', iconBg: '#0891b2', logo: 'logos/onnxruntime.png', downloadTarget: 'onnxruntime',
         desc: 'Cross-platform ML inference for TTS, vision, and specialized models',
+        screenshots: ['screenshots/onnxruntime-1.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/microsoft/onnxruntime',
@@ -1251,6 +1390,7 @@ const TOOLS = [
     {
         id: 'vosk', name: 'Vosk', category: 'ai-inference', icon: 'V', iconBg: '#ea580c', logo: 'logos/vosk.png', downloadTarget: 'vosk',
         desc: 'Lightweight offline speech recognition with streaming support',
+        screenshots: ['screenshots/vosk-1.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'pip', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/alphacep/vosk-api',
@@ -1311,6 +1451,7 @@ const TOOLS = [
     {
         id: 'bitnet', name: 'BitNet.cpp', category: 'ai-inference', icon: 'B', iconBg: '#00d4aa', logo: 'logos/bitnet.svg', downloadTarget: 'bitnet',
         desc: 'Microsoft\'s 1-bit LLM inference - run ternary models at extreme efficiency on CPUs',
+        screenshots: ['screenshots/bitnet-1.png'],
         size: '~50 MB (source)',
         platforms: { jetson: 'build', ubuntu: 'build', mac: 'build', windows: 'build' },
         downloads: {
@@ -1359,6 +1500,7 @@ const TOOLS = [
     {
         id: 'ollama', name: 'Ollama', category: 'ai-platform', icon: 'O', iconBg: '#1a1a2e', logo: 'logos/ollama.png', downloadTarget: 'ollama',
         desc: 'Run LLMs locally with one command - OpenAI-compatible API, automatic GPU detection',
+        screenshots: ['screenshots/ollama-1.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/ollama/ollama',
@@ -1378,6 +1520,7 @@ const TOOLS = [
         id: 'blender', name: 'Blender', category: 'creative', icon: 'B', iconBg: '#e87d0d', logo: 'logos/blender.png', downloadTarget: 'blender',
         desc: '3D modeling, animation, rendering, and scripting - with Python API for programmatic modeling',
         size: '~1.1 GB (portable)',
+        screenshots: ['screenshots/blender-1.png'],
         platforms: { ubuntu: 'portable', mac: 'portable', windows: 'portable' },
         downloads: {
             source: 'https://github.com/blender/blender',
@@ -1389,25 +1532,28 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'Blender is a free, open-source 3D creation suite supporting the entire 3D pipeline: modeling, rigging, animation, simulation, rendering, compositing, motion tracking, and video editing. Its Python API enables full programmatic control for AI-driven 3D content generation.',
+            overview: 'Blender is a free, open-source 3D creation suite supporting the entire 3D pipeline: modeling, rigging, animation, simulation, rendering, compositing, motion tracking, and video editing. It is used by professional studios, indie developers, architects, scientists, and hobbyists to produce everything from feature films and game assets to 3D-printed models and scientific visualizations.\n\nBlender\'s Python API (the bpy module) provides full programmatic control over every aspect of a scene. You can create geometry, assign materials, configure cameras and lighting, and render frames entirely from scripts without ever opening the GUI. This makes it ideal for AI-driven 3D content generation, batch rendering pipelines, and procedural asset creation on headless servers.\n\nThe software includes two render engines: Cycles (a physically-accurate path tracer with GPU acceleration via CUDA, OptiX, HIP, and Metal) and EEVEE (a real-time PBR engine for fast previews). Geometry Nodes provide a visual node-based system for procedural modeling, enabling parametric generation of complex landscapes, buildings, vegetation, and effects through data flow graphs.',
             features: [
-                'Full Python scripting API (bpy) for programmatic 3D modeling',
-                'Headless/background mode: blender --background --python script.py',
-                'Cycles (path-traced) and EEVEE (real-time) render engines',
-                'Geometry Nodes for procedural generation',
-                'CUDA/OptiX GPU rendering support',
-                'USD, glTF, FBX, OBJ, STL import/export',
-                'Built-in video sequence editor',
+                'Full Python scripting API (bpy) for programmatic 3D modeling and automation',
+                'Headless/background mode for server-side rendering and batch processing',
+                'Cycles path-traced renderer with GPU acceleration (CUDA, OptiX, HIP, Metal)',
+                'EEVEE real-time PBR renderer for fast previews and stylized output',
+                'Geometry Nodes for visual procedural generation workflows',
+                'USD, glTF, FBX, OBJ, STL, PLY, Alembic import/export',
+                'Built-in video sequence editor for post-production and compositing',
                 'Grease Pencil for 2D animation in 3D space',
-                'Sculpting, texture painting, UV mapping',
-                'Physics simulations (fluid, cloth, particles, rigid/soft body)'
+                'Sculpting, texture painting, and UV mapping tools',
+                'Physics simulations: fluid, cloth, particles, rigid/soft body, smoke, fire',
+                'Motion tracking and camera solving for VFX compositing',
+                'Add-on ecosystem with hundreds of community and bundled extensions'
             ],
             cli: [
-                {cmd: 'blender --background scene.blend --python script.py', desc: 'Run Python script headlessly on a .blend file'},
-                {cmd: 'blender --background scene.blend --render-anim', desc: 'Render full animation in background'},
-                {cmd: 'blender --background scene.blend --render-frame 1 --render-output //output', desc: 'Render single frame'},
-                {cmd: 'blender --background --python-expr "import bpy; bpy.ops.mesh.primitive_cube_add()"', desc: 'Execute Python expression'},
-                {cmd: 'blender --background scene.blend --engine CYCLES --render-frame 1', desc: 'Render with Cycles engine'}
+                {cmd: 'blender --background scene.blend --python script.py', desc: 'Run a Python script headlessly on a .blend file'},
+                {cmd: 'blender --background scene.blend --render-anim', desc: 'Render full animation sequence in background mode'},
+                {cmd: 'blender --background scene.blend --render-frame 1 --render-output //output_', desc: 'Render a single frame to the specified output path'},
+                {cmd: 'blender --background --python-expr "import bpy; bpy.ops.mesh.primitive_cube_add(); bpy.ops.export_mesh.stl(filepath=\'cube.stl\')"', desc: 'Create geometry and export via inline Python expression'},
+                {cmd: 'blender --background scene.blend --engine CYCLES --render-frame 1', desc: 'Render frame 1 using the Cycles path-tracing engine'},
+                {cmd: 'blender --background --factory-startup --python convert.py -- input.fbx output.glb', desc: 'Batch convert between 3D formats using a custom conversion script'}
             ]
         }
     },
@@ -1415,6 +1561,7 @@ const TOOLS = [
         id: 'freecad', name: 'FreeCAD', category: 'creative', icon: 'C', iconBg: '#0b5394', logo: 'logos/freecad.svg', downloadTarget: 'freecad',
         desc: 'Parametric 3D CAD modeler with Python scripting - headless mode for automated design',
         size: '~760 MB (AppImage)',
+        screenshots: ['screenshots/freecad-1.png', 'screenshots/freecad-2.png'],
         platforms: { ubuntu: 'appimage', mac: 'dmg', windows: 'installer' },
         downloads: {
             source: 'https://github.com/FreeCAD/FreeCAD',
@@ -1426,24 +1573,27 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'FreeCAD is an open-source parametric 3D CAD modeler for mechanical engineering and product design. Its Python API and headless FreeCADCmd binary enable fully automated CAD generation, making it ideal for AI-assisted engineering workflows.',
+            overview: 'FreeCAD is an open-source parametric 3D CAD modeler designed for mechanical engineering, product design, and architecture. Unlike mesh-based modelers like Blender, FreeCAD works with precise geometric primitives and constraint-based sketches, producing models suitable for manufacturing with exact dimensions and tolerances.\n\nThe parametric approach means every dimension, constraint, and operation is stored as a parameter that can be changed later -- the entire model updates automatically. This makes FreeCAD ideal for AI-assisted engineering: an AI can generate or modify designs by adjusting parameters programmatically through Python scripts, without needing to understand mesh topology.\n\nFreeCAD\'s headless binary (FreeCADCmd) runs without any display, enabling automated CAD generation on servers. The Python API exposes all workbenches: Part Design for solid modeling, Sketcher for 2D constraint-based drawing, FEM for structural analysis, Path for CNC toolpaths, and Assembly for multi-part designs. Files can be exported to STEP (the industry standard for CAD interchange), STL for 3D printing, or DXF for laser cutting.',
             features: [
-                'Headless mode via FreeCADCmd (no GUI required)',
-                'Full Python scripting with FreeCAD module',
-                'Parametric design - all dimensions are programmable',
-                'Part Design, Assembly, Sketcher, Spreadsheet workbenches',
-                'STEP, IGES, STL, OBJ, DXF import/export',
-                'FEM (Finite Element Method) analysis',
-                'Path workbench for CNC/3D printing toolpaths',
-                'OpenCASCADE geometry kernel',
-                'Macro recording and playback',
-                'Topological naming fix in 1.0+'
+                'Headless mode via FreeCADCmd binary (no GUI/display required)',
+                'Full Python scripting API with FreeCAD, Part, and Mesh modules',
+                'Parametric design - all dimensions stored as editable parameters',
+                'Part Design workbench for solid modeling with pad, pocket, fillet, chamfer',
+                'Sketcher with geometric and dimensional constraints',
+                'Assembly workbench for multi-part designs with joints and mates',
+                'STEP, IGES, STL, OBJ, DXF, SVG, PDF import/export',
+                'FEM (Finite Element Method) workbench for stress/thermal analysis',
+                'Path workbench for generating CNC G-code and 3D print toolpaths',
+                'OpenCASCADE geometry kernel (same as commercial CAD software)',
+                'Spreadsheet-driven parametric models (link cells to dimensions)',
+                'Topological naming fix in 1.0+ for stable parametric references'
             ],
             cli: [
-                {cmd: 'FreeCADCmd -c', desc: 'Start interactive Python console (headless)'},
-                {cmd: 'FreeCADCmd script.py', desc: 'Run Python script headlessly'},
-                {cmd: 'FreeCADCmd -c "import Part; box=Part.makeBox(10,10,10); Part.show(box)"', desc: 'Create geometry programmatically'},
-                {cmd: 'freecad --console script.py', desc: 'Run in console mode (alternative syntax)'}
+                {cmd: 'FreeCADCmd -c', desc: 'Start interactive Python console in headless mode'},
+                {cmd: 'FreeCADCmd script.py', desc: 'Run a Python CAD generation script without GUI'},
+                {cmd: 'FreeCADCmd -c "import Part; box=Part.makeBox(10,10,10); Part.export([box], \'box.step\')"', desc: 'Create a box and export to STEP format'},
+                {cmd: 'FreeCADCmd -c "import Mesh; Mesh.open(\'input.stl\'); Mesh.export([mesh], \'output.obj\')"', desc: 'Convert between mesh formats'},
+                {cmd: 'freecad --console script.py', desc: 'Alternative console-mode syntax for running scripts'}
             ]
         }
     },
@@ -1451,6 +1601,7 @@ const TOOLS = [
         id: 'kicad', name: 'KiCad', category: 'creative', icon: 'K', iconBg: '#314cb6', logo: 'logos/kicad.png', downloadTarget: 'kicad',
         desc: 'Electronic design automation - schematic capture, PCB layout, and 3D visualization',
         size: '~212 MB (AppImage)',
+        screenshots: ['screenshots/kicad-1.png', 'screenshots/kicad-2.png'],
         platforms: { ubuntu: 'prebuilt' },
         downloads: {
             source: 'https://gitlab.com/kicad/code/kicad',
@@ -1460,24 +1611,28 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'KiCad is a free, open-source EDA suite for schematic capture, PCB layout, and manufacturing output. Version 9+ includes kicad-cli for headless operations like DRC checks, Gerber generation, and BOM export - enabling AI-driven PCB design automation.',
+            overview: 'KiCad is a free, open-source Electronic Design Automation (EDA) suite used for designing printed circuit boards (PCBs). The workflow starts with schematic capture (drawing the logical circuit), then proceeds to PCB layout (physically placing components and routing copper traces), and finally outputs manufacturing files (Gerbers, drill files, BOMs) that can be sent directly to a PCB fabrication house.\n\nVersion 9 and later includes kicad-cli, a command-line interface that enables headless automation of the entire design-to-manufacturing pipeline. You can run design rule checks (DRC), export Gerber files, generate bills of materials, and produce 3D STEP models of your board -- all without opening the GUI. This is transformative for AI-assisted PCB design workflows.\n\nKiCad includes comprehensive symbol and footprint libraries covering thousands of common components, a built-in SPICE simulator for analog circuit analysis, and a 3D viewer that shows your board with accurate component models. The S-expression file format is text-based and version-control friendly, making it possible for scripts and AI to generate or modify designs programmatically.',
             features: [
-                'kicad-cli for headless automation (DRC, export, BOM)',
-                'Schematic editor with hierarchical sheets',
-                'PCB editor with interactive router',
-                'Built-in 3D viewer with STEP export',
-                'Spice simulation integration',
-                'Gerber, drill file, BOM generation',
-                'Comprehensive symbol/footprint libraries',
-                'Python scripting for custom plugins',
-                'Design rule checking (DRC/ERC)',
-                'IPC-2581, ODB++, Gerber X2 output'
+                'kicad-cli for headless automation (DRC, Gerber export, BOM, 3D models)',
+                'Schematic editor with hierarchical sheets and bus connections',
+                'PCB editor with push-and-shove interactive router',
+                'Built-in 3D viewer with raytracing and STEP/VRML export',
+                'SPICE simulation integration for analog circuit analysis',
+                'Gerber, Excellon drill, BOM, pick-and-place file generation',
+                'Comprehensive symbol and footprint libraries (thousands of components)',
+                'Python scripting API for custom plugins and automation',
+                'Design rule checking (DRC) and electrical rule checking (ERC)',
+                'IPC-2581, ODB++, Gerber X2 manufacturing output formats',
+                'Text-based S-expression file format (git-friendly, scriptable)',
+                'Custom design rules with expression-based constraints'
             ],
             cli: [
-                {cmd: 'kicad-cli pcb export gerbers board.kicad_pcb -o gerbers/', desc: 'Export Gerber files for manufacturing'},
-                {cmd: 'kicad-cli pcb drc board.kicad_pcb -o drc-report.json', desc: 'Run design rule check'},
-                {cmd: 'kicad-cli pcb export step board.kicad_pcb -o board.step', desc: 'Export 3D STEP model'},
-                {cmd: 'kicad-cli sch export pdf schematic.kicad_sch -o schematic.pdf', desc: 'Export schematic as PDF'}
+                {cmd: 'kicad-cli pcb export gerbers board.kicad_pcb -o gerbers/', desc: 'Export Gerber manufacturing files for all copper and mask layers'},
+                {cmd: 'kicad-cli pcb export drill board.kicad_pcb -o gerbers/', desc: 'Export Excellon drill files for via and through-hole drilling'},
+                {cmd: 'kicad-cli pcb drc board.kicad_pcb -o drc-report.json --format json', desc: 'Run design rule check and output JSON report'},
+                {cmd: 'kicad-cli pcb export step board.kicad_pcb -o board.step', desc: 'Export 3D STEP model of the assembled board'},
+                {cmd: 'kicad-cli sch export pdf schematic.kicad_sch -o schematic.pdf', desc: 'Export schematic sheets as a multi-page PDF'},
+                {cmd: 'kicad-cli sch export bom schematic.kicad_sch -o bom.csv', desc: 'Generate bill of materials from schematic'}
             ]
         }
     },
@@ -1485,6 +1640,7 @@ const TOOLS = [
         id: 'godot', name: 'Godot Engine', category: 'creative', icon: 'G', iconBg: '#478cbf', logo: 'logos/godot.svg', downloadTarget: 'godot',
         desc: 'Open-source game engine with GDScript/C# - headless mode for procedural generation and simulation',
         size: '~50 MB (editor), ~700 MB (with export templates)',
+        screenshots: ['screenshots/godot-1.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/godotengine/godot',
@@ -1497,24 +1653,28 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'Godot is a feature-packed, cross-platform game engine for 2D and 3D games. With --headless mode and GDScript/C# scripting, it enables AI-driven procedural generation, physics simulations, and training environments without a display.',
+            overview: 'Godot is a feature-packed, open-source game engine for creating 2D and 3D games and interactive applications. Unlike Unity or Unreal, Godot is completely free with no royalties, and its MIT license means you can modify the engine itself. The editor is lightweight (~50 MB) and runs on Linux ARM64 (Jetson), x86_64, macOS, and Windows.\n\nGodot uses a scene tree architecture where everything is a "node" organized in a tree hierarchy. Nodes can be sprites, 3D meshes, physics bodies, UI elements, audio players, or custom logic. Scenes can be instanced (reused) inside other scenes, enabling modular game design. Scripting is done primarily in GDScript (a Python-like language designed for game logic) or C# for those who prefer static typing.\n\nThe --headless flag allows running Godot without a display, making it suitable for server-side procedural content generation, physics simulations, AI training environments, and automated testing. You can generate game levels, simulate physics scenarios, or run multiplayer game servers entirely from the command line.',
             features: [
-                'Headless mode: godot --headless --script script.gd',
-                'GDScript (Python-like) and C# scripting',
-                'Scene tree architecture for hierarchical game objects',
-                'Vulkan, OpenGL, and Metal rendering',
-                'Physics engines (Godot Physics, Jolt)',
-                'Export to Linux, Windows, macOS, Android, iOS, Web',
-                'Visual shader editor',
-                'Animation and state machine systems',
-                'Tilemap and 2D game tools',
-                'Navigation mesh and pathfinding'
+                'Headless mode (--headless) for server-side generation and simulation',
+                'GDScript (Python-like) and C# scripting languages',
+                'Scene tree architecture with reusable instanced scenes',
+                'Vulkan, OpenGL 3.3, and Metal rendering backends',
+                'Physics engines: Godot Physics 2D/3D and Jolt (high-performance)',
+                'Export to Linux, Windows, macOS, Android, iOS, and Web (HTML5)',
+                'Visual shader editor with node-based material creation',
+                'Animation player, blend trees, and state machine systems',
+                'Tilemap editor and 2D game tools (pixel-perfect, parallax, etc.)',
+                'Navigation mesh generation and A* pathfinding',
+                'Built-in multiplayer networking (ENet, WebSocket, WebRTC)',
+                'GDExtension API for C/C++/Rust native performance modules'
             ],
             cli: [
-                {cmd: 'godot --headless --script generate.gd', desc: 'Run GDScript in headless mode'},
-                {cmd: 'godot --headless --export-release "Linux" build/game', desc: 'Export project for Linux'},
-                {cmd: 'godot --headless --import project.godot', desc: 'Import/reimport all resources'},
-                {cmd: 'godot --headless --doctool docs/', desc: 'Generate API documentation'}
+                {cmd: 'godot --headless --script generate.gd', desc: 'Run a GDScript file in headless mode (no display needed)'},
+                {cmd: 'godot --headless --export-release "Linux" build/game', desc: 'Export project as release build for Linux'},
+                {cmd: 'godot --headless --export-release "Web" build/index.html', desc: 'Export project as HTML5 web build'},
+                {cmd: 'godot --headless --import project.godot', desc: 'Import and reimport all project resources'},
+                {cmd: 'godot --headless --doctool docs/', desc: 'Generate class API documentation'},
+                {cmd: 'godot --headless --script test_runner.gd --quit', desc: 'Run automated tests and exit'}
             ]
         }
     },
@@ -1525,6 +1685,7 @@ const TOOLS = [
         id: 'vlc', name: 'VLC', category: 'media', icon: 'V', iconBg: '#ff8800', logo: 'logos/vlc.png', downloadTarget: 'vlc',
         desc: 'Universal media player and streaming server - CLI transcoding, streaming, and format conversion',
         size: '~50 MB',
+        screenshots: ['screenshots/vlc-1.png', 'screenshots/vlc-2.jpg'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/videolan/vlc',
@@ -1533,24 +1694,28 @@ const TOOLS = [
             binaries: {}
         },
         details: {
-            overview: 'VLC is a free, open-source multimedia player and framework that plays most multimedia files and streaming protocols. Its command-line interface (cvlc) enables headless transcoding, streaming, and format conversion.',
+            overview: 'VLC is a free, open-source multimedia player and streaming framework that handles virtually every audio and video format in existence -- MP4, MKV, AVI, FLAC, MP3, H.264, H.265/HEVC, VP9, AV1, and hundreds more. It requires no external codec packs because all decoders are built in. VLC runs on Linux, macOS, Windows, Android, iOS, and many other platforms.\n\nBeyond playback, VLC is a powerful media processing tool. The command-line interface (cvlc or vlc --intf dummy) enables headless transcoding, format conversion, and network streaming without any GUI. You can set up an HTTP or RTSP streaming server, transcode between formats in batch, capture from cameras or screens, and extract audio from video files.\n\nVLC supports hardware-accelerated decoding via VAAPI (Intel/AMD on Linux), NVDEC (NVIDIA), VideoToolbox (macOS), and DXVA2/D3D11 (Windows). Its remote control interfaces (HTTP, Telnet, D-Bus, RC) allow other applications or scripts to control playback programmatically, making it useful as a media backend for kiosks, digital signage, or automated media processing pipelines.',
             features: [
-                'Plays virtually any audio/video format without codecs',
-                'CLI mode (cvlc) for headless operation',
-                'HTTP/RTSP/RTP streaming server',
-                'Hardware-accelerated decoding (VAAPI, NVDEC)',
-                'Transcoding between any supported formats',
-                'Network stream capture and recording',
-                'Subtitle rendering and extraction',
-                'Audio/video filters and effects',
-                'Playlist and batch processing',
-                'Remote control via HTTP/Telnet/RC interfaces'
+                'Plays virtually any audio/video format without external codecs',
+                'CLI mode (cvlc) for headless transcoding and streaming',
+                'HTTP, RTSP, RTP, and UDP streaming server capabilities',
+                'Hardware-accelerated decoding (VAAPI, NVDEC, VideoToolbox)',
+                'Transcode between any supported audio/video formats',
+                'Network stream capture, recording, and time-shifting',
+                'Subtitle rendering, extraction, and synchronization',
+                'Audio/video filters: crop, deinterlace, rotate, normalize, EQ',
+                'Playlist and batch processing for media conversion pipelines',
+                'Remote control via HTTP, Telnet, D-Bus, or RC interfaces',
+                'Screen and webcam capture with live encoding',
+                'Chromecast streaming support'
             ],
             cli: [
-                {cmd: 'cvlc input.mp4 --sout "#transcode{vcodec=h264,acodec=mp4a}:file{dst=output.mp4}"', desc: 'Transcode video'},
-                {cmd: 'cvlc input.mp4 --sout "#std{access=http,mux=ts,dst=:8080}"', desc: 'Stream over HTTP'},
-                {cmd: 'cvlc screen:// --sout "#transcode{vcodec=h264}:file{dst=screen.mp4}"', desc: 'Screen capture to file'},
-                {cmd: 'cvlc input.wav --sout "#transcode{acodec=mp3}:file{dst=output.mp3}"', desc: 'Convert audio format'}
+                {cmd: 'cvlc input.mp4 --sout "#transcode{vcodec=h264,acodec=mp4a,ab=128}:file{dst=output.mp4}"', desc: 'Transcode video to H.264 with AAC audio'},
+                {cmd: 'cvlc input.mp4 --sout "#std{access=http,mux=ts,dst=:8080}"', desc: 'Stream a file over HTTP on port 8080'},
+                {cmd: 'cvlc screen:// --sout "#transcode{vcodec=h264,vb=2048}:file{dst=screen.mp4}"', desc: 'Capture screen to MP4 file'},
+                {cmd: 'cvlc input.mp4 --no-video --sout "#transcode{acodec=mp3,ab=192}:file{dst=audio.mp3}"', desc: 'Extract and convert audio track to MP3'},
+                {cmd: 'cvlc v4l2:///dev/video0 --sout "#transcode{vcodec=h264}:std{access=http,mux=ts,dst=:8080}"', desc: 'Stream webcam over HTTP'},
+                {cmd: 'vlc --intf http --http-port 9090 --http-password secret', desc: 'Start VLC with HTTP remote control interface'}
             ]
         }
     },
@@ -1561,6 +1726,7 @@ const TOOLS = [
         id: 'n8n', name: 'n8n', category: 'ai-platform', icon: 'N', iconBg: '#ea4b71', logo: 'logos/n8n.png', downloadTarget: 'n8n',
         desc: 'Workflow automation with 400+ integrations and native AI capabilities - fair-code licensed',
         size: '~500 MB (Docker)',
+        screenshots: ['screenshots/n8n-1.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/n8n-io/n8n',
@@ -1569,29 +1735,39 @@ const TOOLS = [
             binaries: {}
         },
         details: {
-            overview: 'n8n is a workflow automation platform that connects AI models to real-world actions. With 400+ integrations, you can build AI agent workflows connecting Ollama/llama.cpp to databases, APIs, file systems, and more - all self-hosted.',
+            overview: 'n8n (pronounced "n-eight-n") is a fair-code workflow automation platform that lets you connect any service to any other service through a visual node-based editor. Think of it as a self-hosted alternative to Zapier or Make.com, but with the power to run code, call local AI models, and process data through complex multi-step pipelines -- all without writing a full application.\n\nThe AI capabilities are particularly compelling: n8n includes native LangChain-based AI agent nodes that can connect to your local Ollama or llama.cpp endpoint. You can build RAG pipelines that query your vector database, summarize documents, generate responses, and take actions -- all orchestrated visually. Workflows can be triggered by webhooks, schedules, file changes, or manual execution.\n\nn8n runs entirely self-hosted (via npm or Docker) and stores all data locally. This means your automation workflows, credentials, and execution history never leave your infrastructure. The platform supports JavaScript and Python code nodes for custom logic, making it flexible enough to handle any automation scenario from IoT data processing to AI-powered document workflows.',
             features: [
-                'Visual workflow editor with 400+ integrations',
-                'Native AI agent nodes (LangChain-based)',
-                'Connect to local Ollama/llama.cpp endpoints',
-                'Docker and npm installation options',
-                'Multi-arch: linux/amd64, linux/arm64',
-                'Webhook triggers for real-time automation',
-                'Code nodes (JavaScript/Python)',
-                'Credential management and encryption',
-                'Workflow versioning and sharing',
-                'Sub-workflow composition'
+                'Visual workflow editor with 400+ built-in integration nodes',
+                'Native AI agent nodes (LangChain-based) for local LLM orchestration',
+                'Connect to local Ollama, llama.cpp, or any OpenAI-compatible endpoint',
+                'Docker and npm installation options (multi-arch: amd64, arm64)',
+                'Webhook triggers for real-time event-driven automation',
+                'Code nodes supporting JavaScript and Python for custom logic',
+                'Credential management with encrypted storage',
+                'Workflow versioning, sharing, and community templates',
+                'Sub-workflow composition for modular automation design',
+                'Error handling with retry logic and fallback branches',
+                'Execution history and debugging with step-by-step replay',
+                'REST API for programmatic workflow management'
             ],
             cli: [
-                {cmd: 'npx n8n start', desc: 'Start n8n server (npm)'},
-                {cmd: 'docker run -p 5678:5678 -v n8n_data:/home/node/.n8n n8nio/n8n', desc: 'Start with Docker'},
-                {cmd: 'n8n execute --id 1', desc: 'Execute workflow by ID from CLI'},
-                {cmd: 'n8n export:workflow --all --output=backup.json', desc: 'Export all workflows'}
+                {cmd: 'npx n8n start', desc: 'Start n8n server via npm (opens on port 5678)'},
+                {cmd: 'docker run -p 5678:5678 -v n8n_data:/home/node/.n8n n8nio/n8n', desc: 'Start with Docker and persistent data volume'},
+                {cmd: 'n8n execute --id 1', desc: 'Execute a specific workflow by ID from the command line'},
+                {cmd: 'n8n export:workflow --all --output=backup.json', desc: 'Export all workflows to a JSON backup file'},
+                {cmd: 'n8n import:workflow --input=backup.json', desc: 'Import workflows from a JSON backup'},
+                {cmd: 'N8N_AI_ENABLED=true n8n start', desc: 'Start with AI features enabled for workflow generation'}
+            ],
+            api: [
+                {endpoint: 'GET /workflows', desc: 'List all workflows'},
+                {endpoint: 'POST /workflows/{id}/activate', desc: 'Activate a workflow'},
+                {endpoint: 'POST /workflows/{id}/run', desc: 'Execute a workflow via API'},
+                {endpoint: 'GET /executions', desc: 'List workflow execution history'}
             ]
         }
     },
     {
-        id: 'influxdb', name: 'InfluxDB', category: 'ai-platform', icon: 'I', iconBg: '#22adf6', logo: 'logos/influxdb.png', downloadTarget: 'influxdb',
+        id: 'influxdb', name: 'InfluxDB', category: 'infrastructure', icon: 'I', iconBg: '#22adf6', logo: 'logos/influxdb.png', downloadTarget: 'influxdb',
         desc: 'Time-series database for metrics, events, and IoT data - OSS 2.7 with built-in dashboards',
         size: '~100 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
@@ -1606,30 +1782,42 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'InfluxDB OSS 2.7 is a purpose-built time-series database with built-in UI, dashboards, and alerting. Ideal for storing AI inference metrics, sensor data, and model performance tracking alongside your AI toolkit.',
+            overview: 'InfluxDB is a purpose-built time-series database optimized for storing and querying timestamped data -- metrics, events, sensor readings, and logs. Unlike general-purpose databases, InfluxDB is designed for high write throughput and fast range queries over time, making it ideal for monitoring AI inference performance, tracking IoT sensor data, and recording experiment metrics.\n\nThe OSS 2.7 release includes a built-in web UI with a dashboard builder, alerting system, and data explorer. You can create visualizations of your AI model\'s tokens-per-second, GPU utilization, request latency, and error rates without installing any additional tools. The Flux query language enables complex analytics including windowing, aggregation, joins, and mathematical transformations.\n\nData is organized into organizations and buckets (with configurable retention policies), and written using the simple line protocol format: measurement,tags field=value timestamp. Client libraries exist for Python, Go, JavaScript, and many other languages, plus Telegraf (a companion agent) can collect metrics from 300+ sources automatically.',
             features: [
-                'Purpose-built time-series storage engine',
-                'Built-in web UI with dashboards',
-                'Flux query language for analytics',
-                'InfluxQL compatibility (SQL-like)',
-                'Telegraf agent for 300+ data sources',
-                'Alerting and notification rules',
-                'Task scheduling for ETL/downsampling',
-                'Multi-tenancy with organizations/buckets',
-                'REST API and client libraries',
-                'Available for Linux ARM64 and x86_64'
+                'Purpose-built time-series storage engine (TSM) optimized for timestamped data',
+                'Built-in web UI with drag-and-drop dashboard builder',
+                'Flux query language for complex analytics and data transformations',
+                'InfluxQL compatibility mode (SQL-like syntax for simpler queries)',
+                'Telegraf companion agent with 300+ input plugins for automatic collection',
+                'Alerting and notification rules (Slack, HTTP, PagerDuty, email)',
+                'Task scheduling for ETL, downsampling, and data pipeline automation',
+                'Multi-tenancy with organizations, buckets, and API tokens',
+                'REST API and client libraries (Python, Go, JavaScript, Java, etc.)',
+                'Line protocol for simple high-throughput writes',
+                'Configurable retention policies for automatic data expiry',
+                'Available as static binary for Linux ARM64 and x86_64'
             ],
+            screenshots: ['screenshots/influxdb-1.png'],
             cli: [
-                {cmd: 'influxd run --bolt-path=/data/influxd.bolt --engine-path=/data/engine', desc: 'Start InfluxDB server'},
-                {cmd: 'influx setup --org myorg --bucket metrics --username admin', desc: 'Initial setup'},
-                {cmd: 'influx write --bucket metrics "inference,model=llama3 tokens_per_sec=45.2"', desc: 'Write time-series data'},
-                {cmd: 'influx query "from(bucket:\\"metrics\\") |> range(start: -1h)"', desc: 'Query recent data'}
+                {cmd: 'influxd run --bolt-path=/data/influxd.bolt --engine-path=/data/engine', desc: 'Start InfluxDB server with custom data paths'},
+                {cmd: 'influx setup --org myorg --bucket metrics --username admin --password secret123 --force', desc: 'Run initial setup (creates org, bucket, admin user)'},
+                {cmd: 'influx write --bucket metrics "inference,model=llama3 tokens_per_sec=45.2,gpu_util=87.5"', desc: 'Write a time-series data point using line protocol'},
+                {cmd: 'influx query \'from(bucket:"metrics") |> range(start: -1h) |> filter(fn: (r) => r._measurement == "inference")\'', desc: 'Query inference metrics from the last hour'},
+                {cmd: 'influx bucket create --name sensors --retention 30d', desc: 'Create a bucket with 30-day retention policy'},
+                {cmd: 'influx backup /data/backup/ --org myorg', desc: 'Create a full backup of the database'}
+            ],
+            api: [
+                {endpoint: 'POST /api/v2/write?org=myorg&bucket=metrics', desc: 'Write data points using line protocol'},
+                {endpoint: 'POST /api/v2/query', desc: 'Execute a Flux query and return results'},
+                {endpoint: 'GET /api/v2/buckets', desc: 'List all buckets in the organization'},
+                {endpoint: 'GET /health', desc: 'Check server health status'}
             ]
         }
     },
     {
         id: 'milvus', name: 'Milvus', category: 'ai-platform', icon: 'M', iconBg: '#00a0e4', logo: 'logos/milvus.svg', downloadTarget: 'milvus',
         desc: 'Vector database for AI applications - similarity search, RAG, and embedding storage',
+        screenshots: ['screenshots/milvus-1.png'],
         size: '~570 MB (Docker) / ~100 MB (Lite)',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -1639,24 +1827,35 @@ const TOOLS = [
             binaries: {}
         },
         details: {
-            overview: 'Milvus is a high-performance vector database designed for AI applications like RAG (Retrieval-Augmented Generation), similarity search, and recommendation systems. Pair it with llama.cpp embeddings for fully local knowledge retrieval.',
+            overview: 'Milvus is a high-performance vector database purpose-built for AI applications. It stores high-dimensional embedding vectors (from text, images, audio, or any data) and retrieves the most similar vectors at scale. This is the foundation of RAG (Retrieval-Augmented Generation), where you embed your documents, store them in Milvus, and query with a question embedding to find relevant context before passing it to an LLM.\n\nMilvus supports billion-scale datasets with multiple index types optimized for different scenarios: HNSW for low-latency recall, IVF for memory-efficient search, and DiskANN for datasets larger than RAM. It can run on ARM64 (Jetson, Raspberry Pi) and x86_64, with optional GPU acceleration for CUDA-capable hardware.\n\nFor edge and embedded use cases, Milvus Lite provides the same API as a pip-installable Python package with no external dependencies -- no Docker, no separate server process. This makes it perfect for local AI applications that need vector search without the overhead of a full distributed database.',
             features: [
-                'Billion-scale vector similarity search',
-                'Multiple index types (IVF, HNSW, DiskANN)',
-                'ARM64 native support (DEB/RPM packages)',
-                'GPU-accelerated search (CUDA)',
-                'Scalar + vector hybrid search',
-                'Schema-free collections',
-                'RESTful and gRPC APIs',
-                'Python, Go, Java, Node.js SDKs',
-                'Milvus Lite for embedded/edge use',
-                'Integrates with LangChain, LlamaIndex'
+                'Billion-scale vector similarity search with sub-second latency',
+                'Multiple index types: HNSW (fast), IVF (memory-efficient), DiskANN (disk-based)',
+                'ARM64 native support for edge AI deployment',
+                'GPU-accelerated search and indexing (CUDA)',
+                'Hybrid search combining vector similarity with scalar filtering',
+                'Dynamic schema with support for varied embedding dimensions',
+                'RESTful API (port 19530) and gRPC API for high-throughput',
+                'Official SDKs: Python (pymilvus), Go, Java, Node.js',
+                'Milvus Lite: embedded mode as a pip package (no Docker needed)',
+                'Native integration with LangChain, LlamaIndex, and Haystack',
+                'Partition and collection management for multi-tenant applications',
+                'Data persistence with write-ahead log and segment compaction'
             ],
             cli: [
-                {cmd: 'milvus run standalone', desc: 'Start Milvus standalone server'},
-                {cmd: 'pip install pymilvus && python -c "from pymilvus import MilvusClient"', desc: 'Install Python SDK'},
-                {cmd: 'pip install milvus-lite', desc: 'Install lightweight embedded version'},
-                {cmd: 'curl localhost:19530/v2/vectordb/collections/list', desc: 'List collections via REST'}
+                {cmd: 'pip install pymilvus', desc: 'Install the Python SDK for Milvus'},
+                {cmd: 'pip install milvus-lite', desc: 'Install embedded Milvus (no server needed, runs in-process)'},
+                {cmd: 'milvus run standalone', desc: 'Start Milvus standalone server (requires Docker or binary)'},
+                {cmd: 'python -c "from pymilvus import MilvusClient; client = MilvusClient(\'./milvus.db\')"', desc: 'Create a local Milvus Lite database file'},
+                {cmd: 'curl localhost:19530/v2/vectordb/collections/list', desc: 'List all collections via REST API'},
+                {cmd: 'curl -X POST localhost:19530/v2/vectordb/entities/search -d \'{"collectionName":"docs","vector":[0.1,0.2,...]}\'', desc: 'Search for similar vectors via REST'}
+            ],
+            api: [
+                {endpoint: 'POST /v2/vectordb/collections/create', desc: 'Create a new vector collection with schema'},
+                {endpoint: 'POST /v2/vectordb/entities/insert', desc: 'Insert vectors and metadata into a collection'},
+                {endpoint: 'POST /v2/vectordb/entities/search', desc: 'Search for nearest neighbor vectors'},
+                {endpoint: 'GET /v2/vectordb/collections/list', desc: 'List all collections in the database'},
+                {endpoint: 'POST /v2/vectordb/indexes/create', desc: 'Create a vector index for fast search'}
             ]
         }
     },
@@ -1664,6 +1863,7 @@ const TOOLS = [
         id: 'comfyui', name: 'ComfyUI', category: 'ai-platform', icon: 'C', iconBg: '#2b2d30', logo: 'logos/comfyui.jpg', downloadTarget: 'comfyui',
         desc: 'Node-based AI image/video generation workflow editor - connects to stable-diffusion.cpp models',
         size: '~5 GB (with dependencies)',
+        screenshots: ['screenshots/comfyui-1.png'],
         platforms: { jetson: 'build', ubuntu: 'build', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/Comfy-Org/ComfyUI',
@@ -1676,24 +1876,35 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'ComfyUI is the most powerful node-based interface for Stable Diffusion, FLUX, and other generative AI models. Build complex image/video generation pipelines visually, with full control over every step of the diffusion process.',
+            overview: 'ComfyUI is the most powerful and flexible node-based interface for Stable Diffusion, FLUX, and other generative AI image/video models. Unlike simple prompt-to-image tools, ComfyUI exposes every step of the diffusion pipeline as a connectable node, giving you complete control over sampling, conditioning, latent manipulation, upscaling, and post-processing.\n\nWorkflows are built by dragging nodes onto a canvas and connecting their inputs/outputs. A typical workflow might load a checkpoint model, encode a text prompt with CLIP, configure a sampler (steps, CFG, scheduler), decode the latent image, and save the result. Advanced workflows chain ControlNet for pose guidance, IP-Adapter for style transfer, LoRA for fine-tuned concepts, and upscalers for high-resolution output.\n\nComfyUI runs as a local web server (default port 8188) with a REST API for programmatic execution. Workflows are saved as JSON files that can be shared, version-controlled, and executed via the API without the browser UI. The custom node ecosystem provides 1000+ extensions for everything from face restoration to video generation with Wan2.1 and AnimateDiff.',
             features: [
-                'Node-based visual workflow editor',
-                'Supports SDXL, SD3.5, FLUX, Wan2.1 models',
-                'ControlNet, IP-Adapter, LoRA support',
-                'Queue system for batch generation',
-                'Custom node ecosystem (1000+ extensions)',
-                'API for programmatic workflow execution',
-                'Workflow sharing and importing',
-                'Memory-efficient model loading',
-                'Image-to-image, inpainting, outpainting',
-                'Video generation workflows'
+                'Node-based visual workflow editor with full pipeline control',
+                'Supports SDXL, SD3.5, FLUX, Wan2.1, and custom diffusion models',
+                'ControlNet, IP-Adapter, LoRA, and textual inversion support',
+                'Queue system for batch generation with priority ordering',
+                'Custom node ecosystem with 1000+ community extensions',
+                'REST API for programmatic workflow execution and queue management',
+                'Workflow JSON format for sharing, versioning, and automation',
+                'Memory-efficient model loading with automatic VRAM management',
+                'Image-to-image, inpainting, outpainting, and upscaling workflows',
+                'Video generation with AnimateDiff, SVD, and Wan2.1 models',
+                'CPU, CUDA, ROCm, and Apple MPS backend support',
+                'Embedded workflow metadata in generated PNG files'
             ],
             cli: [
-                {cmd: 'python main.py --listen 0.0.0.0 --port 8188', desc: 'Start ComfyUI server'},
-                {cmd: 'python main.py --cpu', desc: 'Run on CPU only (no GPU required)'},
-                {cmd: 'python main.py --lowvram', desc: 'Low VRAM mode for constrained devices'},
-                {cmd: 'curl -X POST localhost:8188/prompt -d @workflow.json', desc: 'Execute workflow via API'}
+                {cmd: 'python main.py --listen 0.0.0.0 --port 8188', desc: 'Start ComfyUI server accessible from any device on the network'},
+                {cmd: 'python main.py --cpu', desc: 'Run on CPU only (slower but no GPU required)'},
+                {cmd: 'python main.py --lowvram', desc: 'Low VRAM mode: moves models to CPU between steps'},
+                {cmd: 'python main.py --highvram', desc: 'High VRAM mode: keeps all models in GPU memory'},
+                {cmd: 'curl -X POST http://localhost:8188/prompt -H "Content-Type: application/json" -d @workflow_api.json', desc: 'Execute a workflow via the REST API'},
+                {cmd: 'python main.py --input-directory /path/to/inputs --output-directory /path/to/outputs', desc: 'Set custom input/output directories'}
+            ],
+            api: [
+                {endpoint: 'POST /prompt', desc: 'Queue a workflow for execution (accepts workflow JSON)'},
+                {endpoint: 'GET /queue', desc: 'View currently running and pending queue items'},
+                {endpoint: 'GET /history', desc: 'Get execution history with output file paths'},
+                {endpoint: 'GET /view?filename=output.png', desc: 'Retrieve a generated image by filename'},
+                {endpoint: 'GET /object_info', desc: 'List all available nodes and their input/output specs'}
             ]
         }
     },
@@ -1704,6 +1915,7 @@ const TOOLS = [
         id: 'syncthing', name: 'Syncthing', category: 'infrastructure', icon: 'S', iconBg: '#0891b2', logo: 'logos/syncthing.svg', downloadTarget: 'syncthing',
         desc: 'Continuous file synchronization - replicate your AI models and tools across servers',
         size: '~10 MB',
+        screenshots: ['screenshots/syncthing-1.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/syncthing/syncthing',
@@ -1716,24 +1928,34 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'Syncthing is a continuous file synchronization program that syncs files between two or more computers in real time. Use it to replicate your Val Ark (models, tools, configs) across multiple servers without central cloud dependency.',
+            overview: 'Syncthing is a continuous, peer-to-peer file synchronization program. It keeps folders in sync between two or more devices in real time, without requiring any cloud service or central server. Files are transferred directly between devices over encrypted connections, making it ideal for replicating your Val Ark toolkit (models, tools, configurations) across multiple machines.\n\nUnlike cloud sync services (Dropbox, Google Drive), Syncthing never stores your data on third-party servers. All communication is encrypted with TLS 1.3 and authenticated with device certificates. When devices are on the same LAN, transfers happen at full network speed. When separated by NAT, Syncthing can use relay servers or hole-punching to establish direct connections.\n\nSyncthing is a single static binary with no dependencies -- just run it and access the web UI to configure shared folders and connected devices. It supports ignore patterns (like .stignore files similar to .gitignore), file versioning (keeping old versions when files change), conflict resolution, and bandwidth scheduling. The REST API enables full automation of configuration and monitoring.',
             features: [
-                'Peer-to-peer sync (no cloud required)',
-                'End-to-end encryption (TLS 1.3)',
-                'Selective folder sync with ignore patterns',
-                'Conflict resolution and versioning',
-                'Web UI for monitoring and config',
-                'REST API for automation',
-                'Single static binary, no dependencies',
-                'Cross-platform (Linux, macOS, Windows, BSD)',
-                'Relay servers for NAT traversal',
-                'Bandwidth limiting and scheduling'
+                'Peer-to-peer sync with no cloud dependency or central server',
+                'End-to-end encryption (TLS 1.3) with device certificate authentication',
+                'Selective folder sync with .stignore patterns (like .gitignore)',
+                'File versioning: keep old versions when files are modified or deleted',
+                'Automatic conflict resolution with .sync-conflict files for manual review',
+                'Built-in web UI for monitoring sync status and configuration',
+                'REST API for programmatic configuration and status monitoring',
+                'Single static binary with zero dependencies (Go compiled)',
+                'Cross-platform: Linux (ARM64/x86_64), macOS, Windows, BSD, Android',
+                'NAT traversal via relay servers and hole-punching',
+                'Bandwidth limiting and transfer scheduling by time of day',
+                'Folder-level send-only, receive-only, or send-receive modes'
             ],
             cli: [
-                {cmd: 'syncthing serve --gui-address=0.0.0.0:8384', desc: 'Start Syncthing with web UI'},
-                {cmd: 'syncthing cli config devices add --device-id DEVICE-ID', desc: 'Add a remote device'},
-                {cmd: 'syncthing cli config folders add --id val-ark --path /path/to/val-ark', desc: 'Share the Val Ark folder'},
-                {cmd: 'syncthing cli show system', desc: 'Show system status'}
+                {cmd: 'syncthing serve --gui-address=0.0.0.0:8384', desc: 'Start Syncthing with web UI accessible from network'},
+                {cmd: 'syncthing serve --no-browser --gui-address=0.0.0.0:8384', desc: 'Start without auto-opening browser (server/headless use)'},
+                {cmd: 'syncthing cli config devices add --device-id DEVICE-ID-HERE', desc: 'Add a remote device by its ID'},
+                {cmd: 'syncthing cli config folders add --id val-ark --path /path/to/val-ark --label "Val Ark"', desc: 'Share a folder for synchronization'},
+                {cmd: 'syncthing cli show system', desc: 'Show system status, uptime, and device ID'},
+                {cmd: 'syncthing cli show connections', desc: 'Show connected devices and transfer rates'}
+            ],
+            api: [
+                {endpoint: 'GET /rest/system/status', desc: 'Get system status (device ID, uptime, memory)'},
+                {endpoint: 'GET /rest/db/status?folder=val-ark', desc: 'Get sync status for a specific folder'},
+                {endpoint: 'GET /rest/system/connections', desc: 'List connected devices with transfer stats'},
+                {endpoint: 'POST /rest/db/scan?folder=val-ark', desc: 'Trigger a rescan of a folder'}
             ]
         }
     },
@@ -1749,24 +1971,34 @@ const TOOLS = [
             binaries: {}
         },
         details: {
-            overview: 'Coolify is an open-source, self-hosted alternative to Heroku, Netlify, and Vercel. Deploy any application (Docker, static, Node, Python, etc.) with automatic SSL, Git integration, and a clean web dashboard. Ideal for hosting AI web interfaces, dashboards, and microservices on your own infrastructure.',
+            overview: 'Coolify is an open-source, self-hosted Platform-as-a-Service (PaaS) that provides the deployment experience of Heroku, Netlify, or Vercel on your own hardware. It manages the entire lifecycle of web applications: building from source, deploying as containers, configuring reverse proxies, provisioning SSL certificates, and monitoring health -- all through a clean web dashboard.\n\nWith Coolify, you can deploy any Dockerfile, Docker Compose stack, or static site with a few clicks. It integrates with GitHub, GitLab, and Gitea for automatic deployments on push. Built-in database management lets you spin up PostgreSQL, MySQL, Redis, or MongoDB instances alongside your applications, with automated backups and one-click restore.\n\nCoolify is particularly valuable for hosting AI-related web interfaces (like ComfyUI, Open WebUI, n8n) and APIs (like llama.cpp servers) behind proper domain names with SSL. Multi-server support means you can manage deployments across multiple machines from a single dashboard, and resource limits prevent any single application from consuming all available memory or CPU.',
             features: [
-                'One-click deploy from Git (GitHub, GitLab, Gitea)',
-                'Docker and Docker Compose support',
-                'Automatic SSL with Let\'s Encrypt',
-                'Built-in database management (Postgres, MySQL, Redis, MongoDB)',
-                'Real-time logs and monitoring',
-                'Webhook and API automation',
-                'Multi-server and multi-team support',
-                'Backup and restore',
-                'Custom domain routing',
-                'Resource limits per application'
+                'One-click deploy from Git repositories (GitHub, GitLab, Gitea, Bitbucket)',
+                'Docker and Docker Compose application support',
+                'Automatic SSL certificate provisioning with Let\'s Encrypt',
+                'Built-in database management: PostgreSQL, MySQL, MariaDB, Redis, MongoDB',
+                'Real-time application logs, metrics, and health monitoring',
+                'Webhook-triggered deployments and REST API automation',
+                'Multi-server management from a single dashboard',
+                'Multi-team support with role-based access control',
+                'Automated database backups with configurable schedules',
+                'Custom domain routing with automatic Traefik/Caddy reverse proxy',
+                'Per-application resource limits (CPU, memory, storage)',
+                'Preview deployments for pull requests and branches'
             ],
+            screenshots: ['screenshots/coolify-1.png'],
             cli: [
-                {cmd: 'curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash', desc: 'Install Coolify (requires Docker)'},
-                {cmd: 'docker ps --filter name=coolify', desc: 'Check Coolify containers'},
-                {cmd: 'docker logs coolify --tail 50', desc: 'View Coolify logs'},
-                {cmd: 'open http://localhost:8000', desc: 'Access Coolify dashboard'}
+                {cmd: 'curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash', desc: 'Install Coolify on a fresh server (requires Docker)'},
+                {cmd: 'docker ps --filter name=coolify', desc: 'Check status of Coolify system containers'},
+                {cmd: 'docker logs coolify --tail 100 -f', desc: 'Follow Coolify application logs in real-time'},
+                {cmd: 'docker compose -f /data/coolify/docker-compose.yml up -d', desc: 'Restart Coolify services manually'},
+                {cmd: 'curl http://localhost:8000', desc: 'Access Coolify dashboard (default port 8000)'}
+            ],
+            api: [
+                {endpoint: 'GET /api/v1/applications', desc: 'List all deployed applications'},
+                {endpoint: 'POST /api/v1/applications/{uuid}/restart', desc: 'Restart a specific application'},
+                {endpoint: 'GET /api/v1/servers', desc: 'List all connected servers'},
+                {endpoint: 'POST /api/v1/deploy', desc: 'Trigger a new deployment via webhook'}
             ]
         }
     },
@@ -1774,6 +2006,7 @@ const TOOLS = [
         id: 'kiwix', name: 'Kiwix', category: 'infrastructure', icon: 'K', iconBg: '#19a4c8', logo: 'logos/kiwix.svg', downloadTarget: 'kiwix',
         desc: 'Offline ZIM file server - serve Wikipedia, Khan Academy, Project Gutenberg, and more over your local network',
         size: '~20 MB',
+        screenshots: ['screenshots/kiwix-1.jpg'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/kiwix/kiwix-tools',
@@ -1786,30 +2019,35 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'Kiwix serves ZIM files — compressed offline snapshots of entire websites like Wikipedia, Khan Academy, Stack Overflow, Project Gutenberg, TED Talks, and more. A single kiwix-serve process can host dozens of ZIM files over HTTP, making them browsable from any device on the network. Essential for offline education and reference.',
+            overview: 'Kiwix is an offline content server that serves ZIM files -- compressed, self-contained snapshots of entire websites. A single ZIM file can contain all of Wikipedia (90 GB with images, 12 GB without), all of Khan Academy, Stack Overflow, Project Gutenberg (60,000+ books), TED Talks, or hundreds of other educational resources. Once downloaded, these work completely offline with no internet connection required.\n\nThe kiwix-serve binary runs an HTTP server that makes ZIM content browsable from any web browser on the network. It supports full-text search, so users can find articles, tutorials, and reference material just like they would on the live website. Multiple ZIM files can be served simultaneously from a single process, creating a comprehensive offline library accessible to anyone on your local network.\n\nThis is one of the most important tools in the Val Ark for offline/community-wifi scenarios: it provides access to the world\'s knowledge without internet connectivity. The ZIM format is highly compressed (Wikipedia\'s 4+ million articles fit in 90 GB), and kiwix-serve has minimal resource requirements -- it reads directly from disk and can run on even a Raspberry Pi. Download ZIM files from download.kiwix.org/zim/ and start serving immediately.',
             features: [
-                'Serve ZIM files over HTTP (any browser can access)',
-                'Full-text search within ZIM content',
-                'Multiple ZIM files in one server instance',
-                'Wikipedia offline (~90GB full, ~12GB no-images)',
-                'Khan Academy, Stack Overflow, TED, Gutenberg ZIMs available',
-                'kiwix-manage: catalog and organize ZIM libraries',
-                'kiwix-search: CLI search within ZIM files',
-                'Static binaries for x86_64 and ARM64',
-                'Low resource usage (serves from disk)',
-                'OPDS catalog for e-reader integration'
+                'Serve ZIM files over HTTP accessible from any web browser',
+                'Full-text search engine built into the ZIM format (Xapian-based)',
+                'Multiple ZIM files served from a single kiwix-serve process',
+                'Wikipedia offline: ~90 GB (full with images) or ~12 GB (text only)',
+                'Khan Academy, Stack Overflow, TED Talks, Gutenberg ZIMs available',
+                'kiwix-manage: create and organize XML library catalogs',
+                'kiwix-search: command-line full-text search within ZIM files',
+                'Static binaries available for x86_64 and ARM64 (Jetson, Pi)',
+                'Minimal resource usage: serves content directly from disk',
+                'OPDS catalog feed for integration with e-readers (Calibre, etc.)',
+                'Responsive web UI works on phones, tablets, and desktops',
+                'ZIM files are single-file archives (easy to copy, share, back up)'
             ],
             cli: [
-                {cmd: 'kiwix-serve --port 8888 wikipedia.zim', desc: 'Serve a ZIM file on port 8888'},
-                {cmd: 'kiwix-serve --library library.xml', desc: 'Serve all ZIMs in a library catalog'},
-                {cmd: 'kiwix-manage library.xml add *.zim', desc: 'Add ZIM files to library catalog'},
-                {cmd: 'kiwix-search wikipedia.zim "machine learning"', desc: 'Search within a ZIM file'}
+                {cmd: 'kiwix-serve --port 8888 wikipedia.zim', desc: 'Serve a single ZIM file on port 8888'},
+                {cmd: 'kiwix-serve --port 8888 --library library.xml', desc: 'Serve all ZIM files listed in a library catalog'},
+                {cmd: 'kiwix-serve --port 8888 *.zim', desc: 'Serve all ZIM files in the current directory'},
+                {cmd: 'kiwix-manage library.xml add wikipedia.zim stackexchange.zim', desc: 'Add ZIM files to a library catalog'},
+                {cmd: 'kiwix-manage library.xml show', desc: 'Display information about all ZIMs in the library'},
+                {cmd: 'kiwix-search wikipedia.zim "machine learning algorithms"', desc: 'Search for articles within a ZIM file from the command line'}
             ]
         }
     },
     {
         id: 'tailscale', name: 'Tailscale', category: 'infrastructure', icon: 'T', iconBg: '#2b5ea7', logo: 'logos/tailscale.svg', downloadTarget: 'tailscale',
         desc: 'Zero-config mesh VPN - connect your devices securely without port forwarding or firewall changes',
+        screenshots: ['screenshots/tailscale-1.png'],
         size: '~30 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -1823,24 +2061,28 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'Tailscale creates a secure mesh VPN using WireGuard. Connect your Val Ark server to any device anywhere without port forwarding, dynamic DNS, or firewall changes. Access your AI models and tools remotely as if on the same LAN.',
+            overview: 'Tailscale is a zero-configuration mesh VPN built on WireGuard. It creates a private network (called a "tailnet") connecting all your devices regardless of their physical location, NAT configuration, or firewall rules. Each device gets a stable IP address (100.x.y.z) and can reach every other device directly, as if they were all on the same local network.\n\nThe key insight of Tailscale is that it handles all the complexity of NAT traversal, key exchange, and peer discovery automatically. You install it, authenticate, and your devices can immediately communicate securely. This means you can access your Val Ark AI server from anywhere -- run inference on your Jetson at home from your laptop at a coffee shop, with full WireGuard encryption and no port forwarding.\n\nTailscale also offers subnet routing (expose an entire LAN through one node), exit nodes (route internet traffic through a specific device), MagicDNS (reach devices by hostname), HTTPS certificates for Tailnet services, and Funnel (expose services to the public internet). For fully self-hosted operation, Headscale is an open-source alternative to Tailscale\'s coordination server.',
             features: [
-                'Zero-config mesh VPN (WireGuard-based)',
-                'No port forwarding or firewall changes needed',
-                'Access AI servers remotely as if on LAN',
-                'MagicDNS: reach devices by name',
-                'Subnet routing for entire networks',
-                'Exit nodes for internet routing',
-                'ACLs for access control',
-                'Single static binary',
-                'Free for personal use (up to 100 devices)',
-                'Headscale: self-hosted control server option'
+                'Zero-config mesh VPN built on WireGuard (fast, modern encryption)',
+                'No port forwarding, dynamic DNS, or firewall changes required',
+                'Stable 100.x.y.z IP addresses for every device on your tailnet',
+                'MagicDNS: reach devices by hostname (e.g., jetson.tail12345.ts.net)',
+                'Subnet routing: expose entire LANs through a single gateway node',
+                'Exit nodes: route internet traffic through a specific device',
+                'Tailscale Serve: expose local services to your tailnet with HTTPS',
+                'Tailscale Funnel: expose services to the public internet securely',
+                'ACL policies for fine-grained access control between devices',
+                'Single static binary, easy to deploy on any Linux/macOS/Windows',
+                'Free tier: up to 100 devices for personal use',
+                'Headscale: fully self-hosted open-source control server alternative'
             ],
             cli: [
-                {cmd: 'tailscale up', desc: 'Connect to your Tailscale network'},
-                {cmd: 'tailscale status', desc: 'Show connected devices'},
-                {cmd: 'tailscale ip', desc: 'Show your Tailscale IP address'},
-                {cmd: 'tailscale serve --bg 8080', desc: 'Expose local port to Tailnet'}
+                {cmd: 'tailscale up', desc: 'Connect this device to your Tailscale network'},
+                {cmd: 'tailscale status', desc: 'Show all connected devices and their IPs'},
+                {cmd: 'tailscale ip -4', desc: 'Show this device\'s Tailscale IPv4 address'},
+                {cmd: 'tailscale serve --bg 8080', desc: 'Expose local port 8080 to your tailnet with HTTPS'},
+                {cmd: 'tailscale serve --bg --set-path /api http://localhost:11434', desc: 'Expose Ollama API at /api path on your tailnet'},
+                {cmd: 'tailscale ping jetson', desc: 'Ping another device by its Tailscale hostname'}
             ]
         }
     },
@@ -1848,6 +2090,7 @@ const TOOLS = [
         id: 'mosquitto', name: 'Mosquitto', category: 'infrastructure', icon: 'M', iconBg: '#3C5280', logo: 'logos/mosquitto.svg', downloadTarget: 'mosquitto',
         desc: 'Lightweight MQTT broker for IoT messaging - connect sensors, devices, and AI inference pipelines',
         size: '~2 MB',
+        screenshots: ['screenshots/mosquitto-1.jpg'],
         platforms: { jetson: 'source', ubuntu: 'apt', mac: 'brew', windows: 'installer' },
         downloads: {
             source: 'https://github.com/eclipse/mosquitto',
@@ -1857,24 +2100,28 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'Eclipse Mosquitto is a lightweight MQTT message broker ideal for IoT and sensor data. Use it to connect AI inference results to dashboards, actuators, or other services. Compiled from source for ARM64.',
+            overview: 'Eclipse Mosquitto is a lightweight, open-source MQTT message broker implementing MQTT protocol versions 5.0, 3.1.1, and 3.1. MQTT (Message Queuing Telemetry Transport) is the standard protocol for IoT messaging -- it uses a publish/subscribe pattern where clients publish messages to "topics" and other clients subscribe to receive messages on those topics.\n\nMosquitto is ideal for connecting sensors, AI inference pipelines, and actuators in real-time. For example, a camera feed processor could publish AI detection results to "ai/detections/camera1", and any number of subscribers (dashboards, alert systems, robotic controllers) receive those messages instantly. The protocol is extremely efficient with minimal per-message overhead, making it suitable for constrained devices and high-frequency data streams.\n\nThe broker is compiled from source for ARM64 (Jetson) and weighs under 2 MB. It includes mosquitto_pub and mosquitto_sub CLI tools for quick testing, supports TLS encryption, WebSocket connections for browser-based clients, bridging between brokers, persistent sessions for offline clients, and ACL-based authentication for multi-user deployments.',
             features: [
-                'MQTT v5.0 and v3.1.1 support',
-                'Lightweight (< 2MB compiled)',
-                'TLS/SSL encryption',
-                'WebSocket support',
-                'Bridge mode for connecting brokers',
-                'Persistence for offline clients',
-                'ACL-based authentication',
-                'Compiled from source for ARM64',
-                'Ideal for sensor → AI → actuator pipelines',
-                'Pairs with MQTT Explorer for debugging'
+                'MQTT v5.0 and v3.1.1 protocol support with full spec compliance',
+                'Extremely lightweight: under 2 MB compiled binary',
+                'TLS/SSL encryption for secure message transport',
+                'WebSocket support for browser-based MQTT clients',
+                'Bridge mode for connecting multiple brokers across networks',
+                'Persistent sessions: queues messages for offline/disconnected clients',
+                'ACL-based authentication with username/password or client certificates',
+                'Compiled from source for ARM64 (runs natively on Jetson)',
+                'Topic wildcards: + (single level) and # (multi-level) for flexible subscriptions',
+                'Retained messages: new subscribers get the last published value immediately',
+                'QoS levels 0, 1, 2 for at-most-once, at-least-once, exactly-once delivery',
+                'Pairs with MQTT Explorer for visual debugging of topic trees'
             ],
             cli: [
-                {cmd: 'mosquitto -c /etc/mosquitto/mosquitto.conf', desc: 'Start broker with config'},
-                {cmd: 'mosquitto_pub -t "ai/result" -m "detected: cat"', desc: 'Publish AI inference result'},
-                {cmd: 'mosquitto_sub -t "sensors/#"', desc: 'Subscribe to all sensor topics'},
-                {cmd: 'mosquitto_passwd -c /etc/mosquitto/passwd user1', desc: 'Create password file'}
+                {cmd: 'mosquitto -c /etc/mosquitto/mosquitto.conf -v', desc: 'Start broker with config file and verbose logging'},
+                {cmd: 'mosquitto -p 1883 -v', desc: 'Quick-start broker on port 1883 with verbose output'},
+                {cmd: 'mosquitto_pub -h localhost -t "ai/result" -m "detected: cat, confidence: 0.95"', desc: 'Publish an AI inference result to a topic'},
+                {cmd: 'mosquitto_sub -h localhost -t "sensors/#" -v', desc: 'Subscribe to all sensor topics with verbose topic display'},
+                {cmd: 'mosquitto_pub -h localhost -t "cmd/relay1" -m "ON" -r', desc: 'Publish a retained message (persists for new subscribers)'},
+                {cmd: 'mosquitto_passwd -c /etc/mosquitto/passwd myuser', desc: 'Create a new password file with initial user'}
             ]
         }
     },
@@ -1882,6 +2129,7 @@ const TOOLS = [
         id: 'mqtt-explorer', name: 'MQTT Explorer', category: 'infrastructure', icon: 'Q', iconBg: '#8b5cf6', logo: 'logos/mqtt-explorer.svg', downloadTarget: 'mqtt-explorer',
         desc: 'Visual MQTT client - browse topics, publish messages, and debug IoT data flows',
         size: '~58 MB (AppImage)',
+        screenshots: ['screenshots/mqtt-explorer-1.png', 'screenshots/mqtt-explorer-2.png'],
         platforms: { ubuntu: 'prebuilt', mac: 'installer', windows: 'installer' },
         downloads: {
             source: 'https://github.com/thomasnordquist/MQTT-Explorer',
@@ -1891,26 +2139,31 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'MQTT Explorer is a comprehensive MQTT client with a structured topic overview. Visualize all your MQTT topics in a tree view, publish test messages, and debug IoT/AI messaging flows.',
+            overview: 'MQTT Explorer is a graphical MQTT client that provides a structured, real-time view of all topics on your MQTT broker. When you connect to a Mosquitto (or any MQTT) broker, it subscribes to all topics and displays them in a navigable tree hierarchy, showing current values, update frequency, and payload history for each topic.\n\nThis tool is invaluable for debugging IoT and AI messaging systems. You can see at a glance what data is flowing through your broker, identify topics that have stopped updating, inspect JSON payloads with automatic formatting, and publish test messages to verify your subscribers are working correctly. The topic tree updates in real-time, giving you a live dashboard of your entire MQTT ecosystem.\n\nMQTT Explorer is distributed as an AppImage for Linux x86_64, meaning it runs without installation on any x86_64 Linux distribution. Simply make it executable and run it. It stores connection profiles so you can quickly switch between different brokers (development, production, etc.).',
             features: [
-                'Tree-structured topic visualization',
-                'Topic history and statistics',
-                'Publish and subscribe with visual feedback',
-                'JSON payload formatting',
-                'Topic search and filtering',
-                'Connection profiles for multiple brokers',
-                'AppImage (x86_64 only)',
-                'Works with Mosquitto and any MQTT broker'
+                'Tree-structured topic visualization with real-time updates',
+                'Topic value history with sparkline graphs over time',
+                'Message rate and payload size statistics per topic',
+                'Publish messages to any topic with QoS and retain options',
+                'Subscribe with wildcard patterns for focused debugging',
+                'Automatic JSON payload formatting and syntax highlighting',
+                'Topic search and filtering to find specific data streams',
+                'Connection profiles for managing multiple broker connections',
+                'Diff view showing changes between message updates',
+                'Copy topic paths and payload values to clipboard',
+                'AppImage format: runs on any x86_64 Linux without installation',
+                'Works with Mosquitto, EMQX, HiveMQ, and any MQTT v3.1.1/v5 broker'
             ],
             cli: [
-                {cmd: './MQTT-Explorer.AppImage', desc: 'Launch MQTT Explorer (x86_64)'},
-                {cmd: './MQTT-Explorer.AppImage --no-sandbox', desc: 'Launch without sandbox (if needed)'}
+                {cmd: 'chmod +x MQTT-Explorer.AppImage && ./MQTT-Explorer.AppImage', desc: 'Make executable and launch MQTT Explorer'},
+                {cmd: './MQTT-Explorer.AppImage --no-sandbox', desc: 'Launch without Electron sandbox (needed in some container environments)'}
             ]
         }
     },
     {
         id: 'redis', name: 'Redis', category: 'infrastructure', icon: 'R', iconBg: '#dc382d', logo: 'logos/redis.svg', downloadTarget: 'redis',
         desc: 'In-memory data store - caching, pub/sub, and session storage for AI applications',
+        screenshots: ['screenshots/redis-1.png'],
         size: '~17 MB (compiled)',
         platforms: { jetson: 'source', ubuntu: 'apt', mac: 'brew', windows: 'n/a' },
         downloads: {
@@ -1921,30 +2174,35 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'Redis is a blazing-fast in-memory data store. Use it for caching AI model outputs, session storage, pub/sub messaging between services, and rate limiting. Compiled from source for ARM64.',
+            overview: 'Redis is an in-memory data structure store that can serve as a database, cache, message broker, and streaming engine. It stores data in RAM for sub-millisecond access times, making it ideal for caching AI inference results, managing session state, rate limiting API requests, and building real-time messaging pipelines between services.\n\nRedis supports rich data structures beyond simple key-value pairs: strings, hashes (objects), lists, sets, sorted sets (leaderboards), streams (append-only logs), bitmaps, and HyperLogLog (cardinality estimation). Each structure has specialized commands optimized for common operations. For example, sorted sets enable real-time ranking of model performance scores, while streams provide a Kafka-like append-only log for event processing.\n\nData persistence is configurable: RDB snapshots create point-in-time dumps at intervals, while AOF (Append Only File) logs every write operation for durability. Redis is compiled from source for ARM64 and runs as a single-threaded process (with I/O threading for network operations), making it simple to deploy and reason about. The Pub/Sub system enables real-time messaging between AI pipeline components.',
             features: [
-                'Sub-millisecond latency',
-                'Cache AI inference results',
-                'Pub/Sub for real-time messaging',
-                'Streams for event logs',
-                'Sorted sets for leaderboards/rankings',
-                'Persistence (RDB + AOF)',
-                'Compiled from source for ARM64',
-                'Vector search with RediSearch module',
-                'Lua scripting support',
-                'Cluster mode for high availability'
+                'Sub-millisecond latency for reads and writes (in-memory storage)',
+                'Rich data structures: strings, hashes, lists, sets, sorted sets, streams',
+                'Pub/Sub messaging for real-time event distribution between services',
+                'Streams: append-only log structure for event sourcing and processing',
+                'Sorted sets for leaderboards, rankings, and priority queues',
+                'Configurable persistence: RDB snapshots and/or AOF write-ahead log',
+                'Compiled from source for ARM64 (Jetson native)',
+                'Lua scripting for atomic multi-step operations',
+                'Key expiration (TTL) for automatic cache invalidation',
+                'Pipeline and transaction support for batch operations',
+                'Cluster mode for horizontal scaling and high availability',
+                'Compatible with RediSearch module for full-text and vector search'
             ],
             cli: [
-                {cmd: 'redis-server --daemonize yes', desc: 'Start Redis in background'},
-                {cmd: 'redis-cli SET model:result "cat detected"', desc: 'Cache an inference result'},
-                {cmd: 'redis-cli SUBSCRIBE ai:events', desc: 'Subscribe to AI event channel'},
-                {cmd: 'redis-cli INFO memory', desc: 'Check memory usage'}
+                {cmd: 'redis-server --daemonize yes --port 6379', desc: 'Start Redis server in background on default port'},
+                {cmd: 'redis-server --save "" --appendonly no', desc: 'Start as pure in-memory cache (no persistence)'},
+                {cmd: 'redis-cli SET inference:latest "cat detected, confidence 0.95"', desc: 'Cache an AI inference result'},
+                {cmd: 'redis-cli HSET model:stats requests 1542 avg_latency_ms 23.4', desc: 'Store structured model statistics in a hash'},
+                {cmd: 'redis-cli SUBSCRIBE ai:events', desc: 'Subscribe to real-time AI event channel'},
+                {cmd: 'redis-cli INFO memory', desc: 'Check memory usage and key statistics'}
             ]
         }
     },
     {
         id: 'postgresql', name: 'PostgreSQL', category: 'infrastructure', icon: 'P', iconBg: '#336791', logo: 'logos/postgresql.svg', downloadTarget: 'postgresql',
         desc: 'Relational database with JSON and vector support - store structured data and embeddings',
+        screenshots: ['screenshots/postgresql-1.png'],
         size: '~34 MB (compiled)',
         platforms: { jetson: 'source', ubuntu: 'apt', mac: 'brew', windows: 'installer' },
         downloads: {
@@ -1955,24 +2213,70 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'PostgreSQL is a powerful relational database with native JSON and pgvector support. Store structured AI metadata, embeddings for similarity search, experiment logs, and application data. Compiled from source for ARM64.',
+            overview: 'PostgreSQL is the world\'s most advanced open-source relational database. It combines rock-solid ACID transactions with modern features like JSONB (binary JSON with indexing), full-text search, and the pgvector extension for AI embedding similarity search. This makes it a single database that can handle structured data, semi-structured JSON, and vector embeddings for RAG applications.\n\nFor AI workflows, PostgreSQL with pgvector provides an alternative to specialized vector databases: you can store document embeddings alongside their metadata, run similarity searches with SQL, and join results with other relational data -- all in a single query. This simplifies architectures that would otherwise require separate vector and relational databases.\n\nPostgreSQL is compiled from source for ARM64 (Jetson) and serves as the backend for many tools in this toolkit: n8n stores its workflow data in PostgreSQL, Coolify uses it for application state, and most web frameworks support it natively. Its extensibility (custom types, functions, indexes, and languages) and its mature ecosystem of extensions (PostGIS for geospatial, TimescaleDB for time-series, pg_cron for scheduling) make it the most versatile database available.',
             features: [
-                'JSONB for semi-structured AI metadata',
-                'pgvector extension for embeddings/similarity search',
-                'Full-text search built-in',
-                'ACID transactions',
-                'Compiled from source for ARM64',
-                'Extensible with plugins (PostGIS, TimescaleDB)',
-                'Logical replication',
-                'Parallel query execution',
-                'Row-level security',
-                'Works with n8n, Coolify, and most AI frameworks'
+                'JSONB columns with GIN indexing for semi-structured AI metadata',
+                'pgvector extension: store and search embeddings with cosine/L2/inner product distance',
+                'Full-text search with tsvector, tsquery, and ranking built-in',
+                'ACID transactions with MVCC for concurrent access without locking',
+                'Compiled from source for ARM64 (native Jetson performance)',
+                'Extensible: custom types, functions, operators, index methods, languages',
+                'PostGIS (geospatial), TimescaleDB (time-series), pg_cron (scheduling)',
+                'Logical and streaming replication for high availability',
+                'Parallel query execution for large analytical workloads',
+                'Row-level security policies for multi-tenant applications',
+                'Window functions, CTEs, lateral joins for complex analytics',
+                'Backend for n8n, Coolify, and most web/AI frameworks'
             ],
             cli: [
-                {cmd: 'initdb -D /data/pg', desc: 'Initialize database cluster'},
-                {cmd: 'pg_ctl -D /data/pg start', desc: 'Start PostgreSQL server'},
-                {cmd: 'psql -c "CREATE EXTENSION vector;"', desc: 'Enable pgvector for embeddings'},
-                {cmd: 'psql -c "SELECT * FROM embeddings ORDER BY vec <-> $1 LIMIT 5;"', desc: 'Vector similarity search'}
+                {cmd: 'initdb -D /data/pg --encoding=UTF8', desc: 'Initialize a new database cluster with UTF-8 encoding'},
+                {cmd: 'pg_ctl -D /data/pg -l /data/pg/logfile start', desc: 'Start PostgreSQL server with log file'},
+                {cmd: 'createdb myapp', desc: 'Create a new database'},
+                {cmd: 'psql -c "CREATE EXTENSION vector;"', desc: 'Enable pgvector for embedding storage and search'},
+                {cmd: 'psql -c "CREATE TABLE docs (id serial, content text, embedding vector(384));"', desc: 'Create a table with a vector column for embeddings'},
+                {cmd: 'psql -c "SELECT content FROM docs ORDER BY embedding <=> \'[0.1,0.2,...]\' LIMIT 5;"', desc: 'Find 5 most similar documents by cosine distance'}
+            ]
+        }
+    },
+    {
+        id: 'telegraf', name: 'Telegraf', category: 'infrastructure', icon: 'T', iconBg: '#9b4f96', logo: 'logos/telegraf.svg', downloadTarget: 'telegraf',
+        desc: 'Metrics collection agent with 300+ input plugins - InfluxDB, Prometheus, and MQTT output',
+        screenshots: ['screenshots/telegraf-1.png'],
+        size: '~80 MB',
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://github.com/influxdata/telegraf',
+            releases: 'https://github.com/influxdata/telegraf/releases',
+            binaries: {
+                'jetson': 'tools/linux-arm64/telegraf/usr/bin/telegraf',
+                'ubuntu': 'tools/linux-x86_64/telegraf/usr/bin/telegraf',
+                'mac': 'tools/macos-arm64/telegraf/usr/bin/telegraf',
+                'windows': 'tools/windows-x64/telegraf/telegraf.exe'
+            }
+        },
+        details: {
+            overview: 'Telegraf is InfluxData\'s open-source, plugin-driven agent for collecting, processing, and writing metrics. With over 300 input plugins, it can gather data from systems, services, IoT sensors, and APIs, then route it to InfluxDB, Prometheus, MQTT brokers, or any of 40+ output destinations. It runs as a single static binary with minimal resource usage.\n\nFor AI and edge computing workflows, Telegraf excels at monitoring GPU utilization, inference latency, model performance, and system health. On Jetson devices it can collect NVIDIA GPU metrics, CPU/memory stats, disk I/O, and network throughput -- all with a single configuration file. Combined with InfluxDB, it creates a complete observability stack for AI inference pipelines.\n\nTelegraf supports processor plugins for data transformation (aggregation, filtering, enrichment), allowing you to compute running averages, detect anomalies, or tag metrics before they reach your database. Its agent-based architecture means no code changes are needed in your applications -- just configure inputs and outputs in TOML.',
+            features: [
+                '300+ input plugins (CPU, GPU, disk, net, Docker, NVIDIA SMI, MQTT, HTTP, etc.)',
+                'InfluxDB native output with batching and retry logic',
+                'Prometheus remote-write and exposition format output',
+                'MQTT input/output for IoT sensor data collection',
+                'Agent-based: single binary, no code changes to applications',
+                'Processor plugins for aggregation, filtering, and data enrichment',
+                'NVIDIA GPU monitoring via nvidia-smi input plugin',
+                'Service inputs for SNMP, gRPC, TCP/UDP listeners, and webhooks',
+                'TOML configuration with environment variable substitution',
+                'Internal metrics for monitoring Telegraf itself',
+                'Execd plugins for custom scripts in any language',
+                'Minimal resource usage suitable for edge and embedded devices'
+            ],
+            cli: [
+                {cmd: 'telegraf --config telegraf.conf', desc: 'Start Telegraf with a configuration file'},
+                {cmd: 'telegraf --sample-config --input-filter cpu:mem:disk --output-filter influxdb_v2', desc: 'Generate sample config for CPU/mem/disk to InfluxDB'},
+                {cmd: 'telegraf --test --config telegraf.conf', desc: 'Test configuration by collecting one sample and printing output'},
+                {cmd: 'telegraf --input-list', desc: 'List all available input plugins'},
+                {cmd: 'telegraf --output-list', desc: 'List all available output plugins'},
+                {cmd: 'telegraf config create --section-filter agent:inputs:outputs --input-filter nvidia_smi --output-filter influxdb_v2', desc: 'Create minimal config for NVIDIA GPU monitoring'}
             ]
         }
     },
@@ -1983,6 +2287,7 @@ const TOOLS = [
         id: 'btop', name: 'btop', category: 'dev-tools', icon: 'B', iconBg: '#6366f1', logo: 'logos/btop.png', downloadTarget: 'btop',
         desc: 'Resource monitor with CPU, memory, disks, network, and process stats - GPU monitoring support',
         size: '~2 MB',
+        screenshots: ['screenshots/btop-1.png', 'screenshots/btop-2.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/aristocratos/btop',
@@ -1995,24 +2300,27 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'btop is a modern resource monitor showing CPU, memory, disk, network, and process usage with a beautiful TUI. Static binaries work on any Linux without dependencies - essential for monitoring AI inference workloads.',
+            overview: 'btop is a modern, feature-rich resource monitor for the terminal that displays real-time information about CPU, memory, disk, network, and process usage with beautiful graphs and a fully interactive TUI (Terminal User Interface). Think of it as a vastly improved replacement for top/htop with GPU monitoring, mouse support, and customizable layouts.\n\nFor AI workloads, btop is essential for monitoring inference server resource usage: you can see per-core CPU utilization during llama.cpp inference, track memory consumption as models are loaded, monitor GPU utilization (NVIDIA via nvidia-smi, AMD via ROCm, Intel via intel_gpu_top), and identify runaway processes. The process list shows per-process CPU, memory, and I/O usage with sorting and filtering.\n\nbtop is distributed as a static binary with zero dependencies -- just copy it to any Linux system and run it. ARM64 native builds are available for Jetson and Raspberry Pi. The interface supports mouse interaction, customizable themes, preset layouts (switch between different monitoring views), and per-core temperature monitoring via lm_sensors or sysfs.',
             features: [
-                'CPU, memory, disk, network real-time graphs',
-                'Per-process CPU/memory/IO monitoring',
-                'GPU monitoring (NVIDIA, AMD, Intel)',
-                'Static binary - no dependencies',
-                'ARM64 native builds available',
-                'Customizable themes and layouts',
-                'Mouse support in terminal',
-                'Process tree view',
-                'Per-core CPU temperature',
-                'Battery and power monitoring'
+                'Real-time CPU, memory, disk, and network graphs with history',
+                'Per-process CPU, memory, and I/O usage with sorting and filtering',
+                'GPU monitoring: NVIDIA (nvidia-smi), AMD (ROCm), Intel (i915)',
+                'Static binary with zero dependencies (works on any Linux)',
+                'ARM64 native builds for Jetson, Raspberry Pi, Apple Silicon',
+                'Customizable themes with 16-color and true-color support',
+                'Mouse support: click processes, resize panels, scroll lists',
+                'Process tree view showing parent-child relationships',
+                'Per-core CPU temperature via lm_sensors or sysfs',
+                'Battery and power consumption monitoring',
+                'Preset layouts: quickly switch between monitoring configurations',
+                'Signal sending: kill, stop, continue processes from the UI'
             ],
             cli: [
-                {cmd: 'btop', desc: 'Launch interactive resource monitor'},
-                {cmd: 'btop --utf-force', desc: 'Force UTF-8 mode for SSH sessions'},
-                {cmd: 'btop -t', desc: 'Start in TTY mode (no mouse)'},
-                {cmd: 'btop --preset 0', desc: 'Start with default preset layout'}
+                {cmd: 'btop', desc: 'Launch the interactive resource monitor'},
+                {cmd: 'btop --utf-force', desc: 'Force UTF-8 rendering (useful over SSH or in containers)'},
+                {cmd: 'btop -t', desc: 'Start in TTY-compatible mode (no mouse, simpler rendering)'},
+                {cmd: 'btop --preset 0', desc: 'Start with a specific preset layout (0-9)'},
+                {cmd: 'btop -lc', desc: 'Start with low-color mode for basic terminals'}
             ]
         }
     },
@@ -2032,24 +2340,29 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'tmux is a terminal multiplexer that lets you run persistent sessions. Essential for keeping AI inference servers running after SSH disconnect, and for monitoring multiple processes side-by-side.',
+            overview: 'tmux is a terminal multiplexer -- it lets you create multiple terminal sessions within a single terminal window, and most importantly, those sessions persist even when you disconnect. This is essential for running long-lived processes like AI inference servers: start llama-server in a tmux session, disconnect from SSH, and the server keeps running. Reconnect later and reattach to see exactly where you left off.\n\nBeyond persistence, tmux enables split-pane layouts for monitoring multiple processes simultaneously. You can have your inference server in one pane, btop showing resource usage in another, and log output in a third -- all visible at once within a single terminal window. Sessions can be named, making it easy to organize different workloads (e.g., "inference", "training", "monitoring").\n\ntmux is distributed as a static binary from the tmux-builds project, meaning it works on any Linux system without dependencies on system libraries. The default key prefix is Ctrl-b, followed by a command key (e.g., Ctrl-b c for new window, Ctrl-b % for vertical split, Ctrl-b " for horizontal split). Configuration is done via ~/.tmux.conf, and the tpm plugin manager adds features like session persistence across reboots.',
             features: [
-                'Persistent sessions survive disconnects',
-                'Split panes for multi-process monitoring',
-                'Static binary from tmux-builds (no dependencies)',
-                'Session sharing for collaboration',
-                'Scriptable layouts and automation',
-                'Copy mode with vi/emacs keybindings',
-                'Status bar customization',
-                'Plugin ecosystem (tpm)',
-                'Linux ARM64 and x86_64 builds',
-                'macOS ARM64 builds'
+                'Persistent sessions that survive SSH disconnects and terminal closes',
+                'Split panes: monitor multiple processes side-by-side in one terminal',
+                'Static binary from tmux-builds (no system library dependencies)',
+                'Named sessions for organizing different workloads',
+                'Session sharing: multiple users can attach to the same session',
+                'Scriptable layouts for reproducible multi-pane setups',
+                'Copy mode with vi or emacs keybindings for scrollback navigation',
+                'Customizable status bar showing system info, time, and session data',
+                'Plugin ecosystem via tpm (tmux plugin manager)',
+                'Window and pane management with keyboard shortcuts',
+                'Linux ARM64, x86_64, and macOS ARM64 static builds',
+                'Environment variable and shell integration preservation'
             ],
+            screenshots: ['screenshots/tmux-1.png'],
             cli: [
-                {cmd: 'tmux new -s inference', desc: 'Create named session for inference server'},
-                {cmd: 'tmux attach -t inference', desc: 'Reattach to running session'},
-                {cmd: 'tmux split-window -h "btop"', desc: 'Split pane with resource monitor'},
-                {cmd: 'tmux send-keys "llama-server -m model.gguf -ngl 999" C-m', desc: 'Send command to session'}
+                {cmd: 'tmux new -s inference', desc: 'Create a new named session called "inference"'},
+                {cmd: 'tmux attach -t inference', desc: 'Reattach to the "inference" session after disconnect'},
+                {cmd: 'tmux ls', desc: 'List all active tmux sessions'},
+                {cmd: 'tmux split-window -h "btop"', desc: 'Split current pane horizontally and run btop'},
+                {cmd: 'tmux send-keys -t inference "llama-server -m model.gguf -ngl 999" C-m', desc: 'Send a command to a named session remotely'},
+                {cmd: 'tmux new -s ai -d && tmux send-keys -t ai "ollama serve" C-m && tmux split-window -t ai -h "btop"', desc: 'Script: create session, start Ollama, add btop pane'}
             ]
         }
     },
@@ -2057,6 +2370,7 @@ const TOOLS = [
         id: 'helix', name: 'Helix', category: 'dev-tools', icon: 'H', iconBg: '#a855f7', logo: 'logos/helix.svg', downloadTarget: 'helix',
         desc: 'Post-modern modal text editor - built-in LSP, tree-sitter, and multiple cursors out of the box',
         size: '~20 MB',
+        screenshots: ['screenshots/helix-1.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/helix-editor/helix',
@@ -2069,24 +2383,28 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'Helix is a Kakoune/Neovim-inspired modal text editor with built-in LSP support, tree-sitter syntax highlighting, and multiple selections. No plugin system needed — batteries included. Edit AI configs, scripts, and code with zero setup.',
+            overview: 'Helix is a post-modern modal text editor inspired by Kakoune and Neovim, written in Rust. Its key innovation is "select-then-act": you first select text (using motions, text objects, or tree-sitter nodes), see what you have selected, and then apply an action (delete, change, yank). This is the opposite of Vim\'s "verb-then-noun" approach and makes editing more visual and predictable.\n\nHelix is "batteries included" -- it ships with built-in LSP (Language Server Protocol) support for code completion, diagnostics, go-to-definition, and refactoring across 30+ languages, all without installing any plugins or package managers. Tree-sitter provides syntax highlighting and structural text objects (select a function, a class, a parameter, a comment) that understand your code\'s AST rather than just regex patterns.\n\nThe editor is distributed as a static binary for ARM64 and x86_64, making it immediately usable on any system. Configuration is a simple TOML file (~/.config/helix/config.toml), and language servers are configured in languages.toml. For anyone who wants a modern editing experience without the complexity of configuring Neovim plugins, Helix provides an excellent out-of-the-box experience.',
             features: [
-                'Built-in LSP (no plugin manager needed)',
-                'Tree-sitter syntax highlighting and text objects',
-                'Multiple selections (select-then-act)',
-                'Built-in file picker and fuzzy finder',
-                'Git gutter and diff support',
-                'DAP (Debug Adapter Protocol) support',
-                'TOML-based config',
-                'ARM64 and x86_64 static builds',
-                '30+ languages supported out of the box',
-                'Space-mode command palette'
+                'Built-in LSP: completion, diagnostics, go-to-definition, rename, code actions',
+                'Tree-sitter: syntax highlighting and structural text objects (select functions, classes)',
+                'Multiple selections: select-then-act paradigm for visual, predictable editing',
+                'Built-in file picker with fuzzy finding and directory navigation',
+                'Git gutter showing added/modified/removed line indicators',
+                'DAP (Debug Adapter Protocol) support for integrated debugging',
+                'Simple TOML-based configuration (no Lua/VimScript needed)',
+                'ARM64 and x86_64 static builds (no system dependencies)',
+                '30+ programming languages supported with syntax and LSP out of the box',
+                'Space-mode command palette for discoverable commands',
+                'Surround, match, and comment commands built-in',
+                'Incremental selection expansion using tree-sitter nodes'
             ],
             cli: [
-                {cmd: 'hx file.py', desc: 'Open file for editing'},
-                {cmd: 'hx --health python', desc: 'Check Python LSP/formatter status'},
-                {cmd: 'hx --tutor', desc: 'Interactive tutorial for beginners'},
-                {cmd: 'hx -c "theme = \\"onedark\\"" file.rs', desc: 'Open with custom config'}
+                {cmd: 'hx file.py', desc: 'Open a file for editing'},
+                {cmd: 'hx .', desc: 'Open the file picker in the current directory'},
+                {cmd: 'hx --health', desc: 'Show health status of all configured language servers'},
+                {cmd: 'hx --health python', desc: 'Check Python LSP/formatter/debugger status specifically'},
+                {cmd: 'hx --tutor', desc: 'Launch the interactive tutorial (great for learning modal editing)'},
+                {cmd: 'hx --config /path/to/config.toml file.rs', desc: 'Open with a custom configuration file'}
             ]
         }
     },
@@ -2094,6 +2412,7 @@ const TOOLS = [
         id: 'vscodium', name: 'VSCodium', category: 'dev-tools', icon: 'V', iconBg: '#2196F3', logo: 'logos/vscodium.svg', downloadTarget: 'vscodium',
         desc: 'VS Code without telemetry - full IDE experience with extensions, debugging, and terminal',
         size: '~430 MB',
+        screenshots: ['screenshots/vscodium-1.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/VSCodium/vscodium',
@@ -2106,31 +2425,36 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'VSCodium is VS Code built from source without Microsoft telemetry or tracking. Full IDE with extensions, integrated terminal, debugging, and Git. Use Open VSX Registry for extensions offline.',
+            overview: 'VSCodium is a community-driven distribution of Microsoft\'s VS Code editor, built from the same open-source repository (vscode) but without Microsoft\'s telemetry, tracking, or proprietary branding. It provides the exact same editing experience -- IntelliSense, debugging, integrated terminal, Git, extensions -- while respecting your privacy and working fully offline.\n\nExtensions are installed from the Open VSX Registry (open-vsx.org) instead of Microsoft\'s Marketplace. Most popular extensions are available: Python, Rust, Go, JavaScript/TypeScript, C/C++, Docker, and many more. Extensions can also be installed from .vsix files downloaded ahead of time, making VSCodium fully functional in offline environments.\n\nVSCodium provides ARM64 native builds for Jetson and Raspberry Pi, and supports portable mode where all settings, extensions, and state are stored in a local directory (no system installation required). This makes it easy to include in the Val Ark toolkit as a self-contained development environment. The integrated terminal, multi-cursor editing, split views, and workspace features make it a complete IDE for any programming language.',
             features: [
-                'VS Code experience without telemetry',
-                'Extensions via Open VSX Registry',
-                'Integrated terminal and debugging',
-                'Git integration built-in',
-                'Remote development (SSH, containers)',
-                'Python, Rust, Go, JS/TS language support',
-                'Jupyter notebook support',
-                'ARM64 native builds',
-                'Portable mode (no install needed)',
-                'Settings sync across devices'
+                'Full VS Code editing experience without telemetry or tracking',
+                'Extensions via Open VSX Registry (community-maintained, no Microsoft account)',
+                'Integrated terminal with split panes and shell selection',
+                'Built-in debugging with breakpoints, watch, call stack for multiple languages',
+                'Git integration: diff, stage, commit, branch, merge, rebase from the UI',
+                'Remote development via SSH, containers, or WSL',
+                'Python, Rust, Go, JS/TS, C/C++ language support with IntelliSense',
+                'Jupyter notebook editing and execution support',
+                'ARM64 native builds for Jetson, Raspberry Pi, Apple Silicon',
+                'Portable mode: all data in a local folder (no install, no system changes)',
+                'Offline extension install from .vsix files',
+                'Multi-cursor editing, regex find/replace, and workspace search'
             ],
             cli: [
-                {cmd: 'codium .', desc: 'Open current directory in VSCodium'},
-                {cmd: 'codium --install-extension ms-python.python', desc: 'Install Python extension'},
-                {cmd: 'codium --list-extensions', desc: 'List installed extensions'},
-                {cmd: 'codium --diff file1.py file2.py', desc: 'Diff two files'}
+                {cmd: 'codium .', desc: 'Open the current directory as a workspace in VSCodium'},
+                {cmd: 'codium --install-extension ms-python.python', desc: 'Install an extension from Open VSX Registry'},
+                {cmd: 'codium --install-extension extension.vsix', desc: 'Install an extension from a local .vsix file (offline)'},
+                {cmd: 'codium --list-extensions', desc: 'List all installed extensions'},
+                {cmd: 'codium --diff file1.py file2.py', desc: 'Open a side-by-side diff view of two files'},
+                {cmd: 'codium --goto file.py:42:10', desc: 'Open file at specific line and column'}
             ]
         }
     },
     {
-        id: 'sqlite', name: 'SQLite', category: 'dev-tools', icon: 'S', iconBg: '#003B57', logo: 'logos/sqlite.svg', downloadTarget: 'sqlite',
+        id: 'sqlite', name: 'SQLite', category: 'infrastructure', icon: 'S', iconBg: '#003B57', logo: 'logos/sqlite.svg', downloadTarget: 'sqlite',
         desc: 'Self-contained SQL database engine - zero-config, serverless, used by most applications',
         size: '~2 MB',
+        screenshots: ['screenshots/sqlite-1.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'built-in', windows: 'prebuilt' },
         downloads: {
             source: 'https://sqlite.org/src',
@@ -2142,24 +2466,28 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'SQLite is the most-used database engine in the world. Serverless, zero-config, single-file databases. Use it for AI experiment logs, metadata storage, application state, and as a data interchange format.',
+            overview: 'SQLite is the most widely deployed database engine in the world -- it is embedded in every smartphone, web browser, and most applications you use daily. Unlike client-server databases (PostgreSQL, MySQL), SQLite runs in-process with your application and stores the entire database in a single file. There is no server to configure, no network connections to manage, and no user accounts to set up.\n\nFor AI development, SQLite is perfect for experiment tracking (log hyperparameters, metrics, and results), metadata storage (index your model files, datasets, and configurations), application state (persist chat history, user preferences, pipeline progress), and as a data interchange format (share datasets as .sqlite files that anyone can query). Python\'s built-in sqlite3 module means you can use it immediately without installing anything.\n\nThe sqlite3 CLI tool provided here is a standalone binary for ARM64 and x86_64 that lets you create, query, and manage SQLite databases from the terminal. It supports full SQL, JSON functions, full-text search (FTS5), common table expressions (CTEs), window functions, and WAL mode for concurrent access. A single SQLite database can scale to terabytes while maintaining excellent read performance.',
             features: [
-                'Zero-config, serverless database',
-                'Single-file databases (easy backup)',
-                'Full SQL with JSON support',
-                'Full-text search (FTS5)',
-                'R*Tree indexes for spatial data',
-                'WAL mode for concurrent reads',
-                'Used by Python, browsers, mobile apps',
-                'Prebuilt CLI for x86_64 and ARM64',
-                'Terabyte-scale databases',
-                'In-process: no network overhead'
+                'Zero-config, serverless: no setup, no daemon, no user accounts',
+                'Single-file databases: easy to backup, copy, share, version control',
+                'Full SQL support including CTEs, window functions, and subqueries',
+                'JSON functions: json_extract, json_each, json_group_array',
+                'Full-text search engine (FTS5) with ranking and snippets',
+                'R*Tree indexes for geospatial and multi-dimensional range queries',
+                'WAL mode: concurrent readers with single writer, no blocking',
+                'Built into Python (sqlite3 module), used by browsers and mobile apps',
+                'Prebuilt CLI binary for x86_64 and ARM64 (no dependencies)',
+                'Terabyte-scale databases with excellent read performance',
+                'In-process operation: no network overhead, no serialization cost',
+                'EXPLAIN QUERY PLAN for understanding and optimizing queries'
             ],
             cli: [
-                {cmd: 'sqlite3 experiments.db', desc: 'Open/create a database'},
-                {cmd: 'sqlite3 db.sqlite ".tables"', desc: 'List tables'},
-                {cmd: 'sqlite3 db.sqlite "SELECT * FROM runs ORDER BY score DESC LIMIT 10;"', desc: 'Query experiment results'},
-                {cmd: 'sqlite3 db.sqlite ".backup backup.db"', desc: 'Create hot backup'}
+                {cmd: 'sqlite3 experiments.db', desc: 'Open or create a database (interactive SQL shell)'},
+                {cmd: 'sqlite3 db.sqlite ".tables"', desc: 'List all tables in a database'},
+                {cmd: 'sqlite3 db.sqlite ".schema runs"', desc: 'Show the CREATE TABLE statement for a table'},
+                {cmd: 'sqlite3 db.sqlite "SELECT * FROM runs ORDER BY score DESC LIMIT 10;"', desc: 'Query and sort experiment results'},
+                {cmd: 'sqlite3 db.sqlite ".mode csv" ".import data.csv mytable"', desc: 'Import a CSV file into a new table'},
+                {cmd: 'sqlite3 db.sqlite ".backup backup.db"', desc: 'Create a consistent backup while the database is in use'}
             ]
         }
     },
@@ -2167,6 +2495,7 @@ const TOOLS = [
         id: 'miniforge', name: 'Miniforge', category: 'dev-tools', icon: 'M', iconBg: '#43b049', logo: 'logos/conda.svg', downloadTarget: 'miniforge',
         desc: 'Conda-forge Python distribution - manage Python environments and scientific packages offline',
         size: '~80 MB (installer)',
+        screenshots: ['screenshots/miniforge-1.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/conda-forge/miniforge',
@@ -2179,24 +2508,28 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'Miniforge is a minimal conda installer using conda-forge as the default channel. Create isolated Python environments with numpy, pytorch, transformers, and other ML packages. Works offline once packages are cached.',
+            overview: 'Miniforge is a minimal installer for conda that uses the conda-forge channel as its default package source. Conda is a package and environment manager that can install Python, R, and compiled libraries (CUDA, MKL, OpenBLAS) in isolated environments. Unlike pip, conda manages binary dependencies and system libraries, making it the preferred tool for scientific computing and machine learning packages.\n\nThe conda-forge channel is community-maintained and provides over 20,000 packages compiled for multiple platforms including Linux ARM64 (Jetson, Raspberry Pi). This means you get native ARM64 builds of NumPy, SciPy, PyTorch, scikit-learn, transformers, and other ML packages without needing to compile from source. Miniforge includes the mamba solver for fast dependency resolution (10-100x faster than the classic conda solver).\n\nOnce packages are downloaded, conda works fully offline by caching them locally. You can export an environment specification (environment.yml), transfer it to an air-gapped system, and recreate the exact same environment. This makes Miniforge essential for reproducible AI research and deployment in offline scenarios.',
             features: [
-                'Conda-forge as default channel (community-maintained)',
-                'Mamba solver for fast dependency resolution',
-                'Create isolated Python environments',
-                'ARM64 native packages available',
-                'Offline mode with cached packages',
-                'NumPy, PyTorch, scikit-learn, transformers available',
-                'Environment export/import (environment.yml)',
-                'No Anaconda license restrictions',
-                'Cross-platform (Linux, macOS, Windows)',
-                'Minimal base install (~80MB)'
+                'Conda-forge as default channel (community-maintained, no license restrictions)',
+                'Mamba solver for 10-100x faster dependency resolution',
+                'Create fully isolated Python environments with separate packages',
+                'ARM64 native packages for Jetson, Raspberry Pi, Apple Silicon',
+                'Offline mode: works without internet once packages are cached',
+                'NumPy, PyTorch, scikit-learn, transformers, ONNX Runtime available',
+                'Environment export/import via environment.yml for reproducibility',
+                'No Anaconda commercial license restrictions (100% open source)',
+                'Cross-platform: Linux (ARM64/x86_64), macOS (ARM64/x86_64), Windows',
+                'Minimal base install (~80 MB) with only essential packages',
+                'Manages non-Python dependencies (CUDA, MKL, OpenBLAS, compilers)',
+                'Virtual environment activation/deactivation with shell integration'
             ],
             cli: [
-                {cmd: 'conda create -n ml python=3.11 numpy pytorch', desc: 'Create ML environment'},
-                {cmd: 'conda activate ml', desc: 'Activate environment'},
-                {cmd: 'conda install transformers datasets', desc: 'Install HuggingFace packages'},
-                {cmd: 'conda env export > environment.yml', desc: 'Export environment for sharing'}
+                {cmd: 'conda create -n ml python=3.11 numpy pytorch', desc: 'Create an ML environment with Python 3.11 and key packages'},
+                {cmd: 'conda activate ml', desc: 'Activate the "ml" environment (changes PATH and Python)'},
+                {cmd: 'conda install -n ml transformers datasets tokenizers', desc: 'Install HuggingFace packages into a specific environment'},
+                {cmd: 'conda env export > environment.yml', desc: 'Export current environment for sharing/reproducibility'},
+                {cmd: 'conda env create -f environment.yml', desc: 'Recreate an environment from an exported specification'},
+                {cmd: 'conda clean --all', desc: 'Remove cached packages to free disk space'}
             ]
         }
     },
@@ -2204,6 +2537,7 @@ const TOOLS = [
         id: 'python-standalone', name: 'Python Standalone', category: 'dev-tools', icon: 'P', iconBg: '#3776ab', logo: 'logos/python.svg', downloadTarget: 'python-standalone',
         desc: 'Portable Python build - no system dependencies, works anywhere with no install step',
         size: '~88 MB',
+        screenshots: ['screenshots/python-standalone-1.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/indygreg/python-build-standalone',
@@ -2241,6 +2575,7 @@ const TOOLS = [
         id: 'dev-cli', name: 'Dev CLI Bundle', category: 'dev-tools', icon: 'D', iconBg: '#737373', logo: 'logos/dev-cli.svg', downloadTarget: 'dev-cli',
         desc: 'Essential CLI tools: ripgrep, fd, bat, jq, fzf, lazygit - all as static ARM64/x86_64 binaries',
         size: '~25 MB total',
+        screenshots: ['screenshots/dev-cli-1.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/BurntSushi/ripgrep',
@@ -2279,6 +2614,7 @@ const TOOLS = [
         id: 'claude-code', name: 'Claude Code', category: 'dev-tools', icon: 'C', iconBg: '#d97706', logo: 'logos/claude-code.svg', downloadTarget: 'claude-code',
         desc: 'Anthropic\'s agentic coding CLI - works offline with Ollama or llama.cpp as backend',
         size: '~50 MB',
+        screenshots: ['screenshots/claude-code-1.png'],
         platforms: { jetson: 'npm', ubuntu: 'npm', mac: 'npm', windows: 'npm' },
         downloads: {
             source: 'https://github.com/anthropics/claude-code',
@@ -2287,26 +2623,262 @@ const TOOLS = [
             binaries: {}
         },
         details: {
-            overview: 'Claude Code is Anthropic\'s official agentic coding assistant for the terminal. It can read, write, and refactor code, run commands, search codebases, and manage git workflows. In offline/local mode, it connects to Ollama or llama.cpp as the LLM backend, enabling fully private AI-assisted development without cloud API calls.',
+            overview: 'Claude Code is Anthropic\'s official agentic coding assistant for the terminal. It operates as an AI pair programmer that can read your codebase, understand project structure, write and edit files, run shell commands, manage git workflows, and iteratively solve complex programming tasks -- all from a conversational CLI interface.\n\nIn offline/local mode, Claude Code connects to any OpenAI-compatible API server as its LLM backend. This means you can point it at Ollama (serving Qwen, DeepSeek, Llama, or any other model) or directly at llama-server, enabling fully private AI-assisted development with no cloud API calls and no data leaving your machine.\n\nClaude Code understands project context through CLAUDE.md files (similar to README but specifically for the AI assistant), can search and navigate large codebases using built-in tools (grep, glob, file reading), execute terminal commands and parse their output, create git commits with meaningful messages, and work across multiple files simultaneously for refactoring tasks. The /init command helps set up a new project with proper context.',
             features: [
-                'Agentic coding: reads, edits, creates files autonomously',
-                'Local/offline mode via Ollama or llama.cpp backend',
-                'OpenAI-compatible API support (any local server)',
-                'Git integration (commits, PRs, branch management)',
-                'Multi-file refactoring with codebase understanding',
-                'Terminal command execution and output parsing',
-                'MCP server support for extended tool access',
-                'Context-aware code search and navigation',
-                'Plan mode for complex multi-step tasks',
-                'Works with any model served by Ollama (Qwen, DeepSeek, etc.)'
+                'Agentic coding: autonomously reads, edits, creates, and deletes files',
+                'Local/offline mode via Ollama, llama.cpp, or any OpenAI-compatible API',
+                'Git integration: commits, diffs, branch management, PR creation',
+                'Multi-file refactoring with full codebase understanding',
+                'Terminal command execution with output parsing and error handling',
+                'MCP (Model Context Protocol) server support for extended tool access',
+                'Context-aware code search using grep, glob, and AST navigation',
+                'Plan mode for breaking complex tasks into verifiable steps',
+                'CLAUDE.md project context files for persistent instructions',
+                'Works with any model: Qwen, DeepSeek, Llama, Mistral via Ollama',
+                'One-shot mode for quick tasks without interactive session',
+                'Conversation history and session resumption'
             ],
             cli: [
-                {cmd: 'npm install -g @anthropic-ai/claude-code', desc: 'Install Claude Code globally'},
-                {cmd: 'ANTHROPIC_BASE_URL=http://localhost:11434/v1 claude', desc: 'Connect to Ollama backend'},
-                {cmd: 'ANTHROPIC_BASE_URL=http://localhost:8080/v1 claude', desc: 'Connect to llama.cpp server'},
-                {cmd: 'claude --model qwen3:32b', desc: 'Use a specific Ollama model'},
-                {cmd: 'claude "refactor this function to use async/await"', desc: 'One-shot coding task'},
-                {cmd: 'claude /init', desc: 'Initialize project context (CLAUDE.md)'}
+                {cmd: 'npm install -g @anthropic-ai/claude-code', desc: 'Install Claude Code globally via npm'},
+                {cmd: 'ANTHROPIC_BASE_URL=http://localhost:11434/v1 claude', desc: 'Connect to local Ollama as the LLM backend'},
+                {cmd: 'ANTHROPIC_BASE_URL=http://localhost:8080/v1 claude', desc: 'Connect to llama-server as the LLM backend'},
+                {cmd: 'claude --model qwen3:32b', desc: 'Start with a specific model (must be available in Ollama)'},
+                {cmd: 'claude "refactor this function to use async/await"', desc: 'One-shot coding task (non-interactive)'},
+                {cmd: 'claude /init', desc: 'Initialize project context by creating a CLAUDE.md file'}
+            ]
+        }
+    },
+    // =========================================================================
+    // ADDITIONAL CREATIVE TOOLS
+    // =========================================================================
+    {
+        id: 'audacity', name: 'Audacity', category: 'media', icon: 'A', iconBg: '#0000cc', logo: 'logos/audacity.svg', downloadTarget: 'audacity',
+        desc: 'Professional audio editor and recorder - multi-track editing, effects, noise reduction, and format conversion',
+        screenshots: ['screenshots/audacity-1.png'],
+        size: '~60 MB',
+        platforms: { jetson: 'package', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://github.com/audacity/audacity',
+            releases: 'https://www.audacityteam.org/download/',
+            installHint: 'package',
+            binaries: {
+                'ubuntu': 'tools/linux-x86_64/audacity/',
+                'mac': 'tools/macos-arm64/audacity/',
+                'windows': 'tools/windows-x64/audacity/'
+            }
+        },
+        details: {
+            overview: 'Audacity is a free, open-source, cross-platform audio editor and recorder. It supports multi-track editing with non-destructive operations, making it suitable for recording podcasts, editing music, cleaning up audio, and converting between formats. It handles WAV, AIFF, FLAC, MP3, OGG, and many other formats via built-in and plugin codecs.\n\nAudacity provides professional-grade tools including noise reduction, equalization, compression, normalization, and spectral analysis. The spectrogram view allows visual frequency analysis and precision editing. It supports VST, LADSPA, LV2, and Nyquist plugin effects for extended functionality.\n\nFor automated workflows, Audacity offers macro support (Chains) that can batch-process multiple files with the same sequence of effects. It can also be scripted via the mod-script-pipe interface for integration with other tools.',
+            features: [
+                'Multi-track audio editing with cut, copy, paste, and mix',
+                'Records live audio through microphone or line-in',
+                'Noise reduction and noise profiling for cleaning recordings',
+                'Equalization, compression, reverb, and 50+ built-in effects',
+                'Spectrogram view for frequency-domain editing',
+                'Batch processing via Macros for repetitive tasks',
+                'VST, LADSPA, LV2, and Nyquist plugin support',
+                'Label tracks for marking sections and chapters',
+                'Export to MP3, WAV, FLAC, OGG, and many other formats',
+                'Cross-platform: Linux, macOS, and Windows'
+            ],
+            cli: [
+                {cmd: 'audacity recording.wav', desc: 'Open an audio file for editing'},
+                {cmd: 'sudo apt install audacity', desc: 'Install on Ubuntu/Debian (ARM64)'},
+                {cmd: 'brew install --cask audacity', desc: 'Install on macOS via Homebrew'}
+            ]
+        }
+    },
+    {
+        id: 'gimp', name: 'GIMP', category: 'creative', icon: 'G', iconBg: '#5c5543', logo: 'logos/gimp.svg', downloadTarget: 'gimp',
+        desc: 'Professional image editor - photo retouching, composition, and graphic design with scriptable automation',
+        screenshots: ['screenshots/gimp-1.png'],
+        size: '~300 MB',
+        platforms: { jetson: 'package', ubuntu: 'package', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://gitlab.gnome.org/GNOME/gimp',
+            releases: 'https://www.gimp.org/downloads/',
+            installHint: 'package',
+            binaries: {
+                'mac': 'tools/macos-arm64/gimp/',
+                'windows': 'tools/windows-x64/gimp/'
+            }
+        },
+        details: {
+            overview: 'GIMP (GNU Image Manipulation Program) is a professional-grade image editor for photo retouching, image composition, and graphic design. It provides a comprehensive toolset including layers, channels, masks, paths, color curves, and filters comparable to commercial alternatives.\n\nGIMP supports all major image formats (JPEG, PNG, TIFF, PSD, WebP, HEIF, raw camera formats via darktable/RawTherapee integration) and provides extensive color management with ICC profile support. Its plugin system supports Python-Fu (Python scripting) and Script-Fu (Scheme scripting) for automation.\n\nFor batch operations, GIMP can be run headlessly via Script-Fu or Python-Fu to process images without a GUI, making it suitable for automated image processing pipelines.',
+            features: [
+                'Full layer support with blending modes and group layers',
+                'Advanced selection tools: bezier, magic wand, color select, quick mask',
+                'Photo retouching: clone, heal, perspective correct, red-eye removal',
+                'Color management with ICC profile support',
+                'Extensive filter library: blur, sharpen, distort, lighting effects',
+                'Python-Fu and Script-Fu for automation and batch processing',
+                'PSD file support (import/export Adobe Photoshop files)',
+                'Raw camera format support via darktable integration',
+                'Customizable interface with dockable panels',
+                'Plugin ecosystem: G\'MIC, Resynthesizer, BIMP for batch processing'
+            ],
+            cli: [
+                {cmd: 'sudo apt install gimp', desc: 'Install on Ubuntu/Debian'},
+                {cmd: 'flatpak install flathub org.gimp.GIMP', desc: 'Install via Flatpak (recommended)'},
+                {cmd: 'gimp -i -b \'(gimp-image-scale (car (gimp-file-load RUN-NONINTERACTIVE "in.png" "in.png")) 800 600) (gimp-quit 0)\'', desc: 'Batch resize an image via Script-Fu'}
+            ]
+        }
+    },
+    {
+        id: 'inkscape', name: 'Inkscape', category: 'creative', icon: 'I', iconBg: '#2b2b2b', logo: 'logos/inkscape.svg', downloadTarget: 'inkscape',
+        desc: 'Professional vector graphics editor - SVG editing, illustration, diagrams, and technical drawing',
+        screenshots: ['screenshots/inkscape-1.png'],
+        size: '~100 MB',
+        platforms: { jetson: 'package', ubuntu: 'prebuilt', mac: 'package', windows: 'package' },
+        downloads: {
+            source: 'https://gitlab.com/inkscape/inkscape',
+            releases: 'https://inkscape.org/release/',
+            installHint: 'package',
+            binaries: {
+                'ubuntu': 'tools/linux-x86_64/inkscape/'
+            }
+        },
+        details: {
+            overview: 'Inkscape is a professional vector graphics editor with SVG as its native format. It provides comprehensive tools for creating illustrations, icons, logos, diagrams, maps, and web graphics. Inkscape is a full-featured alternative to Adobe Illustrator and CorelDRAW.\n\nThe editor supports the full SVG standard plus many SVG extensions, and can import/export PDF, EPS, AI, DXF, and raster formats (PNG, JPEG). Its node editor provides precise control over bezier curves and paths, while the built-in XML editor allows direct SVG source manipulation.\n\nInkscape has a powerful command-line interface for batch operations: format conversion, resizing, export to PDF/PNG, and applying transformations without launching the GUI. Extensions can be written in Python for custom functionality.',
+            features: [
+                'Full SVG standard compliance with extensions',
+                'Bezier curves and spiro curves with node editing',
+                'Text tool with full typography control and SVG fonts',
+                'Layer support with blend modes and opacity',
+                'Boolean operations: union, difference, intersection, exclusion',
+                'Path effects: pattern along path, envelope, roughen, etc.',
+                'Export to PDF, EPS, PNG, DXF, and many other formats',
+                'Extensions system with Python scripting',
+                'Connectors and flowcharts for diagram creation',
+                'Clone and tile for pattern generation',
+                'Trace bitmap: convert raster images to vector paths',
+                'Command-line batch export and format conversion'
+            ],
+            cli: [
+                {cmd: 'inkscape input.svg --export-filename=output.pdf', desc: 'Export SVG to PDF'},
+                {cmd: 'inkscape input.svg --export-filename=output.png --export-dpi=300', desc: 'Export SVG to high-resolution PNG'},
+                {cmd: 'inkscape input.svg --actions="select-all;object-to-path" --export-overwrite', desc: 'Convert all objects to paths in-place'},
+                {cmd: 'sudo apt install inkscape', desc: 'Install on Ubuntu/Debian'}
+            ]
+        }
+    },
+    {
+        id: 'yt-dlp', name: 'yt-dlp', category: 'media', icon: 'Y', iconBg: '#ff0000', logo: 'logos/yt-dlp.svg', downloadTarget: 'yt-dlp',
+        desc: 'Media downloader for archiving videos, audio, and playlists from thousands of sites',
+        size: '~10 MB',
+        screenshots: ['screenshots/yt-dlp-1.png'],
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://github.com/yt-dlp/yt-dlp',
+            releases: 'https://github.com/yt-dlp/yt-dlp/releases',
+            binaries: {
+                'jetson': 'tools/linux-arm64/yt-dlp/',
+                'ubuntu': 'tools/linux-x86_64/yt-dlp/',
+                'mac': 'tools/macos-arm64/yt-dlp/',
+                'windows': 'tools/windows-x64/yt-dlp/'
+            }
+        },
+        details: {
+            overview: 'yt-dlp is a feature-rich command-line audio/video downloader that supports thousands of websites. It is an actively maintained fork of youtube-dl with significant improvements including faster downloads, better format selection, SponsorBlock integration, and improved metadata handling.\n\nyt-dlp can download individual videos, entire playlists, channels, and live streams. It supports selecting specific video/audio quality, downloading subtitles in multiple languages, embedding metadata and thumbnails, and extracting audio-only. Combined with FFmpeg, it can post-process downloads into any format.\n\nFor archival purposes, yt-dlp can maintain a download archive to avoid re-downloading, write metadata to JSON files, download all available subtitles, and preserve original upload dates and descriptions.',
+            features: [
+                'Supports 1000+ websites (YouTube, Vimeo, Twitter, etc.)',
+                'Format selection: choose video/audio quality and codec',
+                'Playlist, channel, and batch downloading',
+                'Subtitle download in multiple languages and formats',
+                'Embed metadata, thumbnails, and chapters into files',
+                'Audio extraction: download as MP3, FLAC, WAV, etc.',
+                'SponsorBlock integration to skip/mark sponsored segments',
+                'Download archive to prevent re-downloading',
+                'Rate limiting and retry logic for reliable downloads',
+                'Cookie and authentication support for private content',
+                'Live stream recording and chat download',
+                'Output templates for organized file naming'
+            ],
+            cli: [
+                {cmd: 'yt-dlp URL', desc: 'Download video in best available quality'},
+                {cmd: 'yt-dlp -x --audio-format mp3 URL', desc: 'Extract audio only as MP3'},
+                {cmd: 'yt-dlp -f "bestvideo[height<=1080]+bestaudio" URL', desc: 'Download max 1080p video with best audio'},
+                {cmd: 'yt-dlp --write-subs --sub-lang en URL', desc: 'Download video with English subtitles'},
+                {cmd: 'yt-dlp --download-archive archive.txt -o "%(title)s.%(ext)s" URL', desc: 'Download with archive tracking (skip existing)'},
+                {cmd: 'yt-dlp --flat-playlist --print url URL', desc: 'List all video URLs in a playlist without downloading'}
+            ]
+        }
+    },
+    {
+        id: 'open-webui', name: 'Open WebUI', category: 'ai-platform', icon: 'W', iconBg: '#1a1a2e', logo: 'logos/open-webui.svg', downloadTarget: 'open-webui',
+        desc: 'ChatGPT-style web interface for Ollama and local LLMs - multi-model chat, RAG, and model management',
+        screenshots: ['screenshots/open-webui-1.png'],
+        size: '~200 MB',
+        platforms: { jetson: 'pip', ubuntu: 'pip', mac: 'pip', windows: 'pip' },
+        downloads: {
+            source: 'https://github.com/open-webui/open-webui',
+            releases: 'https://docs.openwebui.com/getting-started/',
+            installHint: 'pip',
+            binaries: {}
+        },
+        details: {
+            overview: 'Open WebUI is a self-hosted, feature-rich web interface for interacting with local LLMs via Ollama or any OpenAI-compatible API. It provides a ChatGPT-like experience with conversation history, multi-model support, document upload (RAG), web search, image generation, and collaborative features.\n\nThe interface supports multiple concurrent conversations with different models, allowing you to compare outputs side-by-side. It includes built-in model management (pull, delete, create custom models with system prompts), prompt templates, and a document knowledge base with vector search for retrieval-augmented generation.\n\nOpen WebUI works seamlessly with Ollama running locally, making it the ideal companion for offline AI deployments. It also supports connecting to remote APIs, function calling, tool use, and can serve multiple users with role-based access control.',
+            features: [
+                'ChatGPT-style interface with markdown rendering and code highlighting',
+                'Multi-model support: switch between Ollama models in real-time',
+                'Document upload and RAG (Retrieval-Augmented Generation)',
+                'Conversation history with search and organization',
+                'Model management: pull, delete, and create custom models',
+                'Web search integration for up-to-date responses',
+                'Image generation via Stable Diffusion or DALL-E APIs',
+                'Prompt templates and system prompt customization',
+                'Multi-user support with authentication and roles',
+                'API compatibility with OpenAI format',
+                'Voice input and text-to-speech output',
+                'Mobile-responsive design for tablets and phones'
+            ],
+            cli: [
+                {cmd: 'pip install open-webui && open-webui serve', desc: 'Install and start Open WebUI'},
+                {cmd: 'open-webui serve --port 3000', desc: 'Start on a specific port'},
+                {cmd: 'docker run -d -p 3000:8080 --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data ghcr.io/open-webui/open-webui:main', desc: 'Run via Docker (connects to host Ollama)'},
+                {cmd: 'OLLAMA_BASE_URL=http://jetson:11434 open-webui serve', desc: 'Connect to remote Ollama instance'}
+            ]
+        }
+    },
+    {
+        id: 'calibre', name: 'Calibre', category: 'media', icon: 'C', iconBg: '#1a5276', logo: 'logos/calibre.svg', downloadTarget: 'calibre',
+        desc: 'E-book manager and converter - organize, convert, and serve e-books in any format',
+        size: '~150 MB',
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://github.com/kovidgoyal/calibre',
+            releases: 'https://calibre-ebook.com/download',
+            binaries: {
+                'jetson': 'tools/linux-arm64/calibre/',
+                'ubuntu': 'tools/linux-x86_64/calibre/',
+                'mac': 'tools/macos-arm64/calibre/',
+                'windows': 'tools/windows-x64/calibre/'
+            }
+        },
+        details: {
+            overview: 'Calibre is a comprehensive e-book management application that organizes your e-book library, converts between formats, syncs with e-reader devices, and provides a built-in e-book viewer and content server. It handles EPUB, MOBI, AZW3, PDF, DJVU, FB2, CBZ/CBR, and dozens of other formats.\n\nThe format conversion engine is particularly powerful: it can convert between virtually any e-book format while preserving formatting, table of contents, and metadata. The content server allows sharing your library over the network, accessible from any web browser or mobile device.\n\nFor offline educational deployments, Calibre is ideal for managing a library of technical documentation, textbooks, and reference materials. The content server can serve as a local e-book distribution point, similar to how Kiwix serves offline Wikipedia.',
+            features: [
+                'Library management with metadata editing and cover art',
+                'Format conversion between 30+ e-book formats',
+                'Built-in e-book viewer with customizable display',
+                'Content server: share library via web browser',
+                'E-reader device sync (Kindle, Kobo, etc.)',
+                'Metadata download from online sources',
+                'Bulk editing and tagging of library entries',
+                'News download: fetch RSS/web content as e-books',
+                'DRM-free format handling and optimization',
+                'Plugin system for extended functionality',
+                'CLI tools for scripted format conversion',
+                'Search and filter across large libraries'
+            ],
+            screenshots: ['screenshots/calibre-1.png'],
+            cli: [
+                {cmd: 'calibre-server --port 8080 ~/Library', desc: 'Start content server on port 8080'},
+                {cmd: 'ebook-convert input.epub output.mobi', desc: 'Convert EPUB to Kindle MOBI format'},
+                {cmd: 'ebook-convert input.pdf output.epub --enable-heuristics', desc: 'Convert PDF to EPUB with smart formatting'},
+                {cmd: 'calibredb add *.epub --library-path ~/Library', desc: 'Add all EPUB files to library'},
+                {cmd: 'calibredb list --library-path ~/Library --fields title,authors', desc: 'List all books with titles and authors'},
+                {cmd: 'fetch-ebook-metadata --isbn 9780134685991', desc: 'Fetch metadata by ISBN'}
             ]
         }
     }
@@ -2332,6 +2904,7 @@ const TOOL_META = {
     'vlc': { maker: 'VideoLAN', website: 'https://www.videolan.org', license: 'GPL-2.0+', licenseUrl: 'https://www.videolan.org/legal.html' },
     'n8n': { maker: 'n8n GmbH', website: 'https://n8n.io', license: 'Sustainable Use', licenseUrl: 'https://github.com/n8n-io/n8n/blob/master/LICENSE.md' },
     'influxdb': { maker: 'InfluxData', website: 'https://www.influxdata.com', license: 'MIT / Apache-2.0', licenseUrl: 'https://github.com/influxdata/influxdb/blob/main/LICENSE-MIT' },
+    'telegraf': { maker: 'InfluxData', website: 'https://www.influxdata.com/time-series-platform/telegraf/', license: 'MIT', licenseUrl: 'https://github.com/influxdata/telegraf/blob/master/LICENSE' },
     'milvus': { maker: 'Zilliz', website: 'https://milvus.io', license: 'Apache-2.0', licenseUrl: 'https://github.com/milvus-io/milvus/blob/master/LICENSE' },
     'comfyui': { maker: 'Comfy Org', website: 'https://www.comfy.org', license: 'GPL-3.0', licenseUrl: 'https://github.com/comfyanonymous/ComfyUI/blob/master/LICENSE' },
     'syncthing': { maker: 'Syncthing Foundation', website: 'https://syncthing.net', license: 'MPL-2.0', licenseUrl: 'https://github.com/syncthing/syncthing/blob/main/LICENSE' },
@@ -2350,7 +2923,13 @@ const TOOL_META = {
     'vscodium': { maker: 'VSCodium', website: 'https://vscodium.com', license: 'MIT', licenseUrl: 'https://github.com/VSCodium/vscodium/blob/master/LICENSE' },
     'sqlite': { maker: 'D. Richard Hipp', website: 'https://sqlite.org', license: 'Public Domain', licenseUrl: 'https://sqlite.org/copyright.html' },
     'miniforge': { maker: 'conda-forge', website: 'https://github.com/conda-forge/miniforge', license: 'BSD-3-Clause', licenseUrl: 'https://github.com/conda-forge/miniforge/blob/main/LICENSE' },
-    'python-standalone': { maker: 'Gregory Szorc', website: 'https://github.com/indygreg/python-build-standalone', license: 'MPL-2.0', licenseUrl: 'https://github.com/indygreg/python-build-standalone/blob/main/LICENSE' }
+    'python-standalone': { maker: 'Gregory Szorc', website: 'https://github.com/indygreg/python-build-standalone', license: 'MPL-2.0', licenseUrl: 'https://github.com/indygreg/python-build-standalone/blob/main/LICENSE' },
+    'audacity': { maker: 'Audacity Team', website: 'https://www.audacityteam.org', license: 'GPL-3.0', licenseUrl: 'https://github.com/audacity/audacity/blob/master/LICENSE.txt' },
+    'gimp': { maker: 'GNOME Foundation', website: 'https://www.gimp.org', license: 'GPL-3.0', licenseUrl: 'https://www.gimp.org/about/COPYING' },
+    'inkscape': { maker: 'Inkscape Project', website: 'https://inkscape.org', license: 'GPL-2.0+', licenseUrl: 'https://gitlab.com/inkscape/inkscape/-/blob/master/COPYING' },
+    'yt-dlp': { maker: 'yt-dlp Contributors', website: 'https://github.com/yt-dlp/yt-dlp', license: 'Unlicense', licenseUrl: 'https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE' },
+    'open-webui': { maker: 'Open WebUI', website: 'https://openwebui.com', license: 'MIT', licenseUrl: 'https://github.com/open-webui/open-webui/blob/main/LICENSE' },
+    'calibre': { maker: 'Kovid Goyal', website: 'https://calibre-ebook.com', license: 'GPL-3.0', licenseUrl: 'https://github.com/kovidgoyal/calibre/blob/master/LICENSE' }
 };
 
 // =============================================================================
@@ -2430,7 +3009,8 @@ function checkInstalledToolsFromAPI(toolsData) {
         for (const [, binPath] of Object.entries(bins)) {
             if (!binPath) continue;
             // Extract dir/file name from path like "tools/linux-arm64/llama-server"
-            const parts = binPath.split('/');
+            const cleaned = binPath.replace(/\/+$/, ''); // strip trailing slashes
+            const parts = cleaned.split('/');
             if (parts.length >= 3) {
                 const dirName = parts.slice(2).join('/');
                 toolDirMap[dirName] = t.id;
@@ -2443,16 +3023,20 @@ function checkInstalledToolsFromAPI(toolsData) {
     for (const [dirName, platforms] of Object.entries(toolsData)) {
         const toolId = toolDirMap[dirName];
         if (!toolId) continue;
-        INSTALLED_TOOLS[toolId] = 'installed';
-        // Store metadata for the newest platform entry
+        // Only mark installed if at least one platform has real content
+        let hasContent = false;
         let newest = null;
         for (const [, info] of Object.entries(platforms)) {
+            if (info.size > 0 || info.files > 0) hasContent = true;
             if (!newest || (info.lastModified && info.lastModified > newest.lastModified)) {
                 newest = info;
             }
         }
-        if (newest) {
-            TOOL_INFO[toolId] = { lastModified: newest.lastModified, size: newest.size };
+        if (hasContent) {
+            INSTALLED_TOOLS[toolId] = 'installed';
+            if (newest) {
+                TOOL_INFO[toolId] = { lastModified: newest.lastModified, size: newest.size };
+            }
         }
     }
 
@@ -2524,17 +3108,17 @@ function getInstallBadge(toolId) {
     const status = INSTALLED_TOOLS[toolId] || 'checking';
     let badge = '';
     switch(status) {
-        case 'installed': badge = '<span class="badge badge-installed">Installed</span>'; break;
+        case 'installed': badge = '<span class="badge badge-installed">Mirrored</span>'; break;
         case 'system': badge = '<span class="badge badge-installed">System</span>'; break;
         case 'source': badge = '<span class="badge badge-source">Source Only</span>'; break;
         case 'bundled': badge = '<span class="badge badge-installed">Bundled</span>'; break;
-        case 'npm': badge = '<span class="badge badge-hint">npm install</span>'; break;
-        case 'pip': badge = '<span class="badge badge-hint">pip install</span>'; break;
+        case 'npm': badge = '<span class="badge badge-hint">npm</span>'; break;
+        case 'pip': badge = '<span class="badge badge-hint">pip</span>'; break;
         case 'docker': badge = '<span class="badge badge-hint">Docker</span>'; break;
         case 'package': badge = '<span class="badge badge-hint">System Package</span>'; break;
         case 'python': badge = '<span class="badge badge-hint">Python</span>'; break;
         case 'checking': badge = '<span class="badge badge-checking">Checking...</span>'; break;
-        default: badge = '<span class="badge badge-missing">Not Installed</span>'; break;
+        default: badge = '<span class="badge badge-missing">Not Mirrored</span>'; break;
     }
     const info = TOOL_INFO[toolId];
     if (info && info.lastModified) {
@@ -3110,6 +3694,27 @@ function showToast() {
     setTimeout(() => toast.classList.remove('show'), 1500);
 }
 
+function openLightbox(src, caption) {
+    let lb = document.getElementById('lightboxOverlay');
+    if (!lb) {
+        lb = document.createElement('div');
+        lb.id = 'lightboxOverlay';
+        lb.className = 'lightbox-overlay';
+        lb.innerHTML = '<span class="lightbox-close">&times;</span><img><div class="lightbox-caption"></div>';
+        lb.onclick = () => lb.classList.remove('active');
+        document.body.appendChild(lb);
+    }
+    lb.querySelector('img').src = src;
+    lb.querySelector('.lightbox-caption').textContent = caption || '';
+    lb.classList.add('active');
+}
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+        const lb = document.getElementById('lightboxOverlay');
+        if (lb) lb.classList.remove('active');
+    }
+});
+
 function navigate(hash) {
     window.location.hash = hash;
 }
@@ -3263,6 +3868,7 @@ function router() {
 
     html += renderFooter();
     app.innerHTML = html;
+    window.scrollTo(0, 0);
 
     // Rebind search if present
     const searchInput = document.getElementById('searchInput');
@@ -3345,7 +3951,7 @@ function renderFooter() {
     html += '</div>';
 
     html += '</div>';
-    html += '<div class="footer-note">Val Ark | All software runs fully offline | NVIDIA Jetson, Ubuntu x86_64, Apple Silicon, and Windows</div>';
+    html += '<div class="footer-note">Created by Matthew Valancy | <a href="/LICENSE" target="_blank" style="color:var(--accent)">GPL-3.0 License</a> | All software runs fully offline</div>';
     html += '</footer>';
     return html;
 }
@@ -3373,6 +3979,21 @@ function renderHome() {
         <span class="search-icon">&#x1F50D;</span>
         <input type="text" id="searchInput" placeholder="Search models, tools, formats...">
     </div>`;
+
+    // Wikipedia/Content browse banner (when Kiwix is serving)
+    if (_kiwixStatus && _kiwixStatus.running) {
+        const kUrl = _kiwixStatus.url || `http://localhost:${_kiwixStatus.port}`;
+        html += `<div class="kiwix-banner" style="margin-bottom:2rem">
+            <div class="kiwix-banner-content">
+                <div class="kiwix-banner-icon">W</div>
+                <div>
+                    <div class="kiwix-banner-title">Browse Wikipedia Offline</div>
+                    <div class="kiwix-banner-desc">All of Wikipedia is available right now — no internet needed. Open it on any device on your network.</div>
+                </div>
+            </div>
+            <a href="${kUrl}" target="_blank" class="kiwix-banner-btn">Open Wikipedia</a>
+        </div>`;
+    }
 
     // Storage bar
     html += `<div class="storage-section"><h3>Storage Breakdown (~${totalStorage} GB total)</h3>`;
@@ -3547,7 +4168,7 @@ function renderToolDetail(toolId) {
     const toolCat = TOOL_CATEGORIES[tool.category];
     if (toolCat) {
         const dlBtn = (INSTALLED_TOOLS[tool.id] === 'missing' && _apiAvailable && tool.downloadTarget)
-            ? `<button class="dl-action-btn" onclick="triggerDownload('tools','${tool.downloadTarget}')" style="margin-left:10px">Install</button>` : '';
+            ? `<button class="dl-action-btn" id="install-btn-${tool.id}" onclick="this.disabled=true;this.innerHTML='<span class=\\'spinner\\'></span> Mirroring...';triggerDownload('tools','${tool.downloadTarget}')" style="margin-left:10px">Mirror</button>` : '';
         html += `<div style="margin-bottom:16px"><span class="tag" style="background:var(--accent-dim);color:var(--accent);font-size:0.85em;padding:4px 12px">${toolCat.label}</span>${tool.size ? `<span class="tag" style="background:var(--purple-dim);color:var(--purple);font-size:0.85em;padding:4px 12px;margin-left:6px">${tool.size}</span>` : ''}${getInstallBadge(tool.id)}${dlBtn}</div>`;
     }
 
@@ -3566,6 +4187,18 @@ function renderToolDetail(toolId) {
     // Overview
     if (d.overview) {
         html += `<div class="detail-section"><h2>Overview</h2><p>${esc(d.overview)}</p></div>`;
+    }
+
+    // Screenshot Gallery
+    if (tool.screenshots && tool.screenshots.length) {
+        html += '<div class="detail-section"><h2>Screenshots</h2>';
+        html += '<div class="screenshot-gallery">';
+        tool.screenshots.forEach((src, i) => {
+            html += `<div class="screenshot-thumb" onclick="openLightbox('${src}', '${esc(tool.name)} - Screenshot ${i+1}')">
+                <img src="${src}" alt="${esc(tool.name)} screenshot ${i+1}" loading="lazy" onerror="this.parentElement.style.display='none'">
+            </div>`;
+        });
+        html += '</div></div>';
     }
 
     // Downloads
@@ -3958,37 +4591,61 @@ function renderContentLibrary() {
     html += renderBreadcrumb([{label: 'Content Library'}]);
     html += '<h1>Offline Content Library</h1>';
     html += '<p class="section-desc">Pre-downloaded knowledge bases served by <a href="#/tools/kiwix">Kiwix</a>. Browse Wikipedia, textbooks, and reference material from any device on your network — no internet required.</p>';
-    html += '<div class="card-grid">';
+
+    // Show prominent "Browse" banner when Kiwix is running
+    if (_kiwixStatus && _kiwixStatus.running) {
+        const kiwixUrl = _kiwixStatus.url || `http://localhost:${_kiwixStatus.port}`;
+        html += `<div class="kiwix-banner">
+            <div class="kiwix-banner-content">
+                <div class="kiwix-banner-icon">W</div>
+                <div>
+                    <div class="kiwix-banner-title">Wikipedia is ready to browse</div>
+                    <div class="kiwix-banner-desc">Open Wikipedia and other content in your browser — works offline, no internet needed.</div>
+                </div>
+            </div>
+            <a href="${kiwixUrl}" target="_blank" class="kiwix-banner-btn">Open Wikipedia</a>
+        </div>`;
+    }
+
+    html += '<div class="cards-grid">';
 
     for (const item of CONTENT_LIBRARY) {
         const statusClass = CONTENT_STATUS[item.id] || 'unknown';
-        const statusLabel = statusClass === 'installed' ? 'Downloaded' :
-            statusClass === 'partial' ? 'Downloading...' : 'Not Downloaded';
+        const statusLabel = statusClass === 'installed' ? 'Mirrored' :
+            statusClass === 'partial' ? 'Mirroring...' : 'Not Mirrored';
         const statusColor = statusClass === 'installed' ? 'var(--green)' :
             statusClass === 'partial' ? 'var(--accent)' : 'var(--text-muted)';
 
         html += `<a href="#/content/${item.id}" class="card">
             <div class="card-icon" style="background:${item.iconBg}">${item.icon}</div>
-            <div class="card-body">
-                <div class="card-title">${esc(item.name)}</div>
-                <div class="card-desc">${esc(item.desc)}</div>
-                <div class="card-meta" style="margin-top:6px">
-                    <span>${item.size}</span>
-                    <span style="color:${statusColor};font-weight:600">${statusLabel}</span>
-                </div>
+            <h3>${esc(item.name)}</h3>
+            <div class="card-desc">${esc(item.desc)}</div>
+            <div class="card-meta">
+                <span>${item.size}</span>
+                <span style="color:${statusColor};font-weight:600">${statusLabel}</span>
             </div>
         </a>`;
     }
 
     html += '</div>';
 
-    // Serve instructions
-    html += `<div class="detail-section" style="margin-top:2rem">
-        <h3>Serving Content</h3>
-        <p>Start the Kiwix server to make all downloaded content browsable from any device:</p>
-        <div class="code-block"><code>./scripts/download-zims.sh serve</code></div>
-        <p style="margin-top:0.5rem;color:var(--text-muted)">Then open <code>http://&lt;server-ip&gt;:8888</code> in any browser on your network.</p>
-    </div>`;
+    // Serve instructions - simplified when Kiwix is already running
+    if (_kiwixStatus && _kiwixStatus.running) {
+        const kUrl = _kiwixStatus.url || `http://localhost:${_kiwixStatus.port}`;
+        html += `<div class="detail-section" style="margin-top:2rem">
+            <h3>How to Browse</h3>
+            <p>Content is being served automatically. Open the link below on any device connected to this network:</p>
+            <p style="margin-top:0.5rem"><a href="${kUrl}" target="_blank" style="color:var(--accent);font-weight:600;font-size:1.1em">${kUrl}</a></p>
+            <p style="margin-top:0.5rem;color:var(--text-muted)">Works on phones, tablets, and computers — no internet needed.</p>
+        </div>`;
+    } else {
+        html += `<div class="detail-section" style="margin-top:2rem">
+            <h3>Serving Content</h3>
+            <p>Start the Kiwix server to make all downloaded content browsable from any device:</p>
+            <div class="code-block"><code>./scripts/download-zims.sh serve</code></div>
+            <p style="margin-top:0.5rem;color:var(--text-muted)">Then open <code>http://&lt;server-ip&gt;:8888</code> in any browser on your network.</p>
+        </div>`;
+    }
 
     html += '</div>';
     return html;
@@ -4005,8 +4662,8 @@ function renderContentDetail(contentId) {
     ]);
 
     const statusClass = CONTENT_STATUS[item.id] || 'unknown';
-    const statusLabel = statusClass === 'installed' ? 'Downloaded' :
-        statusClass === 'partial' ? 'Downloading...' : 'Not Downloaded';
+    const statusLabel = statusClass === 'installed' ? 'Mirrored' :
+        statusClass === 'partial' ? 'Mirroring...' : 'Not Mirrored';
     const statusColor = statusClass === 'installed' ? 'var(--green)' :
         statusClass === 'partial' ? 'var(--accent)' : 'var(--text-muted)';
 
@@ -4027,7 +4684,7 @@ function renderContentDetail(contentId) {
     html += `<tr><td>File</td><td><code>${item.file}</code></td></tr>`;
     html += '</table>';
     if (statusClass !== 'installed' && _apiAvailable) {
-        html += `<button class="dl-action-btn" onclick="triggerDownload('content','${item.id}')" style="margin-top:12px">Install</button>`;
+        html += `<button class="dl-action-btn" onclick="triggerDownload('content','${item.id}')" style="margin-top:12px">Mirror</button>`;
     }
     html += '</div>';
 
@@ -4125,9 +4782,24 @@ function renderQuickStart() {
         <div class="code-label">Downloads edge/mobile AI models (~15GB)</div>
     </div>`;
 
-    // Step 4: Run your first model
+    // Step 4: Browse Wikipedia
     html += `<div class="detail-section">
-        <h2>4. Run Your First AI Model</h2>
+        <h2>4. Browse Wikipedia Offline</h2>
+        <p style="margin-bottom:12px">Once the server is running, Wikipedia is available on any device connected to your network:</p>`;
+    if (_kiwixStatus && _kiwixStatus.running) {
+        const kUrl = _kiwixStatus.url || `http://localhost:${_kiwixStatus.port}`;
+        html += `<p><a href="${kUrl}" target="_blank" style="color:var(--accent);font-weight:600;font-size:1.1em">${kUrl}</a></p>
+        <div class="code-label">Open this link on any phone, tablet, or computer on your WiFi</div>`;
+    } else {
+        html += `<div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>./start.sh serve</div>
+        <div class="code-label">Starts the web server — Wikipedia is served automatically on port 8888</div>`;
+    }
+    html += `<p style="font-size:0.85em;color:var(--text-secondary);margin-top:8px">No internet needed. Works with Simple English (~240K articles) and Full English (~6.8M articles) Wikipedia.</p>
+    </div>`;
+
+    // Step 5: Run your first model
+    html += `<div class="detail-section">
+        <h2>5. Run Your First AI Model</h2>
         <p style="margin-bottom:12px">Start a local LLM chat server:</p>
         <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>./tools/linux-x86_64/llama-server -m ./models/llm/llama-3.2-1b/Llama-3.2-1B-Instruct-Q8_0.gguf -ngl 999 -c 2048 --port 8080</div>
         <div class="code-label">Starts an OpenAI-compatible API at http://localhost:8080</div>
@@ -4135,9 +4807,9 @@ function renderQuickStart() {
         <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>curl http://localhost:8080/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"llama","messages":[{"role":"user","content":"Hello!"}]}'</div>
     </div>`;
 
-    // Step 5: Auto-update
+    // Step 6: Auto-update
     html += `<div class="detail-section">
-        <h2>5. Keep Updated (Optional)</h2>
+        <h2>6. Keep Updated (Optional)</h2>
         <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>./start.sh cron install</div>
         <div class="code-label">Sets up weekly auto-update (Sundays at 3 AM)</div>
     </div>`;
@@ -4616,8 +5288,8 @@ function setPlatform(platform) {
 // =============================================================================
 let _apiAvailable = false;
 let _sseConnection = null;
-let _sseReconnectDelay = 1000;
 let _diskData = null;
+let _kiwixStatus = null; // {running, port, url, files}
 const _activeDownloads = new Map();
 
 // Debounced router: prevents multiple rapid full-page re-renders
@@ -4661,6 +5333,11 @@ async function initFromAPI() {
             }
         }
 
+        // Populate kiwix status
+        if (data.kiwix) {
+            _kiwixStatus = data.kiwix;
+        }
+
         // Single render after all data populated
         scheduleRender();
         return true;
@@ -4681,7 +5358,7 @@ function connectSSE() {
     if (_sseConnection) return;
     try {
         _sseConnection = new EventSource('/api/downloads/stream');
-        _sseConnection.addEventListener('init', () => { _sseReconnectDelay = 1000; });
+        _sseConnection.addEventListener('init', () => { /* connected */ });
         _sseConnection.addEventListener('start', (e) => {
             const data = JSON.parse(e.data);
             _activeDownloads.set(data.id, { ...data, progress: 0, lastLine: '', status: 'running' });
@@ -4714,9 +5391,8 @@ function connectSSE() {
         _sseConnection.onerror = () => {
             _sseConnection.close();
             _sseConnection = null;
-            // Exponential backoff: 1s, 2s, 4s, 8s... max 30s
-            setTimeout(connectSSE, _sseReconnectDelay);
-            _sseReconnectDelay = Math.min(_sseReconnectDelay * 2, 30000);
+            // Reconnect after 5s delay
+            setTimeout(connectSSE, 5000);
         };
     } catch (e) {}
 }
@@ -4747,7 +5423,7 @@ async function triggerDownload(type, target) {
             alert(result.error);
         }
     } catch (e) {
-        alert('Failed to start download: ' + e.message);
+        alert('Failed to start installation: ' + e.message);
     }
 }
 
@@ -4776,7 +5452,7 @@ function renderProgressPanel() {
     }
 
     panel.classList.add('visible');
-    let html = '<div class="dl-panel-header"><span>Downloads</span><span style="font-size:0.75em;color:var(--text-muted)">' + _activeDownloads.size + ' active</span></div>';
+    let html = '<div class="dl-panel-header"><span>Installations</span><span style="font-size:0.75em;color:var(--text-muted)">' + _activeDownloads.size + ' active</span></div>';
     html += '<div class="dl-panel-body">';
     for (const [id, dl] of _activeDownloads) {
         const statusIcon = dl.status === 'complete' ? ' &#x2713;' :
@@ -4788,7 +5464,7 @@ function renderProgressPanel() {
                 ${dl.status === 'running' ? `<button class="dl-cancel-btn" onclick="cancelDownload('${id}')">Cancel</button>` : ''}
             </div>
             <div class="dl-progress-bar"><div class="dl-progress-fill" style="width:${dl.progress}%"></div></div>
-            <div class="dl-item-line">${dl.lastLine || (dl.status === 'running' ? 'Starting...' : dl.status)}</div>
+            <div class="dl-item-line">${((dl.lastLine || (dl.status === 'running' ? 'Starting...' : dl.status)) + '').slice(0, 60)}</div>
         </div>`;
     }
     html += '</div>';
@@ -4805,6 +5481,15 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (apiOk) {
         connectSSE();
     } else {
+        // Try disk endpoint individually (may be available even if /api/status/all is not)
+        try {
+            const diskResp = await fetch('/api/status/disk');
+            if (diskResp.ok) {
+                _diskData = await diskResp.json();
+                const diskEl = document.getElementById('nav-disk');
+                if (diskEl) diskEl.innerHTML = renderDiskBar();
+            }
+        } catch (e) {}
         // Fallback: HEAD-request probing (no API server)
         await checkInstalledToolsFallback();
         // Parallelize content HEAD checks

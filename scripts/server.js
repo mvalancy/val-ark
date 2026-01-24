@@ -28,6 +28,7 @@ const MIME = {
     '.ttf': 'font/ttf',
     '.mp4': 'video/mp4',
     '.webm': 'video/webm',
+    '.webp': 'image/webp',
     '.zim': 'application/octet-stream',
     '.gguf': 'application/octet-stream',
     '.tar': 'application/x-tar',
@@ -108,9 +109,9 @@ function startDownload(type, scriptPath, args = []) {
     }
 
     const id = String(++downloadCounter);
-    const proc = spawn('bash', [scriptPath, ...args], {
+    const proc = spawn('/usr/bin/bash', [scriptPath, ...args], {
         cwd: ROOT,
-        env: { ...process.env, FORCE_COLOR: '0' },
+        env: { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || ''), FORCE_COLOR: '0' },
     });
 
     const download = {
@@ -127,9 +128,12 @@ function startDownload(type, scriptPath, args = []) {
 
     const handleOutput = (chunk) => {
         const lines = chunk.toString().split('\n').filter(l => l.trim());
-        for (const line of lines) {
+        for (const raw of lines) {
+            // Strip ANSI escape codes and timestamp prefixes
+            const line = raw.replace(/\x1b\[[0-9;]*m/g, '').replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, '');
             download.lastLine = line.slice(0, 200);
-            const pctMatch = line.match(/(\d+)%/);
+            // Only match orchestrator progress "Progress: N%" not curl's per-file "11.3%"
+            const pctMatch = line.match(/Progress:\s*(\d+)%/);
             if (pctMatch) {
                 download.progress = Math.min(100, parseInt(pctMatch[1], 10));
             }
@@ -218,13 +222,14 @@ function getToolsStatus() {
     }
 
     const platforms = readdirSafe(toolsDir).filter(f => {
+        if (f.startsWith('.')) return false;
         try { return fs.statSync(path.join(toolsDir, f)).isDirectory(); }
         catch { return false; }
     });
 
     for (const platform of platforms) {
         const platDir = path.join(toolsDir, platform);
-        const entries = readdirSafe(platDir);
+        const entries = readdirSafe(platDir).filter(e => !e.startsWith('.'));
         for (const entry of entries) {
             const fullPath = path.join(platDir, entry);
             try {
@@ -454,12 +459,15 @@ function handleAPI(req, res, urlPath) {
                 return sendJSON(res, req, getContentStatus());
             case '/api/status/models':
                 return sendJSON(res, req, getModelsStatus());
+            case '/api/status/kiwix':
+                return sendJSON(res, req, kiwixStatus);
             case '/api/status/all':
                 return sendJSON(res, req, {
                     disk: getDiskStatus(),
                     tools: getToolsStatus(),
                     content: getContentStatus(),
                     models: getModelsStatus(),
+                    kiwix: kiwixStatus,
                 });
             case '/api/status/downloads': {
                 const active = {};
@@ -609,12 +617,113 @@ const server = http.createServer((req, res) => {
         return serveStatic(res, fullPath);
     }
 
+    // Serve LICENSE from project root
+    if (normalized === '/LICENSE' || normalized === path.sep + 'LICENSE') {
+        return serveStatic(res, path.join(ROOT, 'LICENSE'));
+    }
+
     // Everything else from web-ui/
     const webPath = path.join(ROOT, 'web-ui', normalized);
     if (!isPathSafe(webPath, path.join(ROOT, 'web-ui'))) return send404(res);
 
     serveStatic(res, webPath);
 });
+
+// =============================================================================
+// Kiwix Auto-Launch
+// =============================================================================
+const KIWIX_PORT = 8888;
+let kiwixProcess = null;
+let kiwixStatus = { running: false, port: KIWIX_PORT, url: '', files: 0 };
+
+function findKiwixServe() {
+    const arch = require('os').arch();
+    const platform = arch === 'x64' ? 'linux-x86_64' : 'linux-arm64';
+    const kiwixPath = path.join(ROOT, 'tools', platform, 'kiwix', 'kiwix-serve');
+    try {
+        fs.accessSync(kiwixPath, fs.constants.X_OK);
+        return kiwixPath;
+    } catch { return null; }
+}
+
+// Expected ZIM file sizes (bytes) for completeness validation
+const ZIM_EXPECTED_SIZES = {
+    'wikipedia_en_simple_all_maxi_2025-11.zim': 3.1 * 1073741824,
+    'wikipedia_en_all_maxi_2025-08.zim': 111 * 1073741824,
+};
+
+function findZimFiles() {
+    const zimDir = path.join(ROOT, 'content', 'zim');
+    try {
+        return fs.readdirSync(zimDir)
+            .filter(f => f.endsWith('.zim'))
+            .filter(f => {
+                // Only serve ZIM files that are at least 95% complete
+                try {
+                    const stat = fs.statSync(path.join(zimDir, f));
+                    const expected = ZIM_EXPECTED_SIZES[f];
+                    if (expected && stat.size < expected * 0.95) {
+                        console.log(`Skipping incomplete ZIM: ${f} (${(stat.size/1073741824).toFixed(1)}GB / ${(expected/1073741824).toFixed(0)}GB)`);
+                        return false;
+                    }
+                    // For unknown files, require at least 100MB
+                    if (!expected && stat.size < 100 * 1048576) return false;
+                    return true;
+                } catch { return false; }
+            })
+            .map(f => path.join(zimDir, f));
+    } catch { return []; }
+}
+
+function startKiwix() {
+    const kiwixBin = findKiwixServe();
+    const zimFiles = findZimFiles();
+
+    if (!kiwixBin || zimFiles.length === 0) {
+        kiwixStatus = { running: false, port: KIWIX_PORT, url: '', files: 0 };
+        return;
+    }
+
+    try {
+        kiwixProcess = spawn(kiwixBin, ['--port', String(KIWIX_PORT), ...zimFiles], {
+            stdio: ['ignore', 'ignore', 'pipe'],
+            detached: false,
+        });
+
+        // Capture stderr for error reporting
+        let stderrBuf = '';
+        kiwixProcess.stderr.on('data', (chunk) => { stderrBuf += chunk.toString().slice(-500); });
+
+        kiwixProcess.on('error', (err) => {
+            console.error(`Kiwix failed to start: ${err.message}`);
+            kiwixStatus.running = false;
+        });
+
+        kiwixProcess.on('exit', (code) => {
+            kiwixStatus.running = false;
+            kiwixProcess = null;
+            if (code !== 0 && code !== null) {
+                console.error(`Kiwix exited with code ${code}${stderrBuf ? ': ' + stderrBuf.trim() : ''}`);
+            }
+        });
+
+        kiwixStatus = {
+            running: true,
+            port: KIWIX_PORT,
+            url: `http://localhost:${KIWIX_PORT}`,
+            files: zimFiles.length,
+        };
+
+        console.log(`Kiwix serving ${zimFiles.length} ZIM file(s) at http://localhost:${KIWIX_PORT}`);
+    } catch (err) {
+        console.error(`Failed to start Kiwix: ${err.message}`);
+    }
+}
+
+// Cleanup on exit
+process.on('exit', () => { if (kiwixProcess) kiwixProcess.kill(); });
+process.on('SIGINT', () => { if (kiwixProcess) kiwixProcess.kill(); process.exit(0); });
+process.on('SIGTERM', () => { if (kiwixProcess) kiwixProcess.kill(); process.exit(0); });
 
 server.listen(PORT, () => {
     console.log(`Val Ark server running at http://localhost:${PORT}`);
@@ -623,4 +732,6 @@ server.listen(PORT, () => {
     getToolsStatus();
     getContentStatus();
     getModelsStatus();
+    // Auto-start Kiwix content server
+    startKiwix();
 });

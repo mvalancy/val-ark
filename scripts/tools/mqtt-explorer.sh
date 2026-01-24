@@ -11,64 +11,34 @@ download_mqtt_explorer() {
     local repo="thomasnordquist/MQTT-Explorer"
     local tag="${PINNED_VERSION}"
 
-    # linux-x86_64: AppImage
-    local url
-    url=$(github_asset_url "$repo" "$tag" "MQTT-Explorer.*AppImage")
-    if [ -n "$url" ]; then
-        local dest="${TOOLS_DIR}/linux-x86_64/mqtt-explorer"
-        ensure_dir "$dest"
-        local filename
-        filename=$(basename "$url")
-        download_file "$url" "${dest}/${filename}" "mqtt-explorer linux-x86_64 AppImage"
-        chmod +x "${dest}/${filename}" 2>/dev/null
-    else
-        log_error "Could not find MQTT-Explorer AppImage asset"
-    fi
+    # linux-x86_64: AppImage (the x86_64 build has no arch suffix)
+    # Filename format: MQTT-Explorer-<version>.AppImage (no -arm64 or -armv7l suffix)
+    local ver_strip="${tag#v}"
+    local url="https://github.com/${repo}/releases/download/${tag}/MQTT-Explorer-${ver_strip}.AppImage"
+    local dest="${TOOLS_DIR}/linux-x86_64/mqtt-explorer"
+    ensure_dir "$dest"
+    local filename="MQTT-Explorer-${ver_strip}.AppImage"
+    download_file "$url" "${dest}/${filename}" "mqtt-explorer linux-x86_64 AppImage"
+    chmod +x "${dest}/${filename}" 2>/dev/null
 
-    # linux-arm64
-    write_install_hint "${TOOLS_DIR}/linux-arm64/mqtt-explorer" "mqtt-explorer" \
-"MQTT Explorer for Linux ARM64
-===============================
+    # linux-arm64: ARM64 AppImage
+    url="https://github.com/${repo}/releases/download/${tag}/MQTT-Explorer-${ver_strip}-arm64.AppImage"
+    local dest_arm64="${TOOLS_DIR}/linux-arm64/mqtt-explorer"
+    ensure_dir "$dest_arm64"
+    download_file "$url" "${dest_arm64}/MQTT-Explorer-${ver_strip}-arm64.AppImage" "mqtt-explorer linux-arm64 AppImage"
+    chmod +x "${dest_arm64}/MQTT-Explorer-${ver_strip}-arm64.AppImage" 2>/dev/null
 
-MQTT Explorer does not provide an ARM64 Linux build.
+    # macos-arm64: DMG
+    url="https://github.com/${repo}/releases/download/${tag}/MQTT-Explorer-${ver_strip}-arm64.dmg"
+    local dest_macos="${TOOLS_DIR}/macos-arm64/mqtt-explorer"
+    ensure_dir "$dest_macos"
+    download_file "$url" "${dest_macos}/MQTT-Explorer-${ver_strip}-arm64.dmg" "mqtt-explorer macos-arm64 DMG"
 
-Options:
-1. Build from source:
-   git clone https://github.com/thomasnordquist/MQTT-Explorer.git
-   cd MQTT-Explorer
-   npm install
-   npm run build
-
-2. Use the web-based version or run via Electron on x86_64.
-
-3. Alternative MQTT clients for ARM64:
-   - mosquitto_sub / mosquitto_pub (CLI)
-   - MQTTX (https://mqttx.app/)
-"
-
-    # macos-arm64
-    write_install_hint "${TOOLS_DIR}/macos-arm64/mqtt-explorer" "mqtt-explorer" \
-"MQTT Explorer for macOS
-========================
-
-Download the macOS DMG from:
-  https://github.com/thomasnordquist/MQTT-Explorer/releases/tag/${tag}
-
-Or install via Homebrew:
-  brew install --cask mqtt-explorer
-"
-
-    # windows-x64
-    write_install_hint "${TOOLS_DIR}/windows-x64/mqtt-explorer" "mqtt-explorer" \
-"MQTT Explorer for Windows
-===========================
-
-Download the Windows installer from:
-  https://github.com/thomasnordquist/MQTT-Explorer/releases/tag/${tag}
-
-Or install via Microsoft Store:
-  Search for 'MQTT Explorer' in the Microsoft Store.
-"
+    # windows-x64: Setup exe
+    url="https://github.com/${repo}/releases/download/${tag}/MQTT-Explorer-Setup-${ver_strip}.exe"
+    local dest_win="${TOOLS_DIR}/windows-x64/mqtt-explorer"
+    ensure_dir "$dest_win"
+    download_file "$url" "${dest_win}/MQTT-Explorer-Setup-${ver_strip}.exe" "mqtt-explorer windows-x64 Setup"
 
     log_success "${TOOL_NAME} download complete."
 }

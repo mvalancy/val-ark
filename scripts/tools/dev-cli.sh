@@ -76,10 +76,10 @@ download_rg() {
         log_error "Could not find ripgrep aarch64-linux asset"
     fi
 
-    # linux-x86_64
+    # linux-x86_64 (ripgrep uses musl, not gnu, for x86_64)
     dest="${TOOLS_DIR}/linux-x86_64/dev-cli"
     ensure_dir "$dest"
-    url=$(github_asset_url "$repo" "$tag" "x86_64.*linux-gnu.*tar.gz")
+    url=$(github_asset_url "$repo" "$tag" "x86_64.*linux-musl.*tar.gz")
     if [ -n "$url" ]; then
         local tmp_dir=$(mktemp -d)
         download_and_extract "$url" "$tmp_dir" "ripgrep linux-x86_64" 1

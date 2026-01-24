@@ -8,7 +8,7 @@ PINNED_VERSION="v2.0.20"
 download_mosquitto() {
     log "Downloading ${TOOL_NAME}..."
 
-    local repo_url="https://github.com/eclipse/mosquitto.git"
+    local repo_url="https://github.com/eclipse-mosquitto/mosquitto.git"
     local tag="${PINNED_VERSION}"
     local build_instructions="Mosquitto Build Instructions
 ==============================

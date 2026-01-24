@@ -9,7 +9,8 @@ PINNED_VERSION="v0.3.45"
 
 download_vosk() {
     log "Downloading ${TOOL_NAME}..."
-    local TAG=$(github_latest_tag "alphacep/vosk-api" "$PINNED_VERSION")
+    # Use pinned version directly - latest releases (v0.3.50+) have no prebuilt binaries
+    local TAG="$PINNED_VERSION"
     local VER="${TAG#v}"  # Strip leading 'v' for filename pattern
 
     local BASE_URL="https://github.com/alphacep/vosk-api/releases/download/${TAG}"
@@ -28,11 +29,11 @@ download_vosk() {
 
     # macOS arm64: no prebuilt binary, write install instructions
     write_install_hint "$TOOLS_DIR/macos-arm64/vosk" "Vosk (macOS)" \
-"Vosk for macOS - Install via pip
+"Vosk for macOS arm64
 ================================
 
-Vosk does not provide prebuilt native libraries for macOS arm64.
-Install the Python package instead:
+No prebuilt native library is available for macOS arm64.
+To use Vosk on macOS, obtain it via pip:
 
     pip install vosk
 
@@ -40,7 +41,8 @@ Or with conda:
 
     conda install -c conda-forge vosk
 
-Documentation: https://alphacephei.com/vosk/
+Source and docs: https://alphacephei.com/vosk/
+GitHub: https://github.com/alphacep/vosk-api
 "
 
     log_success "Vosk download complete"

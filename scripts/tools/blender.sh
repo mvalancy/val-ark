@@ -9,7 +9,7 @@ download_blender() {
     log "Downloading ${TOOL_NAME}..."
 
     local ver="${PINNED_VERSION}"
-    local mirror="https://mirror.clarkson.edu/blender/release/Blender4.4"
+    local mirror="https://download.blender.org/release/Blender4.4"
 
     # linux-x86_64
     local dest="${TOOLS_DIR}/linux-x86_64/blender"

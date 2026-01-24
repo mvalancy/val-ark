@@ -25,8 +25,8 @@ download_ffmpeg() {
     local MACOS_DIR="$TOOLS_DIR/macos-arm64/ffmpeg"
     ensure_dir "$MACOS_DIR"
 
-    local FFMPEG_MAC_URL="https://evermeet.cx/ffmpeg/ffmpeg-7.1.1.zip"
-    local FFPROBE_MAC_URL="https://evermeet.cx/ffmpeg/ffprobe-7.1.1.zip"
+    local FFMPEG_MAC_URL="https://evermeet.cx/ffmpeg/ffmpeg-8.0.1.zip"
+    local FFPROBE_MAC_URL="https://evermeet.cx/ffmpeg/ffprobe-8.0.1.zip"
 
     download_and_extract "$FFMPEG_MAC_URL" "$MACOS_DIR" "FFmpeg macOS arm64 (ffmpeg)"
     download_and_extract "$FFPROBE_MAC_URL" "$MACOS_DIR" "FFmpeg macOS arm64 (ffprobe)"

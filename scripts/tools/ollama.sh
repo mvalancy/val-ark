@@ -1,36 +1,34 @@
 #!/bin/bash
+###############################################################################
 # Val Ark - Download Ollama
+###############################################################################
 source "$(dirname "$0")/_common.sh"
 
 TOOL_NAME="ollama"
-PINNED_VERSION="v0.6.2"
+PINNED_VERSION="v0.15.0"
 
 download_ollama() {
     log "Downloading ${TOOL_NAME}..."
+    # Use ollama.com/download (official CDN) instead of GitHub releases
+    local BASE_URL="https://ollama.com/download"
 
-    local tag="${PINNED_VERSION}"
-    local base_url="https://github.com/ollama/ollama/releases/download/${tag}"
+    # linux-arm64: tar.zst archive (jetpack6 variant for Jetson Orin)
+    local ARM64_URL="${BASE_URL}/ollama-linux-arm64-jetpack6.tar.zst"
+    download_and_extract "$ARM64_URL" "$TOOLS_DIR/linux-arm64/ollama" "ollama linux-arm64 (jetpack6)"
 
-    # linux-arm64: raw binary
-    local dest="${TOOLS_DIR}/linux-arm64/ollama"
-    ensure_dir "$dest"
-    download_file "${base_url}/ollama-linux-arm64" "${dest}/ollama" "ollama linux-arm64"
-    chmod +x "${dest}/ollama" 2>/dev/null
+    # linux-x86_64: tar.zst archive
+    local X64_URL="${BASE_URL}/ollama-linux-amd64.tar.zst"
+    download_and_extract "$X64_URL" "$TOOLS_DIR/linux-x86_64/ollama" "ollama linux-x86_64"
 
-    # linux-x86_64: raw binary
-    dest="${TOOLS_DIR}/linux-x86_64/ollama"
-    ensure_dir "$dest"
-    download_file "${base_url}/ollama-linux-amd64" "${dest}/ollama" "ollama linux-x86_64"
-    chmod +x "${dest}/ollama" 2>/dev/null
+    # macos-arm64: tgz archive
+    local MAC_URL="${BASE_URL}/ollama-darwin.tgz"
+    download_and_extract "$MAC_URL" "$TOOLS_DIR/macos-arm64/ollama" "ollama macos-arm64"
 
-    # macos-arm64: zip archive
-    dest="${TOOLS_DIR}/macos-arm64/ollama"
-    download_and_extract "${base_url}/Ollama-darwin.zip" "$dest" "ollama macos-arm64" 0
+    # windows-x64: zip archive
+    local WIN_URL="${BASE_URL}/ollama-windows-amd64.zip"
+    download_and_extract "$WIN_URL" "$TOOLS_DIR/windows-x64/ollama" "ollama windows-x64"
 
-    # windows-x64: installer exe
-    dest="${TOOLS_DIR}/windows-x64/ollama"
-    ensure_dir "$dest"
-    download_file "${base_url}/OllamaSetup.exe" "${dest}/OllamaSetup.exe" "ollama windows-x64"
+    log_success "Ollama download complete"
 }
 
 # Run if called directly

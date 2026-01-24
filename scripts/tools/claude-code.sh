@@ -24,7 +24,7 @@ Usage:
   claude
 
 For more information:
-  https://docs.anthropic.com/en/docs/claude-code
+  https://code.claude.com/docs
 "
 
     # linux-arm64

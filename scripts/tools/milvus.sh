@@ -3,7 +3,7 @@
 source "$(dirname "$0")/_common.sh"
 
 TOOL_NAME="milvus"
-PINNED_VERSION="2.4.0"
+PINNED_VERSION="2.5.6"
 
 download_milvus() {
     log "Downloading ${TOOL_NAME}..."

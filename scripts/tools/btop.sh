@@ -21,7 +21,7 @@ download_btop() {
         download_file "$url" "$tmp_file" "btop linux-arm64"
         if [ -f "$tmp_file" ] && [ -s "$tmp_file" ]; then
             log_info "Extracting btop linux-arm64..."
-            tar -xjf "$tmp_file" -C "$dest" --strip-components=2 2>/dev/null
+            tar -xjf "$tmp_file" -C "$dest" --strip-components=1 2>/dev/null
             log_success "Extracted btop linux-arm64"
             rm -f "$tmp_file" 2>/dev/null
         fi
@@ -38,7 +38,7 @@ download_btop() {
         download_file "$url" "$tmp_file" "btop linux-x86_64"
         if [ -f "$tmp_file" ] && [ -s "$tmp_file" ]; then
             log_info "Extracting btop linux-x86_64..."
-            tar -xjf "$tmp_file" -C "$dest" --strip-components=2 2>/dev/null
+            tar -xjf "$tmp_file" -C "$dest" --strip-components=1 2>/dev/null
             log_success "Extracted btop linux-x86_64"
             rm -f "$tmp_file" 2>/dev/null
         fi

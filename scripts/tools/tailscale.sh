@@ -3,7 +3,9 @@
 source "$(dirname "$0")/_common.sh"
 
 TOOL_NAME="tailscale"
-PINNED_VERSION="1.78.3"
+PINNED_VERSION="1.92.5"
+# Note: Tailscale stable channel only keeps the latest version.
+# Update this to the current stable from https://pkgs.tailscale.com/stable/
 
 download_tailscale() {
     log "Downloading ${TOOL_NAME}..."

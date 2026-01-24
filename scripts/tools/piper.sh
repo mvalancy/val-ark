@@ -27,12 +27,12 @@ download_piper() {
         log_warn "No linux-x86_64 asset found for Piper ${TAG}"
     fi
 
-    # macos-arm64 (works via Rosetta)
-    local MACOS_URL=$(github_asset_url "rhasspy/piper" "$TAG" "macos_x64.tar.gz")
+    # macos-arm64 (native)
+    local MACOS_URL=$(github_asset_url "rhasspy/piper" "$TAG" "macos_aarch64.tar.gz")
     if [ -n "$MACOS_URL" ]; then
-        download_and_extract "$MACOS_URL" "$TOOLS_DIR/macos-arm64/piper" "Piper macos-arm64 (Rosetta)"
+        download_and_extract "$MACOS_URL" "$TOOLS_DIR/macos-arm64/piper" "Piper macos-arm64"
     else
-        log_warn "No macOS asset found for Piper ${TAG}"
+        log_warn "No macOS arm64 asset found for Piper ${TAG}"
     fi
 
     # windows-x64

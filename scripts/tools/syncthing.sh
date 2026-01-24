@@ -28,10 +28,10 @@ download_syncthing() {
         log_error "Could not find syncthing linux-x86_64 asset"
     fi
 
-    # macos-arm64
-    url=$(github_asset_url "$repo" "$tag" "macos-arm64.*tar.gz")
+    # macos-arm64 (macOS releases are .zip, not .tar.gz)
+    url=$(github_asset_url "$repo" "$tag" "macos-arm64.*zip")
     if [ -n "$url" ]; then
-        download_and_extract "$url" "${TOOLS_DIR}/macos-arm64/syncthing" "syncthing macos-arm64" 1
+        download_and_extract "$url" "${TOOLS_DIR}/macos-arm64/syncthing" "syncthing macos-arm64" 0
     else
         log_error "Could not find syncthing macos-arm64 asset"
     fi

@@ -24,13 +24,17 @@ DOWNLOAD_SUCCESS="${DOWNLOAD_SUCCESS:-0}"
 DOWNLOAD_FAILED="${DOWNLOAD_FAILED:-0}"
 DOWNLOAD_SKIPPED="${DOWNLOAD_SKIPPED:-0}"
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+# Colors (disabled when FORCE_COLOR=0 or non-interactive)
+if [ "${FORCE_COLOR:-}" = "0" ] || [ ! -t 1 ]; then
+    RED='' GREEN='' YELLOW='' BLUE='' CYAN='' NC=''
+else
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    NC='\033[0m'
+fi
 
 ###############################################################################
 # Logging
@@ -46,7 +50,16 @@ log_error()   { log "${RED}ERROR${NC}: $*"; }
 log_info()    { log "${BLUE}INFO${NC}: $*"; }
 log_warn()    { log "${YELLOW}WARN${NC}: $*"; }
 
-ensure_dir() { mkdir -p "$1" 2>/dev/null || true; }
+ensure_dir() {
+    if [ -f "$1" ]; then
+        # File exists at directory path - move it aside
+        mv "$1" "${1}.bak" 2>/dev/null
+        mkdir -p "$1" 2>/dev/null
+        mv "${1}.bak" "$1/$(basename "$1")" 2>/dev/null
+    else
+        mkdir -p "$1" 2>/dev/null || true
+    fi
+}
 
 ###############################################################################
 # GitHub API Helpers
@@ -68,7 +81,7 @@ github_latest_tag() {
     local api_url="https://api.github.com/repos/${repo}/releases/latest"
 
     local tag
-    tag=$(curl -sS -H "$(github_api_header)" "$api_url" 2>/dev/null \
+    tag=$(curl -sS --connect-timeout 5 --max-time 10 -H "$(github_api_header)" "$api_url" 2>/dev/null \
         | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
 
     if [ -z "$tag" ]; then
@@ -88,7 +101,7 @@ github_asset_url() {
     local pattern="$3"
     local api_url="https://api.github.com/repos/${repo}/releases/tags/${tag}"
 
-    curl -sS -H "$(github_api_header)" "$api_url" 2>/dev/null \
+    curl -sS --connect-timeout 5 --max-time 10 -H "$(github_api_header)" "$api_url" 2>/dev/null \
         | grep "browser_download_url" | grep -i "$pattern" | head -1 \
         | sed 's/.*"browser_download_url": *"\([^"]*\)".*/\1/'
 }
@@ -117,11 +130,12 @@ download_file() {
     while [ $attempt -le $MAX_RETRIES ]; do
         log_info "Downloading ${label} (attempt ${attempt}/${MAX_RETRIES})"
 
-        if command -v wget >/dev/null 2>&1; then
-            wget -c --progress=dot:mega --timeout=60 --tries=1 \
-                "$url" -O "$dest_path" 2>&1 | tail -5
-        else
-            curl -L --progress-bar --connect-timeout 60 -o "$dest_path" "$url"
+        if command -v curl >/dev/null 2>&1; then
+            curl -fL --progress-bar --connect-timeout 30 --max-time 600 \
+                -o "$dest_path" "$url" 2>&1
+        elif command -v wget >/dev/null 2>&1; then
+            wget --progress=dot:mega --timeout=60 --tries=1 \
+                "$url" -O "$dest_path" 2>&1
         fi
         local status=$?
 
@@ -155,9 +169,13 @@ download_and_extract() {
 
     ensure_dir "$dest_dir"
 
-    # Check if already extracted (has files in dest_dir)
-    local existing=$(find "$dest_dir" -type f 2>/dev/null | head -3 | wc -l)
-    if [ "$existing" -gt 1 ]; then
+    # Check if already extracted (has real files in dest_dir, not just .tmp_*)
+    local existing=0
+    while IFS= read -r _; do
+        existing=$((existing + 1))
+        [ $existing -ge 2 ] && break
+    done < <(find "$dest_dir" -type f ! -name '.tmp_*' 2>/dev/null)
+    if [ "$existing" -ge 2 ]; then
         log_info "Already extracted: ${label} - skipping"
         DOWNLOAD_SKIPPED=$((DOWNLOAD_SKIPPED + 1))
         return 0
@@ -219,12 +237,34 @@ download_and_extract() {
 
     if [ $extract_status -ne 0 ]; then
         log_error "Extraction failed for ${label}"
-    else
-        log_success "Extracted: ${label}"
+        rm -f "$tmp_file" 2>/dev/null || true
+        return $extract_status
     fi
 
-    rm -f "$tmp_file" 2>/dev/null || true
-    return $extract_status
+    log_success "Extracted: ${label}"
+
+    # Archive preservation: keep initial + previous + latest
+    local dist_dir="${dest_dir}/.dist"
+    ensure_dir "$dist_dir"
+    local initial_file="${dist_dir}/initial-${archive_name}"
+    local latest_file="${dist_dir}/${archive_name}"
+    local prev_file="${dist_dir}/prev-${archive_name}"
+
+    if [ ! -f "$initial_file" ]; then
+        # First ever download - save as initial
+        cp "$tmp_file" "$initial_file" 2>/dev/null
+        log_info "Saved initial archive: ${archive_name}"
+    fi
+
+    if [ -f "$latest_file" ] && [ -s "$latest_file" ]; then
+        # Rotate latest → previous (overwrite any existing prev)
+        mv -f "$latest_file" "$prev_file" 2>/dev/null || true
+    fi
+
+    # Save as latest
+    mv -f "$tmp_file" "$latest_file" 2>/dev/null || rm -f "$tmp_file" 2>/dev/null
+
+    return 0
 }
 
 # Clone a git repo at a specific tag/branch

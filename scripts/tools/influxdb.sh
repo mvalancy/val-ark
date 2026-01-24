@@ -44,8 +44,8 @@ Access the UI at:
 Download the Windows binary from:
   https://portal.influxdata.com/downloads/
 
-Or use the direct link:
-  https://dl.influxdata.com/influxdb/releases/influxdb2-${ver}-windows-amd64.zip
+Direct download (latest available version):
+  https://dl.influxdata.com/influxdb/releases/v2.8.0/influxdb2-2.8.0-windows_amd64.zip
 
 Extract and run:
   influxd.exe

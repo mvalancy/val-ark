@@ -15,6 +15,18 @@ download_bitnet() {
     clone_repo "https://github.com/microsoft/BitNet.git" "$PINNED_VERSION" \
         "$TOOLS_DIR/linux-arm64/bitnet/source" "BitNet source (linux-arm64)"
 
+    # Clone to linux-x86_64 tools dir
+    clone_repo "https://github.com/microsoft/BitNet.git" "$PINNED_VERSION" \
+        "$TOOLS_DIR/linux-x86_64/bitnet/source" "BitNet source (linux-x86_64)"
+
+    # Clone to macos-arm64 tools dir
+    clone_repo "https://github.com/microsoft/BitNet.git" "$PINNED_VERSION" \
+        "$TOOLS_DIR/macos-arm64/bitnet/source" "BitNet source (macos-arm64)"
+
+    # Clone to windows-x64 tools dir
+    clone_repo "https://github.com/microsoft/BitNet.git" "$PINNED_VERSION" \
+        "$TOOLS_DIR/windows-x64/bitnet/source" "BitNet source (windows-x64)"
+
     # Clone to sources dir
     clone_repo "https://github.com/microsoft/BitNet.git" "$PINNED_VERSION" \
         "$PROJECT_ROOT/sources/BitNet" "BitNet source"

@@ -392,7 +392,7 @@ clone_sources() {
 # Disk Space Check (200GB buffer enforcement)
 ###############################################################################
 
-DISK_BUFFER_GB=200
+DISK_BUFFER_GB=60
 
 check_disk_space() {
     local avail_kb=$(df --output=avail "${PROJECT_ROOT}" 2>/dev/null | tail -1)
@@ -777,28 +777,26 @@ update_apps() {
         fi
     }
 
-    # --- MQTT Explorer (~100MB, x86_64 AppImage only) ---
-    if [ "$arm64" != true ]; then
-        require_disk_space 110 "MQTT Explorer" && {
-            local mqtt_dir="${plat_dir}/mqtt-explorer"
-            if [ ! -f "${mqtt_dir}/MQTT-Explorer.AppImage" ]; then
-                local mqtt_url
-                mqtt_url=$(curl -sS "https://api.github.com/repos/thomasnordquist/MQTT-Explorer/releases/latest" 2>/dev/null \
-                    | grep "browser_download_url.*AppImage\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
-                if [ -n "$mqtt_url" ]; then
-                    log_info "Downloading MQTT Explorer (x86_64 AppImage)..."
-                    mkdir -p "${mqtt_dir}"
-                    curl -L -o "${mqtt_dir}/MQTT-Explorer.AppImage" "$mqtt_url" 2>/dev/null
-                    chmod +x "${mqtt_dir}/MQTT-Explorer.AppImage"
-                    [ -s "${mqtt_dir}/MQTT-Explorer.AppImage" ] && log_ok "MQTT Explorer: $(du -h "${mqtt_dir}/MQTT-Explorer.AppImage" | cut -f1)" || log_err "MQTT Explorer download failed"
-                else
-                    log_warn "Could not find MQTT Explorer release URL"
-                fi
+    # --- MQTT Explorer (~100MB, x86_64 AppImage — always download for the ark) ---
+    require_disk_space 110 "MQTT Explorer" && {
+        local mqtt_dir="${TOOLS_DIR}/linux-x86_64/mqtt-explorer"
+        if [ ! -f "${mqtt_dir}/MQTT-Explorer.AppImage" ]; then
+            local mqtt_url
+            mqtt_url=$(curl -sS "https://api.github.com/repos/thomasnordquist/MQTT-Explorer/releases/latest" 2>/dev/null \
+                | grep "browser_download_url.*AppImage\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
+            if [ -n "$mqtt_url" ]; then
+                log_info "Downloading MQTT Explorer (x86_64 AppImage)..."
+                mkdir -p "${mqtt_dir}"
+                curl -L -o "${mqtt_dir}/MQTT-Explorer.AppImage" "$mqtt_url" 2>/dev/null
+                chmod +x "${mqtt_dir}/MQTT-Explorer.AppImage"
+                [ -s "${mqtt_dir}/MQTT-Explorer.AppImage" ] && log_ok "MQTT Explorer: $(du -h "${mqtt_dir}/MQTT-Explorer.AppImage" | cut -f1)" || log_err "MQTT Explorer download failed"
             else
-                log_info "Already have: MQTT Explorer"
+                log_warn "Could not find MQTT Explorer release URL"
             fi
-        }
-    fi
+        else
+            log_info "Already have: MQTT Explorer"
+        fi
+    }
 
     # --- SQLite CLI (~2MB) ---
     require_disk_space 5 "SQLite" && {
@@ -1042,72 +1040,62 @@ PGEOF
         fi
     }
 
-    # --- Blender (~300MB, x86_64 only — no official arm64 Linux builds) ---
-    if [ "$arm64" != true ]; then
-        require_disk_space 350 "Blender" && {
-            local blender_dir="${plat_dir}/blender"
-            if [ ! -f "${blender_dir}/blender" ]; then
-                local blender_ver="4.4.0"
-                local blender_url="https://download.blender.org/release/Blender${blender_ver%.*}/blender-${blender_ver}-linux-x64.tar.xz"
-                log_info "Downloading Blender ${blender_ver} (linux-x86_64)..."
-                mkdir -p "${blender_dir}"
-                curl -L -o /tmp/blender.tar.xz "$blender_url" 2>/dev/null
-                if [ -f /tmp/blender.tar.xz ] && [ $(stat -c%s /tmp/blender.tar.xz 2>/dev/null || echo 0) -gt 10000 ]; then
-                    tar -xJf /tmp/blender.tar.xz -C /tmp/ 2>/dev/null
-                    # Move contents from extracted dir (blender-X.Y.Z-linux-x64/) into target
-                    local bdir=$(find /tmp -maxdepth 1 -name "blender-*-linux*" -type d | head -1)
-                    if [ -n "$bdir" ] && [ -f "${bdir}/blender" ]; then
-                        mv "${bdir}"/* "${blender_dir}/" 2>/dev/null
-                        rm -rf "${bdir}"
-                        chmod +x "${blender_dir}/blender" 2>/dev/null
-                        log_ok "Blender ${blender_ver}: $(du -sh "${blender_dir}" | cut -f1)"
-                    else
-                        log_err "Blender extraction failed"
-                    fi
-                    rm -f /tmp/blender.tar.xz
+    # --- Blender (~300MB, x86_64 binary — always download for the ark) ---
+    require_disk_space 350 "Blender" && {
+        local blender_dir="${TOOLS_DIR}/linux-x86_64/blender"
+        if [ ! -f "${blender_dir}/blender" ]; then
+            local blender_ver="4.4.0"
+            local blender_url="https://download.blender.org/release/Blender${blender_ver%.*}/blender-${blender_ver}-linux-x64.tar.xz"
+            log_info "Downloading Blender ${blender_ver} (linux-x86_64)..."
+            mkdir -p "${blender_dir}"
+            curl -L -o /tmp/blender.tar.xz "$blender_url" 2>/dev/null
+            if [ -f /tmp/blender.tar.xz ] && [ $(stat -c%s /tmp/blender.tar.xz 2>/dev/null || echo 0) -gt 10000 ]; then
+                tar -xJf /tmp/blender.tar.xz -C /tmp/ 2>/dev/null
+                local bdir=$(find /tmp -maxdepth 1 -name "blender-*-linux*" -type d | head -1)
+                if [ -n "$bdir" ] && [ -f "${bdir}/blender" ]; then
+                    mv "${bdir}"/* "${blender_dir}/" 2>/dev/null
+                    rm -rf "${bdir}"
+                    chmod +x "${blender_dir}/blender" 2>/dev/null
+                    log_ok "Blender ${blender_ver}: $(du -sh "${blender_dir}" | cut -f1)"
                 else
-                    log_err "Blender download failed"
-                    rm -f /tmp/blender.tar.xz
+                    log_err "Blender extraction failed"
                 fi
+                rm -f /tmp/blender.tar.xz
             else
-                log_info "Already have: Blender"
+                log_err "Blender download failed"
+                rm -f /tmp/blender.tar.xz
             fi
-        }
-    else
-        log_info "Blender: no official arm64 Linux build — install via apt or snap on target"
-    fi
+        else
+            log_info "Already have: Blender"
+        fi
+    }
 
-    # --- FreeCAD (~700MB AppImage, x86_64 only) ---
-    if [ "$arm64" != true ]; then
-        require_disk_space 750 "FreeCAD" && {
-            local freecad_dir="${plat_dir}/FreeCAD"
-            if [ ! -f "${freecad_dir}/bin/FreeCADCmd" ] && [ ! -f "${freecad_dir}/FreeCAD.AppImage" ]; then
-                log_info "Downloading FreeCAD AppImage (linux-x86_64)..."
-                mkdir -p "${freecad_dir}/bin"
-                local freecad_url
-                freecad_url=$(curl -sS "https://api.github.com/repos/FreeCAD/FreeCAD-Bundle/releases/latest" 2>/dev/null \
-                    | grep "browser_download_url.*Linux-x86_64.*AppImage\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
-                if [ -n "$freecad_url" ]; then
-                    curl -L -o "${freecad_dir}/FreeCAD.AppImage" "$freecad_url" 2>/dev/null
-                    if [ -f "${freecad_dir}/FreeCAD.AppImage" ] && [ $(stat -c%s "${freecad_dir}/FreeCAD.AppImage" 2>/dev/null || echo 0) -gt 10000 ]; then
-                        chmod +x "${freecad_dir}/FreeCAD.AppImage"
-                        # Create symlink for bin/FreeCADCmd compatibility
-                        ln -sf ../FreeCAD.AppImage "${freecad_dir}/bin/FreeCADCmd" 2>/dev/null
-                        log_ok "FreeCAD: $(du -sh "${freecad_dir}/FreeCAD.AppImage" | cut -f1)"
-                    else
-                        log_err "FreeCAD download failed (file too small)"
-                        rm -f "${freecad_dir}/FreeCAD.AppImage"
-                    fi
+    # --- FreeCAD (~700MB AppImage, x86_64 binary — always download for the ark) ---
+    require_disk_space 750 "FreeCAD" && {
+        local freecad_dir="${TOOLS_DIR}/linux-x86_64/FreeCAD"
+        if [ ! -f "${freecad_dir}/bin/FreeCADCmd" ] && [ ! -f "${freecad_dir}/FreeCAD.AppImage" ]; then
+            log_info "Downloading FreeCAD AppImage (linux-x86_64)..."
+            mkdir -p "${freecad_dir}/bin"
+            local freecad_url
+            freecad_url=$(curl -sS "https://api.github.com/repos/FreeCAD/FreeCAD-Bundle/releases/latest" 2>/dev/null \
+                | grep "browser_download_url.*Linux-x86_64.*AppImage\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
+            if [ -n "$freecad_url" ]; then
+                curl -L -o "${freecad_dir}/FreeCAD.AppImage" "$freecad_url" 2>/dev/null
+                if [ -f "${freecad_dir}/FreeCAD.AppImage" ] && [ $(stat -c%s "${freecad_dir}/FreeCAD.AppImage" 2>/dev/null || echo 0) -gt 10000 ]; then
+                    chmod +x "${freecad_dir}/FreeCAD.AppImage"
+                    ln -sf ../FreeCAD.AppImage "${freecad_dir}/bin/FreeCADCmd" 2>/dev/null
+                    log_ok "FreeCAD: $(du -sh "${freecad_dir}/FreeCAD.AppImage" | cut -f1)"
                 else
-                    log_err "FreeCAD: could not resolve download URL from GitHub"
+                    log_err "FreeCAD download failed (file too small)"
+                    rm -f "${freecad_dir}/FreeCAD.AppImage"
                 fi
             else
-                log_info "Already have: FreeCAD"
+                log_err "FreeCAD: could not resolve download URL from GitHub"
             fi
-        }
-    else
-        log_info "FreeCAD: no official arm64 Linux build — install via apt on target"
-    fi
+        else
+            log_info "Already have: FreeCAD"
+        fi
+    }
 
     # --- Disk space summary ---
     echo ""

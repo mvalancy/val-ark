@@ -1241,7 +1241,7 @@ const TOOLS = [
         id: 'blender', name: 'Blender', category: 'creative', icon: 'B', iconBg: '#e87d0d', logo: 'logos/blender.png',
         desc: '3D modeling, animation, rendering, and scripting - with Python API for programmatic modeling',
         size: '~1.1 GB (portable)',
-        platforms: { jetson: 'package', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        platforms: { ubuntu: 'portable', mac: 'portable', windows: 'portable' },
         downloads: {
             source: 'https://github.com/blender/blender',
             releases: 'https://www.blender.org/download/',
@@ -1278,7 +1278,7 @@ const TOOLS = [
         id: 'freecad', name: 'FreeCAD', category: 'creative', icon: 'C', iconBg: '#0b5394', logo: 'logos/freecad.svg',
         desc: 'Parametric 3D CAD modeler with Python scripting - headless mode for automated design',
         size: '~760 MB (AppImage)',
-        platforms: { jetson: 'package', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        platforms: { ubuntu: 'appimage', mac: 'dmg', windows: 'installer' },
         downloads: {
             source: 'https://github.com/FreeCAD/FreeCAD',
             releases: 'https://github.com/FreeCAD/FreeCAD-Bundle/releases',
@@ -1836,12 +1836,12 @@ async function checkInstalledTools() {
 
         const binPath = bins[currentPlat];
         if (!binPath) {
-            // No binary defined for current platform - check other platforms
+            // No binary for current platform - check if any binary exists in the ark
             const anyPath = Object.values(bins).find(p => p);
             if (anyPath) {
                 try {
                     const r = await fetch(anyPath, {method:'HEAD'});
-                    INSTALLED_TOOLS[t.id] = r.ok ? 'other-platform' : 'missing';
+                    INSTALLED_TOOLS[t.id] = r.ok ? 'installed' : 'missing';
                 } catch(e) { INSTALLED_TOOLS[t.id] = 'missing'; }
             } else {
                 INSTALLED_TOOLS[t.id] = t.downloads.installHint || 'missing';
@@ -1881,7 +1881,6 @@ function getInstallBadge(toolId) {
         case 'system': return '<span class="badge badge-installed">System</span>';
         case 'source': return '<span class="badge badge-source">Source Only</span>';
         case 'bundled': return '<span class="badge badge-installed">Bundled</span>';
-        case 'other-platform': return '<span class="badge badge-other">Other Platforms</span>';
         case 'npm': return '<span class="badge badge-hint">npm install</span>';
         case 'pip': return '<span class="badge badge-hint">pip install</span>';
         case 'docker': return '<span class="badge badge-hint">Docker</span>';

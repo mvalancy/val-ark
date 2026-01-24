@@ -1118,6 +1118,41 @@ PGEOF
         fi
     }
 
+    # --- Kiwix Tools (~20MB per arch — ZIM file server/viewer) ---
+    require_disk_space 50 "Kiwix Tools" && {
+        local kiwix_ver="3.8.1"
+        local kiwix_x86="${TOOLS_DIR}/linux-x86_64/kiwix"
+        local kiwix_arm="${TOOLS_DIR}/linux-arm64/kiwix"
+
+        if [ ! -f "${kiwix_x86}/kiwix-serve" ]; then
+            log_info "Downloading Kiwix Tools ${kiwix_ver} (linux-x86_64)..."
+            mkdir -p "${kiwix_x86}"
+            curl -sL "https://download.kiwix.org/release/kiwix-tools/kiwix-tools_linux-x86_64-${kiwix_ver}.tar.gz" | \
+                tar xz -C "${kiwix_x86}" --strip-components=1
+            if [ -f "${kiwix_x86}/kiwix-serve" ]; then
+                log_ok "Kiwix Tools x86_64: $(du -sh "${kiwix_x86}" | cut -f1)"
+            else
+                log_err "Kiwix Tools x86_64 download failed"
+            fi
+        else
+            log_info "Already have: Kiwix Tools (x86_64)"
+        fi
+
+        if [ ! -f "${kiwix_arm}/kiwix-serve" ]; then
+            log_info "Downloading Kiwix Tools ${kiwix_ver} (linux-arm64)..."
+            mkdir -p "${kiwix_arm}"
+            curl -sL "https://download.kiwix.org/release/kiwix-tools/kiwix-tools_linux-aarch64-${kiwix_ver}.tar.gz" | \
+                tar xz -C "${kiwix_arm}" --strip-components=1
+            if [ -f "${kiwix_arm}/kiwix-serve" ]; then
+                log_ok "Kiwix Tools arm64: $(du -sh "${kiwix_arm}" | cut -f1)"
+            else
+                log_err "Kiwix Tools arm64 download failed"
+            fi
+        else
+            log_info "Already have: Kiwix Tools (arm64)"
+        fi
+    }
+
     # --- Disk space summary ---
     echo ""
     local budget=$(check_disk_space)

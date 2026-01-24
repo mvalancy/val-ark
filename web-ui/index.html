@@ -1634,6 +1634,215 @@ const TOOLS = [
         }
     },
     {
+        id: 'kiwix', name: 'Kiwix', category: 'infrastructure', icon: 'K', iconBg: '#19a4c8', logo: 'logos/kiwix.svg',
+        desc: 'Offline ZIM file server - serve Wikipedia, Khan Academy, Project Gutenberg, and more over your local network',
+        size: '~20 MB',
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://github.com/kiwix/kiwix-tools',
+            releases: 'https://download.kiwix.org/release/kiwix-tools/',
+            binaries: {
+                'jetson': 'tools/linux-arm64/kiwix/kiwix-serve',
+                'ubuntu': 'tools/linux-x86_64/kiwix/kiwix-serve',
+                'mac': 'tools/macos-arm64/kiwix/kiwix-serve',
+                'windows': 'tools/windows-x64/kiwix/kiwix-serve.exe'
+            }
+        },
+        details: {
+            overview: 'Kiwix serves ZIM files — compressed offline snapshots of entire websites like Wikipedia, Khan Academy, Stack Overflow, Project Gutenberg, TED Talks, and more. A single kiwix-serve process can host dozens of ZIM files over HTTP, making them browsable from any device on the network. Essential for offline education and reference.',
+            features: [
+                'Serve ZIM files over HTTP (any browser can access)',
+                'Full-text search within ZIM content',
+                'Multiple ZIM files in one server instance',
+                'Wikipedia offline (~90GB full, ~12GB no-images)',
+                'Khan Academy, Stack Overflow, TED, Gutenberg ZIMs available',
+                'kiwix-manage: catalog and organize ZIM libraries',
+                'kiwix-search: CLI search within ZIM files',
+                'Static binaries for x86_64 and ARM64',
+                'Low resource usage (serves from disk)',
+                'OPDS catalog for e-reader integration'
+            ],
+            cli: [
+                {cmd: 'kiwix-serve --port 8888 wikipedia.zim', desc: 'Serve a ZIM file on port 8888'},
+                {cmd: 'kiwix-serve --library library.xml', desc: 'Serve all ZIMs in a library catalog'},
+                {cmd: 'kiwix-manage library.xml add *.zim', desc: 'Add ZIM files to library catalog'},
+                {cmd: 'kiwix-search wikipedia.zim "machine learning"', desc: 'Search within a ZIM file'}
+            ]
+        }
+    },
+    {
+        id: 'tailscale', name: 'Tailscale', category: 'infrastructure', icon: 'T', iconBg: '#2b5ea7',
+        desc: 'Zero-config mesh VPN - connect your devices securely without port forwarding or firewall changes',
+        size: '~30 MB',
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://github.com/tailscale/tailscale',
+            releases: 'https://github.com/tailscale/tailscale/releases',
+            binaries: {
+                'jetson': 'tools/linux-arm64/tailscale/tailscale',
+                'ubuntu': 'tools/linux-x86_64/tailscale/tailscale',
+                'mac': 'tools/macos-arm64/tailscale/tailscale',
+                'windows': 'tools/windows-x64/tailscale/tailscale.exe'
+            }
+        },
+        details: {
+            overview: 'Tailscale creates a secure mesh VPN using WireGuard. Connect your Val Ark server to any device anywhere without port forwarding, dynamic DNS, or firewall changes. Access your AI models and tools remotely as if on the same LAN.',
+            features: [
+                'Zero-config mesh VPN (WireGuard-based)',
+                'No port forwarding or firewall changes needed',
+                'Access AI servers remotely as if on LAN',
+                'MagicDNS: reach devices by name',
+                'Subnet routing for entire networks',
+                'Exit nodes for internet routing',
+                'ACLs for access control',
+                'Single static binary',
+                'Free for personal use (up to 100 devices)',
+                'Headscale: self-hosted control server option'
+            ],
+            cli: [
+                {cmd: 'tailscale up', desc: 'Connect to your Tailscale network'},
+                {cmd: 'tailscale status', desc: 'Show connected devices'},
+                {cmd: 'tailscale ip', desc: 'Show your Tailscale IP address'},
+                {cmd: 'tailscale serve --bg 8080', desc: 'Expose local port to Tailnet'}
+            ]
+        }
+    },
+    {
+        id: 'mosquitto', name: 'Mosquitto', category: 'infrastructure', icon: 'M', iconBg: '#3C5280', logo: 'logos/mosquitto.png',
+        desc: 'Lightweight MQTT broker for IoT messaging - connect sensors, devices, and AI inference pipelines',
+        size: '~2 MB',
+        platforms: { jetson: 'source', ubuntu: 'apt', mac: 'brew', windows: 'installer' },
+        downloads: {
+            source: 'https://github.com/eclipse/mosquitto',
+            releases: 'https://mosquitto.org/download/',
+            binaries: {
+                'jetson': 'tools/linux-arm64/mosquitto/mosquitto'
+            }
+        },
+        details: {
+            overview: 'Eclipse Mosquitto is a lightweight MQTT message broker ideal for IoT and sensor data. Use it to connect AI inference results to dashboards, actuators, or other services. Compiled from source for ARM64.',
+            features: [
+                'MQTT v5.0 and v3.1.1 support',
+                'Lightweight (< 2MB compiled)',
+                'TLS/SSL encryption',
+                'WebSocket support',
+                'Bridge mode for connecting brokers',
+                'Persistence for offline clients',
+                'ACL-based authentication',
+                'Compiled from source for ARM64',
+                'Ideal for sensor → AI → actuator pipelines',
+                'Pairs with MQTT Explorer for debugging'
+            ],
+            cli: [
+                {cmd: 'mosquitto -c /etc/mosquitto/mosquitto.conf', desc: 'Start broker with config'},
+                {cmd: 'mosquitto_pub -t "ai/result" -m "detected: cat"', desc: 'Publish AI inference result'},
+                {cmd: 'mosquitto_sub -t "sensors/#"', desc: 'Subscribe to all sensor topics'},
+                {cmd: 'mosquitto_passwd -c /etc/mosquitto/passwd user1', desc: 'Create password file'}
+            ]
+        }
+    },
+    {
+        id: 'mqtt-explorer', name: 'MQTT Explorer', category: 'infrastructure', icon: 'Q', iconBg: '#8b5cf6',
+        desc: 'Visual MQTT client - browse topics, publish messages, and debug IoT data flows',
+        size: '~58 MB (AppImage)',
+        platforms: { ubuntu: 'prebuilt', mac: 'installer', windows: 'installer' },
+        downloads: {
+            source: 'https://github.com/thomasnordquist/MQTT-Explorer',
+            releases: 'https://github.com/thomasnordquist/MQTT-Explorer/releases',
+            binaries: {
+                'ubuntu': 'tools/linux-x86_64/mqtt-explorer/MQTT-Explorer.AppImage'
+            }
+        },
+        details: {
+            overview: 'MQTT Explorer is a comprehensive MQTT client with a structured topic overview. Visualize all your MQTT topics in a tree view, publish test messages, and debug IoT/AI messaging flows.',
+            features: [
+                'Tree-structured topic visualization',
+                'Topic history and statistics',
+                'Publish and subscribe with visual feedback',
+                'JSON payload formatting',
+                'Topic search and filtering',
+                'Connection profiles for multiple brokers',
+                'AppImage (x86_64 only)',
+                'Works with Mosquitto and any MQTT broker'
+            ],
+            cli: [
+                {cmd: './MQTT-Explorer.AppImage', desc: 'Launch MQTT Explorer (x86_64)'},
+                {cmd: './MQTT-Explorer.AppImage --no-sandbox', desc: 'Launch without sandbox (if needed)'}
+            ]
+        }
+    },
+    {
+        id: 'redis', name: 'Redis', category: 'infrastructure', icon: 'R', iconBg: '#dc382d', logo: 'logos/redis.svg',
+        desc: 'In-memory data store - caching, pub/sub, and session storage for AI applications',
+        size: '~17 MB (compiled)',
+        platforms: { jetson: 'source', ubuntu: 'apt', mac: 'brew', windows: 'n/a' },
+        downloads: {
+            source: 'https://github.com/redis/redis',
+            releases: 'https://github.com/redis/redis/releases',
+            binaries: {
+                'jetson': 'tools/linux-arm64/redis/redis-server'
+            }
+        },
+        details: {
+            overview: 'Redis is a blazing-fast in-memory data store. Use it for caching AI model outputs, session storage, pub/sub messaging between services, and rate limiting. Compiled from source for ARM64.',
+            features: [
+                'Sub-millisecond latency',
+                'Cache AI inference results',
+                'Pub/Sub for real-time messaging',
+                'Streams for event logs',
+                'Sorted sets for leaderboards/rankings',
+                'Persistence (RDB + AOF)',
+                'Compiled from source for ARM64',
+                'Vector search with RediSearch module',
+                'Lua scripting support',
+                'Cluster mode for high availability'
+            ],
+            cli: [
+                {cmd: 'redis-server --daemonize yes', desc: 'Start Redis in background'},
+                {cmd: 'redis-cli SET model:result "cat detected"', desc: 'Cache an inference result'},
+                {cmd: 'redis-cli SUBSCRIBE ai:events', desc: 'Subscribe to AI event channel'},
+                {cmd: 'redis-cli INFO memory', desc: 'Check memory usage'}
+            ]
+        }
+    },
+    {
+        id: 'postgresql', name: 'PostgreSQL', category: 'infrastructure', icon: 'P', iconBg: '#336791', logo: 'logos/postgresql.svg',
+        desc: 'Relational database with JSON and vector support - store structured data and embeddings',
+        size: '~34 MB (compiled)',
+        platforms: { jetson: 'source', ubuntu: 'apt', mac: 'brew', windows: 'installer' },
+        downloads: {
+            source: 'https://github.com/postgres/postgres',
+            releases: 'https://www.postgresql.org/ftp/source/',
+            binaries: {
+                'jetson': 'tools/linux-arm64/postgresql/bin/postgres'
+            }
+        },
+        details: {
+            overview: 'PostgreSQL is a powerful relational database with native JSON and pgvector support. Store structured AI metadata, embeddings for similarity search, experiment logs, and application data. Compiled from source for ARM64.',
+            features: [
+                'JSONB for semi-structured AI metadata',
+                'pgvector extension for embeddings/similarity search',
+                'Full-text search built-in',
+                'ACID transactions',
+                'Compiled from source for ARM64',
+                'Extensible with plugins (PostGIS, TimescaleDB)',
+                'Logical replication',
+                'Parallel query execution',
+                'Row-level security',
+                'Works with n8n, Coolify, and most AI frameworks'
+            ],
+            cli: [
+                {cmd: 'initdb -D /data/pg', desc: 'Initialize database cluster'},
+                {cmd: 'pg_ctl -D /data/pg start', desc: 'Start PostgreSQL server'},
+                {cmd: 'psql -c "CREATE EXTENSION vector;"', desc: 'Enable pgvector for embeddings'},
+                {cmd: 'psql -c "SELECT * FROM embeddings ORDER BY vec <-> $1 LIMIT 5;"', desc: 'Vector similarity search'}
+            ]
+        }
+    },
+    // =========================================================================
+    // DEV TOOLS
+    // =========================================================================
+    {
         id: 'btop', name: 'btop', category: 'dev-tools', icon: 'B', iconBg: '#6366f1', logo: 'logos/btop.png',
         desc: 'Resource monitor with CPU, memory, disks, network, and process stats - GPU monitoring support',
         size: '~2 MB',
@@ -1704,6 +1913,190 @@ const TOOLS = [
                 {cmd: 'tmux attach -t inference', desc: 'Reattach to running session'},
                 {cmd: 'tmux split-window -h "btop"', desc: 'Split pane with resource monitor'},
                 {cmd: 'tmux send-keys "llama-server -m model.gguf -ngl 999" C-m', desc: 'Send command to session'}
+            ]
+        }
+    },
+    {
+        id: 'helix', name: 'Helix', category: 'dev-tools', icon: 'H', iconBg: '#a855f7',
+        desc: 'Post-modern modal text editor - built-in LSP, tree-sitter, and multiple cursors out of the box',
+        size: '~20 MB',
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://github.com/helix-editor/helix',
+            releases: 'https://github.com/helix-editor/helix/releases',
+            binaries: {
+                'jetson': 'tools/linux-arm64/helix/hx',
+                'ubuntu': 'tools/linux-x86_64/helix/hx',
+                'mac': 'tools/macos-arm64/helix/hx',
+                'windows': 'tools/windows-x64/helix/hx.exe'
+            }
+        },
+        details: {
+            overview: 'Helix is a Kakoune/Neovim-inspired modal text editor with built-in LSP support, tree-sitter syntax highlighting, and multiple selections. No plugin system needed — batteries included. Edit AI configs, scripts, and code with zero setup.',
+            features: [
+                'Built-in LSP (no plugin manager needed)',
+                'Tree-sitter syntax highlighting and text objects',
+                'Multiple selections (select-then-act)',
+                'Built-in file picker and fuzzy finder',
+                'Git gutter and diff support',
+                'DAP (Debug Adapter Protocol) support',
+                'TOML-based config',
+                'ARM64 and x86_64 static builds',
+                '30+ languages supported out of the box',
+                'Space-mode command palette'
+            ],
+            cli: [
+                {cmd: 'hx file.py', desc: 'Open file for editing'},
+                {cmd: 'hx --health python', desc: 'Check Python LSP/formatter status'},
+                {cmd: 'hx --tutor', desc: 'Interactive tutorial for beginners'},
+                {cmd: 'hx -c "theme = \\"onedark\\"" file.rs', desc: 'Open with custom config'}
+            ]
+        }
+    },
+    {
+        id: 'vscodium', name: 'VSCodium', category: 'dev-tools', icon: 'V', iconBg: '#2196F3', logo: 'logos/vscodium.svg',
+        desc: 'VS Code without telemetry - full IDE experience with extensions, debugging, and terminal',
+        size: '~430 MB',
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://github.com/VSCodium/vscodium',
+            releases: 'https://github.com/VSCodium/vscodium/releases',
+            binaries: {
+                'jetson': 'tools/linux-arm64/vscodium/bin/codium',
+                'ubuntu': 'tools/linux-x86_64/vscodium/bin/codium',
+                'mac': 'tools/macos-arm64/vscodium/bin/codium',
+                'windows': 'tools/windows-x64/vscodium/bin/codium.cmd'
+            }
+        },
+        details: {
+            overview: 'VSCodium is VS Code built from source without Microsoft telemetry or tracking. Full IDE with extensions, integrated terminal, debugging, and Git. Use Open VSX Registry for extensions offline.',
+            features: [
+                'VS Code experience without telemetry',
+                'Extensions via Open VSX Registry',
+                'Integrated terminal and debugging',
+                'Git integration built-in',
+                'Remote development (SSH, containers)',
+                'Python, Rust, Go, JS/TS language support',
+                'Jupyter notebook support',
+                'ARM64 native builds',
+                'Portable mode (no install needed)',
+                'Settings sync across devices'
+            ],
+            cli: [
+                {cmd: 'codium .', desc: 'Open current directory in VSCodium'},
+                {cmd: 'codium --install-extension ms-python.python', desc: 'Install Python extension'},
+                {cmd: 'codium --list-extensions', desc: 'List installed extensions'},
+                {cmd: 'codium --diff file1.py file2.py', desc: 'Diff two files'}
+            ]
+        }
+    },
+    {
+        id: 'sqlite', name: 'SQLite', category: 'dev-tools', icon: 'S', iconBg: '#003B57', logo: 'logos/sqlite.svg',
+        desc: 'Self-contained SQL database engine - zero-config, serverless, used by most applications',
+        size: '~2 MB',
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'built-in', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://sqlite.org/src',
+            releases: 'https://sqlite.org/download.html',
+            binaries: {
+                'jetson': 'tools/linux-arm64/sqlite/sqlite3',
+                'ubuntu': 'tools/linux-x86_64/sqlite/sqlite3',
+                'windows': 'tools/windows-x64/sqlite/sqlite3.exe'
+            }
+        },
+        details: {
+            overview: 'SQLite is the most-used database engine in the world. Serverless, zero-config, single-file databases. Use it for AI experiment logs, metadata storage, application state, and as a data interchange format.',
+            features: [
+                'Zero-config, serverless database',
+                'Single-file databases (easy backup)',
+                'Full SQL with JSON support',
+                'Full-text search (FTS5)',
+                'R*Tree indexes for spatial data',
+                'WAL mode for concurrent reads',
+                'Used by Python, browsers, mobile apps',
+                'Prebuilt CLI for x86_64 and ARM64',
+                'Terabyte-scale databases',
+                'In-process: no network overhead'
+            ],
+            cli: [
+                {cmd: 'sqlite3 experiments.db', desc: 'Open/create a database'},
+                {cmd: 'sqlite3 db.sqlite ".tables"', desc: 'List tables'},
+                {cmd: 'sqlite3 db.sqlite "SELECT * FROM runs ORDER BY score DESC LIMIT 10;"', desc: 'Query experiment results'},
+                {cmd: 'sqlite3 db.sqlite ".backup backup.db"', desc: 'Create hot backup'}
+            ]
+        }
+    },
+    {
+        id: 'miniforge', name: 'Miniforge', category: 'dev-tools', icon: 'M', iconBg: '#43b049', logo: 'logos/conda.svg',
+        desc: 'Conda-forge Python distribution - manage Python environments and scientific packages offline',
+        size: '~80 MB (installer)',
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://github.com/conda-forge/miniforge',
+            releases: 'https://github.com/conda-forge/miniforge/releases',
+            binaries: {
+                'jetson': 'tools/linux-arm64/miniforge/bin/conda',
+                'ubuntu': 'tools/linux-x86_64/miniforge/bin/conda',
+                'mac': 'tools/macos-arm64/miniforge/bin/conda',
+                'windows': 'tools/windows-x64/miniforge/Scripts/conda.exe'
+            }
+        },
+        details: {
+            overview: 'Miniforge is a minimal conda installer using conda-forge as the default channel. Create isolated Python environments with numpy, pytorch, transformers, and other ML packages. Works offline once packages are cached.',
+            features: [
+                'Conda-forge as default channel (community-maintained)',
+                'Mamba solver for fast dependency resolution',
+                'Create isolated Python environments',
+                'ARM64 native packages available',
+                'Offline mode with cached packages',
+                'NumPy, PyTorch, scikit-learn, transformers available',
+                'Environment export/import (environment.yml)',
+                'No Anaconda license restrictions',
+                'Cross-platform (Linux, macOS, Windows)',
+                'Minimal base install (~80MB)'
+            ],
+            cli: [
+                {cmd: 'conda create -n ml python=3.11 numpy pytorch', desc: 'Create ML environment'},
+                {cmd: 'conda activate ml', desc: 'Activate environment'},
+                {cmd: 'conda install transformers datasets', desc: 'Install HuggingFace packages'},
+                {cmd: 'conda env export > environment.yml', desc: 'Export environment for sharing'}
+            ]
+        }
+    },
+    {
+        id: 'python-standalone', name: 'Python Standalone', category: 'dev-tools', icon: 'P', iconBg: '#3776ab', logo: 'logos/python.svg',
+        desc: 'Portable Python build - no system dependencies, works anywhere with no install step',
+        size: '~88 MB',
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://github.com/indygreg/python-build-standalone',
+            releases: 'https://github.com/indygreg/python-build-standalone/releases',
+            binaries: {
+                'jetson': 'tools/linux-arm64/python-standalone/bin/python3',
+                'ubuntu': 'tools/linux-x86_64/python-standalone/bin/python3',
+                'mac': 'tools/macos-arm64/python-standalone/bin/python3',
+                'windows': 'tools/windows-x64/python-standalone/python.exe'
+            }
+        },
+        details: {
+            overview: 'A self-contained Python distribution with no external dependencies. Run Python scripts, install pip packages, and execute AI tools without needing system Python or admin privileges. Built by the python-build-standalone project.',
+            features: [
+                'No system dependencies needed',
+                'Works without install/admin privileges',
+                'Includes pip, setuptools, venv',
+                'ARM64 and x86_64 builds',
+                'Python 3.12 (latest stable)',
+                'Relocatable (copy anywhere)',
+                'Useful for CI, containers, offline systems',
+                'Run AI scripts without system Python',
+                'Compatible with all pip packages',
+                'Used by tools like uv, rye, mise'
+            ],
+            cli: [
+                {cmd: 'python3 -m venv myenv && source myenv/bin/activate', desc: 'Create virtual environment'},
+                {cmd: 'python3 -m pip install torch --index-url https://download.pytorch.org/whl/cpu', desc: 'Install PyTorch CPU'},
+                {cmd: 'python3 script.py', desc: 'Run a Python script'},
+                {cmd: 'python3 -c "import sys; print(sys.version)"', desc: 'Check Python version'}
             ]
         }
     },
@@ -1810,7 +2203,18 @@ const TOOL_META = {
     'btop': { maker: 'aristocratos', website: 'https://github.com/aristocratos/btop', license: 'Apache-2.0', licenseUrl: 'https://github.com/aristocratos/btop/blob/main/LICENSE' },
     'tmux': { maker: 'tmux Project', website: 'https://github.com/tmux/tmux', license: 'ISC', licenseUrl: 'https://github.com/tmux/tmux/blob/master/COPYING' },
     'dev-cli': { maker: 'Various (BurntSushi, sharkdp, junegunn)', website: 'https://github.com/BurntSushi/ripgrep', license: 'MIT / Apache-2.0', licenseUrl: 'https://github.com/BurntSushi/ripgrep/blob/master/COPYING' },
-    'claude-code': { maker: 'Anthropic', website: 'https://claude.ai/code', license: 'Proprietary', licenseUrl: 'https://github.com/anthropics/claude-code/blob/main/LICENSE.md' }
+    'claude-code': { maker: 'Anthropic', website: 'https://claude.ai/code', license: 'Proprietary', licenseUrl: 'https://github.com/anthropics/claude-code/blob/main/LICENSE.md' },
+    'kiwix': { maker: 'Kiwix', website: 'https://kiwix.org', license: 'GPL-3.0', licenseUrl: 'https://github.com/kiwix/kiwix-tools/blob/main/COPYING' },
+    'tailscale': { maker: 'Tailscale Inc.', website: 'https://tailscale.com', license: 'BSD-3-Clause', licenseUrl: 'https://github.com/tailscale/tailscale/blob/main/LICENSE' },
+    'mosquitto': { maker: 'Eclipse Foundation', website: 'https://mosquitto.org', license: 'EPL-2.0 / EDL-1.0', licenseUrl: 'https://github.com/eclipse/mosquitto/blob/master/LICENSE.txt' },
+    'mqtt-explorer': { maker: 'Thomas Nordquist', website: 'https://mqtt-explorer.com', license: 'CC-BY-ND-4.0', licenseUrl: 'https://github.com/thomasnordquist/MQTT-Explorer/blob/master/LICENSE' },
+    'redis': { maker: 'Redis Ltd.', website: 'https://redis.io', license: 'RSALv2 / SSPLv1', licenseUrl: 'https://github.com/redis/redis/blob/unstable/LICENSE.txt' },
+    'postgresql': { maker: 'PostgreSQL Global Dev Group', website: 'https://www.postgresql.org', license: 'PostgreSQL License', licenseUrl: 'https://www.postgresql.org/about/licence/' },
+    'helix': { maker: 'Helix Project', website: 'https://helix-editor.com', license: 'MPL-2.0', licenseUrl: 'https://github.com/helix-editor/helix/blob/master/LICENSE' },
+    'vscodium': { maker: 'VSCodium', website: 'https://vscodium.com', license: 'MIT', licenseUrl: 'https://github.com/VSCodium/vscodium/blob/master/LICENSE' },
+    'sqlite': { maker: 'D. Richard Hipp', website: 'https://sqlite.org', license: 'Public Domain', licenseUrl: 'https://sqlite.org/copyright.html' },
+    'miniforge': { maker: 'conda-forge', website: 'https://github.com/conda-forge/miniforge', license: 'BSD-3-Clause', licenseUrl: 'https://github.com/conda-forge/miniforge/blob/main/LICENSE' },
+    'python-standalone': { maker: 'Gregory Szorc', website: 'https://github.com/indygreg/python-build-standalone', license: 'MPL-2.0', licenseUrl: 'https://github.com/indygreg/python-build-standalone/blob/main/LICENSE' }
 };
 
 // Installation status for current instance (Jetson ARM64)

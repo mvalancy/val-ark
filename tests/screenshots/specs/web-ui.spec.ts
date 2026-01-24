@@ -11,7 +11,9 @@ const TOOL_IDS = [
   'onnxruntime', 'vosk', 'bitnet', 'ollama', 'blender',
   'freecad', 'kicad', 'godot', 'vlc', 'n8n',
   'influxdb', 'milvus', 'comfyui', 'syncthing', 'coolify',
-  'btop', 'tmux', 'dev-cli', 'claude-code'
+  'kiwix', 'tailscale', 'mosquitto', 'mqtt-explorer', 'redis',
+  'postgresql', 'btop', 'tmux', 'helix', 'vscodium',
+  'sqlite', 'miniforge', 'python-standalone', 'dev-cli', 'claude-code'
 ];
 
 // All model slugs from the web UI
@@ -430,6 +432,44 @@ const TOOL_BINARIES: Record<string, string[]> = {
   'dev-cli': [
     'tools/linux-x86_64/dev-cli',
     'tools/linux-arm64/dev-cli',
+  ],
+  'kiwix': [
+    'tools/linux-x86_64/kiwix/kiwix-serve',
+    'tools/linux-arm64/kiwix/kiwix-serve',
+  ],
+  'tailscale': [
+    'tools/linux-x86_64/tailscale/tailscale',
+    'tools/linux-arm64/tailscale/tailscale',
+  ],
+  'mosquitto': [
+    'tools/linux-arm64/mosquitto/mosquitto',
+  ],
+  'mqtt-explorer': [
+    'tools/linux-x86_64/mqtt-explorer/MQTT-Explorer.AppImage',
+  ],
+  'redis': [
+    'tools/linux-arm64/redis/redis-server',
+  ],
+  'postgresql': [
+    'tools/linux-arm64/postgresql/bin/postgres',
+  ],
+  'helix': [
+    'tools/linux-x86_64/helix/hx',
+    'tools/linux-arm64/helix/hx',
+  ],
+  'vscodium': [
+    'tools/linux-x86_64/vscodium/bin/codium',
+    'tools/linux-arm64/vscodium/bin/codium',
+  ],
+  'sqlite': [
+    'tools/linux-x86_64/sqlite/sqlite3',
+    'tools/linux-arm64/sqlite/sqlite3',
+  ],
+  'miniforge': [
+    'tools/linux-arm64/miniforge/bin/conda',
+  ],
+  'python-standalone': [
+    'tools/linux-arm64/python-standalone/bin/python3',
   ],
 };
 

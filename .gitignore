@@ -28,6 +28,9 @@ dist/
 *.dylib
 *.dll
 
+# Playwright screenshot tests
+tests/screenshots/node_modules/
+
 # Logs
 *.log
 logs/

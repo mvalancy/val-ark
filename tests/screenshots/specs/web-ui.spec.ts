@@ -12,8 +12,9 @@ const TOOL_IDS = [
   'freecad', 'kicad', 'godot', 'vlc', 'n8n',
   'influxdb', 'milvus', 'comfyui', 'syncthing', 'coolify',
   'kiwix', 'tailscale', 'mosquitto', 'mqtt-explorer', 'redis',
-  'postgresql', 'btop', 'tmux', 'helix', 'vscodium',
-  'sqlite', 'miniforge', 'python-standalone', 'dev-cli', 'claude-code'
+  'postgresql', 'telegraf', 'btop', 'tmux', 'helix', 'vscodium',
+  'sqlite', 'miniforge', 'python-standalone', 'dev-cli', 'claude-code',
+  'audacity', 'gimp', 'inkscape', 'yt-dlp', 'open-webui', 'calibre'
 ];
 
 // All model slugs from the web UI
@@ -631,38 +632,367 @@ test.describe('Val Ark - Model File Verification', () => {
   });
 });
 
-// Content Library IDs
+// Content Library IDs and expected data
 const CONTENT_IDS = ['wikipedia-simple', 'wikipedia-full'];
+const CONTENT_DATA: Record<string, { name: string; size: string; articles: string; updated: string; file: string; source: string; featureCount: number }> = {
+  'wikipedia-simple': {
+    name: 'Wikipedia Simple English',
+    size: '3.1 GB',
+    articles: '~240,000',
+    updated: '2025-11',
+    file: 'content/zim/wikipedia_en_simple_all_maxi_2025-11.zim',
+    source: 'https://en.wikipedia.org/wiki/Simple_English_Wikipedia',
+    featureCount: 6
+  },
+  'wikipedia-full': {
+    name: 'Wikipedia English (Full)',
+    size: '111 GB',
+    articles: '~6,800,000',
+    updated: '2025-08',
+    file: 'content/zim/wikipedia_en_all_maxi_2025-08.zim',
+    source: 'https://en.wikipedia.org',
+    featureCount: 6
+  }
+};
 
 test.describe('Val Ark - Content Library', () => {
-  test('Content page loads and shows all content cards', async ({ page }) => {
-    await page.goto(`file://${WEB_UI}#/content`);
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForSelector('.card', { timeout: 5000 });
-    const cards = page.locator('a.card[href*="#/content/"]');
-    const count = await cards.count();
-    expect(count).toBe(CONTENT_IDS.length);
-  });
 
-  test('Content nav link exists and navigates', async ({ page }) => {
+  // ─── Navigation ───────────────────────────────────────────────────────────────
+
+  test('Content nav link exists and is visible', async ({ page }) => {
     await page.goto(`file://${WEB_UI}`);
     await page.waitForLoadState('domcontentloaded');
     const contentLink = page.locator('a.nav-link:has-text("Content")');
     await expect(contentLink).toBeVisible();
+    await expect(contentLink).toHaveAttribute('href', '#/content');
+  });
+
+  test('Content nav link navigates to content page', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    const contentLink = page.locator('a.nav-link:has-text("Content")');
     await contentLink.click();
     await page.waitForTimeout(300);
     expect(page.url()).toContain('#/content');
+    await expect(page.locator('h1')).toHaveText('Offline Content Library');
+  });
+
+  test('Content nav link has active class on content list page', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/content`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.card', { timeout: 5000 });
+    const contentLink = page.locator('a.nav-link:has-text("Content")');
+    await expect(contentLink).toHaveClass(/active/);
+  });
+
+  test('Content nav link has active class on content detail pages', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/content/wikipedia-simple`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('h1', { timeout: 5000 });
+    const contentLink = page.locator('a.nav-link:has-text("Content")');
+    await expect(contentLink).toHaveClass(/active/);
+  });
+
+  // ─── Content List Page ────────────────────────────────────────────────────────
+
+  test('Content page has correct heading and description', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/content`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('h1', { timeout: 5000 });
+    await expect(page.locator('h1')).toHaveText('Offline Content Library');
+    const desc = page.locator('.section-desc');
+    await expect(desc).toBeVisible();
+    const descText = await desc.textContent();
+    expect(descText).toContain('Kiwix');
+  });
+
+  test('Content page shows correct number of cards', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/content`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.card', { timeout: 5000 });
+    const cards = page.locator('a.card[href*="#/content/"]');
+    await expect(cards).toHaveCount(CONTENT_IDS.length);
+  });
+
+  test('Content cards are inside a cards-grid container', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/content`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.card', { timeout: 5000 });
+    // Must use 'cards-grid' (with 's') to match CSS grid layout
+    const gridCards = page.locator('.cards-grid a.card[href*="#/content/"]');
+    await expect(gridCards).toHaveCount(CONTENT_IDS.length);
+  });
+
+  test('Content cards use same structure as tool cards (h3 for title, no card-body wrapper)', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/content`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.card', { timeout: 5000 });
+    const firstCard = page.locator('a.card[href*="#/content/"]').first();
+    // Title should be an h3, not a div.card-title
+    await expect(firstCard.locator('h3')).toBeVisible();
+    // Should NOT have a card-body wrapper
+    const cardBody = await firstCard.locator('.card-body').count();
+    expect(cardBody).toBe(0);
   });
 
   for (const contentId of CONTENT_IDS) {
-    test(`content detail page: ${contentId}`, async ({ page }) => {
+    const data = CONTENT_DATA[contentId];
+
+    test(`Content card "${contentId}" has correct title`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.card', { timeout: 5000 });
+      const card = page.locator(`a.card[href="#/content/${contentId}"]`);
+      await expect(card).toBeVisible();
+      const title = card.locator('h3');
+      await expect(title).toHaveText(data.name);
+    });
+
+    test(`Content card "${contentId}" has description text`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.card', { timeout: 5000 });
+      const card = page.locator(`a.card[href="#/content/${contentId}"]`);
+      const desc = card.locator('.card-desc');
+      await expect(desc).toBeVisible();
+      const text = await desc.textContent();
+      expect(text!.length).toBeGreaterThan(10);
+    });
+
+    test(`Content card "${contentId}" shows size`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.card', { timeout: 5000 });
+      const card = page.locator(`a.card[href="#/content/${contentId}"]`);
+      const meta = card.locator('.card-meta');
+      await expect(meta).toBeVisible();
+      const metaText = await meta.textContent();
+      expect(metaText).toContain(data.size);
+    });
+
+    test(`Content card "${contentId}" has an icon`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.card', { timeout: 5000 });
+      const card = page.locator(`a.card[href="#/content/${contentId}"]`);
+      const icon = card.locator('.card-icon');
+      await expect(icon).toBeVisible();
+      const iconText = await icon.textContent();
+      expect(iconText).toBe('W');
+    });
+
+    test(`Content card "${contentId}" has status indicator`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.card', { timeout: 5000 });
+      const card = page.locator(`a.card[href="#/content/${contentId}"]`);
+      const meta = card.locator('.card-meta');
+      const metaText = await meta.textContent();
+      // Status should be one of: Mirrored, Not Mirrored, Mirroring...
+      expect(metaText).toMatch(/Mirrored|Not Mirrored|Mirroring/);
+    });
+
+    test(`Content card "${contentId}" links to correct detail page`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.card', { timeout: 5000 });
+      const card = page.locator(`a.card[href="#/content/${contentId}"]`);
+      await card.click();
+      await page.waitForTimeout(300);
+      expect(page.url()).toContain(`#/content/${contentId}`);
+      await expect(page.locator('h1')).toContainText(data.name);
+    });
+  }
+
+  test('Content page has serving instructions section', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/content`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.card', { timeout: 5000 });
+    const servingHeading = page.locator('h3:has-text("Serving Content")');
+    await expect(servingHeading).toBeVisible();
+    const codeBlock = page.locator('.code-block code');
+    const codeText = await codeBlock.first().textContent();
+    expect(codeText).toContain('download-zims.sh serve');
+  });
+
+  // ─── Content Detail Pages ─────────────────────────────────────────────────────
+
+  for (const contentId of CONTENT_IDS) {
+    const data = CONTENT_DATA[contentId];
+
+    test(`Detail "${contentId}" has correct h1 heading`, async ({ page }) => {
       await page.goto(`file://${WEB_UI}#/content/${contentId}`);
       await page.waitForLoadState('domcontentloaded');
       await page.waitForSelector('h1', { timeout: 5000 });
-      const heading = await page.locator('h1').first().textContent();
-      expect(heading).toBeTruthy();
+      await expect(page.locator('h1').first()).toHaveText(data.name);
+    });
+
+    test(`Detail "${contentId}" has breadcrumb with Content link`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.breadcrumb', { timeout: 5000 });
+      const breadcrumb = page.locator('.breadcrumb');
+      await expect(breadcrumb).toBeVisible();
+      const contentLink = breadcrumb.locator('a[href="#/content"]');
+      await expect(contentLink).toBeVisible();
+      await expect(contentLink).toHaveText('Content');
+    });
+
+    test(`Detail "${contentId}" breadcrumb shows item name`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.breadcrumb', { timeout: 5000 });
+      const breadcrumbText = await page.locator('.breadcrumb').textContent();
+      expect(breadcrumbText).toContain(data.name);
+    });
+
+    test(`Detail "${contentId}" breadcrumb Content link navigates back`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.breadcrumb', { timeout: 5000 });
+      const contentLink = page.locator('.breadcrumb a[href="#/content"]');
+      await contentLink.click();
+      await page.waitForTimeout(300);
+      expect(page.url()).toContain('#/content');
+      await expect(page.locator('h1')).toHaveText('Offline Content Library');
+    });
+
+    test(`Detail "${contentId}" has detail table with Size row`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.detail-table', { timeout: 5000 });
+      const table = page.locator('.detail-table');
+      const tableText = await table.textContent();
+      expect(tableText).toContain('Size');
+      expect(tableText).toContain(data.size);
+    });
+
+    test(`Detail "${contentId}" has detail table with Articles row`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.detail-table', { timeout: 5000 });
+      const tableText = await page.locator('.detail-table').textContent();
+      expect(tableText).toContain('Articles');
+      expect(tableText).toContain(data.articles);
+    });
+
+    test(`Detail "${contentId}" has detail table with Updated row`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.detail-table', { timeout: 5000 });
+      const tableText = await page.locator('.detail-table').textContent();
+      expect(tableText).toContain('Updated');
+      expect(tableText).toContain(data.updated);
+    });
+
+    test(`Detail "${contentId}" has detail table with Status row`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.detail-table', { timeout: 5000 });
+      const tableText = await page.locator('.detail-table').textContent();
+      expect(tableText).toContain('Status');
+      expect(tableText).toMatch(/Mirrored|Not Mirrored|Mirroring/);
+    });
+
+    test(`Detail "${contentId}" has detail table with Source link`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.detail-table', { timeout: 5000 });
+      const sourceLink = page.locator(`.detail-table a[href="${data.source}"]`);
+      await expect(sourceLink).toBeVisible();
+    });
+
+    test(`Detail "${contentId}" has detail table with File path`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.detail-table', { timeout: 5000 });
+      const tableText = await page.locator('.detail-table').textContent();
+      expect(tableText).toContain(data.file);
+    });
+
+    test(`Detail "${contentId}" has Overview section`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.detail-section', { timeout: 5000 });
+      const overviewHeading = page.locator('.detail-section h3:has-text("Overview")');
+      await expect(overviewHeading).toBeVisible();
+      const overviewSection = overviewHeading.locator('..');
+      const overviewText = await overviewSection.locator('p').textContent();
+      expect(overviewText!.length).toBeGreaterThan(20);
+    });
+
+    test(`Detail "${contentId}" has What's Included section with features`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.detail-section', { timeout: 5000 });
+      const featuresHeading = page.locator('.detail-section h3:has-text("What\'s Included")');
+      await expect(featuresHeading).toBeVisible();
+      const featuresSection = featuresHeading.locator('..');
+      const listItems = featuresSection.locator('li');
+      await expect(listItems).toHaveCount(data.featureCount);
+    });
+
+    test(`Detail "${contentId}" has Usage section with code block`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.detail-section', { timeout: 5000 });
+      const usageHeading = page.locator('.detail-section h3:has-text("Usage")');
+      await expect(usageHeading).toBeVisible();
+      const usageSection = usageHeading.locator('..');
+      const codeBlock = usageSection.locator('.code-block code');
+      await expect(codeBlock).toBeVisible();
+      const codeText = await codeBlock.textContent();
+      expect(codeText).toContain('kiwix-serve');
+      expect(codeText).toContain(data.file);
+    });
+
+    test(`Detail "${contentId}" has icon in header`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.detail-header', { timeout: 5000 });
+      const icon = page.locator('.detail-header .card-icon');
+      await expect(icon).toBeVisible();
+      await expect(icon).toHaveText('W');
+    });
+
+    test(`Detail "${contentId}" has description below heading`, async ({ page }) => {
+      await page.goto(`file://${WEB_UI}#/content/${contentId}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector('.detail-header', { timeout: 5000 });
+      const headerP = page.locator('.detail-header p');
+      await expect(headerP).toBeVisible();
+      const text = await headerP.textContent();
+      expect(text!.length).toBeGreaterThan(10);
     });
   }
+
+  // ─── Edge Cases ───────────────────────────────────────────────────────────────
+
+  test('Invalid content ID shows "not found" message', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/content/nonexistent-item`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('h1', { timeout: 5000 });
+    const heading = await page.locator('h1').textContent();
+    expect(heading).toContain('not found');
+  });
+
+  test('Content page has proper page structure (nav + footer)', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/content`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.card', { timeout: 5000 });
+    await expect(page.locator('nav.top-nav')).toBeVisible();
+    await expect(page.locator('footer, .footer')).toBeVisible();
+  });
+
+  test('Content detail page has proper page structure (nav + footer)', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/content/wikipedia-simple`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('h1', { timeout: 5000 });
+    await expect(page.locator('nav.top-nav')).toBeVisible();
+    await expect(page.locator('footer, .footer')).toBeVisible();
+  });
+
+  // ─── Filesystem checks ────────────────────────────────────────────────────────
 
   test('download-zims.sh script exists and is executable', () => {
     const scriptPath = path.join(PROJECT_ROOT, 'scripts/download-zims.sh');

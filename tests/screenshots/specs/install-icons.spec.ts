@@ -87,18 +87,18 @@ test.describe('Val Ark - Install vs Download', () => {
     await page.goto(`${BASE_URL}/#/tools/vosk`);
     await page.waitForTimeout(500);
 
-    // Check if Install button exists and has correct onclick
-    const installBtn = page.locator('.dl-action-btn:has-text("Install")');
-    const btnCount = await installBtn.count();
+    // Check if Mirror button exists and has correct onclick
+    const mirrorBtn = page.locator('.dl-action-btn:has-text("Mirror")');
+    const btnCount = await mirrorBtn.count();
 
     if (btnCount > 0) {
-      const onclick = await installBtn.getAttribute('onclick');
+      const onclick = await mirrorBtn.getAttribute('onclick');
       // Should call triggerDownload('tools', 'vosk') not triggerDownload('update', ...)
       expect(onclick).toContain("triggerDownload('tools'");
       expect(onclick).toContain("'vosk'");
       expect(onclick).not.toContain("'update'");
     }
-    // If button doesn't exist, tool is already installed - that's OK
+    // If button doesn't exist, tool is already mirrored - that's OK
   });
 
   test('all tools have a downloadTarget defined', () => {
@@ -156,11 +156,11 @@ test.describe('Val Ark - Install vs Download', () => {
     await page.goto(`${BASE_URL}/#/content/wikipedia-simple`);
     await page.waitForTimeout(500);
 
-    // If content is not installed and API is available, should show "Install"
-    const installBtn = page.locator('.dl-action-btn');
-    if (await installBtn.count() > 0) {
-      const text = await installBtn.textContent();
-      expect(text).toContain('Install');
+    // If content is not mirrored and API is available, should show "Mirror"
+    const mirrorBtn = page.locator('.dl-action-btn');
+    if (await mirrorBtn.count() > 0) {
+      const text = await mirrorBtn.textContent();
+      expect(text).toContain('Mirror');
       expect(text).not.toBe('Download');
     }
   });

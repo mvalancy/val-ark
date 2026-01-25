@@ -3061,17 +3061,29 @@ function checkInstalledToolsFromAPI(toolsData) {
     for (const [dirName, platforms] of Object.entries(toolsData)) {
         const toolId = toolDirMap[dirName];
         if (!toolId) continue;
-        // Only mark installed if at least one platform has real content
-        let hasContent = false;
+        // Check if at least one platform has real binaries (not just install hints)
+        let hasBinary = false;
+        let hasHintOnly = false;
         let newest = null;
         for (const [, info] of Object.entries(platforms)) {
-            if (info.size > 0 || info.files > 0) hasContent = true;
+            if (info.size > 0 || info.files > 0) {
+                if (info.installHint) {
+                    hasHintOnly = true;
+                } else {
+                    hasBinary = true;
+                }
+            }
             if (!newest || (info.lastModified && info.lastModified > newest.lastModified)) {
                 newest = info;
             }
         }
-        if (hasContent) {
+        if (hasBinary) {
             INSTALLED_TOOLS[toolId] = 'installed';
+            if (newest) {
+                TOOL_INFO[toolId] = { lastModified: newest.lastModified, size: newest.size };
+            }
+        } else if (hasHintOnly) {
+            INSTALLED_TOOLS[toolId] = 'hint';
             if (newest) {
                 TOOL_INFO[toolId] = { lastModified: newest.lastModified, size: newest.size };
             }
@@ -3150,6 +3162,7 @@ function getInstallBadge(toolId) {
         case 'system': badge = '<span class="badge badge-installed">System</span>'; break;
         case 'source': badge = '<span class="badge badge-source">Source Only</span>'; break;
         case 'bundled': badge = '<span class="badge badge-installed">Bundled</span>'; break;
+        case 'hint': badge = '<span class="badge badge-hint">Install Guide</span>'; break;
         case 'npm': badge = '<span class="badge badge-hint">npm</span>'; break;
         case 'pip': badge = '<span class="badge badge-hint">pip</span>'; break;
         case 'docker': badge = '<span class="badge badge-hint">Docker</span>'; break;

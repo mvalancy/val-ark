@@ -8,52 +8,38 @@ PINNED_VERSION="1.4"
 download_inkscape() {
     log "Downloading ${TOOL_NAME}..."
 
-    # linux-x86_64: no stable direct-download URL for AppImage (gallery IDs change)
-    local dest="${TOOLS_DIR}/linux-x86_64/inkscape"
-    ensure_dir "$dest"
-    write_install_hint "$dest" "inkscape (linux-x86_64)" "Inkscape - linux-x86_64
-=====================
-
-Install via Flatpak:
-  flatpak install flathub org.inkscape.Inkscape
-
-Or via package manager:
-  sudo apt install inkscape
-
-Or download AppImage from: https://inkscape.org/release/inkscape-${PINNED_VERSION}/gnulinux/appimage/
-"
-
-    # linux-arm64: package manager only
-    dest="${TOOLS_DIR}/linux-arm64/inkscape"
+    # linux-arm64: No official AppImage, use install hint
+    local dest="${TOOLS_DIR}/linux-arm64/inkscape"
     ensure_dir "$dest"
     write_install_hint "$dest" "inkscape (linux-arm64)" "Inkscape - linux-arm64
-=====================
+======================
 
 Install via package manager:
   sudo apt install inkscape
 
-For more info: https://inkscape.org/release/
+Or via Flatpak:
+  flatpak install flathub org.inkscape.Inkscape
 "
+
+    # linux-x86_64: AppImage from official releases
+    dest="${TOOLS_DIR}/linux-x86_64/inkscape"
+    ensure_dir "$dest"
+    # AppImage URL from Inkscape's official releases
+    local url="https://media.inkscape.org/dl/resources/file/Inkscape-091e20e-x86_64.AppImage"
+    download_file "$url" "${dest}/Inkscape-${PINNED_VERSION}.AppImage" "Inkscape Linux x86_64"
+    chmod +x "${dest}/Inkscape-${PINNED_VERSION}.AppImage" 2>/dev/null
 
     # macos-arm64: DMG from official site
     dest="${TOOLS_DIR}/macos-arm64/inkscape"
     ensure_dir "$dest"
-    write_install_hint "$dest" "inkscape (macos-arm64)" "Inkscape - macOS ARM64
-=====================
+    url="https://media.inkscape.org/media/resources/Inkscape-1.4.028868_arm64.dmg"
+    download_file "$url" "${dest}/Inkscape-${PINNED_VERSION}.dmg" "Inkscape macOS ARM64"
 
-  brew install --cask inkscape
-
-Or download from: https://inkscape.org/release/
-"
-
-    # windows-x64: installer from official site
+    # windows-x64: Official installer
     dest="${TOOLS_DIR}/windows-x64/inkscape"
     ensure_dir "$dest"
-    write_install_hint "$dest" "inkscape (windows-x64)" "Inkscape - Windows x64
-=====================
-
-Download from: https://inkscape.org/release/
-"
+    url="https://media.inkscape.org/media/resources/inkscape-1.4_2024-10-11_86a8ad7-x64.exe"
+    download_file "$url" "${dest}/Inkscape-${PINNED_VERSION}-Setup.exe" "Inkscape Windows"
 
     log_success "Inkscape download complete"
 }

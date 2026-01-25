@@ -363,6 +363,8 @@ function shallowDirInfo(dirPath) {
     let size = 0;
     let newest = 0;
     let fileCount = 0;
+    let hasBinary = false; // Has real binary (>50KB non-txt file)
+    const MIN_BINARY_SIZE = 50000; // 50KB threshold for "real" binary
     try {
         const stat = fs.statSync(dirPath);
         newest = stat.mtimeMs;
@@ -370,12 +372,37 @@ function shallowDirInfo(dirPath) {
         for (const entry of entries) {
             try {
                 const s = fs.statSync(path.join(dirPath, entry));
-                if (s.isFile()) { size += s.size; fileCount++; }
+                if (s.isFile()) {
+                    size += s.size;
+                    fileCount++;
+                    // Check if this is a real binary (not just a text hint)
+                    const isTxt = entry.endsWith('.txt') || entry.endsWith('.md');
+                    if (!isTxt && s.size > MIN_BINARY_SIZE) {
+                        hasBinary = true;
+                    }
+                } else if (s.isDirectory()) {
+                    // Check subdirectories for binaries too (e.g., nested extracts)
+                    const subEntries = readdirSafe(path.join(dirPath, entry));
+                    for (const sub of subEntries.slice(0, 10)) { // Limit check
+                        try {
+                            const subStat = fs.statSync(path.join(dirPath, entry, sub));
+                            if (subStat.isFile() && subStat.size > MIN_BINARY_SIZE) {
+                                hasBinary = true;
+                                break;
+                            }
+                        } catch (e) {}
+                    }
+                }
                 if (s.mtimeMs > newest) newest = s.mtimeMs;
             } catch (e) {}
         }
     } catch (e) {}
-    return { size, lastModified: new Date(newest).toISOString(), files: fileCount };
+    return {
+        size,
+        lastModified: new Date(newest).toISOString(),
+        files: fileCount,
+        installHint: !hasBinary && size < MIN_BINARY_SIZE
+    };
 }
 
 function readdirSafe(dir) {

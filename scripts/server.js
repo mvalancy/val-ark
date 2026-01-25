@@ -629,7 +629,7 @@ function serveStatic(res, filePath) {
         res.writeHead(200, {
             'Content-Type': mime,
             'Content-Length': stat.size,
-            'Cache-Control': ext === '.html' ? 'no-cache' : 'max-age=3600',
+            'Cache-Control': (ext === '.html' || ext === '.css' || ext === '.js') ? 'no-cache' : 'max-age=3600',
             ...SECURITY_HEADERS,
         });
         fs.createReadStream(filePath).pipe(res);

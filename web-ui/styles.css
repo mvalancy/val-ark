@@ -617,13 +617,13 @@ body {
     line-height: 1.7;
 }
 
-/* Kiwix Banner */
+/* Kiwix Banner - Always uses light theme colors for contrast */
 .kiwix-banner {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: var(--bg-card);
-    border: 1px solid var(--accent);
+    background: linear-gradient(135deg, #dbeafe 0%, #e0f2fe 100%);
+    border: 1px solid #3b82f6;
     border-radius: var(--radius);
     padding: 20px 24px;
     margin-bottom: 24px;
@@ -638,7 +638,7 @@ body {
     width: 48px;
     height: 48px;
     border-radius: 10px;
-    background: var(--accent);
+    background: #2563eb;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -650,15 +650,15 @@ body {
 .kiwix-banner-title {
     font-size: 1.1em;
     font-weight: 600;
-    color: var(--text-primary);
+    color: #1e293b;
     margin-bottom: 4px;
 }
 .kiwix-banner-desc {
     font-size: 0.85em;
-    color: var(--text-secondary);
+    color: #475569;
 }
 .kiwix-banner-btn {
-    background: var(--accent);
+    background: #2563eb;
     color: #fff;
     padding: 10px 20px;
     border-radius: var(--radius-sm);
@@ -666,21 +666,9 @@ body {
     font-size: 0.9em;
     white-space: nowrap;
     text-decoration: none;
-    transition: opacity 0.2s;
+    transition: opacity 0.2s, transform 0.2s;
 }
-.kiwix-banner-btn:hover { opacity: 0.85; }
-
-/* Kiwix Banner - Light mode explicit overrides */
-[data-theme="light"] .kiwix-banner {
-    background: #f0f7ff;
-    border-color: var(--accent);
-}
-[data-theme="light"] .kiwix-banner-title {
-    color: #1e293b;
-}
-[data-theme="light"] .kiwix-banner-desc {
-    color: #475569;
-}
+.kiwix-banner-btn:hover { opacity: 0.9; transform: translateY(-1px); }
 
 /* Screenshot Gallery */
 .screenshot-gallery {

@@ -16,8 +16,14 @@ Local-first, peer-to-peer, offline-capable.
 ### Model Families
 ![Model Cards](docs/screenshots/model-cards.png)
 
-### Tool Detail (BitNet.cpp)
+### Tool Detail
 ![Tool Detail](docs/screenshots/tool-detail.png)
+
+### Wikipedia / Content Library
+![Wikipedia](docs/screenshots/wikipedia-page.png)
+
+### Light Mode
+![Light Mode](docs/screenshots/light-mode.png)
 
 </details>
 
@@ -210,7 +216,7 @@ val-ark/
 │   └── zim/                  # Offline ZIM files (Wikipedia, etc.)
 ├── tests/
 │   ├── run-all.sh            # Test runner
-│   ├── screenshots/          # 213 Playwright tests
+│   ├── screenshots/          # 256 Playwright tests
 │   └── test-*.sh             # Validation scripts
 ├── docs/
 │   ├── ARCHITECTURE.md       # Mermaid diagrams
@@ -232,7 +238,7 @@ val-ark/
 - [docs/OFFLINE.md](docs/OFFLINE.md) - Offline and P2P guide
 - [docs/MODEL_INVENTORY.md](docs/MODEL_INVENTORY.md) - Model details
 
-## Testing (213 Playwright Tests)
+## Testing (256 Playwright Tests)
 
 ```bash
 ./start.sh test               # Run via menu

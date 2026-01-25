@@ -622,7 +622,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: linear-gradient(135deg, #dbeafe 0%, #e0f2fe 100%);
+    background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
     border: 1px solid #3b82f6;
     border-radius: var(--radius);
     padding: 20px 24px;
@@ -638,7 +638,7 @@ body {
     width: 48px;
     height: 48px;
     border-radius: 10px;
-    background: #2563eb;
+    background: #1d4ed8;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -649,16 +649,16 @@ body {
 }
 .kiwix-banner-title {
     font-size: 1.1em;
-    font-weight: 600;
-    color: #1e293b;
+    font-weight: 700;
+    color: #1e3a5f;
     margin-bottom: 4px;
 }
 .kiwix-banner-desc {
     font-size: 0.85em;
-    color: #475569;
+    color: #1e40af;
 }
 .kiwix-banner-btn {
-    background: #2563eb;
+    background: #1d4ed8;
     color: #fff;
     padding: 10px 20px;
     border-radius: var(--radius-sm);

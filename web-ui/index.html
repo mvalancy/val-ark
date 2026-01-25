@@ -2104,40 +2104,39 @@ function checkInstalledToolsFromAPI(toolsData) {
     for (const [dirName, platforms] of Object.entries(toolsData)) {
         const toolId = toolDirMap[dirName];
         if (!toolId) continue;
-        // Check if at least one platform has real binaries (not just install hints)
+        // Check content type across platforms
         let hasBinary = false;
-        let hasHintOnly = false;
+        let hasSource = false;
+        let hasHint = false;
         let newest = null;
         for (const [, info] of Object.entries(platforms)) {
-            if (info.size > 0 || info.files > 0) {
-                if (info.installHint) {
-                    hasHintOnly = true;
-                } else {
-                    hasBinary = true;
-                }
-            }
+            // Use new contentType field if available, fall back to legacy detection
+            const ct = info.contentType || (info.installHint ? 'hint' : (info.files > 0 ? 'unknown' : 'empty'));
+            if (ct === 'binary') hasBinary = true;
+            else if (ct === 'source') hasSource = true;
+            else if (ct === 'hint') hasHint = true;
             if (!newest || (info.lastModified && info.lastModified > newest.lastModified)) {
                 newest = info;
             }
         }
+        // Priority: binary > source > hint
         if (hasBinary) {
             INSTALLED_TOOLS[toolId] = 'installed';
-            if (newest) {
-                TOOL_INFO[toolId] = { lastModified: newest.lastModified, size: newest.size };
-            }
-        } else if (hasHintOnly) {
+        } else if (hasSource) {
+            INSTALLED_TOOLS[toolId] = 'source';
+        } else if (hasHint) {
             INSTALLED_TOOLS[toolId] = 'hint';
-            if (newest) {
-                TOOL_INFO[toolId] = { lastModified: newest.lastModified, size: newest.size };
-            }
+        }
+        if (newest && INSTALLED_TOOLS[toolId]) {
+            TOOL_INFO[toolId] = { lastModified: newest.lastModified, size: newest.size };
         }
     }
 
-    // Check source entries
-    if (toolsData['llama-cpp']) { if (!INSTALLED_TOOLS['llama-cpp']) INSTALLED_TOOLS['llama-cpp'] = 'source'; }
-    if (toolsData['whisper-cpp']) { if (!INSTALLED_TOOLS['whisper-cpp']) INSTALLED_TOOLS['whisper-cpp'] = 'source'; }
-    if (toolsData['stable-diffusion-cpp']) { if (!INSTALLED_TOOLS['sd-cpp']) INSTALLED_TOOLS['sd-cpp'] = 'source'; }
-    if (toolsData['BitNet']) { if (!INSTALLED_TOOLS['bitnet']) INSTALLED_TOOLS['bitnet'] = 'source'; }
+    // Also check sources directory entries (legacy support)
+    if (toolsData['llama.cpp']?.source) { if (!INSTALLED_TOOLS['llama-cpp']) INSTALLED_TOOLS['llama-cpp'] = 'source'; }
+    if (toolsData['whisper.cpp']?.source) { if (!INSTALLED_TOOLS['whisper-cpp']) INSTALLED_TOOLS['whisper-cpp'] = 'source'; }
+    if (toolsData['stable-diffusion.cpp']?.source) { if (!INSTALLED_TOOLS['sd-cpp']) INSTALLED_TOOLS['sd-cpp'] = 'source'; }
+    if (toolsData['BitNet']?.source) { if (!INSTALLED_TOOLS['bitnet']) INSTALLED_TOOLS['bitnet'] = 'source'; }
 
     // Mark remaining tools
     for (const t of TOOLS) {
@@ -3489,20 +3488,47 @@ function renderToolDetail(toolId) {
 
         // Platform picker for local server files
         if (dl.binaries && Object.keys(dl.binaries).length > 0) {
-            html += '<h3 style="font-size:0.95em;margin-bottom:12px;color:var(--text-secondary)">Choose your platform:</h3>';
+            html += '<h3 style="font-size:0.95em;margin-bottom:12px;color:var(--text-secondary)">Platform availability:</h3>';
             html += '<div class="paths-grid">';
             Object.entries(dl.binaries).forEach(([platId, path]) => {
                 if (!path) return;
                 const platLabel = PLATFORMS[platId] ? PLATFORMS[platId].fullLabel : platId;
                 const filename = path.split('/').pop();
-                html += `<div class="path-card">
-                    <h4>${platLabel}</h4>
-                    <a href="${path}" download class="download-btn" onclick="handleDownload(event,'${path}')">${filename}</a>
-                    <p style="margin-top:6px"><code style="font-size:0.78em">${path}</code></p>
-                </div>`;
+                const platType = tool.platforms[platId] || 'unknown';
+
+                // Get content type from TOOL_INFO if available
+                const toolStatus = INSTALLED_TOOLS[tool.id];
+                const toolInfo = TOOL_INFO[tool.id] || {};
+
+                // Determine what to show based on platform type
+                if (platType === 'prebuilt' || platType === 'portable' || platType === 'appimage') {
+                    // Show download link for prebuilt binaries
+                    html += `<div class="path-card">
+                        <h4>${platLabel}</h4>
+                        <a href="${path}" download class="download-btn" onclick="handleDownload(event,'${path}')">${filename}</a>
+                        <p style="margin-top:6px"><code style="font-size:0.78em">${path}</code></p>
+                    </div>`;
+                } else if (platType === 'build') {
+                    // Show source tarball download
+                    const tarballPath = path.replace(/\/$/, '') + '.tar.gz';
+                    html += `<div class="path-card">
+                        <h4>${platLabel}</h4>
+                        <span class="badge badge-source" style="display:inline-block;margin-bottom:8px">Build from Source</span>
+                        <p style="font-size:0.85em;color:var(--text-secondary);margin-bottom:8px">Source code tarball for offline build.</p>
+                        <a href="${tarballPath}" download class="download-btn" style="background:var(--yellow);color:#000" onclick="handleDownload(event,'${tarballPath}')">Download Source (.tar.gz)</a>
+                        <p style="margin-top:6px;font-size:0.8em;color:var(--text-muted)">Extract and build with CMake or make.</p>
+                    </div>`;
+                } else {
+                    // Default: show path but indicate status
+                    html += `<div class="path-card">
+                        <h4>${platLabel}</h4>
+                        <span class="badge badge-hint" style="display:inline-block;margin-bottom:8px">${platType}</span>
+                        <p style="margin-top:6px"><code style="font-size:0.78em">${path}</code></p>
+                    </div>`;
+                }
             });
             html += '</div>';
-            html += `<p style="font-size:0.8em;color:var(--text-muted);margin-top:12px">Local files are available when served from a Val Ark server. Run <code>./start.sh update</code> to download the latest versions.</p>`;
+            html += `<p style="font-size:0.8em;color:var(--text-muted);margin-top:12px">Run <code>./start.sh download tools</code> to mirror tools locally. Prebuilt binaries download directly; others require building from source.</p>`;
         }
         html += '</div>';
     }

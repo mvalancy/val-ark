@@ -363,45 +363,105 @@ function shallowDirInfo(dirPath) {
     let size = 0;
     let newest = 0;
     let fileCount = 0;
-    let hasBinary = false; // Has real binary (>50KB non-txt file)
+    let hasBinary = false; // Has real binary (>50KB non-txt/non-src file)
+    let isSource = false;  // Has source code indicators
+    let hasInstallHint = false; // Has INSTALL.txt
     const MIN_BINARY_SIZE = 50000; // 50KB threshold for "real" binary
+
+    // Source code indicators
+    const SOURCE_MARKERS = ['CMakeLists.txt', 'setup.py', 'Cargo.toml', 'go.mod', '.git'];
+    // Makefile alone doesn't mean source - many packages include prebuilt + Makefile for install
+
     try {
         const stat = fs.statSync(dirPath);
         newest = stat.mtimeMs;
         const entries = readdirSafe(dirPath);
+
+        // Check for INSTALL.txt hint
+        if (entries.includes('INSTALL.txt')) {
+            hasInstallHint = true;
+        }
+
+        // First pass: look for binaries (including in bin/ subdirectory)
         for (const entry of entries) {
             try {
-                const s = fs.statSync(path.join(dirPath, entry));
+                const fullPath = path.join(dirPath, entry);
+                const s = fs.statSync(fullPath);
                 if (s.isFile()) {
                     size += s.size;
                     fileCount++;
-                    // Check if this is a real binary (not just a text hint)
                     const isTxt = entry.endsWith('.txt') || entry.endsWith('.md');
-                    if (!isTxt && s.size > MIN_BINARY_SIZE) {
+                    const isSrc = entry.endsWith('.c') || entry.endsWith('.cpp') || entry.endsWith('.h') || entry.endsWith('.py') || entry.endsWith('.rs') || entry.endsWith('.go');
+                    if (!isTxt && !isSrc && s.size > MIN_BINARY_SIZE) {
                         hasBinary = true;
                     }
                 } else if (s.isDirectory()) {
-                    // Check subdirectories for binaries too (e.g., nested extracts)
-                    const subEntries = readdirSafe(path.join(dirPath, entry));
-                    for (const sub of subEntries.slice(0, 10)) { // Limit check
-                        try {
-                            const subStat = fs.statSync(path.join(dirPath, entry, sub));
-                            if (subStat.isFile() && subStat.size > MIN_BINARY_SIZE) {
-                                hasBinary = true;
-                                break;
-                            }
-                        } catch (e) {}
+                    // Check common binary directories
+                    if (entry === 'bin' || entry === 'lib' || entry === 'Release' || entry === 'Debug') {
+                        const subEntries = readdirSafe(fullPath);
+                        for (const sub of subEntries.slice(0, 20)) {
+                            try {
+                                const subStat = fs.statSync(path.join(fullPath, sub));
+                                if (subStat.isFile() && subStat.size > MIN_BINARY_SIZE) {
+                                    hasBinary = true;
+                                    break;
+                                }
+                            } catch (e) {}
+                        }
                     }
                 }
                 if (s.mtimeMs > newest) newest = s.mtimeMs;
             } catch (e) {}
         }
+
+        // Second pass: check for source markers (only if no binaries found)
+        if (!hasBinary) {
+            for (const marker of SOURCE_MARKERS) {
+                if (entries.includes(marker)) {
+                    isSource = true;
+                    break;
+                }
+            }
+            // Check subdirs for source markers too
+            if (!isSource) {
+                for (const entry of entries) {
+                    try {
+                        const s = fs.statSync(path.join(dirPath, entry));
+                        if (s.isDirectory()) {
+                            const subEntries = readdirSafe(path.join(dirPath, entry));
+                            for (const marker of SOURCE_MARKERS) {
+                                if (subEntries.includes(marker)) {
+                                    isSource = true;
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (e) {}
+                    if (isSource) break;
+                }
+            }
+        }
     } catch (e) {}
+
+    // Determine content type - binary takes priority over source
+    let contentType = 'empty';
+    if (hasBinary) {
+        contentType = 'binary';
+    } else if (isSource) {
+        contentType = 'source';
+    } else if (hasInstallHint) {
+        contentType = 'hint';
+    } else if (fileCount > 0) {
+        contentType = 'unknown';
+    }
+
     return {
         size,
         lastModified: new Date(newest).toISOString(),
         files: fileCount,
-        installHint: !hasBinary && size < MIN_BINARY_SIZE
+        contentType,
+        // Legacy field for backward compat
+        installHint: contentType === 'hint'
     };
 }
 
@@ -540,6 +600,10 @@ function handleAPI(req, res, urlPath) {
                 req.on('close', () => sseClients.delete(res));
                 return;
             default:
+                // Handle /api/archive/<path> for tarball downloads
+                if (urlPath.startsWith('/api/archive/')) {
+                    return serveArchive(res, req, urlPath.slice('/api/archive/'.length));
+                }
                 return sendJSON(res, req, { error: 'Unknown endpoint' }, 404);
         }
     }
@@ -621,7 +685,12 @@ function isPathSafe(resolved, baseDir) {
 
 function serveStatic(res, filePath) {
     fs.stat(filePath, (err, stat) => {
-        if (err || !stat.isFile()) return send404(res);
+        if (err) return send404(res);
+
+        // Handle directories with a simple file listing
+        if (stat.isDirectory()) {
+            return serveDirectory(res, filePath);
+        }
 
         const ext = path.extname(filePath).toLowerCase();
         const mime = MIME[ext] || 'application/octet-stream';
@@ -634,6 +703,54 @@ function serveStatic(res, filePath) {
         });
         fs.createReadStream(filePath).pipe(res);
     });
+}
+
+function serveDirectory(res, dirPath) {
+    const entries = readdirSafe(dirPath);
+    const relativePath = dirPath.replace(ROOT, '').replace(/^\//, '');
+
+    let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Index of /${relativePath}</title>
+    <style>body{font-family:system-ui,sans-serif;max-width:900px;margin:40px auto;padding:0 20px;background:#0a0e14;color:#e8edf4}
+    a{color:#4da6ff;text-decoration:none}a:hover{text-decoration:underline}
+    table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px 12px;border-bottom:1px solid #2a3545}
+    th{color:#94a3b8}.size{text-align:right;color:#64748b}.dir{color:#4ade80}</style></head>
+    <body><h1>Index of /${relativePath}</h1><table><tr><th>Name</th><th class="size">Size</th><th>Modified</th></tr>`;
+
+    // Add parent directory link if not at root
+    if (relativePath) {
+        const parent = '/' + relativePath.split('/').slice(0, -1).join('/');
+        html += `<tr><td><a href="${parent || '/'}">..</a></td><td></td><td></td></tr>`;
+    }
+
+    // List entries
+    for (const name of entries.sort()) {
+        if (name.startsWith('.')) continue; // Skip hidden files
+        try {
+            const fullPath = path.join(dirPath, name);
+            const stat = fs.statSync(fullPath);
+            const href = '/' + relativePath + (relativePath ? '/' : '') + name;
+            const isDir = stat.isDirectory();
+            const sizeStr = isDir ? '-' : formatSize(stat.size);
+            const dateStr = stat.mtime.toISOString().split('T')[0];
+            html += `<tr><td><a href="${href}" class="${isDir ? 'dir' : ''}">${name}${isDir ? '/' : ''}</a></td><td class="size">${sizeStr}</td><td>${dateStr}</td></tr>`;
+        } catch (e) {}
+    }
+
+    html += '</table><hr><p style="color:#64748b;font-size:0.85em">Val Ark Server</p></body></html>';
+
+    res.writeHead(200, {
+        'Content-Type': 'text/html',
+        'Cache-Control': 'no-cache',
+        ...SECURITY_HEADERS,
+    });
+    res.end(html);
+}
+
+function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
 }
 
 // =============================================================================

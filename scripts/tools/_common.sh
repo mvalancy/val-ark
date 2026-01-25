@@ -268,6 +268,7 @@ download_and_extract() {
 }
 
 # Clone a git repo at a specific tag/branch
+# Also creates a downloadable tarball for offline distribution
 clone_repo() {
     local url="$1"
     local ref="$2"
@@ -277,6 +278,8 @@ clone_repo() {
     if [ -d "$dest/.git" ]; then
         log_info "Already cloned: ${label} - skipping"
         DOWNLOAD_SKIPPED=$((DOWNLOAD_SKIPPED + 1))
+        # Ensure tarball exists even if clone was skipped
+        create_source_tarball "$dest" "$label" "$ref"
         return 0
     fi
 
@@ -286,16 +289,48 @@ clone_repo() {
     if git clone --depth 1 --branch "$ref" "$url" "$dest" 2>/dev/null; then
         log_success "Cloned: ${label}"
         DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
+        create_source_tarball "$dest" "$label" "$ref"
     else
         # Try without --branch for default branch
         if git clone --depth 1 "$url" "$dest" 2>/dev/null; then
             log_success "Cloned: ${label} (default branch)"
             DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
+            create_source_tarball "$dest" "$label" "$ref"
         else
             log_error "Clone failed: ${label}"
             DOWNLOAD_FAILED=$((DOWNLOAD_FAILED + 1))
             return 1
         fi
+    fi
+}
+
+# Create a tarball from a source directory for offline download
+create_source_tarball() {
+    local src_dir="$1"
+    local label="$2"
+    local version="${3:-source}"
+
+    local dir_name=$(basename "$src_dir")
+    local tarball="${src_dir}.tar.gz"
+
+    # Skip if tarball already exists and is recent (within 24 hours)
+    if [ -f "$tarball" ]; then
+        local tarball_age=$(($(date +%s) - $(stat -c %Y "$tarball" 2>/dev/null || stat -f %m "$tarball" 2>/dev/null || echo 0)))
+        if [ $tarball_age -lt 86400 ]; then
+            log_info "Tarball exists: ${dir_name}.tar.gz"
+            return 0
+        fi
+    fi
+
+    log_info "Creating tarball: ${dir_name}.tar.gz"
+    local parent_dir=$(dirname "$src_dir")
+
+    # Create tarball excluding .git directory to save space
+    if tar -czf "$tarball" -C "$parent_dir" --exclude='.git' "$dir_name" 2>/dev/null; then
+        local size=$(du -h "$tarball" 2>/dev/null | cut -f1)
+        log_success "Created: ${dir_name}.tar.gz (${size})"
+    else
+        log_warn "Could not create tarball for ${dir_name}"
     fi
 }
 

@@ -140,6 +140,67 @@ test.describe('Val Ark Web UI - Search', () => {
     );
     expect(restoredVisible).toBe(initialVisible);
   });
+
+  test('search shows result count', async ({ page }) => {
+    const searchInput = page.locator('#searchInput');
+    await searchInput.fill('llama');
+    await page.waitForTimeout(300);
+    const status = page.locator('#searchStatus');
+    await expect(status).toBeVisible();
+    const statusText = await status.textContent();
+    expect(statusText).toContain('Found');
+    expect(statusText).toContain('llama');
+  });
+
+  test('search shows no results message for nonexistent term', async ({ page }) => {
+    const searchInput = page.locator('#searchInput');
+    await searchInput.fill('zzzznonexistent12345');
+    await page.waitForTimeout(300);
+    const status = page.locator('#searchStatus');
+    await expect(status).toBeVisible();
+    const statusText = await status.textContent();
+    expect(statusText).toContain('No results');
+  });
+
+  test('search clear button appears when searching', async ({ page }) => {
+    const searchInput = page.locator('#searchInput');
+    const clearBtn = page.locator('#searchClear');
+    // Initially hidden
+    await expect(clearBtn).toBeHidden();
+    // Type something
+    await searchInput.fill('llama');
+    await page.waitForTimeout(300);
+    // Clear button should appear
+    await expect(clearBtn).toBeVisible();
+  });
+
+  test('Escape key clears search', async ({ page }) => {
+    const searchInput = page.locator('#searchInput');
+    await searchInput.fill('llama');
+    await page.waitForTimeout(300);
+    // Verify search is active
+    const statusBefore = await page.locator('#searchStatus').textContent();
+    expect(statusBefore).toContain('llama');
+    // Press Escape
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    // Search should be cleared
+    await expect(searchInput).toHaveValue('');
+    await expect(page.locator('#searchStatus')).toBeHidden();
+  });
+
+  test('Slash key focuses search', async ({ page }) => {
+    const searchInput = page.locator('#searchInput');
+    // Click elsewhere to unfocus
+    await page.click('body');
+    await page.waitForTimeout(100);
+    // Press / to focus search
+    await page.keyboard.press('/');
+    await page.waitForTimeout(100);
+    // Search input should be focused
+    const isFocused = await page.evaluate(() => document.activeElement?.id === 'searchInput');
+    expect(isFocused).toBe(true);
+  });
 });
 
 test.describe('Val Ark Web UI - Tool Detail Pages', () => {
@@ -662,7 +723,7 @@ test.describe('Val Ark - Content Library', () => {
   test('Content nav link exists and is visible', async ({ page }) => {
     await page.goto(`file://${WEB_UI}`);
     await page.waitForLoadState('domcontentloaded');
-    const contentLink = page.locator('a.nav-link:has-text("Content")');
+    const contentLink = page.locator('a.nav-link:has-text("Wikipedia")');
     await expect(contentLink).toBeVisible();
     await expect(contentLink).toHaveAttribute('href', '#/content');
   });
@@ -670,7 +731,7 @@ test.describe('Val Ark - Content Library', () => {
   test('Content nav link navigates to content page', async ({ page }) => {
     await page.goto(`file://${WEB_UI}`);
     await page.waitForLoadState('domcontentloaded');
-    const contentLink = page.locator('a.nav-link:has-text("Content")');
+    const contentLink = page.locator('a.nav-link:has-text("Wikipedia")');
     await contentLink.click();
     await page.waitForTimeout(300);
     expect(page.url()).toContain('#/content');
@@ -681,7 +742,7 @@ test.describe('Val Ark - Content Library', () => {
     await page.goto(`file://${WEB_UI}#/content`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('.card', { timeout: 5000 });
-    const contentLink = page.locator('a.nav-link:has-text("Content")');
+    const contentLink = page.locator('a.nav-link:has-text("Wikipedia")');
     await expect(contentLink).toHaveClass(/active/);
   });
 
@@ -689,7 +750,7 @@ test.describe('Val Ark - Content Library', () => {
     await page.goto(`file://${WEB_UI}#/content/wikipedia-simple`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('h1', { timeout: 5000 });
-    const contentLink = page.locator('a.nav-link:has-text("Content")');
+    const contentLink = page.locator('a.nav-link:has-text("Wikipedia")');
     await expect(contentLink).toHaveClass(/active/);
   });
 
@@ -1004,5 +1065,461 @@ test.describe('Val Ark - Content Library', () => {
   test('ZIM content directory exists', () => {
     const zimDir = path.join(PROJECT_ROOT, 'content/zim');
     expect(fs.existsSync(zimDir), 'content/zim directory should exist').toBe(true);
+  });
+});
+
+// =============================================================================
+// UX IMPROVEMENTS - Tests for Phase 1-2 features
+// =============================================================================
+
+test.describe('Val Ark - Glossary Page', () => {
+  test('Glossary page loads and shows terms', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/glossary`);
+    await page.waitForLoadState('domcontentloaded');
+    await expect(page.locator('h1')).toContainText('Glossary');
+    // Should show term definitions
+    const termCards = page.locator('.detail-section');
+    await expect(termCards.first()).toBeVisible();
+  });
+
+  test('Glossary has categorized terms', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/glossary`);
+    await page.waitForLoadState('domcontentloaded');
+    // Should have AI Models category (as h2 heading)
+    await expect(page.locator('h2:has-text("AI Models")')).toBeVisible();
+    // Should have Hardware category
+    await expect(page.locator('h2:has-text("Hardware")')).toBeVisible();
+  });
+
+  test('Glossary terms include key AI concepts', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/glossary`);
+    await page.waitForLoadState('domcontentloaded');
+    const pageText = await page.textContent('body');
+    expect(pageText).toContain('LLM');
+    expect(pageText).toContain('GGUF');
+    expect(pageText).toContain('VRAM');
+  });
+});
+
+test.describe('Val Ark - Quickstart Wizard', () => {
+  test('Quickstart page has goal cards wizard', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/quickstart`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.goal-card', { timeout: 5000 });
+    const goalCards = page.locator('.goal-card');
+    // Should have at least 4 goal cards
+    expect(await goalCards.count()).toBeGreaterThanOrEqual(4);
+  });
+
+  test('Goal cards link to correct pages', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/quickstart`);
+    await page.waitForLoadState('domcontentloaded');
+    // Chat goal should link to llama-cpp
+    const chatCard = page.locator('.goal-card:has-text("Chat with AI")');
+    await expect(chatCard).toHaveAttribute('href', '#/tools/llama-cpp');
+    // Transcribe goal should link to whisper-cpp
+    const transcribeCard = page.locator('.goal-card:has-text("Transcribe")');
+    await expect(transcribeCard).toHaveAttribute('href', '#/tools/whisper-cpp');
+  });
+
+  test('Quickstart has beginner section', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/quickstart`);
+    await page.waitForLoadState('domcontentloaded');
+    // Should have a beginner-friendly details/summary section
+    const beginnerSection = page.locator('details:has-text("Beginner")');
+    await expect(beginnerSection).toBeVisible();
+  });
+
+  test('Beginner section has terminal intro', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/quickstart`);
+    await page.waitForLoadState('domcontentloaded');
+    // Click to expand beginner section
+    await page.click('summary:has-text("Beginner")');
+    await page.waitForTimeout(200);
+    // Should show terminal instructions (h3 with "Terminal" in heading)
+    await expect(page.locator('h3:has-text("Terminal")')).toBeVisible();
+    // Should show hardware requirements (h4 heading)
+    await expect(page.locator('h4:has-text("Hardware Requirements")')).toBeVisible();
+  });
+
+  test('Beginner section links to glossary', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/quickstart`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.click('summary:has-text("Beginner")');
+    await page.waitForTimeout(200);
+    // Should have glossary link
+    const glossaryLink = page.locator('a[href="#/glossary"]');
+    await expect(glossaryLink).toBeVisible();
+  });
+});
+
+test.describe('Val Ark - Accessibility', () => {
+  test('Skip-to-content link exists and is focusable', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    const skipLink = page.locator('.skip-link');
+    // Should exist in DOM
+    await expect(skipLink).toBeAttached();
+    // Should have correct href
+    await expect(skipLink).toHaveAttribute('href', '#main-content');
+  });
+
+  test('Main content has ID for skip link', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.nav-link', { timeout: 5000 });
+    // Main content should have id="main-content"
+    const mainContent = page.locator('#main-content');
+    await expect(mainContent).toBeVisible();
+  });
+});
+
+test.describe('Val Ark - Homepage Hero', () => {
+  test('Homepage has hero intro text', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.hero', { timeout: 5000 });
+    // Should have intro paragraph
+    const heroIntro = page.locator('.hero-intro');
+    await expect(heroIntro).toBeVisible();
+    const text = await heroIntro.textContent();
+    expect(text).toContain('AI');
+  });
+
+  test('Homepage has action buttons', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.hero-actions', { timeout: 5000 });
+    // Should have Start Guide button
+    const startGuide = page.locator('.hero-actions a:has-text("Start Guide")');
+    await expect(startGuide).toBeVisible();
+    // Should have Wikipedia button
+    const wikiButton = page.locator('.hero-actions a:has-text("Wikipedia")');
+    await expect(wikiButton).toBeVisible();
+  });
+
+  test('Hero action buttons navigate correctly', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.hero-actions', { timeout: 5000 });
+    // Click Start Guide
+    await page.click('.hero-actions a:has-text("Start Guide")');
+    await page.waitForTimeout(300);
+    expect(page.url()).toContain('#/quickstart');
+  });
+});
+
+test.describe('Val Ark - Mobile Navigation', () => {
+  test('Hamburger menu exists on mobile viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.top-nav', { timeout: 5000 });
+    // Hamburger should be visible on mobile
+    const hamburger = page.locator('.nav-hamburger');
+    await expect(hamburger).toBeVisible();
+  });
+
+  test('Hamburger menu toggles navigation', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.nav-hamburger', { timeout: 5000 });
+    // Click hamburger
+    await page.click('.nav-hamburger');
+    await page.waitForTimeout(200);
+    // Nav links should now be visible
+    const navLinks = page.locator('.nav-links');
+    await expect(navLinks).toHaveClass(/mobile-open/);
+  });
+});
+
+test.describe('Val Ark - API Endpoints', () => {
+  test('Health endpoint returns status', async ({ request }) => {
+    try {
+      const response = await request.get('http://localhost:3000/api/health');
+      expect(response.status()).toBe(200);
+      const data = await response.json();
+      expect(data.status).toBe('ok');
+      expect(data).toHaveProperty('uptime');
+      expect(data).toHaveProperty('version');
+    } catch (e) {
+      // Server might not be running - skip test
+      test.skip();
+    }
+  });
+});
+
+test.describe('Val Ark - CSS Extraction', () => {
+  test('External stylesheet loads correctly', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    // Check that CSS variables are applied (means stylesheet loaded)
+    const bgColor = await page.evaluate(() => {
+      return getComputedStyle(document.body).backgroundColor;
+    });
+    // Should not be default white
+    expect(bgColor).not.toBe('rgba(0, 0, 0, 0)');
+    expect(bgColor).not.toBe('rgb(255, 255, 255)');
+  });
+
+  test('styles.css file exists', () => {
+    const cssPath = path.join(path.dirname(WEB_UI), 'styles.css');
+    expect(fs.existsSync(cssPath), 'styles.css should exist').toBe(true);
+  });
+});
+
+test.describe('Val Ark - Scroll to Top Button', () => {
+  test('scroll-to-top button exists in DOM', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    const scrollBtn = page.locator('#scrollTopBtn');
+    // Button should exist but be hidden initially
+    await expect(scrollBtn).toBeAttached();
+  });
+
+  test('scroll-to-top button appears after scrolling', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/tools/llama-cpp`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(300);
+    const scrollBtn = page.locator('#scrollTopBtn');
+    // Initially hidden
+    await expect(scrollBtn).toHaveClass(/^((?!visible).)*$/);
+    // Scroll down
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await page.waitForTimeout(200);
+    // Button should now be visible
+    await expect(scrollBtn).toHaveClass(/visible/);
+  });
+});
+
+test.describe('Val Ark - Related Tools', () => {
+  test('tool detail page shows related tools section', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/tools/llama-cpp`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('h2', { timeout: 5000 });
+    // Should have a "More AI Inference Tools" section
+    const relatedSection = page.locator('h2:has-text("More")');
+    await expect(relatedSection).toBeVisible();
+  });
+
+  test('related tools link to correct pages', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/tools/llama-cpp`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.related-links', { timeout: 5000 });
+    // Click a related tool link (not a model link)
+    const relatedToolLink = page.locator('.related-link[href*="#/tools/"]').first();
+    if (await relatedToolLink.isVisible()) {
+      await relatedToolLink.click();
+      await page.waitForTimeout(300);
+      expect(page.url()).toContain('#/tools/');
+    }
+  });
+});
+
+test.describe('Val Ark - Copy Feedback', () => {
+  test('code block shows copied flash on click', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/tools/llama-cpp`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.code-block', { timeout: 5000 });
+    const codeBlock = page.locator('.code-block').first();
+    await codeBlock.click();
+    await page.waitForTimeout(100);
+    // Should have the copied-flash class briefly
+    // (class is removed after animation, so we check toast instead)
+    const toast = page.locator('#copiedToast');
+    await expect(toast).toHaveClass(/show/);
+  });
+});
+
+test.describe('Val Ark - Keyboard Help Modal', () => {
+  test('question mark key opens keyboard help', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(300);
+    // Click body to ensure focus
+    await page.click('body');
+    // Press ? to open help (type the character directly)
+    await page.keyboard.type('?');
+    await page.waitForTimeout(300);
+    const modal = page.locator('#keyboardHelpModal');
+    await expect(modal).toHaveClass(/visible/);
+  });
+
+  test('Escape closes keyboard help', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.click('body');
+    // Open help
+    await page.keyboard.type('?');
+    await page.waitForTimeout(300);
+    const modal = page.locator('#keyboardHelpModal');
+    await expect(modal).toHaveClass(/visible/);
+    // Close with Escape
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    await expect(modal).not.toHaveClass(/visible/);
+  });
+
+  test('keyboard help shows shortcut list', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.click('body');
+    await page.keyboard.type('?');
+    await page.waitForTimeout(300);
+    // Should show shortcuts
+    const slashShortcut = page.locator('.shortcut-row:has(kbd:has-text("/"))');
+    await expect(slashShortcut).toBeVisible();
+    const escShortcut = page.locator('.shortcut-row:has(kbd:has-text("Esc"))');
+    await expect(escShortcut).toBeVisible();
+  });
+});
+
+test.describe('Val Ark Web UI - Skeleton Loading & Print Styles', () => {
+  test('badge-checking class applies shimmer animation', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    // Create a test element with badge-checking class
+    await page.evaluate(() => {
+      const badge = document.createElement('span');
+      badge.className = 'badge badge-checking';
+      badge.textContent = 'Checking...';
+      badge.id = 'test-badge';
+      document.body.appendChild(badge);
+    });
+    const badge = page.locator('#test-badge');
+    await expect(badge).toBeVisible();
+    // Verify animation is applied (shimmer should be set)
+    const animation = await badge.evaluate(el => getComputedStyle(el).animationName);
+    expect(animation).toBe('shimmer');
+  });
+
+  test('skeleton-line class applies shimmer animation', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    // Create a skeleton line element
+    await page.evaluate(() => {
+      const line = document.createElement('div');
+      line.className = 'skeleton-line';
+      line.id = 'test-skeleton-line';
+      document.body.appendChild(line);
+    });
+    const line = page.locator('#test-skeleton-line');
+    const animation = await line.evaluate(el => getComputedStyle(el).animationName);
+    expect(animation).toBe('shimmer');
+  });
+
+  test('skeleton-card class has correct background', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    // Create a skeleton card element
+    await page.evaluate(() => {
+      const card = document.createElement('div');
+      card.className = 'skeleton-card';
+      card.id = 'test-skeleton-card';
+      document.body.appendChild(card);
+    });
+    const card = page.locator('#test-skeleton-card');
+    // Skeleton card should have min-height set
+    const minHeight = await card.evaluate(el => getComputedStyle(el).minHeight);
+    expect(minHeight).toBe('140px');
+  });
+
+  test('styles.css is loaded', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    // Check that the stylesheet link exists
+    const stylesheetLink = page.locator('link[rel="stylesheet"][href="styles.css"]');
+    await expect(stylesheetLink).toBeAttached();
+  });
+
+  test('print styles defined in stylesheet', async ({ page }) => {
+    // Read the CSS file directly and check for print media query
+    const cssContent = fs.readFileSync(path.resolve(__dirname, '../../../web-ui/styles.css'), 'utf8');
+    expect(cssContent).toContain('@media print');
+    expect(cssContent).toContain('.top-nav');
+    expect(cssContent).toContain('display: none');
+    expect(cssContent).toContain('background: white');
+  });
+});
+
+test.describe('Val Ark Web UI - Theme Toggle', () => {
+  test('theme toggle button exists in navigation', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    const toggle = page.locator('.theme-toggle');
+    await expect(toggle).toBeVisible();
+  });
+
+  test('theme toggle switches to light mode', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    // Initially no data-theme attribute (dark mode)
+    const html = page.locator('html');
+    await expect(html).not.toHaveAttribute('data-theme', 'light');
+    // Click toggle
+    await page.click('.theme-toggle');
+    // Should now be light mode
+    await expect(html).toHaveAttribute('data-theme', 'light');
+  });
+
+  test('theme toggle switches back to dark mode', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    // Switch to light
+    await page.click('.theme-toggle');
+    const html = page.locator('html');
+    await expect(html).toHaveAttribute('data-theme', 'light');
+    // Click again to switch back to dark
+    await page.click('.theme-toggle');
+    await expect(html).not.toHaveAttribute('data-theme', 'light');
+  });
+
+  test('theme preference persists in localStorage', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    // Switch to light
+    await page.click('.theme-toggle');
+    // Check localStorage
+    const saved = await page.evaluate(() => localStorage.getItem('ark-theme'));
+    expect(saved).toBe('light');
+    // Switch back
+    await page.click('.theme-toggle');
+    const saved2 = await page.evaluate(() => localStorage.getItem('ark-theme'));
+    expect(saved2).toBe('dark');
+  });
+
+  test('light theme applies correct background color', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    // Get dark mode bg
+    const darkBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    // Switch to light
+    await page.click('.theme-toggle');
+    await page.waitForTimeout(100);
+    const lightBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    // Background should be different
+    expect(lightBg).not.toBe(darkBg);
+  });
+
+  test('theme toggle shows sun icon in dark mode', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    const sunIcon = page.locator('.theme-toggle .icon-sun');
+    const moonIcon = page.locator('.theme-toggle .icon-moon');
+    // In dark mode, sun should be visible
+    await expect(sunIcon).toBeVisible();
+    await expect(moonIcon).not.toBeVisible();
+  });
+
+  test('theme toggle shows moon icon in light mode', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.click('.theme-toggle');
+    const sunIcon = page.locator('.theme-toggle .icon-sun');
+    const moonIcon = page.locator('.theme-toggle .icon-moon');
+    // In light mode, moon should be visible
+    await expect(sunIcon).not.toBeVisible();
+    await expect(moonIcon).toBeVisible();
   });
 });

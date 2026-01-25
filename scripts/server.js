@@ -461,6 +461,18 @@ function readBody(req) {
     });
 }
 
+// Check if request is from localhost (for restricting dangerous operations)
+function isLocalhost(req) {
+    const addr = req.socket?.remoteAddress || '';
+    // IPv4 localhost
+    if (addr === '127.0.0.1' || addr === '::1') return true;
+    // IPv6 localhost
+    if (addr === '::ffff:127.0.0.1') return true;
+    // Socket file (always local)
+    if (!addr) return true;
+    return false;
+}
+
 function handleAPI(req, res, urlPath) {
     const corsOrigin = getCORSOrigin(req);
 
@@ -478,6 +490,13 @@ function handleAPI(req, res, urlPath) {
     // GET endpoints
     if (req.method === 'GET') {
         switch (urlPath) {
+            case '/api/health':
+                return sendJSON(res, req, {
+                    status: 'ok',
+                    uptime: process.uptime(),
+                    version: '1.0.0',
+                    timestamp: new Date().toISOString()
+                });
             case '/api/status/disk':
                 return sendJSON(res, req, getDiskStatus());
             case '/api/status/tools':
@@ -525,8 +544,16 @@ function handleAPI(req, res, urlPath) {
         }
     }
 
-    // POST endpoints
+    // POST endpoints - restricted to localhost for security
     if (req.method === 'POST') {
+        // Download/control endpoints are restricted to localhost only
+        // This prevents remote exploitation while allowing local browser access
+        if (!isLocalhost(req)) {
+            return sendJSON(res, req, {
+                error: 'Download operations are only available from localhost for security.'
+            }, 403);
+        }
+
         readBody(req).then((body) => {
             let result;
             switch (urlPath) {

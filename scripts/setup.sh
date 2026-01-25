@@ -117,6 +117,30 @@ else
 fi
 
 ###############################################################################
+# Python Dependencies (Optional)
+###############################################################################
+
+echo ""
+log_info "Python dependencies:"
+
+# Check for Pillow (image optimization)
+if python3 -c "from PIL import Image" 2>/dev/null; then
+    echo -e "  ${GREEN}✓${NC} Pillow (image optimization)"
+else
+    echo -e "  ${YELLOW}~${NC} Pillow (optional, for image optimization)"
+    if command -v pip3 &>/dev/null; then
+        echo -n "  Install Pillow with pip? [y/N]: "
+        read -r answer
+        if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
+            pip3 install --user Pillow
+            log_ok "Pillow installed"
+        fi
+    else
+        echo "      Install: pip3 install Pillow"
+    fi
+fi
+
+###############################################################################
 # Platform Detection
 ###############################################################################
 

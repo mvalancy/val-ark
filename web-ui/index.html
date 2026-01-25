@@ -4,966 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Val Ark - Complete Offline Software Toolkit</title>
-<style>
-:root {
-    --bg-primary: #0a0e14;
-    --bg-secondary: #131921;
-    --bg-tertiary: #1a2230;
-    --bg-card: #151d28;
-    --bg-card-hover: #1a2435;
-    --border: #2a3545;
-    --border-hover: #3a4f6a;
-    --text-primary: #e8edf4;
-    --text-secondary: #8b9bb4;
-    --text-muted: #5a6a80;
-    --accent: #4da6ff;
-    --accent-dim: rgba(77,166,255,0.12);
-    --green: #4ade80;
-    --green-dim: rgba(74,222,128,0.12);
-    --yellow: #fbbf24;
-    --yellow-dim: rgba(251,191,36,0.12);
-    --orange: #fb923c;
-    --red: #f87171;
-    --purple: #a78bfa;
-    --purple-dim: rgba(167,139,250,0.12);
-    --pink: #f472b6;
-    --cyan: #22d3ee;
-    --badge-top: #2563eb;
-    --radius: 10px;
-    --radius-sm: 6px;
-    --shadow: 0 4px 24px rgba(0,0,0,0.3);
-    --mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', monospace;
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Helvetica, Arial, sans-serif;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    line-height: 1.6;
-    min-height: 100vh;
-    padding-top: 60px;
-}
-
-/* Sticky Nav */
-.top-nav {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 60px;
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    padding: 0 24px;
-    z-index: 100;
-    gap: 24px;
-}
-.nav-logo {
-    font-size: 1.3em;
-    font-weight: 800;
-    color: var(--text-primary);
-    cursor: pointer;
-    white-space: nowrap;
-    letter-spacing: -0.5px;
-}
-.nav-links {
-    display: flex;
-    gap: 4px;
-    background: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
-    padding: 3px;
-}
-.nav-link {
-    padding: 6px 16px;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 0.85em;
-    font-weight: 500;
-    transition: all 0.2s;
-    white-space: nowrap;
-}
-.nav-link:hover { color: var(--text-primary); background: var(--bg-card); }
-.nav-link.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
-
-/* Container */
-.container { max-width: 1440px; margin: 0 auto; padding: 20px 24px; }
-
-/* Breadcrumb */
-.breadcrumb {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 0;
-    font-size: 0.85em;
-    color: var(--text-muted);
-    margin-bottom: 12px;
-}
-.breadcrumb a {
-    color: var(--text-secondary);
-    text-decoration: none;
-    transition: color 0.2s;
-}
-.breadcrumb a:hover { color: var(--accent); }
-.breadcrumb .sep { color: var(--text-muted); }
-.breadcrumb .current { color: var(--text-primary); font-weight: 500; }
-
-/* Hero */
-.hero {
-    text-align: center;
-    padding: 40px 20px 28px;
-    margin-bottom: 24px;
-}
-.hero h1 {
-    font-size: 2.8em;
-    font-weight: 800;
-    letter-spacing: -1px;
-    margin-bottom: 8px;
-    color: var(--text-primary);
-}
-.hero .subtitle { color: var(--text-secondary); font-size: 1.05em; }
-.hero .stats { color: var(--text-muted); font-size: 0.85em; margin-top: 6px; }
-
-/* Search */
-.search-bar {
-    max-width: 520px;
-    margin: 20px auto;
-    position: relative;
-}
-.search-bar input {
-    width: 100%;
-    padding: 12px 16px 12px 44px;
-    border: 1.5px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    font-size: 0.95em;
-    outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
-}
-.search-bar input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
-.search-bar .search-icon {
-    position: absolute;
-    left: 14px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--text-muted);
-    font-size: 1.1em;
-}
-
-/* Storage Bar */
-.storage-section { margin: 20px 0 28px; }
-.storage-section h3 { font-size: 0.9em; color: var(--text-secondary); margin-bottom: 10px; }
-.storage-bar-container {
-    display: flex;
-    height: 24px;
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    background: var(--bg-tertiary);
-}
-.storage-segment {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.7em;
-    font-weight: 600;
-    color: #000;
-    transition: opacity 0.2s;
-}
-.storage-segment:hover { opacity: 0.8; }
-.storage-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-top: 10px;
-}
-.storage-legend-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.78em;
-    color: var(--text-secondary);
-}
-.storage-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 3px;
-}
-
-/* Cards Grid */
-.cards-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 16px;
-    margin: 20px 0;
-}
-.card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px;
-    cursor: pointer;
-    transition: border-color 0.2s, transform 0.1s, box-shadow 0.2s;
-    position: relative;
-}
-.card:hover {
-    border-color: var(--border-hover);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 20px rgba(77,166,255,0.06);
-}
-.card-icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.3em;
-    font-weight: 700;
-    margin-bottom: 12px;
-    color: #fff;
-}
-.card h3 { font-size: 1em; font-weight: 600; margin-bottom: 4px; }
-.card .card-desc { font-size: 0.82em; color: var(--text-secondary); margin-bottom: 10px; }
-.card .card-meta {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-}
-.cat-btn {
-    padding: 6px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 0.8em;
-    font-weight: 500;
-    transition: all 0.2s;
-}
-.cat-btn:hover { border-color: var(--accent); color: var(--text-primary); }
-.cat-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); font-weight: 600; }
-.badge { padding: 2px 8px; border-radius: 4px; font-size: 0.68em; font-weight: 600; margin-left: 6px; }
-.badge-installed { background: #16a34a22; color: #22c55e; }
-.badge-source { background: #eab30822; color: #eab308; }
-.badge-missing { background: #64748b22; color: #64748b; }
-.badge-hint { background: #6366f122; color: #a78bfa; }
-.badge-other { background: #f59e0b22; color: #f59e0b; }
-.badge-checking { background: #64748b11; color: #64748b; }
-.attribution-bar { display: flex; gap: 16px; flex-wrap: wrap; padding: 10px 14px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; font-size: 0.85em; }
-.attribution-bar .attr-item { color: var(--text-secondary); }
-.attribution-bar a { color: var(--accent); text-decoration: none; }
-.attribution-bar a:hover { text-decoration: underline; }
-.tag {
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 0.72em;
-    font-weight: 500;
-}
-.tag-format { background: var(--purple-dim); color: var(--purple); }
-.tag-tool { background: var(--accent-dim); color: var(--accent); }
-.tag-count { background: var(--green-dim); color: var(--green); }
-.top-badge {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    background: var(--badge-top);
-    color: #fff;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 0.68em;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-}
-.top-badge-inline {
-    display: inline-flex;
-    align-items: center;
-    background: var(--badge-top);
-    color: #fff;
-    padding: 4px 12px;
-    border-radius: 4px;
-    font-size: 0.42em;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-
-/* Category Section */
-.category-section { margin-bottom: 28px; }
-.category-title {
-    font-size: 1.1em;
-    font-weight: 600;
-    color: var(--text-secondary);
-    margin-bottom: 14px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border);
-}
-
-/* Detail Page */
-.detail-header {
-    display: flex;
-    align-items: flex-start;
-    gap: 20px;
-    margin-bottom: 28px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid var(--border);
-}
-.detail-icon {
-    width: 56px;
-    height: 56px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.8em;
-    font-weight: 700;
-    color: #fff;
-    flex-shrink: 0;
-}
-.detail-title-area h1 { font-size: 1.8em; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.detail-title-area .detail-desc { color: var(--text-secondary); font-size: 0.95em; margin-bottom: 10px; }
-.detail-badges {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-.platform-badge {
-    padding: 3px 10px;
-    border-radius: 4px;
-    font-size: 0.75em;
-    font-weight: 500;
-    background: var(--green-dim);
-    color: var(--green);
-}
-.platform-badge.unavailable {
-    background: var(--bg-tertiary);
-    color: var(--text-muted);
-    text-decoration: line-through;
-}
-
-/* Detail Sections */
-.detail-section { margin-bottom: 28px; }
-.detail-section h2 {
-    font-size: 1.15em;
-    font-weight: 600;
-    margin-bottom: 12px;
-    color: var(--text-primary);
-}
-.detail-section h3 {
-    font-size: 1em;
-    font-weight: 600;
-    margin-bottom: 8px;
-    color: var(--text-secondary);
-}
-.detail-section ul {
-    list-style: none;
-    padding: 0;
-}
-.detail-section ul li {
-    padding: 4px 0 4px 18px;
-    position: relative;
-    font-size: 0.9em;
-    color: var(--text-secondary);
-}
-.detail-section ul li::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 12px;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--accent);
-}
-.detail-section p {
-    font-size: 0.92em;
-    color: var(--text-secondary);
-    line-height: 1.7;
-}
-
-/* Kiwix Banner */
-.kiwix-banner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: linear-gradient(135deg, #1a3a5c 0%, #1a2744 100%);
-    border: 1px solid var(--accent);
-    border-radius: var(--radius);
-    padding: 20px 24px;
-    margin-bottom: 24px;
-    gap: 16px;
-}
-.kiwix-banner-content {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-}
-.kiwix-banner-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 10px;
-    background: #1a73e8;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.5em;
-    font-weight: 700;
-    color: #fff;
-    flex-shrink: 0;
-}
-.kiwix-banner-title {
-    font-size: 1.1em;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 4px;
-}
-.kiwix-banner-desc {
-    font-size: 0.85em;
-    color: var(--text-secondary);
-}
-.kiwix-banner-btn {
-    background: var(--accent);
-    color: #fff;
-    padding: 10px 20px;
-    border-radius: var(--radius-sm);
-    font-weight: 600;
-    font-size: 0.9em;
-    white-space: nowrap;
-    text-decoration: none;
-    transition: opacity 0.2s;
-}
-.kiwix-banner-btn:hover { opacity: 0.85; }
-
-/* Screenshot Gallery */
-.screenshot-gallery {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 12px;
-    margin-top: 12px;
-}
-.screenshot-thumb {
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    border: 1px solid var(--border);
-    cursor: pointer;
-    transition: transform 0.2s, border-color 0.2s;
-    aspect-ratio: 16/10;
-    background: var(--bg-tertiary);
-}
-.screenshot-thumb:hover {
-    transform: scale(1.02);
-    border-color: var(--accent);
-}
-.screenshot-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
-
-/* Lightbox */
-.lightbox-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.92);
-    z-index: 9999;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    padding: 20px;
-}
-.lightbox-overlay.active { display: flex; }
-.lightbox-overlay img {
-    max-width: 95vw;
-    max-height: 90vh;
-    border-radius: 8px;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
-}
-.lightbox-caption {
-    position: fixed;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    color: #fff;
-    font-size: 0.9em;
-    background: rgba(0,0,0,0.6);
-    padding: 6px 16px;
-    border-radius: 20px;
-}
-.lightbox-close {
-    position: fixed;
-    top: 20px;
-    right: 24px;
-    color: #fff;
-    font-size: 2em;
-    cursor: pointer;
-    z-index: 10000;
-    line-height: 1;
-}
-
-/* Code Blocks */
-.code-block {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 12px 16px;
-    font-family: var(--mono);
-    font-size: 0.83em;
-    color: var(--green);
-    overflow-x: auto;
-    cursor: pointer;
-    transition: border-color 0.2s;
-    margin-bottom: 8px;
-    position: relative;
-    word-break: break-all;
-    white-space: pre-wrap;
-}
-.code-block:hover { border-color: var(--accent); }
-.code-block .copy-hint {
-    position: absolute;
-    top: 6px;
-    right: 10px;
-    font-size: 0.75em;
-    color: var(--text-muted);
-    font-family: inherit;
-}
-.code-label {
-    font-size: 0.78em;
-    color: var(--text-muted);
-    margin: -4px 0 12px;
-}
-
-/* Tables */
-.detail-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.85em;
-    margin-bottom: 16px;
-}
-.detail-table th {
-    text-align: left;
-    padding: 8px 12px;
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
-    font-weight: 600;
-    border-bottom: 1px solid var(--border);
-}
-.detail-table td {
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
-    color: var(--text-secondary);
-}
-.detail-table tr:hover td { background: var(--bg-card-hover); }
-.detail-table .mono { font-family: var(--mono); font-size: 0.92em; color: var(--accent); }
-.detail-table .highlight { color: var(--purple); font-weight: 600; }
-
-/* Variant table (model detail) */
-.variant-table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
-.variant-table th {
-    text-align: left;
-    padding: 10px 12px;
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
-    font-weight: 600;
-    border-bottom: 1px solid var(--border);
-}
-.variant-table td {
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--border);
-    color: var(--text-secondary);
-}
-.variant-table tr:hover td { background: var(--bg-card-hover); }
-.variant-cmd-cell {
-    font-family: var(--mono);
-    font-size: 0.85em;
-    color: var(--green);
-    cursor: pointer;
-    max-width: 400px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.variant-cmd-cell:hover { color: var(--accent); }
-
-/* Quick Start Cards */
-.quickstart-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-    gap: 16px;
-    margin: 20px 0;
-}
-.qs-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px;
-    transition: border-color 0.2s;
-}
-.qs-card:hover { border-color: var(--border-hover); }
-.qs-card h4 { font-size: 1em; margin-bottom: 6px; color: var(--text-primary); }
-.qs-card p { font-size: 0.82em; color: var(--text-secondary); margin-bottom: 12px; }
-.qs-card .cmd {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 10px 14px;
-    font-family: var(--mono);
-    font-size: 0.8em;
-    color: var(--green);
-    cursor: pointer;
-    overflow-x: auto;
-    white-space: pre-wrap;
-    word-break: break-all;
-    transition: border-color 0.2s;
-}
-.qs-card .cmd:hover { border-color: var(--accent); }
-
-/* Related links */
-.related-links {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-top: 12px;
-}
-.related-link {
-    padding: 6px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
-    text-decoration: none;
-    font-size: 0.82em;
-    transition: all 0.2s;
-    cursor: pointer;
-}
-.related-link:hover { border-color: var(--accent); color: var(--accent); }
-
-/* Testimonials */
-.testimonials-section { margin-top: 8px; }
-.testimonial-card {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
-    border-radius: var(--radius-sm);
-    padding: 14px 18px;
-    margin-bottom: 12px;
-    font-size: 0.85em;
-}
-.testimonial-card .quote {
-    color: var(--text-primary);
-    font-style: italic;
-    line-height: 1.5;
-    margin-bottom: 8px;
-}
-.testimonial-card .source {
-    color: var(--text-muted);
-    font-size: 0.88em;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-.testimonial-card .source .date { color: var(--yellow); font-weight: 500; }
-.testimonial-card .source a {
-    color: var(--accent);
-    text-decoration: none;
-    font-size: 0.9em;
-}
-.testimonial-card .source a:hover { text-decoration: underline; }
-
-/* Model Paths */
-.paths-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 12px;
-    margin-top: 12px;
-}
-.path-card {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 14px;
-}
-.path-card h4 {
-    font-size: 0.88em;
-    color: var(--accent);
-    margin-bottom: 6px;
-}
-.path-card code {
-    font-family: var(--mono);
-    font-size: 0.82em;
-    color: var(--green);
-    background: var(--bg-card);
-    padding: 2px 6px;
-    border-radius: 3px;
-}
-.path-card p {
-    font-size: 0.8em;
-    color: var(--text-secondary);
-    margin-top: 4px;
-}
-.download-btn {
-    display: inline-block;
-    padding: 8px 16px;
-    background: var(--accent);
-    color: #fff;
-    border-radius: var(--radius-sm);
-    text-decoration: none;
-    font-size: 0.85em;
-    font-weight: 600;
-    margin: 8px 0;
-    transition: opacity 0.2s;
-}
-.download-btn:hover { opacity: 0.85; }
-.download-btn-sm {
-    display: inline-block;
-    padding: 4px 10px;
-    background: var(--accent-dim);
-    color: var(--accent);
-    border-radius: 4px;
-    text-decoration: none;
-    font-size: 0.75em;
-    font-weight: 600;
-    transition: background 0.2s;
-}
-.download-btn-sm:hover { background: var(--accent); color: #fff; }
-.dl-available::before { content: '\2713 '; }
-.dl-missing { opacity: 0.5; border: 1px dashed var(--text-muted) !important; }
-.dl-missing::before { content: '\2717 '; }
-.dl-missing-msg {
-    margin-top: 8px;
-    padding: 8px 12px;
-    background: var(--yellow-dim);
-    border-left: 3px solid var(--yellow);
-    border-radius: 4px;
-    font-size: 0.78em;
-    color: var(--text-secondary);
-    animation: fadeIn 0.2s;
-}
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-/* Toast */
-.copied-toast {
-    position: fixed;
-    bottom: 30px;
-    right: 30px;
-    background: var(--green);
-    color: #000;
-    padding: 10px 20px;
-    border-radius: var(--radius);
-    font-weight: 600;
-    font-size: 0.85em;
-    opacity: 0;
-    transform: translateY(10px);
-    transition: all 0.3s;
-    pointer-events: none;
-    z-index: 1000;
-}
-.copied-toast.show { opacity: 1; transform: translateY(0); }
-
-/* Footer */
-.site-footer {
-    padding: 36px 20px;
-    color: var(--text-muted);
-    font-size: 0.8em;
-    border-top: 1px solid var(--border);
-    margin-top: 40px;
-}
-.footer-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 24px;
-    max-width: 1200px;
-    margin: 0 auto 24px auto;
-}
-.footer-col h4 { color: var(--text-secondary); font-size: 1em; margin-bottom: 8px; font-weight: 600; }
-.footer-col a { display: block; color: var(--text-muted); text-decoration: none; padding: 2px 0; font-size: 0.95em; }
-.footer-col a:hover { color: var(--accent); }
-.footer-note { text-align: center; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
-
-/* Responsive */
-@media (max-width: 900px) {
-    .top-nav { padding: 0 12px; gap: 12px; }
-}
-@media (max-width: 768px) {
-    body { padding-top: 56px; }
-    .top-nav { height: 56px; }
-    .container { padding: 12px; }
-    .hero h1 { font-size: 2em; }
-    .cards-grid { grid-template-columns: 1fr; }
-    .quickstart-grid { grid-template-columns: 1fr; }
-    .nav-links { gap: 2px; padding: 2px; }
-    .nav-link { padding: 5px 10px; font-size: 0.78em; }
-    .detail-header { flex-direction: column; gap: 12px; }
-    .detail-table { font-size: 0.78em; }
-    .detail-table th, .detail-table td { padding: 6px 8px; }
-}
-@media (max-width: 480px) {
-    .nav-links { display: none; }
-}
-
-a.card, a.nav-logo, a.nav-link, a.related-link {
-    text-decoration: none;
-    color: inherit;
-}
-
-/* Disk Space Bar */
-.nav-disk {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.75em;
-    color: var(--text-muted);
-    white-space: nowrap;
-}
-.nav-disk-bar {
-    width: 80px;
-    height: 4px;
-    background: var(--bg-tertiary);
-    border-radius: 2px;
-    overflow: hidden;
-}
-.nav-disk-fill {
-    height: 100%;
-    background: var(--green);
-    border-radius: 3px;
-    transition: width 0.3s;
-}
-.nav-disk-fill.warn { background: var(--yellow); }
-.nav-disk-fill.critical { background: var(--red); }
-
-/* Download Progress Panel */
-.dl-panel {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    width: 340px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    z-index: 9999;
-    overflow: hidden;
-    display: none;
-}
-.dl-panel.visible { display: block; }
-.dl-panel.success { border-color: var(--green); animation: flash-green 1s; }
-@keyframes flash-green {
-    0%, 100% { box-shadow: var(--shadow); }
-    50% { box-shadow: 0 0 20px rgba(74,222,128,0.3); }
-}
-.dl-panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--border);
-    font-size: 0.85em;
-    font-weight: 600;
-}
-.dl-panel-body { padding: 12px 14px; }
-.dl-item {
-    margin-bottom: 10px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--border);
-}
-.dl-item:last-child { margin-bottom: 0; border-bottom: none; }
-.dl-item-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 6px;
-    font-size: 0.82em;
-}
-.dl-item-type { font-weight: 600; text-transform: capitalize; }
-.dl-progress-bar {
-    width: 100%;
-    height: 4px;
-    background: var(--bg-tertiary);
-    border-radius: 2px;
-    overflow: hidden;
-    margin-bottom: 4px;
-}
-.dl-progress-fill {
-    height: 100%;
-    background: var(--accent);
-    border-radius: 2px;
-    transition: width 0.3s;
-}
-.dl-item-line {
-    font-size: 0.72em;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.dl-cancel-btn {
-    background: none;
-    border: none;
-    color: var(--red);
-    cursor: pointer;
-    font-size: 0.75em;
-    padding: 2px 6px;
-}
-.dl-cancel-btn:hover { text-decoration: underline; }
-
-/* Download Action Button */
-.dl-action-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    font-size: 0.85em;
-    font-weight: 600;
-    transition: opacity 0.2s;
-}
-.dl-action-btn:hover { opacity: 0.85; }
-.dl-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.dl-action-btn.secondary {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    color: var(--text-primary);
-}
-
-/* Install Button Spinner */
-.dl-action-btn .spinner {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    border: 2px solid rgba(255,255,255,0.3);
-    border-top-color: #fff;
-    border-radius: 50%;
-    animation: dl-spin 0.6s linear infinite;
-}
-@keyframes dl-spin { to { transform: rotate(360deg); } }
-
-/* Last Updated Label */
-.last-updated {
-    font-size: 0.7em;
-    color: var(--text-muted);
-    display: block;
-    margin-top: 2px;
-}
-
-@media (max-width: 768px) {
-    .nav-disk { display: none; }
-    .dl-panel { width: calc(100% - 24px); right: 12px; bottom: 12px; }
-}
-</style>
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<a href="#main-content" class="skip-link">Skip to main content</a>
 
 <div id="app-root"></div>
 <div class="copied-toast" id="copiedToast">Copied to clipboard!</div>
+<button class="scroll-top" id="scrollTopBtn" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Scroll to top" title="Back to top">&#x2191;</button>
 
 <script>
 // =============================================================================
@@ -1010,6 +58,36 @@ const PLATFORMS = {
 
 let currentPlatform = localStorage.getItem('ark-platform') || 'jetson';
 if (!PLATFORMS[currentPlatform]) currentPlatform = 'jetson';
+
+// =============================================================================
+// GLOSSARY - Technical terms explained for beginners
+// =============================================================================
+const GLOSSARY = {
+    'LLM': 'Large Language Model - AI that understands and generates text, like ChatGPT.',
+    'GGUF': 'A file format for AI models that\'s efficient and portable. Think of it like MP3 for AI.',
+    'quantization': 'Compressing an AI model to use less memory while keeping most of its quality. Like JPEG compression for images.',
+    'VRAM': 'Video RAM - memory on your graphics card. AI models run faster when loaded into VRAM.',
+    'tokens': 'Units of text (roughly 4 characters or 3/4 of a word). AI models process text as tokens.',
+    'context': 'How much text an AI can "remember" in a conversation. Measured in tokens (e.g., 4K = ~3000 words).',
+    'inference': 'When an AI model generates a response. The actual "thinking" process.',
+    'GPU': 'Graphics Processing Unit - makes AI run 10-50x faster than CPU alone.',
+    'CUDA': 'NVIDIA\'s technology for running calculations on their GPUs.',
+    'Metal': 'Apple\'s technology for running calculations on M-series Mac GPUs.',
+    'embedding': 'Converting text into numbers that capture its meaning. Used for search and similarity.',
+    'TTS': 'Text-to-Speech - converting written text into spoken audio.',
+    'STT': 'Speech-to-Text - converting spoken audio into written text. Also called transcription.',
+    'ONNX': 'A universal format for AI models that works across different frameworks.',
+    'ZIM': 'A compressed file format for offline content like Wikipedia.',
+    'API': 'Application Programming Interface - a way for programs to talk to each other.',
+    'CLI': 'Command Line Interface - a text-based way to control software by typing commands.'
+};
+
+// Helper to wrap terms in glossary tooltips
+function glossary(term, text) {
+    const def = GLOSSARY[term];
+    if (!def) return text || term;
+    return `<span class="glossary-term" tabindex="0">${text || term}<span class="tooltip">${esc(def)}</span></span>`;
+}
 
 // =============================================================================
 // TOOL CATEGORIES
@@ -3724,24 +2802,73 @@ function esc(str) {
     return div.innerHTML;
 }
 
+function toggleMobileNav(hamburger) {
+    hamburger.classList.toggle('open');
+    const navLinks = document.querySelector('.nav-links');
+    navLinks.classList.toggle('mobile-open');
+}
+
+function closeMobileNav() {
+    const hamburger = document.querySelector('.nav-hamburger');
+    const navLinks = document.querySelector('.nav-links');
+    if (hamburger) hamburger.classList.remove('open');
+    if (navLinks) navLinks.classList.remove('mobile-open');
+}
+
+// Theme toggle (dark/light mode)
+function toggleTheme() {
+    const html = document.documentElement;
+    const current = html.getAttribute('data-theme');
+    const newTheme = current === 'light' ? null : 'light';
+    if (newTheme) {
+        html.setAttribute('data-theme', 'light');
+        localStorage.setItem('ark-theme', 'light');
+    } else {
+        html.removeAttribute('data-theme');
+        localStorage.setItem('ark-theme', 'dark');
+    }
+}
+
+// Apply saved theme on load
+(function() {
+    const saved = localStorage.getItem('ark-theme');
+    if (saved === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+    }
+})();
+
 function copyText(el) {
     let text = el.textContent || el.innerText;
-    text = text.replace(/click to copy/gi, '').replace(/\bcopy\b/gi, '').trim();
-    navigator.clipboard.writeText(text).then(showToast).catch(() => {
+    text = text.replace(/click to copy/gi, '').replace(/\bcopy\b/gi, '').replace(/\bcopied!\b/gi, '').trim();
+    const doCopy = () => {
+        // Visual feedback: flash the element
+        el.classList.add('copied-flash');
+        setTimeout(() => el.classList.remove('copied-flash'), 600);
+        // Update hint text temporarily
+        const hint = el.querySelector('.copy-hint');
+        if (hint) {
+            const orig = hint.textContent;
+            hint.textContent = 'Copied!';
+            hint.classList.add('copied');
+            setTimeout(() => { hint.textContent = orig; hint.classList.remove('copied'); }, 1500);
+        }
+        showToast();
+    };
+    navigator.clipboard.writeText(text).then(doCopy).catch(() => {
         const ta = document.createElement('textarea');
         ta.value = text;
         document.body.appendChild(ta);
         ta.select();
         document.execCommand('copy');
         document.body.removeChild(ta);
-        showToast();
+        doCopy();
     });
 }
 
 function showToast() {
     const toast = document.getElementById('copiedToast');
     toast.classList.add('show');
-    setTimeout(() => toast.classList.remove('show'), 1500);
+    setTimeout(() => toast.classList.remove('show'), 2000);
 }
 
 function openLightbox(src, caption) {
@@ -3759,14 +2886,97 @@ function openLightbox(src, caption) {
     lb.classList.add('active');
 }
 document.addEventListener('keydown', e => {
+    // Escape: Close modals, lightbox, or clear search
     if (e.key === 'Escape') {
+        // Close keyboard help modal
+        const kbModal = document.getElementById('keyboardHelpModal');
+        if (kbModal && kbModal.classList.contains('visible')) {
+            kbModal.classList.remove('visible');
+            return;
+        }
+        // Close lightbox
         const lb = document.getElementById('lightboxOverlay');
-        if (lb) lb.classList.remove('active');
+        if (lb && lb.classList.contains('active')) {
+            lb.classList.remove('active');
+            return;
+        }
+        // Clear search if active
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput && searchInput.value) {
+            clearSearch();
+            return;
+        }
+        // Close mobile nav if open
+        const navLinks = document.querySelector('.nav-links.mobile-open');
+        if (navLinks) {
+            navLinks.classList.remove('mobile-open');
+            const hamburger = document.querySelector('.nav-hamburger');
+            if (hamburger) hamburger.classList.remove('open');
+        }
+    }
+    // Slash key: Focus search (like GitHub)
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
+        e.preventDefault();
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) searchInput.focus();
+    }
+    // Question mark: Show keyboard shortcuts modal
+    if (e.key === '?' && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
+        toggleKeyboardHelp();
+    }
+});
+// Enter in search: Navigate to first visible result
+document.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+        const searchInput = document.getElementById('searchInput');
+        if (document.activeElement === searchInput && searchInput.value) {
+            const firstCard = document.querySelector('.card:not([style*="display: none"])');
+            if (firstCard && firstCard.href) {
+                window.location.hash = firstCard.getAttribute('href').replace('#', '');
+            }
+        }
+    }
+});
+
+// Scroll-to-top button visibility
+let scrollTopBtn = null;
+window.addEventListener('scroll', () => {
+    if (!scrollTopBtn) scrollTopBtn = document.getElementById('scrollTopBtn');
+    if (scrollTopBtn) {
+        scrollTopBtn.classList.toggle('visible', window.scrollY > 500);
     }
 });
 
 function navigate(hash) {
     window.location.hash = hash;
+}
+
+// Keyboard shortcuts help modal
+function toggleKeyboardHelp() {
+    let modal = document.getElementById('keyboardHelpModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'keyboardHelpModal';
+        modal.className = 'keyboard-help-modal';
+        modal.innerHTML = `
+            <div class="keyboard-help-content">
+                <div class="keyboard-help-header">
+                    <h3>Keyboard Shortcuts</h3>
+                    <button class="keyboard-help-close" onclick="toggleKeyboardHelp()">&times;</button>
+                </div>
+                <div class="keyboard-help-body">
+                    <div class="shortcut-row"><kbd>/</kbd><span>Focus search</span></div>
+                    <div class="shortcut-row"><kbd>Esc</kbd><span>Clear search / Close modal</span></div>
+                    <div class="shortcut-row"><kbd>Enter</kbd><span>Go to first search result</span></div>
+                    <div class="shortcut-row"><kbd>?</kbd><span>Show this help</span></div>
+                </div>
+                <div class="keyboard-help-footer">Press <kbd>Esc</kbd> or <kbd>?</kbd> to close</div>
+            </div>
+        `;
+        modal.addEventListener('click', e => { if (e.target === modal) toggleKeyboardHelp(); });
+        document.body.appendChild(modal);
+    }
+    modal.classList.toggle('visible');
 }
 
 // Download link handler - checks file exists before downloading
@@ -3912,6 +3122,8 @@ function router() {
         html += renderContentDetail(contentId);
     } else if (route === '/quickstart') {
         html += renderQuickStart();
+    } else if (route === '/glossary') {
+        html += renderGlossary();
     } else {
         html += renderHome();
     }
@@ -3946,14 +3158,21 @@ function renderNav(route) {
     return `
     <nav class="top-nav">
         <a href="#/" class="nav-logo">Val Ark</a>
+        <div class="nav-hamburger" onclick="toggleMobileNav(this)" aria-label="Toggle menu">
+            <span></span><span></span><span></span>
+        </div>
         <div class="nav-links">
-            <a href="#/" class="nav-link ${activeSection === 'home' ? 'active' : ''}">Home</a>
-            <a href="#/tools" class="nav-link ${activeSection === 'tools' ? 'active' : ''}">Software</a>
-            <a href="#/models" class="nav-link ${activeSection === 'models' ? 'active' : ''}">Models</a>
-            <a href="#/content" class="nav-link ${activeSection === 'content' ? 'active' : ''}">Content</a>
-            <a href="#/quickstart" class="nav-link ${activeSection === 'quickstart' ? 'active' : ''}">Getting Started</a>
+            <a href="#/" class="nav-link ${activeSection === 'home' ? 'active' : ''}" onclick="closeMobileNav()">Home</a>
+            <a href="#/tools" class="nav-link ${activeSection === 'tools' ? 'active' : ''}" onclick="closeMobileNav()">Software</a>
+            <a href="#/models" class="nav-link ${activeSection === 'models' ? 'active' : ''}" onclick="closeMobileNav()">Models</a>
+            <a href="#/content" class="nav-link ${activeSection === 'content' ? 'active' : ''}" onclick="closeMobileNav()">Wikipedia</a>
+            <a href="#/quickstart" class="nav-link ${activeSection === 'quickstart' ? 'active' : ''}" onclick="closeMobileNav()">Getting Started</a>
         </div>
         <div class="nav-disk" id="nav-disk">${renderDiskBar()}</div>
+        <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme" title="Toggle light/dark theme">
+            <span class="icon-sun">&#x2600;</span>
+            <span class="icon-moon">&#x263D;</span>
+        </button>
     </nav>`;
 }
 
@@ -4013,26 +3232,33 @@ function renderHome() {
     const totalModels = MODEL_FAMILIES.reduce((s, f) => s + f.variants.length, 0);
     const totalStorage = STORAGE_DATA.reduce((s, d) => s + d.size, 0);
 
-    let html = '<div class="container">';
+    let html = '<div class="container" id="main-content">';
 
     // Hero
     html += `
     <div class="hero">
         <h1>Val Ark</h1>
         <p class="subtitle">Complete Offline Software Toolkit</p>
+        <p class="hero-intro">Run AI chatbots, generate images, transcribe audio, and access Wikipedia — all running locally on your computer, no internet required. Perfect for privacy, remote locations, or unreliable connections.</p>
         <p class="stats">${totalModels}+ Models | ${TOOLS.length} Tools | ${Object.keys(PLATFORMS).length} Platforms | ~${totalStorage} GB</p>
+        <div class="hero-actions">
+            <a href="#/quickstart" class="btn btn-primary">New Here? Start Guide</a>
+            <a href="#/content" class="btn btn-secondary">Just Want Wikipedia?</a>
+        </div>
     </div>`;
 
     // Search
     html += `
     <div class="search-bar">
         <span class="search-icon">&#x1F50D;</span>
-        <input type="text" id="searchInput" placeholder="Search models, tools, formats...">
-    </div>`;
+        <input type="text" id="searchInput" placeholder="Search models, tools, formats..." aria-label="Search tools and models">
+        <button class="search-clear" id="searchClear" onclick="clearSearch()" aria-label="Clear search" style="display:none">&times;</button>
+    </div>
+    <div id="searchStatus" class="search-status" style="display:none"></div>`;
 
     // Wikipedia/Content browse banner (when Kiwix is serving)
     if (_kiwixStatus && _kiwixStatus.running) {
-        const kUrl = _kiwixStatus.url || `http://localhost:${_kiwixStatus.port}`;
+        const kUrl = getKiwixUrl();
         html += `<div class="kiwix-banner" style="margin-bottom:2rem">
             <div class="kiwix-banner-content">
                 <div class="kiwix-banner-icon">W</div>
@@ -4068,7 +3294,7 @@ function renderHome() {
         html += '<div class="cards-grid" id="toolCards-' + catId + '">';
         catTools.forEach(t => {
             const cardIcon = t.logo
-                ? `<img src="${t.logo}" alt="${esc(t.name)}" style="width:40px;height:40px;border-radius:8px;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="card-icon" style="background:${t.iconBg};display:none">${t.icon}</div>`
+                ? `<img src="${t.logo}" alt="${esc(t.name)}" loading="lazy" style="width:40px;height:40px;border-radius:8px;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="card-icon" style="background:${t.iconBg};display:none">${t.icon}</div>`
                 : `<div class="card-icon" style="background:${t.iconBg}">${t.icon}</div>`;
             const sizeTag = t.size ? `<span class="tag" style="background:var(--purple-dim);color:var(--purple);font-size:0.7em">${t.size}</span>` : '';
             html += `
@@ -4096,7 +3322,7 @@ function renderHome() {
         html += '<div class="cards-grid" id="modelCards-' + cat + '">';
         families.forEach(f => {
             const hasTopPick = f.topPick || f.variants.some(v => v.topPick);
-            const logoImg = f.logo ? `<img src="${f.logo}" alt="" style="width:28px;height:28px;border-radius:6px;object-fit:cover;margin-right:8px;vertical-align:middle" onerror="this.style.display='none'">` : '';
+            const logoImg = f.logo ? `<img src="${f.logo}" alt="" loading="lazy" style="width:28px;height:28px;border-radius:6px;object-fit:cover;margin-right:8px;vertical-align:middle" onerror="this.style.display='none'">` : '';
             const topVariant = f.variants.find(v => v.topPick) || f.variants[0];
             html += `
             <a href="#/models/${f.slug}" class="card" data-search="${esc(f.family + ' ' + f.desc + ' ' + f.format + ' ' + f.tool + ' ' + f.variants.map(v=>v.name+' '+v.note).join(' '))}">
@@ -4118,10 +3344,42 @@ function renderHome() {
 }
 
 function filterCards(term) {
+    let visibleCount = 0;
+    let totalCount = 0;
     document.querySelectorAll('.card').forEach(card => {
+        totalCount++;
         const searchData = (card.getAttribute('data-search') || '').toLowerCase();
-        card.style.display = (!term || searchData.includes(term)) ? '' : 'none';
+        const isMatch = !term || searchData.includes(term);
+        card.style.display = isMatch ? '' : 'none';
+        if (isMatch) visibleCount++;
     });
+
+    // Update search status and clear button
+    const clearBtn = document.getElementById('searchClear');
+    const statusEl = document.getElementById('searchStatus');
+    if (clearBtn) clearBtn.style.display = term ? 'block' : 'none';
+    if (statusEl) {
+        if (term) {
+            if (visibleCount === 0) {
+                statusEl.innerHTML = `<span class="search-no-results">No results for "<strong>${esc(term)}</strong>"</span> <span style="color:var(--text-muted)">Try: llama, whisper, image, voice</span>`;
+                statusEl.style.display = 'block';
+            } else {
+                statusEl.innerHTML = `Found <strong>${visibleCount}</strong> ${visibleCount === 1 ? 'item' : 'items'} matching "<strong>${esc(term)}</strong>"`;
+                statusEl.style.display = 'block';
+            }
+        } else {
+            statusEl.style.display = 'none';
+        }
+    }
+}
+
+function clearSearch() {
+    const input = document.getElementById('searchInput');
+    if (input) {
+        input.value = '';
+        input.focus();
+        filterCards('');
+    }
 }
 
 // =============================================================================
@@ -4130,18 +3388,18 @@ function filterCards(term) {
 let activeToolCategory = 'all';
 
 function renderToolsList() {
-    let html = '<div class="container">';
+    let html = '<div class="container" id="main-content">';
     html += renderBreadcrumb([{label: 'Tools & Software'}]);
     html += '<h1 style="font-size:1.6em;margin-bottom:12px">Tools & Software</h1>';
     html += '<p style="color:var(--text-secondary);margin-bottom:16px;font-size:0.9em">' + TOOLS.length + ' tools across ' + Object.keys(TOOL_CATEGORIES).length + ' categories</p>';
 
     // Category filter buttons
-    html += '<div class="category-filters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px">';
-    html += `<button class="cat-btn ${activeToolCategory === 'all' ? 'active' : ''}" onclick="activeToolCategory='all';router()">All (${TOOLS.length})</button>`;
+    html += '<div class="category-filters" role="group" aria-label="Filter by category" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px">';
+    html += `<button class="cat-btn ${activeToolCategory === 'all' ? 'active' : ''}" aria-pressed="${activeToolCategory === 'all'}" onclick="activeToolCategory='all';router()">All (${TOOLS.length})</button>`;
     Object.entries(TOOL_CATEGORIES).forEach(([catId, cat]) => {
         const count = TOOLS.filter(t => t.category === catId).length;
         if (count > 0) {
-            html += `<button class="cat-btn ${activeToolCategory === catId ? 'active' : ''}" onclick="activeToolCategory='${catId}';router()">${cat.label} (${count})</button>`;
+            html += `<button class="cat-btn ${activeToolCategory === catId ? 'active' : ''}" aria-pressed="${activeToolCategory === catId}" onclick="activeToolCategory='${catId}';router()">${cat.label} (${count})</button>`;
         }
     });
     html += '</div>';
@@ -4164,7 +3422,7 @@ function renderToolsList() {
         html += '<div class="cards-grid">';
         tools.forEach(t => {
             const cardIcon = t.logo
-                ? `<img src="${t.logo}" alt="${esc(t.name)}" style="width:40px;height:40px;border-radius:8px;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="card-icon" style="background:${t.iconBg};display:none">${t.icon}</div>`
+                ? `<img src="${t.logo}" alt="${esc(t.name)}" loading="lazy" style="width:40px;height:40px;border-radius:8px;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="card-icon" style="background:${t.iconBg};display:none">${t.icon}</div>`
                 : `<div class="card-icon" style="background:${t.iconBg}">${t.icon}</div>`;
             const sizeTag = t.size ? `<span class="tag" style="background:var(--purple-dim);color:var(--purple)">${t.size}</span>` : '';
             const meta = TOOL_META[t.id];
@@ -4196,12 +3454,12 @@ function renderToolDetail(toolId) {
     if (!tool) return '<div class="container"><h1>Tool not found</h1></div>';
     const d = tool.details || {};
 
-    let html = '<div class="container">';
+    let html = '<div class="container" id="main-content">';
     html += renderBreadcrumb([{label: 'Software', href: '#/tools'}, {label: tool.name}]);
 
     // Header
     const logoHtml = tool.logo
-        ? `<img src="${tool.logo}" alt="${esc(tool.name)}" style="width:56px;height:56px;border-radius:12px;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+        ? `<img src="${tool.logo}" alt="${esc(tool.name)}" loading="lazy" style="width:56px;height:56px;border-radius:12px;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
         : '';
     html += `<div class="detail-header">
         ${logoHtml}<div class="detail-icon" style="background:${tool.iconBg};${tool.logo ? 'display:none' : ''}">${tool.icon}</div>
@@ -4447,6 +3705,17 @@ function renderToolDetail(toolId) {
         html += '</div></div>';
     }
 
+    // Related tools in same category
+    const relatedTools = TOOLS.filter(t => t.category === tool.category && t.id !== toolId).slice(0, 6);
+    if (relatedTools.length) {
+        const catLabel = TOOL_CATEGORIES[tool.category]?.label || tool.category;
+        html += `<div class="detail-section"><h2>More ${catLabel} Tools</h2><div class="related-links">`;
+        relatedTools.forEach(t => {
+            html += `<a href="#/tools/${t.id}" class="related-link">${esc(t.name)}</a>`;
+        });
+        html += '</div></div>';
+    }
+
     html += '</div>';
     return html;
 }
@@ -4458,7 +3727,7 @@ function renderModelsList() {
     const categories = ['LLM', 'TTS', 'STT', 'Vision', 'ImageGen', 'NVIDIA'];
     const categoryLabels = {LLM:'Large Language Models', TTS:'Text-to-Speech', STT:'Speech-to-Text', Vision:'Vision Language Models', ImageGen:'Image Generation', NVIDIA:'NVIDIA Specialized'};
 
-    let html = '<div class="container">';
+    let html = '<div class="container" id="main-content">';
     html += renderBreadcrumb([{label: 'Models'}]);
 
     html += `<div class="search-bar">
@@ -4473,7 +3742,7 @@ function renderModelsList() {
         html += '<div class="cards-grid">';
         families.forEach(f => {
             const hasTopPick = f.topPick || f.variants.some(v => v.topPick);
-            const logoImg = f.logo ? `<img src="${f.logo}" alt="" style="width:28px;height:28px;border-radius:6px;object-fit:cover;margin-right:8px;vertical-align:middle" onerror="this.style.display='none'">` : '';
+            const logoImg = f.logo ? `<img src="${f.logo}" alt="" loading="lazy" style="width:28px;height:28px;border-radius:6px;object-fit:cover;margin-right:8px;vertical-align:middle" onerror="this.style.display='none'">` : '';
             const topVariant = f.variants.find(v => v.topPick) || f.variants[0];
             html += `
             <a href="#/models/${f.slug}" class="card" data-search="${esc(f.family + ' ' + f.desc + ' ' + f.format + ' ' + f.tool + ' ' + f.variants.map(v=>v.name+' '+(v.note||'')).join(' '))}">
@@ -4510,12 +3779,12 @@ function renderModelDetail(slug) {
                     TOOLS.find(t => t.name === family.tool) ||
                     TOOLS.find(t => family.tool.includes(t.id.replace('-', '.')));
 
-    let html = '<div class="container">';
+    let html = '<div class="container" id="main-content">';
     html += renderBreadcrumb([{label: 'Models', href: '#/models'}, {label: family.family}]);
 
     // Header
     const familyLogo = family.logo
-        ? `<img src="${family.logo}" alt="${esc(family.family)}" style="width:56px;height:56px;border-radius:12px;object-fit:cover" onerror="this.style.display='none'">`
+        ? `<img src="${family.logo}" alt="${esc(family.family)}" loading="lazy" style="width:56px;height:56px;border-radius:12px;object-fit:cover" onerror="this.style.display='none'">`
         : '';
     html += `<div class="detail-header">
         ${familyLogo}
@@ -4637,14 +3906,14 @@ function renderModelDetail(slug) {
 // CONTENT LIBRARY (ZIM files)
 // =============================================================================
 function renderContentLibrary() {
-    let html = '<div class="container">';
+    let html = '<div class="container" id="main-content">';
     html += renderBreadcrumb([{label: 'Content Library'}]);
     html += '<h1>Offline Content Library</h1>';
     html += '<p class="section-desc">Pre-downloaded knowledge bases served by <a href="#/tools/kiwix">Kiwix</a>. Browse Wikipedia, textbooks, and reference material from any device on your network — no internet required.</p>';
 
     // Show prominent "Browse" banner when Kiwix is running
     if (_kiwixStatus && _kiwixStatus.running) {
-        const kiwixUrl = _kiwixStatus.url || `http://localhost:${_kiwixStatus.port}`;
+        const kiwixUrl = getKiwixUrl();
         html += `<div class="kiwix-banner">
             <div class="kiwix-banner-content">
                 <div class="kiwix-banner-icon">W</div>
@@ -4681,7 +3950,7 @@ function renderContentLibrary() {
 
     // Serve instructions - simplified when Kiwix is already running
     if (_kiwixStatus && _kiwixStatus.running) {
-        const kUrl = _kiwixStatus.url || `http://localhost:${_kiwixStatus.port}`;
+        const kUrl = getKiwixUrl();
         html += `<div class="detail-section" style="margin-top:2rem">
             <h3>How to Browse</h3>
             <p>Content is being served automatically. Open the link below on any device connected to this network:</p>
@@ -4705,7 +3974,7 @@ function renderContentDetail(contentId) {
     const item = CONTENT_LIBRARY.find(c => c.id === contentId);
     if (!item) return '<div class="container"><h1>Content not found</h1></div>';
 
-    let html = '<div class="container">';
+    let html = '<div class="container" id="main-content">';
     html += renderBreadcrumb([
         {label: 'Content', href: '#/content'},
         {label: item.name}
@@ -4796,10 +4065,86 @@ async function checkContentStatus() {
 function renderQuickStart() {
     const p = PLATFORMS[currentPlatform];
     const s = p.sep;
-    let html = '<div class="container">';
+    let html = '<div class="container" id="main-content">';
     html += renderBreadcrumb([{label: 'Getting Started'}]);
     html += `<h1 style="font-size:1.6em;margin-bottom:8px">Getting Started</h1>`;
     html += `<p style="color:var(--text-secondary);font-size:0.9em;margin-bottom:24px">Download Val Ark, pick your platform, and start using AI tools offline.</p>`;
+
+    // ─── Beginner Wizard: What do you want to do? ───────────────────────────────
+    html += `<div class="detail-section" style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:24px">
+        <h2 style="margin-bottom:12px">What do you want to do?</h2>
+        <p style="color:var(--text-secondary);font-size:0.9em;margin-bottom:16px">Click an option below to jump to the relevant guide:</p>
+        <div class="goal-cards">
+            <a href="#/tools/llama-cpp" class="goal-card">
+                <span class="goal-icon">💬</span>
+                <h4>Chat with AI</h4>
+                <p>Run a local chatbot like ChatGPT</p>
+            </a>
+            <a href="#/tools/whisper-cpp" class="goal-card">
+                <span class="goal-icon">🎙️</span>
+                <h4>Transcribe Audio</h4>
+                <p>Convert speech to text</p>
+            </a>
+            <a href="#/tools/sd-cpp" class="goal-card">
+                <span class="goal-icon">🎨</span>
+                <h4>Generate Images</h4>
+                <p>Create AI art from text prompts</p>
+            </a>
+            <a href="#/content" class="goal-card">
+                <span class="goal-icon">📚</span>
+                <h4>Browse Wikipedia</h4>
+                <p>Full offline Wikipedia access</p>
+            </a>
+            <a href="#/tools" class="goal-card">
+                <span class="goal-icon">🛠️</span>
+                <h4>Explore All Tools</h4>
+                <p>See everything available</p>
+            </a>
+        </div>
+    </div>`;
+
+    // ─── Beginner: Terminal Introduction ────────────────────────────────────────
+    html += `<details style="margin-bottom:24px">
+        <summary style="cursor:pointer;color:var(--accent);font-weight:600;font-size:1.05em;padding:12px;background:var(--bg-card);border-radius:var(--radius-sm)">🆕 Complete Beginner? Start Here</summary>
+        <div style="padding:16px;background:var(--bg-tertiary);border-radius:0 0 var(--radius-sm) var(--radius-sm);border:1px solid var(--border);border-top:none">
+            <h3 style="margin-bottom:12px">What is a Terminal?</h3>
+            <p style="margin-bottom:12px;font-size:0.9em">A terminal (also called command line or console) is a text-based way to control your computer. Instead of clicking buttons, you type commands. It looks intimidating but is actually simpler once you learn a few basics.</p>
+
+            <h4 style="margin:16px 0 8px">How to Open a Terminal</h4>
+            <ul style="font-size:0.9em;padding-left:20px;color:var(--text-secondary)">
+                <li><strong>Windows:</strong> Press <kbd style="background:var(--bg-card);padding:2px 6px;border-radius:3px">Win</kbd> + <kbd style="background:var(--bg-card);padding:2px 6px;border-radius:3px">R</kbd>, type <code>cmd</code>, press Enter</li>
+                <li><strong>Mac:</strong> Press <kbd style="background:var(--bg-card);padding:2px 6px;border-radius:3px">Cmd</kbd> + <kbd style="background:var(--bg-card);padding:2px 6px;border-radius:3px">Space</kbd>, type "Terminal", press Enter</li>
+                <li><strong>Linux:</strong> Press <kbd style="background:var(--bg-card);padding:2px 6px;border-radius:3px">Ctrl</kbd> + <kbd style="background:var(--bg-card);padding:2px 6px;border-radius:3px">Alt</kbd> + <kbd style="background:var(--bg-card);padding:2px 6px;border-radius:3px">T</kbd></li>
+            </ul>
+
+            <h4 style="margin:16px 0 8px">Essential Commands</h4>
+            <table style="width:100%;font-size:0.85em;border-collapse:collapse">
+                <tr style="border-bottom:1px solid var(--border)">
+                    <td style="padding:8px"><code>cd folder</code></td>
+                    <td style="padding:8px;color:var(--text-secondary)">Go into a folder</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border)">
+                    <td style="padding:8px"><code>ls</code> or <code>dir</code></td>
+                    <td style="padding:8px;color:var(--text-secondary)">List files in current folder</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border)">
+                    <td style="padding:8px"><code>./start.sh</code></td>
+                    <td style="padding:8px;color:var(--text-secondary)">Run a script (on Mac/Linux)</td>
+                </tr>
+            </table>
+
+            <h4 style="margin:16px 0 8px">Hardware Requirements</h4>
+            <p style="font-size:0.9em;color:var(--text-secondary);margin-bottom:8px">To run AI models locally, you'll need:</p>
+            <ul style="font-size:0.85em;padding-left:20px;color:var(--text-secondary)">
+                <li><strong>Minimum:</strong> 8 GB RAM, any modern CPU (for small models)</li>
+                <li><strong>Recommended:</strong> 16+ GB RAM, NVIDIA GPU with 6+ GB VRAM</li>
+                <li><strong>Optimal:</strong> 32+ GB RAM, NVIDIA RTX 3080+ or Apple M2+</li>
+            </ul>
+            <p style="font-size:0.85em;color:var(--text-muted);margin-top:8px">Don't have a powerful GPU? Start with small models (1-3B parameters) that run well on CPU.</p>
+
+            <p style="margin-top:16px;font-size:0.9em"><a href="#/glossary" style="color:var(--accent)">📖 View Glossary</a> — Plain-English explanations of technical terms like LLM, GGUF, VRAM, and more.</p>
+        </div>
+    </details>`;
 
     // Step 1: Get Val Ark
     html += `<div class="detail-section">
@@ -4837,7 +4182,7 @@ function renderQuickStart() {
         <h2>4. Browse Wikipedia Offline</h2>
         <p style="margin-bottom:12px">Once the server is running, Wikipedia is available on any device connected to your network:</p>`;
     if (_kiwixStatus && _kiwixStatus.running) {
-        const kUrl = _kiwixStatus.url || `http://localhost:${_kiwixStatus.port}`;
+        const kUrl = getKiwixUrl();
         html += `<p><a href="${kUrl}" target="_blank" style="color:var(--accent);font-weight:600;font-size:1.1em">${kUrl}</a></p>
         <div class="code-label">Open this link on any phone, tablet, or computer on your WiFi</div>`;
     } else {
@@ -5077,6 +4422,53 @@ print(r.choices[0].message.content)</div>
 }
 
 // =============================================================================
+// GLOSSARY PAGE
+// =============================================================================
+function renderGlossary() {
+    let html = '<div class="container" id="main-content">';
+    html += renderBreadcrumb([{label: 'Glossary'}]);
+    html += `<h1 style="font-size:1.6em;margin-bottom:8px">AI & Tech Glossary</h1>`;
+    html += `<p style="color:var(--text-secondary);font-size:0.9em;margin-bottom:24px">Plain-English explanations of technical terms you'll encounter when using AI tools offline.</p>`;
+
+    // Group terms by category
+    const categories = {
+        'AI Models': ['LLM', 'GGUF', 'quantization', 'inference', 'embedding', 'context', 'tokens'],
+        'Hardware': ['GPU', 'VRAM', 'CUDA', 'Metal'],
+        'Speech & Media': ['TTS', 'STT', 'ONNX'],
+        'Technical': ['API', 'CLI', 'ZIM']
+    };
+
+    for (const [catName, terms] of Object.entries(categories)) {
+        html += `<div class="detail-section">
+            <h2 style="margin-bottom:16px">${esc(catName)}</h2>
+            <div style="display:grid;gap:12px">`;
+        for (const term of terms) {
+            const def = GLOSSARY[term];
+            if (def) {
+                html += `<div style="padding:16px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm)">
+                    <div style="font-weight:600;color:var(--accent);margin-bottom:6px;font-size:1.05em">${esc(term)}</div>
+                    <div style="color:var(--text-secondary);font-size:0.9em">${esc(def)}</div>
+                </div>`;
+            }
+        }
+        html += `</div></div>`;
+    }
+
+    // Related links
+    html += `<div class="detail-section">
+        <h2>Learn More</h2>
+        <div class="related-links">
+            <a href="#/quickstart" class="related-link">Getting Started Guide</a>
+            <a href="#/models" class="related-link">Browse AI Models</a>
+            <a href="#/tools" class="related-link">Browse Software</a>
+        </div>
+    </div>`;
+
+    html += '</div>';
+    return html;
+}
+
+// =============================================================================
 // OLLAMA PAGE
 // =============================================================================
 function renderOllama() {
@@ -5162,7 +4554,7 @@ function renderOllama() {
         {title: 'List Models', cmd: `curl http://localhost:11434/api/tags`},
     ];
 
-    let html = '<div class="container">';
+    let html = '<div class="container" id="main-content">';
     html += renderBreadcrumb([{label: 'Tools', href: '#/tools'}, {label: 'Ollama'}]);
 
     // Header
@@ -5342,6 +4734,15 @@ let _diskData = null;
 let _kiwixStatus = null; // {running, port, url, files}
 const _activeDownloads = new Map();
 
+// Get Kiwix URL using current page hostname (not localhost)
+function getKiwixUrl() {
+    if (!_kiwixStatus || !_kiwixStatus.running) return null;
+    // Use the hostname the user is currently accessing (Tailscale, WiFi IP, etc)
+    const host = window.location.hostname || 'localhost';
+    const port = _kiwixStatus.port || 8888;
+    return `http://${host}:${port}`;
+}
+
 // Debounced router: prevents multiple rapid full-page re-renders
 let _routerTimer = null;
 function scheduleRender() {
@@ -5502,7 +4903,7 @@ function renderProgressPanel() {
     }
 
     panel.classList.add('visible');
-    let html = '<div class="dl-panel-header"><span>Installations</span><span style="font-size:0.75em;color:var(--text-muted)">' + _activeDownloads.size + ' active</span></div>';
+    let html = '<div class="dl-panel-header"><span>Downloads</span><span style="font-size:0.75em;color:var(--text-muted)">' + _activeDownloads.size + ' active</span></div>';
     html += '<div class="dl-panel-body">';
     for (const [id, dl] of _activeDownloads) {
         const statusIcon = dl.status === 'complete' ? ' &#x2713;' :
@@ -5525,6 +4926,10 @@ window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', async () => {
     if (!window.location.hash) window.location.hash = '#/';
     router();
+
+    // Show loading indicator
+    const diskEl = document.getElementById('nav-disk');
+    if (diskEl) diskEl.innerHTML = '<span class="loading-indicator">Loading...</span>';
 
     // Try combined API first (single request, single re-render)
     const apiOk = await initFromAPI();

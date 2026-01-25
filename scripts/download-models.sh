@@ -848,12 +848,6 @@ download_image_gen_models() {
         "sd_xl_turbo_1.0_fp16.safetensors" \
         "${IMG_DIR}/sdxl-turbo"
 
-    # --- SD 3.5 Medium (new architecture, sd.cpp compatible) ---
-    log_info "=== SD 3.5 Medium ==="
-    hf_download_file "stabilityai/stable-diffusion-3.5-medium" \
-        "sd3.5_medium.safetensors" \
-        "${IMG_DIR}/sd3.5-medium"
-
     # --- Stable Diffusion XL Base ---
     log_info "=== SDXL Base ==="
     hf_download_file "stabilityai/stable-diffusion-xl-base-1.0" \

@@ -55,6 +55,33 @@ download_fd() {
     else
         log_error "Could not find fd x86_64-linux asset"
     fi
+
+    # macos-arm64
+    dest="${TOOLS_DIR}/macos-arm64/dev-cli"
+    ensure_dir "$dest"
+    url=$(github_asset_url "$repo" "$tag" "aarch64.*apple-darwin.*tar.gz")
+    if [ -n "$url" ]; then
+        local tmp_dir=$(mktemp -d)
+        download_and_extract "$url" "$tmp_dir" "fd macos-arm64" 1
+        find "$tmp_dir" -name "fd" -type f -exec cp {} "${dest}/fd" \; 2>/dev/null
+        chmod +x "${dest}/fd" 2>/dev/null
+        rm -rf "$tmp_dir"
+    else
+        log_error "Could not find fd aarch64-apple-darwin asset"
+    fi
+
+    # windows-x64
+    dest="${TOOLS_DIR}/windows-x64/dev-cli"
+    ensure_dir "$dest"
+    url=$(github_asset_url "$repo" "$tag" "x86_64.*windows.*zip")
+    if [ -n "$url" ]; then
+        local tmp_dir=$(mktemp -d)
+        download_and_extract "$url" "$tmp_dir" "fd windows-x64" 0
+        find "$tmp_dir" -name "fd.exe" -type f -exec cp {} "${dest}/fd.exe" \; 2>/dev/null
+        rm -rf "$tmp_dir"
+    else
+        log_error "Could not find fd x86_64-windows asset"
+    fi
 }
 
 download_rg() {
@@ -88,6 +115,33 @@ download_rg() {
         rm -rf "$tmp_dir"
     else
         log_error "Could not find ripgrep x86_64-linux asset"
+    fi
+
+    # macos-arm64
+    dest="${TOOLS_DIR}/macos-arm64/dev-cli"
+    ensure_dir "$dest"
+    url=$(github_asset_url "$repo" "$tag" "aarch64.*apple-darwin.*tar.gz")
+    if [ -n "$url" ]; then
+        local tmp_dir=$(mktemp -d)
+        download_and_extract "$url" "$tmp_dir" "ripgrep macos-arm64" 1
+        find "$tmp_dir" -name "rg" -type f -exec cp {} "${dest}/rg" \; 2>/dev/null
+        chmod +x "${dest}/rg" 2>/dev/null
+        rm -rf "$tmp_dir"
+    else
+        log_error "Could not find ripgrep aarch64-apple-darwin asset"
+    fi
+
+    # windows-x64
+    dest="${TOOLS_DIR}/windows-x64/dev-cli"
+    ensure_dir "$dest"
+    url=$(github_asset_url "$repo" "$tag" "x86_64.*windows.*zip")
+    if [ -n "$url" ]; then
+        local tmp_dir=$(mktemp -d)
+        download_and_extract "$url" "$tmp_dir" "ripgrep windows-x64" 0
+        find "$tmp_dir" -name "rg.exe" -type f -exec cp {} "${dest}/rg.exe" \; 2>/dev/null
+        rm -rf "$tmp_dir"
+    else
+        log_error "Could not find ripgrep x86_64-windows asset"
     fi
 }
 
@@ -123,6 +177,33 @@ download_bat() {
     else
         log_error "Could not find bat x86_64-linux asset"
     fi
+
+    # macos-arm64
+    dest="${TOOLS_DIR}/macos-arm64/dev-cli"
+    ensure_dir "$dest"
+    url=$(github_asset_url "$repo" "$tag" "aarch64.*apple-darwin.*tar.gz")
+    if [ -n "$url" ]; then
+        local tmp_dir=$(mktemp -d)
+        download_and_extract "$url" "$tmp_dir" "bat macos-arm64" 1
+        find "$tmp_dir" -name "bat" -type f -exec cp {} "${dest}/bat" \; 2>/dev/null
+        chmod +x "${dest}/bat" 2>/dev/null
+        rm -rf "$tmp_dir"
+    else
+        log_error "Could not find bat aarch64-apple-darwin asset"
+    fi
+
+    # windows-x64
+    dest="${TOOLS_DIR}/windows-x64/dev-cli"
+    ensure_dir "$dest"
+    url=$(github_asset_url "$repo" "$tag" "x86_64.*windows.*zip")
+    if [ -n "$url" ]; then
+        local tmp_dir=$(mktemp -d)
+        download_and_extract "$url" "$tmp_dir" "bat windows-x64" 0
+        find "$tmp_dir" -name "bat.exe" -type f -exec cp {} "${dest}/bat.exe" \; 2>/dev/null
+        rm -rf "$tmp_dir"
+    else
+        log_error "Could not find bat x86_64-windows asset"
+    fi
 }
 
 download_fzf() {
@@ -157,6 +238,33 @@ download_fzf() {
     else
         log_error "Could not find fzf linux_amd64 asset"
     fi
+
+    # macos-arm64
+    dest="${TOOLS_DIR}/macos-arm64/dev-cli"
+    ensure_dir "$dest"
+    url=$(github_asset_url "$repo" "$tag" "darwin_arm64.*tar.gz")
+    if [ -n "$url" ]; then
+        local tmp_dir=$(mktemp -d)
+        download_and_extract "$url" "$tmp_dir" "fzf macos-arm64" 0
+        find "$tmp_dir" -name "fzf" -type f -exec cp {} "${dest}/fzf" \; 2>/dev/null
+        chmod +x "${dest}/fzf" 2>/dev/null
+        rm -rf "$tmp_dir"
+    else
+        log_error "Could not find fzf darwin_arm64 asset"
+    fi
+
+    # windows-x64
+    dest="${TOOLS_DIR}/windows-x64/dev-cli"
+    ensure_dir "$dest"
+    url=$(github_asset_url "$repo" "$tag" "windows_amd64.*zip")
+    if [ -n "$url" ]; then
+        local tmp_dir=$(mktemp -d)
+        download_and_extract "$url" "$tmp_dir" "fzf windows-x64" 0
+        find "$tmp_dir" -name "fzf.exe" -type f -exec cp {} "${dest}/fzf.exe" \; 2>/dev/null
+        rm -rf "$tmp_dir"
+    else
+        log_error "Could not find fzf windows_amd64 asset"
+    fi
 }
 
 download_jq() {
@@ -176,6 +284,19 @@ download_jq() {
     url="https://github.com/jqlang/jq/releases/download/${tag}/jq-linux-amd64"
     download_file "$url" "${dest}/jq" "jq linux-x86_64"
     chmod +x "${dest}/jq" 2>/dev/null
+
+    # macos-arm64
+    dest="${TOOLS_DIR}/macos-arm64/dev-cli"
+    ensure_dir "$dest"
+    url="https://github.com/jqlang/jq/releases/download/${tag}/jq-macos-arm64"
+    download_file "$url" "${dest}/jq" "jq macos-arm64"
+    chmod +x "${dest}/jq" 2>/dev/null
+
+    # windows-x64
+    dest="${TOOLS_DIR}/windows-x64/dev-cli"
+    ensure_dir "$dest"
+    url="https://github.com/jqlang/jq/releases/download/${tag}/jq-windows-amd64.exe"
+    download_file "$url" "${dest}/jq.exe" "jq windows-x64"
 }
 
 download_lazygit() {
@@ -209,6 +330,33 @@ download_lazygit() {
         rm -rf "$tmp_dir"
     else
         log_error "Could not find lazygit Linux_x86_64 asset"
+    fi
+
+    # macos-arm64
+    dest="${TOOLS_DIR}/macos-arm64/dev-cli"
+    ensure_dir "$dest"
+    url=$(github_asset_url "$repo" "$tag" "Darwin_arm64.*tar.gz")
+    if [ -n "$url" ]; then
+        local tmp_dir=$(mktemp -d)
+        download_and_extract "$url" "$tmp_dir" "lazygit macos-arm64" 0
+        find "$tmp_dir" -name "lazygit" -type f -exec cp {} "${dest}/lazygit" \; 2>/dev/null
+        chmod +x "${dest}/lazygit" 2>/dev/null
+        rm -rf "$tmp_dir"
+    else
+        log_error "Could not find lazygit Darwin_arm64 asset"
+    fi
+
+    # windows-x64
+    dest="${TOOLS_DIR}/windows-x64/dev-cli"
+    ensure_dir "$dest"
+    url=$(github_asset_url "$repo" "$tag" "Windows_x86_64.*zip")
+    if [ -n "$url" ]; then
+        local tmp_dir=$(mktemp -d)
+        download_and_extract "$url" "$tmp_dir" "lazygit windows-x64" 0
+        find "$tmp_dir" -name "lazygit.exe" -type f -exec cp {} "${dest}/lazygit.exe" \; 2>/dev/null
+        rm -rf "$tmp_dir"
+    else
+        log_error "Could not find lazygit Windows_x86_64 asset"
     fi
 }
 

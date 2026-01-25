@@ -1108,10 +1108,10 @@ const TOOLS = [
             source: 'https://github.com/ggml-org/whisper.cpp',
             releases: 'https://github.com/ggml-org/whisper.cpp/releases',
             binaries: {
-                'ubuntu': 'tools/linux-x86_64/whisper-cli',
-                'jetson': 'tools/linux-arm64/whisper-cli',
-                'mac': 'tools/macos-arm64/whisper-cli',
-                'windows': 'tools/windows-x64/whisper-cli.exe'
+                'ubuntu': 'tools/linux-x86_64/whisper-cpp/',
+                'jetson': 'tools/linux-arm64/whisper-cpp/',
+                'mac': 'tools/macos-arm64/whisper-cpp/',
+                'windows': 'tools/windows-x64/whisper-cpp/'
             }
         },
         details: {
@@ -1278,10 +1278,10 @@ const TOOLS = [
             source: 'https://github.com/FFmpeg/FFmpeg',
             releases: 'https://github.com/BtbN/FFmpeg-Builds/releases',
             binaries: {
-                'ubuntu': 'tools/linux-x86_64/ffmpeg',
-                'jetson': 'tools/linux-arm64/ffmpeg',
-                'mac': 'tools/macos-arm64/ffmpeg',
-                'windows': 'tools/windows-x64/ffmpeg.exe'
+                'ubuntu': 'tools/linux-x86_64/ffmpeg/',
+                'jetson': 'tools/linux-arm64/ffmpeg/',
+                'mac': 'tools/macos-arm64/ffmpeg/',
+                'windows': 'tools/windows-x64/ffmpeg/'
             }
         },
         details: {
@@ -1526,9 +1526,9 @@ const TOOLS = [
             source: 'https://github.com/blender/blender',
             releases: 'https://www.blender.org/download/',
             binaries: {
-                'ubuntu': 'tools/linux-x86_64/blender/blender',
-                'mac': 'tools/macos-arm64/Blender.app',
-                'windows': 'tools/windows-x64/blender/blender.exe'
+                'ubuntu': 'tools/linux-x86_64/blender/',
+                'mac': 'tools/macos-arm64/blender/',
+                'windows': 'tools/windows-x64/blender/'
             }
         },
         details: {
@@ -1567,9 +1567,9 @@ const TOOLS = [
             source: 'https://github.com/FreeCAD/FreeCAD',
             releases: 'https://github.com/FreeCAD/FreeCAD-Bundle/releases',
             binaries: {
-                'ubuntu': 'tools/linux-x86_64/FreeCAD/bin/FreeCADCmd',
-                'mac': 'tools/macos-arm64/FreeCAD.app',
-                'windows': 'tools/windows-x64/FreeCAD/bin/FreeCADCmd.exe'
+                'ubuntu': 'tools/linux-x86_64/freecad/',
+                'mac': 'tools/macos-arm64/freecad/',
+                'windows': 'tools/windows-x64/freecad/'
             }
         },
         details: {
@@ -1648,7 +1648,7 @@ const TOOLS = [
             binaries: {
                 'jetson': 'tools/linux-arm64/godot/Godot_v4.5.1-stable_linux.arm64',
                 'ubuntu': 'tools/linux-x86_64/godot/Godot_v4.5.1-stable_linux.x86_64',
-                'mac': 'tools/macos-arm64/Godot.app',
+                'mac': 'tools/macos-arm64/godot/',
                 'windows': 'tools/windows-x64/godot/Godot_v4.5.1-stable_win64.exe'
             }
         },
@@ -1869,10 +1869,10 @@ const TOOLS = [
             source: 'https://github.com/Comfy-Org/ComfyUI',
             releases: 'https://github.com/Comfy-Org/desktop/releases',
             binaries: {
-                'jetson': 'sources/ComfyUI/',
-                'ubuntu': 'sources/ComfyUI/',
-                'mac': 'tools/macos-arm64/ComfyUI/',
-                'windows': 'tools/windows-x64/ComfyUI/'
+                'jetson': 'tools/linux-arm64/comfyui/',
+                'ubuntu': 'tools/linux-x86_64/comfyui/',
+                'mac': 'tools/macos-arm64/comfyui/',
+                'windows': 'tools/windows-x64/comfyui/'
             }
         },
         details: {
@@ -1923,8 +1923,8 @@ const TOOLS = [
             binaries: {
                 'jetson': 'tools/linux-arm64/syncthing/syncthing',
                 'ubuntu': 'tools/linux-x86_64/syncthing/syncthing',
-                'mac': 'tools/macos-arm64/syncthing/syncthing',
-                'windows': 'tools/windows-x64/syncthing/syncthing.exe'
+                'mac': 'tools/macos-arm64/syncthing/',
+                'windows': 'tools/windows-x64/syncthing/'
             }
         },
         details: {
@@ -2248,10 +2248,10 @@ const TOOLS = [
             source: 'https://github.com/influxdata/telegraf',
             releases: 'https://github.com/influxdata/telegraf/releases',
             binaries: {
-                'jetson': 'tools/linux-arm64/telegraf/usr/bin/telegraf',
-                'ubuntu': 'tools/linux-x86_64/telegraf/usr/bin/telegraf',
-                'mac': 'tools/macos-arm64/telegraf/usr/bin/telegraf',
-                'windows': 'tools/windows-x64/telegraf/telegraf.exe'
+                'jetson': 'tools/linux-arm64/telegraf/',
+                'ubuntu': 'tools/linux-x86_64/telegraf/',
+                'mac': 'tools/macos-arm64/telegraf/',
+                'windows': 'tools/windows-x64/telegraf/'
             }
         },
         details: {
@@ -2379,7 +2379,7 @@ const TOOLS = [
                 'jetson': 'tools/linux-arm64/helix/hx',
                 'ubuntu': 'tools/linux-x86_64/helix/hx',
                 'mac': 'tools/macos-arm64/helix/hx',
-                'windows': 'tools/windows-x64/helix/hx.exe'
+                'windows': 'tools/windows-x64/helix/'
             }
         },
         details: {
@@ -3662,8 +3662,7 @@ const MODEL_FAMILIES = [
         variants: [
             {name: 'SDXL Turbo', quant: 'fp16', size: '6.5 GB', note: '1-step generation, very fast', file: 'image-gen/sdxl-turbo/sd_xl_turbo_1.0_fp16.safetensors', topPick: true},
             {name: 'SDXL Lightning (4-step)', quant: '-', size: '6.5 GB', note: 'Fast high-quality generation', file: 'image-gen/sdxl-lightning/sdxl_lightning_4step.safetensors'},
-            {name: 'SDXL Base 1.0', quant: '-', size: '6.5 GB', note: 'Full SDXL baseline, most LoRAs compatible', file: 'image-gen/sdxl-base/sd_xl_base_1.0.safetensors'},
-            {name: 'SD 3.5 Medium', quant: '-', size: '4.3 GB', note: 'Latest SD, improved text in images', file: 'image-gen/sd3.5-medium/sd3.5_medium.safetensors'}
+            {name: 'SDXL Base 1.0', quant: '-', size: '6.5 GB', note: 'Full SDXL baseline, most LoRAs compatible', file: 'image-gen/sdxl-base/sd_xl_base_1.0.safetensors'}
         ]
     },
     {

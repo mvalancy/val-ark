@@ -2,7 +2,7 @@
 # Val Ark - Download Kiwix Tools
 source "$(dirname "$0")/_common.sh"
 
-TOOL_NAME="kiwix-tools"
+TOOL_NAME="kiwix"
 PINNED_VERSION="3.7.0"
 
 download_kiwix() {
@@ -13,21 +13,21 @@ download_kiwix() {
 
     # linux-arm64
     local url="${base_url}/kiwix-tools_linux-aarch64-${ver}.tar.gz"
-    download_and_extract "$url" "${TOOLS_DIR}/linux-arm64/kiwix-tools" "kiwix-tools linux-arm64" 1
+    download_and_extract "$url" "${TOOLS_DIR}/linux-arm64/kiwix" "kiwix linux-arm64" 1
 
     # linux-x86_64
     url="${base_url}/kiwix-tools_linux-x86_64-${ver}.tar.gz"
-    download_and_extract "$url" "${TOOLS_DIR}/linux-x86_64/kiwix-tools" "kiwix-tools linux-x86_64" 1
+    download_and_extract "$url" "${TOOLS_DIR}/linux-x86_64/kiwix" "kiwix linux-x86_64" 1
 
     # macos-arm64
     url="${base_url}/kiwix-tools_macos-arm64-${ver}.tar.gz"
-    download_and_extract "$url" "${TOOLS_DIR}/macos-arm64/kiwix-tools" "kiwix-tools macos-arm64" 1
+    download_and_extract "$url" "${TOOLS_DIR}/macos-arm64/kiwix" "kiwix macos-arm64" 1
 
     # windows-x64 (no win-x86_64 build for 3.7.0; provide win-i686 and install hint)
     url="${base_url}/kiwix-tools_win-i686-${ver}.zip"
-    download_and_extract "$url" "${TOOLS_DIR}/windows-x64/kiwix-tools" "kiwix-tools windows-x64 (i686)" 0
+    download_and_extract "$url" "${TOOLS_DIR}/windows-x64/kiwix" "kiwix windows-x64 (i686)" 0
 
-    write_install_hint "${TOOLS_DIR}/windows-x64/kiwix-tools" "kiwix-tools" \
+    write_install_hint "${TOOLS_DIR}/windows-x64/kiwix" "kiwix" \
 "Kiwix Tools for Windows
 =========================
 

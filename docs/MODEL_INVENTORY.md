@@ -58,7 +58,7 @@
 ### Meta Llama 3.x
 | Model | Quant | Size | Notes |
 |-------|-------|------|-------|
-| Llama-3.1-8B-Instruct | Q8_0 | 8.5 GB | 128K context, fast (30+ t/s) |
+| Llama-3.1-8B-Instruct | Q8_0 | 8.5 GB | 128K context, fast on modern hardware |
 | Llama-3.2-3B-Instruct | Q8_0 | 3.4 GB | Ultra-fast for pipelines |
 | Llama-3.2-1B-Instruct | Q8_0 | 1.3 GB | Minimal footprint |
 | Llama-3.3-70B-Instruct | IQ2_XXS | ~19 GB | Latest 70B, aggressive quant |

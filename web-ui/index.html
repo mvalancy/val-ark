@@ -151,22 +151,14 @@ const TOOLS = [
                 {endpoint: 'GET /metrics', desc: 'Prometheus metrics (tokens/sec, etc)'},
                 {endpoint: 'POST /tokenize', desc: 'Tokenize text for token counting'}
             ],
-            performance: [
-                {platform: 'NVIDIA Jetson', model: '7B Q4_K_M', metric: '~30 t/s generation, ~400 t/s prompt processing'},
-                {platform: 'NVIDIA Jetson', model: '14B Q4_K_M', metric: '~18 t/s generation, ~250 t/s pp'},
-                {platform: 'Ubuntu x86_64 (RTX 3090)', model: '7B Q4_K_M', metric: '~90 t/s generation'},
-                {platform: 'Ubuntu x86_64 (RTX 3090)', model: '32B Q4_K_M', metric: '~25 t/s generation'},
-                {platform: 'Apple M3 Max', model: '7B Q4_K_M', metric: '~50 t/s generation'},
-                {platform: 'Apple M3 Max', model: '32B Q4_K_M', metric: '~20 t/s generation'},
-                {platform: 'RTX 4090', model: '7B Q4_K_M', metric: '~110 t/s generation'}
-            ],
+            performanceNotes: 'Performance varies significantly by hardware. Use llama-bench to measure your specific setup. Key factors: GPU VRAM, memory bandwidth, model size, quantization level, and context length.',
             quantGuide: [
-                {quant: 'Q8_0', quality: '99%', sizeVsF16: '~50%', note: 'Near-lossless, recommended if fits in VRAM'},
-                {quant: 'Q6_K', quality: '97%', sizeVsF16: '~42%', note: 'Excellent quality, slightly smaller'},
-                {quant: 'Q5_K_M', quality: '95%', sizeVsF16: '~36%', note: 'Great balance, 15-20% more than Q4'},
-                {quant: 'Q4_K_M', quality: '92%', sizeVsF16: '~30%', note: 'Gold standard - best quality/size tradeoff'},
-                {quant: 'IQ3_XXS', quality: '82%', sizeVsF16: '~22%', note: 'For fitting 70B+ models in 32GB'},
-                {quant: 'IQ2_XXS', quality: '72%', sizeVsF16: '~18%', note: 'Aggressive, noticeable quality loss'}
+                {quant: 'Q8_0', quality: 'Near-lossless', sizeVsF16: '~50%', note: 'Recommended if VRAM allows'},
+                {quant: 'Q6_K', quality: 'Excellent', sizeVsF16: '~42%', note: 'Great quality, smaller size'},
+                {quant: 'Q5_K_M', quality: 'Very good', sizeVsF16: '~36%', note: 'Good balance of quality and size'},
+                {quant: 'Q4_K_M', quality: 'Good', sizeVsF16: '~30%', note: 'Most popular - best quality/size tradeoff'},
+                {quant: 'IQ3_XXS', quality: 'Moderate', sizeVsF16: '~22%', note: 'For fitting large models in limited VRAM'},
+                {quant: 'IQ2_XXS', quality: 'Basic', sizeVsF16: '~18%', note: 'Aggressive compression, quality tradeoff'}
             ],
             memory: [
                 {model: '1B', q4km: '~1.5 GB', q8: '~2 GB'},
@@ -221,22 +213,16 @@ const TOOLS = [
                 {endpoint: 'GET /health', desc: 'Server health check'}
             ],
             models: [
-                {name: 'large-v3-turbo (Q5_0)', size: '574 MB', speed: '~5x realtime', quality: 'Excellent', note: 'TOP PICK for edge'},
-                {name: 'large-v3-turbo (f16)', size: '1.62 GB', speed: '~4x realtime', quality: 'Best turbo', note: 'Best quality/speed'},
-                {name: 'large-v3 (f16)', size: '3.1 GB', speed: '~2x realtime', quality: 'Best overall', note: 'Highest accuracy'},
-                {name: 'distil-large-v3.5', size: '1.5 GB', speed: '~6x realtime', quality: 'Very good', note: '1.5x faster than turbo'},
-                {name: 'medium (Q5_0)', size: '539 MB', speed: '~8x realtime', quality: 'Good', note: 'Balanced choice'},
-                {name: 'small (f16)', size: '466 MB', speed: '~12x realtime', quality: 'Moderate', note: 'Fast processing'},
-                {name: 'base (f16)', size: '142 MB', speed: '~20x realtime', quality: 'Basic', note: 'Ultra-fast option'},
-                {name: 'tiny (f16)', size: '75 MB', speed: '~30x realtime', quality: 'Low', note: 'Keyword spotting only'}
+                {name: 'large-v3-turbo (Q5_0)', size: '574 MB', quality: 'Excellent', note: 'TOP PICK for edge - smallest high-quality model'},
+                {name: 'large-v3-turbo (f16)', size: '1.62 GB', quality: 'Best turbo', note: 'Best quality in turbo series'},
+                {name: 'large-v3 (f16)', size: '3.1 GB', quality: 'Best overall', note: 'Highest accuracy, slower'},
+                {name: 'distil-large-v3.5', size: '1.5 GB', quality: 'Very good', note: 'Distilled for faster inference'},
+                {name: 'medium (Q5_0)', size: '539 MB', quality: 'Good', note: 'Balanced choice'},
+                {name: 'small (f16)', size: '466 MB', quality: 'Moderate', note: 'Fast processing'},
+                {name: 'base (f16)', size: '142 MB', quality: 'Basic', note: 'Ultra-fast option'},
+                {name: 'tiny (f16)', size: '75 MB', quality: 'Low', note: 'Keyword spotting only'}
             ],
-            performance: [
-                {platform: 'NVIDIA Jetson', model: 'large-v3-turbo Q5_0', metric: '~5-8x realtime (10min audio in ~75s)'},
-                {platform: 'Ubuntu x86_64 (RTX 3090)', model: 'large-v3-turbo Q5_0', metric: '~15x realtime'},
-                {platform: 'Apple M4 Pro', model: 'large-v3-turbo Q5_0', metric: '~10x realtime (10min in ~60s)'},
-                {platform: 'RTX 4090', model: 'large-v3-turbo Q5_0', metric: '~20x realtime (10min in ~30s)'},
-                {platform: 'CPU (8-core)', model: 'large-v3-turbo Q5_0', metric: '~2-3x realtime'}
-            ],
+            performanceNotes: 'Speed depends on hardware, model size, and audio length. GPU acceleration (CUDA/Metal) significantly improves throughput. Quantized models (Q5_0) reduce memory with minimal quality loss.',
             audioPrep: 'FFmpeg command to prepare audio for Whisper:\nffmpeg -i input.mp4 -ar 16000 -ac 1 -f wav output.wav\n\nWhisper requires: 16kHz sample rate, mono channel, WAV/PCM format.'
         }
     },
@@ -284,12 +270,7 @@ const TOOLS = [
                 {name: 'de_DE-thorsten-medium', quality: 'Medium', speakers: 1, note: 'German male voice'},
                 {name: 'fr_FR-upmc-medium', quality: 'Medium', speakers: 1, note: 'French voice'}
             ],
-            performance: [
-                {platform: 'NVIDIA Jetson', metric: '~0.1x RTF (10x faster than real-time)'},
-                {platform: 'Ubuntu x86_64 CPU', metric: '~0.05-0.1x RTF (10-20x faster than real-time)'},
-                {platform: 'Apple M-series', metric: '~0.05x RTF (20x faster than real-time)'},
-                {platform: 'Desktop CPU', metric: '~0.05-0.2x RTF depending on model quality'}
-            ],
+            performanceNotes: 'Piper is optimized for fast synthesis across all platforms. Even on modest hardware it typically runs faster than real-time. Higher quality voices require more processing.',
             params: 'Key parameters:\n--length-scale: Speed control (0.5=fast, 1.0=normal, 1.5=slow)\n--noise-scale: Expressiveness (0.0=flat, 0.667=default, 1.0=very expressive)\n--noise-w: Phoneme width variation (0.0=uniform, 0.8=default)\n--speaker: Speaker ID for multi-speaker models (0-indexed)'
         }
     },
@@ -390,12 +371,7 @@ const TOOLS = [
                 {platform: 'macOS', encoder: 'h264_videotoolbox', decoder: 'videotoolbox', note: 'Apple VideoToolbox acceleration'},
                 {platform: 'Windows', encoder: 'h264_nvenc (NVIDIA), h264_qsv (Intel)', decoder: 'Multiple', note: 'GPU-dependent'}
             ],
-            performance: [
-                {platform: 'NVIDIA Jetson (NVENC)', metric: '~200 fps 1080p H.264 encode'},
-                {platform: 'Ubuntu x86_64 (NVENC)', metric: '~500+ fps 1080p H.264 encode'},
-                {platform: 'macOS VideoToolbox', metric: '~300+ fps 1080p H.264 encode'},
-                {platform: 'Desktop CPU (x264)', metric: '~30-60 fps 1080p medium preset'}
-            ]
+            performanceNotes: 'Hardware encoding (NVENC, VideoToolbox, QSV) is significantly faster than software encoding. Use hardware acceleration when available for real-time or faster-than-realtime encoding.'
         }
     },
     {
@@ -456,13 +432,7 @@ const TOOLS = [
                 {level: 'ORT_ENABLE_EXTENDED', desc: '+ Node fusion (Conv+BN, MatMul+Add)'},
                 {level: 'ORT_ENABLE_ALL', desc: '+ Layout optimization, memory planning (DEFAULT)'}
             ],
-            performance: [
-                {platform: 'NVIDIA Jetson (CUDA EP)', metric: 'Piper TTS: ~0.1x RTF'},
-                {platform: 'NVIDIA Jetson (TensorRT EP)', metric: '1.5-7x speedup over CUDA EP'},
-                {platform: 'Ubuntu x86_64 (CUDA EP)', metric: 'Piper TTS: ~0.05x RTF'},
-                {platform: 'Apple M-series (CoreML EP)', metric: 'Piper TTS: ~0.05x RTF'},
-                {platform: 'Desktop CPU', metric: 'Piper TTS: ~0.1-0.2x RTF (4+ threads)'}
-            ]
+            performanceNotes: 'Performance depends on model complexity and execution provider. GPU providers (CUDA, TensorRT, CoreML) are typically faster than CPU for supported models. TensorRT provides additional optimizations for NVIDIA hardware.'
         }
     },
     {
@@ -546,9 +516,9 @@ const TOOLS = [
                 'Native ternary weight support ({-1, 0, +1}) - not post-training quantization',
                 '2-6x faster than FP16/INT8 on same hardware (CPU-optimized kernels)',
                 '55-82% energy reduction vs standard inference',
-                'Run 100B parameter models on CPU at 5-7 tokens/second',
+                'Run very large (100B+) parameter models on CPU alone',
                 'ARM64 optimized (NEON) - excellent on Jetson and Apple Silicon',
-                'x86_64 optimized (AVX2/AVX512) - 2.4-6.2x speedup',
+                'x86_64 optimized (AVX2/AVX512) for efficient CPU inference',
                 'GPU inference kernels (CUDA) for even faster throughput',
                 'GGUF model format compatible',
                 'Supports BitNet b1.58-2B-4T, Falcon3, and Falcon-E model families',
@@ -561,18 +531,13 @@ const TOOLS = [
                 {cmd: 'python setup_env.py --hf-repo tiiuae/Falcon3-3B-Instruct-1.58bit -q i2_s', desc: 'Build for Falcon3 model'}
             ],
             models: [
-                {name: 'BitNet-b1.58-2B-4T', size: '1.19 GB', speed: '~50 tok/s (CPU)', quality: 'Good', note: 'Official Microsoft 2B model'},
-                {name: 'Falcon3-1B-1.58bit', size: '1.3 GB', speed: '~80 tok/s (CPU)', quality: 'Basic', note: 'Ultra-fast edge model'},
-                {name: 'Falcon3-3B-1.58bit', size: '2.1 GB', speed: '~40 tok/s (CPU)', quality: 'Good', note: 'Best 1-bit edge balance'},
-                {name: 'Falcon3-7B-1.58bit', size: '3.1 GB', speed: '~20 tok/s (CPU)', quality: 'Very Good', note: 'Near full-precision quality'},
-                {name: 'Falcon3-10B-1.58bit', size: '3.8 GB', speed: '~15 tok/s (CPU)', quality: 'Excellent', note: 'Best 1-bit quality'}
+                {name: 'BitNet-b1.58-2B-4T', size: '1.19 GB', quality: 'Good', note: 'Official Microsoft 2B model'},
+                {name: 'Falcon3-1B-1.58bit', size: '1.3 GB', quality: 'Basic', note: 'Ultra-fast edge model'},
+                {name: 'Falcon3-3B-1.58bit', size: '2.1 GB', quality: 'Good', note: 'Best 1-bit edge balance'},
+                {name: 'Falcon3-7B-1.58bit', size: '3.1 GB', quality: 'Very Good', note: 'Near full-precision quality'},
+                {name: 'Falcon3-10B-1.58bit', size: '3.8 GB', quality: 'Excellent', note: 'Best 1-bit quality'}
             ],
-            performance: [
-                {platform: 'NVIDIA Jetson (ARM64)', model: 'BitNet-2B-4T', metric: '~40-60 tok/s (CPU), energy: 70% less than FP16'},
-                {platform: 'x86_64 Desktop (AVX2)', model: 'BitNet-2B-4T', metric: '~50-100 tok/s (CPU), 2.4-6.2x vs FP16'},
-                {platform: 'Apple M-series (ARM64)', model: 'BitNet-2B-4T', metric: '~60-100 tok/s (CPU), 1.4-5.1x vs FP16'},
-                {platform: 'Any CPU', model: '100B 1-bit model', metric: '~5-7 tok/s (human reading speed)'}
-            ]
+            performanceNotes: '1-bit quantization enables efficient CPU inference. Performance varies by CPU architecture - ARM64 (NEON) and x86_64 (AVX2/AVX512) both have optimized kernels. Larger models trade speed for quality.'
         }
     },
     {
@@ -4269,7 +4234,7 @@ r = client.chat.completions.create(model="qwen", messages=[{"role":"user","conte
 print(r.choices[0].message.content)</div>
         <div style="margin-top:12px;padding:10px;background:var(--green-dim);border-left:3px solid var(--green);border-radius:4px">
             <p style="font-size:0.85em"><strong>Expected output:</strong> Server logs show "llama server listening at http://0.0.0.0:8080".
-            Typical throughput: 15-40 tokens/sec on Jetson Orin, 30-80 tok/s on desktop GPU, 20-50 tok/s on M-series Mac.</p>
+            Throughput varies by hardware - use the server's /metrics endpoint to monitor tokens/sec.</p>
         </div>
         <div style="margin-top:8px;padding:10px;background:var(--yellow-dim);border-left:3px solid var(--yellow);border-radius:4px">
             <p style="font-size:0.85em"><strong>Tips:</strong> Use <code>--parallel 4</code> for multi-user, <code>-c 8192</code> for longer context.
@@ -4295,8 +4260,8 @@ print(r.choices[0].message.content)</div>
         <p style="font-size:0.9em;margin:12px 0"><strong>Step 3:</strong> For SRT subtitles</p>
         <div class="cmd" onclick="copyText(this)">${esc(p.toolsBase + s + p.whisperBin)} -m ${esc(p.modelsBase + s)}stt${s}whisper-ggml${s}ggml-large-v3-turbo-q5_0.bin -f audio.wav --output-srt</div>
         <div style="margin-top:12px;padding:10px;background:var(--green-dim);border-left:3px solid var(--green);border-radius:4px">
-            <p style="font-size:0.85em"><strong>Expected output:</strong> JSON file with word-level timestamps. Processing speed: 10-30x realtime on GPU, 2-5x on CPU.
-            The large-v3-turbo model has ~2% WER (word error rate) on English.</p>
+            <p style="font-size:0.85em"><strong>Expected output:</strong> JSON file with word-level timestamps. GPU acceleration significantly improves speed.
+            The large-v3-turbo model achieves excellent accuracy on English audio.</p>
         </div>
         <div style="margin-top:8px;padding:10px;background:var(--yellow-dim);border-left:3px solid var(--yellow);border-radius:4px">
             <p style="font-size:0.85em"><strong>Tips:</strong> Use <code>--language en</code> to skip auto-detection (faster). For long files, add <code>--max-len 0</code> to avoid splitting.
@@ -4322,8 +4287,8 @@ print(r.choices[0].message.content)</div>
         <p style="font-size:0.9em;margin:12px 0"><strong>Step 3:</strong> Stream directly to speakers (Linux)</p>
         <div class="cmd" onclick="copyText(this)">echo "Streaming audio" | ${esc(p.toolsBase + s + p.piperBin)} --model ${esc(p.modelsBase + s)}tts${s}piper${s}en_US-lessac-medium.onnx --output-raw | aplay -r 22050 -f S16_LE -c 1</div>
         <div style="margin-top:12px;padding:10px;background:var(--green-dim);border-left:3px solid var(--green);border-radius:4px">
-            <p style="font-size:0.85em"><strong>Expected output:</strong> 22050 Hz 16-bit mono WAV file. Piper synthesizes at 10-20x realtime
-            (a 10-second phrase generates in under 1 second). Output quality is comparable to cloud TTS services.</p>
+            <p style="font-size:0.85em"><strong>Expected output:</strong> 22050 Hz 16-bit mono WAV file. Piper synthesizes faster than realtime
+            on most hardware. Output quality is comparable to cloud TTS services.</p>
         </div>
         <div style="margin-top:8px;padding:10px;background:var(--yellow-dim);border-left:3px solid var(--yellow);border-radius:4px">
             <p style="font-size:0.85em"><strong>Tips:</strong> <code>--length_scale</code> controls speed (0.8 = faster, 1.2 = slower).

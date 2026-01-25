@@ -617,12 +617,12 @@ body {
     line-height: 1.7;
 }
 
-/* Kiwix Banner - Always uses light theme colors for contrast */
+/* Kiwix Banner - Blue theme with white text */
 .kiwix-banner {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
     border: 1px solid #3b82f6;
     border-radius: var(--radius);
     padding: 20px 24px;
@@ -638,7 +638,7 @@ body {
     width: 48px;
     height: 48px;
     border-radius: 10px;
-    background: #1d4ed8;
+    background: rgba(255,255,255,0.2);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -650,16 +650,16 @@ body {
 .kiwix-banner-title {
     font-size: 1.1em;
     font-weight: 700;
-    color: #1e3a5f;
+    color: #ffffff;
     margin-bottom: 4px;
 }
 .kiwix-banner-desc {
     font-size: 0.85em;
-    color: #1e40af;
+    color: rgba(255,255,255,0.9);
 }
 .kiwix-banner-btn {
-    background: #1d4ed8;
-    color: #fff;
+    background: #ffffff;
+    color: #1d4ed8;
     padding: 10px 20px;
     border-radius: var(--radius-sm);
     font-weight: 600;
@@ -668,7 +668,7 @@ body {
     text-decoration: none;
     transition: opacity 0.2s, transform 0.2s;
 }
-.kiwix-banner-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+.kiwix-banner-btn:hover { opacity: 0.95; transform: translateY(-1px); }
 
 /* Screenshot Gallery */
 .screenshot-gallery {

@@ -118,8 +118,22 @@ verify_fleet() {
             chk "fleet node reachable (arch=$arch)"
             if echo "$out" | grep -q "$(basename "$fdata")"; then
                 chk "fleet node mounts shared mirror (uses our disk over the network)"
-                # Real GPU inference on the node, reading a model straight off the share.
-                local rcmd="command -v llama-cli >/dev/null 2>&1 && g=\$(find '$fdata/models/llm' '$fdata/models/embed' -name '*.gguf' 2>/dev/null | head -1) && [ -n \"\$g\" ] && timeout 150 llama-cli -m \"\$g\" -p ping -n 8 -ngl 999 --no-warmup 2>&1 | grep -iE 'offloaded|CUDA|tokens per second|llama_perf' | head -3"
+                # Real GPU inference on the node, reading a model straight off the
+                # share. Newer llama.cpp builds turned llama-cli into a REPL that
+                # hangs on SSH stdin EOF, and some nodes ship only llama-server, so:
+                # prefer llama-completion, fall back to a *real* llama-cli with
+                # stdin closed; skip cleanly if neither single-shot binary exists.
+                local rcmd
+                rcmd=$(cat <<EOF
+g=\$(find "$fdata/models/llm" "$fdata/models/embed" -name '*.gguf' 2>/dev/null | sort | head -1)
+[ -n "\$g" ] || exit 0
+bin=""
+command -v llama-completion >/dev/null 2>&1 && bin=llama-completion
+[ -z "\$bin" ] && command -v llama-cli >/dev/null 2>&1 && [ -x "\$(readlink -f "\$(command -v llama-cli)")" ] && bin=llama-cli
+[ -n "\$bin" ] || exit 0
+timeout 120 \$bin -m "\$g" -p ping -n 8 -ngl 999 </dev/null 2>&1 | grep -iE 'offload|CUDA|tokens per second|llama_perf' | head -3
+EOF
+)
                 local inf; inf=$("${SSH[@]}" "$host" "$rcmd" 2>/dev/null)
                 if [ -n "$inf" ]; then
                     if echo "$inf" | grep -qiE 'offload|CUDA'; then chk "fleet node GPU inference works (model served over NFS)"

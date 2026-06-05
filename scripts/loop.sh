@@ -111,8 +111,30 @@ loop_once() {
     log "${GREEN}cycle complete${NC} | fillable $(valark_human "$(valark_fillable_bytes)") | health: ${STATE_DIR}/health.json"
 }
 
+# Cron management — durable 24/7 driver that survives reboots/sessions.
+CRON_TAG="val-ark-loop"
+cron_install() {
+    local every="${1:-30}"   # minutes
+    mkdir -p "$LOG_DIR" 2>/dev/null
+    local line="*/${every} * * * * cd ${PROJECT_ROOT} && /usr/bin/flock -n ${STATE_DIR}/loop.lock bash ${_DIR}/loop.sh once >> ${LOG_DIR}/loop_cron.log 2>&1 # ${CRON_TAG}"
+    (crontab -l 2>/dev/null | grep -v "${CRON_TAG}"; echo "$line") | crontab -
+    log "installed cron: every ${every} min (tag ${CRON_TAG})"
+    crontab -l 2>/dev/null | grep "${CRON_TAG}"
+}
+cron_uninstall() {
+    crontab -l 2>/dev/null | grep -v "${CRON_TAG}" | crontab -
+    log "removed ${CRON_TAG} cron entries"
+}
+
+# Single-cycle lock so overlapping cron ticks never stack.
+run_locked() {
+    exec 8>"${STATE_DIR}/loop.lock"
+    if ! flock -n 8; then log "another loop cycle is running; skipping"; exit 0; fi
+    "$@"
+}
+
 case "${1:-once}" in
-    once) loop_once ;;
+    once) mkdir -p "$STATE_DIR" "$LOG_DIR" 2>/dev/null; run_locked loop_once ;;
     run)
         interval="${2:-1800}"
         log "loop: starting continuous run (interval ${interval}s). Touch ${STATE_DIR}/STOP to halt."
@@ -121,5 +143,7 @@ case "${1:-once}" in
             loop_once
             log "sleeping ${interval}s"; sleep "$interval"
         done ;;
-    *) echo "usage: loop.sh {once|run [interval_seconds]}"; exit 1 ;;
+    install)   cron_install "${2:-30}" ;;
+    uninstall) cron_uninstall ;;
+    *) echo "usage: loop.sh {once|run [interval_seconds]|install [minutes]|uninstall}"; exit 1 ;;
 esac

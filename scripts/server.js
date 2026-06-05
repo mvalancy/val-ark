@@ -829,7 +829,10 @@ function findZimFiles() {
         return fs.readdirSync(zimDir)
             .filter(f => f.endsWith('.zim'))
             .filter(f => {
-                // Only serve ZIM files that are at least 95% complete
+                // Serve every complete .zim. The librarian downloads atomically
+                // (partials are *.zim.part, which don't match .zim), so any .zim
+                // here is finished — no size floor needed beyond skipping empties.
+                // Known legacy names keep a 95%-complete guard as a safety net.
                 try {
                     const stat = fs.statSync(path.join(zimDir, f));
                     const expected = ZIM_EXPECTED_SIZES[f];
@@ -837,8 +840,7 @@ function findZimFiles() {
                         console.log(`Skipping incomplete ZIM: ${f} (${(stat.size/1073741824).toFixed(1)}GB / ${(expected/1073741824).toFixed(0)}GB)`);
                         return false;
                     }
-                    // For unknown files, require at least 100MB
-                    if (!expected && stat.size < 100 * 1048576) return false;
+                    if (stat.size < 1048576) return false; // skip <1MB / empty
                     return true;
                 } catch { return false; }
             })

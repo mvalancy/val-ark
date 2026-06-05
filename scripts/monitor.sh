@@ -3,7 +3,9 @@
 # Monitor download progress - run in a separate terminal
 ###############################################################################
 
-MODEL_ROOT="${HOME}/models"
+_MON_DIR="$(cd "$(dirname "$0")" && pwd)"
+[ -f "${_MON_DIR}/lib/valark-env.sh" ] && . "${_MON_DIR}/lib/valark-env.sh"
+MODEL_ROOT="${MODELS_DIR:-${HOME}/models}"
 
 while true; do
     clear

@@ -1,9 +1,25 @@
 # Runtime files
 .download_pid
 
+# Local machine config (host-specific paths, tokens, fleet) — never commit
+.env
+.valark.conf
+
 # Downloaded tools and binaries (large, re-downloadable)
 tools/
 !scripts/tools/
+
+# Repo-root data trees that live on the data disk. These are SYMLINKS at
+# runtime (repo/<name> -> $VAL_ARK_DATA/...), and git treats a symlink as a
+# file, so the trailing-slash dir patterns above don't catch them. Anchor to
+# the repo root with no trailing slash so both real dirs and symlinks match.
+# (Leading "/" keeps scripts/tools etc. unaffected.)
+/tools
+/models
+/content
+/sources
+/assets
+/installers
 
 # Offline content (ZIM files, very large)
 content/

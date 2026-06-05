@@ -9,7 +9,11 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 
-MODEL_ROOT="${HOME}/models"
+# Honour the unified data-root layout (.env / VAL_ARK_DATA) when available.
+if [ -f "${SCRIPT_DIR}/lib/valark-env.sh" ]; then
+    . "${SCRIPT_DIR}/lib/valark-env.sh"
+fi
+MODEL_ROOT="${MODELS_DIR:-${HOME}/models}"
 TOOLS_ROOT="${MODEL_ROOT}/tools"
 
 # Colors
@@ -136,5 +140,8 @@ echo ""
 
 echo -e "${BOLD}Disk Space${NC}"
 echo -e "${DIM}──────────────────────────────────────${NC}"
-df -h "${PROJECT_ROOT}" | tail -1 | awk '{printf "  Total: %s | Used: %s | Available: %s (%s)\n", $2, $3, $4, $5}'
+# Report the DATA disk (where models/tools/content live), not the repo disk.
+_DISK_TARGET="${DATA_ROOT:-$PROJECT_ROOT}"
+echo -e "  ${DIM}data disk:${NC} ${_DISK_TARGET}"
+df -h "${_DISK_TARGET}" | tail -1 | awk '{printf "  Total: %s | Used: %s | Available: %s (%s)\n", $2, $3, $4, $5}'
 echo ""

@@ -11,8 +11,15 @@ _COMMON_LOADED=1
 # Resolve project root from this file's location
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
-TOOLS_DIR="${PROJECT_ROOT}/tools"
-LOG_DIR="${TOOLS_DIR}/.logs"
+
+# Honour the unified data-root layout (.env / VAL_ARK_DATA) when available.
+# Falls back to the classic repo-relative layout otherwise.
+if [ -f "${PROJECT_ROOT}/scripts/lib/valark-env.sh" ]; then
+    # shellcheck source=../lib/valark-env.sh
+    . "${PROJECT_ROOT}/scripts/lib/valark-env.sh"
+fi
+TOOLS_DIR="${TOOLS_DIR:-${PROJECT_ROOT}/tools}"
+LOG_DIR="${LOG_DIR:-${TOOLS_DIR}/.logs}"
 MAX_RETRIES=5
 RETRY_DELAY=15
 

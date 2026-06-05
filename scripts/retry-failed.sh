@@ -3,7 +3,9 @@
 # Retry failed downloads from a previous session
 ###############################################################################
 
-MODEL_ROOT="${HOME}/models"
+_RF_DIR="$(cd "$(dirname "$0")" && pwd)"
+[ -f "${_RF_DIR}/lib/valark-env.sh" ] && . "${_RF_DIR}/lib/valark-env.sh"
+MODEL_ROOT="${MODELS_DIR:-${HOME}/models}"
 FAILED_FILE="${MODEL_ROOT}/logs/failed_downloads.txt"
 
 if [ ! -f "$FAILED_FILE" ] || [ ! -s "$FAILED_FILE" ]; then

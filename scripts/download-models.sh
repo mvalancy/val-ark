@@ -17,7 +17,13 @@
 set -o pipefail
 
 # Configuration
-MODEL_ROOT="${HOME}/models"
+# Honour the unified data-root layout (.env / VAL_ARK_DATA) when available.
+_DM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "${_DM_SCRIPT_DIR}/lib/valark-env.sh" ]; then
+    # shellcheck source=lib/valark-env.sh
+    . "${_DM_SCRIPT_DIR}/lib/valark-env.sh"
+fi
+MODEL_ROOT="${MODELS_DIR:-${HOME}/models}"
 LOG_DIR="${MODEL_ROOT}/logs"
 LOG_FILE="${LOG_DIR}/download_$(date +%Y%m%d_%H%M%S).log"
 MAX_RETRIES=5

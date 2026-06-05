@@ -120,7 +120,9 @@ CRON_TAG="val-ark-loop"
 cron_install() {
     local every="${1:-30}"   # minutes
     mkdir -p "$LOG_DIR" 2>/dev/null
-    local line="*/${every} * * * * cd ${PROJECT_ROOT} && /usr/bin/flock -n ${STATE_DIR}/loop.lock bash ${_DIR}/loop.sh once >> ${LOG_DIR}/loop_cron.log 2>&1 # ${CRON_TAG}"
+    # No outer flock here: loop.sh 'once' self-guards via run_locked (fd 8 on
+    # loop.lock). An outer flock on the same file would dead-lock the inner one.
+    local line="*/${every} * * * * cd ${PROJECT_ROOT} && bash ${_DIR}/loop.sh once >> ${LOG_DIR}/loop_cron.log 2>&1 # ${CRON_TAG}"
     (crontab -l 2>/dev/null | grep -v "${CRON_TAG}"; echo "$line") | crontab -
     log "installed cron: every ${every} min (tag ${CRON_TAG})"
     crontab -l 2>/dev/null | grep "${CRON_TAG}"

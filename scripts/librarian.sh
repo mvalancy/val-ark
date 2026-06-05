@@ -147,6 +147,10 @@ cmd_fill() {
         *) shift;; esac; done
     ensure_state
     [ -f "$STOP_FLAG" ] && { warn "STOP flag present ($STOP_FLAG); not filling"; return 0; }
+    # Single-filler lock: a background fill and the loop's fill must never race
+    # on the same files. Non-blocking — if another fill holds it, this is a no-op.
+    exec 9>"${STATE_DIR}/fill.lock"
+    if ! flock -n 9; then warn "another fill is already running; skipping"; return 0; fi
     [ -z "$budget" ] && budget="$(valark_fillable_bytes)"
     catalog_refresh_zim >/dev/null 2>&1 || warn "ZIM catalog refresh failed; using cache"
     build_plan "$budget" > "${TMPDIR_VA}/plan.tsv"

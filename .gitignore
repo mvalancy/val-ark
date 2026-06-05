@@ -1,6 +1,9 @@
 # Runtime files
 .download_pid
 
+# Claude Code session / agent worktrees
+.claude/
+
 # Local machine config (host-specific paths, tokens, fleet) — never commit
 .env
 .valark.conf

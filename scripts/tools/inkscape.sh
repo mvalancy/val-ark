@@ -32,13 +32,13 @@ Or via Flatpak:
     # macos-arm64: DMG from official site
     dest="${TOOLS_DIR}/macos-arm64/inkscape"
     ensure_dir "$dest"
-    url="https://media.inkscape.org/media/resources/Inkscape-1.4.028868_arm64.dmg"
+    url="https://media.inkscape.org/dl/resources/file/Inkscape-1.4.028868_arm64.dmg"
     download_file "$url" "${dest}/Inkscape-${PINNED_VERSION}.dmg" "Inkscape macOS ARM64"
 
     # windows-x64: Official installer
     dest="${TOOLS_DIR}/windows-x64/inkscape"
     ensure_dir "$dest"
-    url="https://media.inkscape.org/media/resources/inkscape-1.4_2024-10-11_86a8ad7-x64.exe"
+    url="https://media.inkscape.org/dl/resources/file/inkscape-1.4_2024-10-11_86a8ad7-x64.exe"
     download_file "$url" "${dest}/Inkscape-${PINNED_VERSION}-Setup.exe" "Inkscape Windows"
 
     log_success "Inkscape download complete"

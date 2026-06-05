@@ -116,7 +116,17 @@ verify_fleet() {
         if out=$("${SSH[@]}" "$host" "uname -m; df -h '$fdata' 2>/dev/null | tail -1" 2>/dev/null) && [ -n "$out" ]; then
             local arch; arch=$(echo "$out" | head -1)
             chk "fleet node reachable (arch=$arch)"
-            if echo "$out" | grep -q "$(basename "$fdata")"; then chk "fleet node sees shared content"
+            if echo "$out" | grep -q "$(basename "$fdata")"; then
+                chk "fleet node mounts shared mirror (uses our disk over the network)"
+                # Real GPU inference on the node, reading a model straight off the share.
+                local rcmd="command -v llama-cli >/dev/null 2>&1 && g=\$(find '$fdata/models/llm' '$fdata/models/embed' -name '*.gguf' 2>/dev/null | head -1) && [ -n \"\$g\" ] && timeout 150 llama-cli -m \"\$g\" -p ping -n 8 -ngl 999 --no-warmup 2>&1 | grep -iE 'offloaded|CUDA|tokens per second|llama_perf' | head -3"
+                local inf; inf=$("${SSH[@]}" "$host" "$rcmd" 2>/dev/null)
+                if [ -n "$inf" ]; then
+                    if echo "$inf" | grep -qiE 'offload|CUDA'; then chk "fleet node GPU inference works (model served over NFS)"
+                    else chk "fleet node inference ran (CPU path)"; fi
+                else
+                    skip "fleet node: no llama-cli + reachable model for an inference check"
+                fi
             else skip "fleet node: shared content not mounted"; fi
         else
             skip "fleet node unreachable"

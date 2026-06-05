@@ -101,6 +101,25 @@ flowchart TD
     M2 --> M3["8. Tier 3 Models ~300GB+"]
 ```
 
+## Self-Filling Mirror (Librarian)
+
+Val Ark can fill a disk of **any size** by itself and keep it healthy. The
+**Librarian** pulls from live catalogs (the Kiwix ZIM library, a diverse model
+set, and OS/router/netboot installers) and downloads in a curated priority order:
+**diversity → small valuable files → fill remaining space → cut back for better
+small items.** A 24/7 loop refreshes catalogs (so content links never go stale),
+checks & repairs links, verifies file integrity, confirms tools actually run
+(locally and across arm64 mesh nodes), and tops up the fill.
+
+```bash
+cp .env.example .env            # set VAL_ARK_DATA=/your/disk (git-ignored)
+./scripts/librarian.sh plan     # preview the diversity-first fill plan
+./scripts/librarian.sh fill     # fill the disk (resumable, never aborts)
+./scripts/loop.sh install 30    # durable 24/7 self-healing loop (every 30 min)
+```
+
+See **[docs/LIBRARIAN.md](docs/LIBRARIAN.md)** for the full design.
+
 ## What's Included (43 Tools)
 
 ### AI Inference

@@ -40,10 +40,14 @@ step(){ log "${CYAN}== $* ==${NC}"; }
 link_check_repair() {
     : > "$LINKREPORT"
     local dead=0 checked=0
-    # (a) literal URLs hard-coded in tool scripts (catches e.g. moved CDN paths)
+    # (a) literal URLs hard-coded in tool scripts (catches e.g. moved CDN paths).
+    # Skip TEMPLATED urls (${var}/$VAR/{}) — those are built at runtime via
+    # github_asset_url and can't be checked statically — plus local/placeholder
+    # examples in install hints. Only fully-literal external URLs are checkable.
     local urls
     urls=$(grep -rhoE 'https?://[^"'"'"' )]+' "${_DIR}/tools/"*.sh 2>/dev/null \
-           | grep -ivE 'example\.com|localhost' | sed 's/[).,]*$//' | sort -u)
+           | grep -vE '[$<>{}]|127\.0\.0\.1|localhost|your-server|0\.0\.0\.0|example\.(com|org)' \
+           | sed 's/[).,]*$//' | sort -u)
     # (b) installer catalog URLs (verifiable direct links)
     local inst
     inst=$(awk -F'|' '/^[0-9]/{print $6}' "${PROJECT_ROOT}/data/installers.tsv" 2>/dev/null)

@@ -58,7 +58,11 @@ _valark_autodetect_data_root() {
     local IFS=':'
     for c in $extra; do [ -n "$c" ] && candidates+=("$c"); done
     IFS=' '
-    candidates+=(/mnt/storage-10tb /mnt/storage /mnt/data /data /srv/val-ark /var/lib/val-ark)
+    # Generic discovery: every mounted volume under /mnt plus common data roots.
+    # (No host-specific paths are baked in — set VAL_ARK_DATA in .env to pin one.)
+    local m
+    for m in /mnt/*; do [ -d "$m" ] && candidates+=("$m"); done
+    candidates+=(/data /srv/val-ark /var/lib/val-ark)
 
     # First pass: a writable candidate that already holds a models/ dir (reuse data).
     local c
@@ -171,6 +175,58 @@ valark_ensure_layout() {
         valark_link assets    "$ASSETS_DIR"
         valark_link installers "$INSTALLERS_DIR"
     fi
+}
+
+# --- Robust reachability check (used by link-repair / tests) ------------------
+# Returns 0 if reachable. Retries with backoff; treats curl 000 / HTTP 429 / 403
+# / 408 / 5xx as TRANSIENT (rate-limit), only a stable 4xx (404/410) means dead.
+# Echoes the final HTTP code on stdout.
+valark_url_ok() {
+    local url="$1" status="" attempt
+    for attempt in 1 2 3 4; do
+        status=$(curl -sS -o /dev/null -w "%{http_code}" -IL --connect-timeout 10 --max-time 25 \
+                 -A "val-ark-linkcheck/1.0" "$url" 2>/dev/null)
+        case "$status" in
+            200|206|301|302|307|308) echo "$status"; return 0 ;;
+            000|403|408|425|429|500|502|503|504) sleep $((attempt * 3)) ;;
+            *) # try a 1-byte ranged GET before declaring dead (some hosts dislike HEAD)
+               status=$(curl -sS -o /dev/null -w "%{http_code}" -L -r 0-0 --connect-timeout 10 --max-time 25 \
+                        -A "val-ark-linkcheck/1.0" "$url" 2>/dev/null)
+               case "$status" in 200|206|301|302|307|308) echo "$status"; return 0 ;; esac
+               break ;;
+        esac
+    done
+    echo "${status:-000}"; return 1
+}
+
+# --- Ensure the data disk is writable (self-healing) --------------------------
+# The data disk may be NTFS that Windows left "unclean" (mounts read-only), or a
+# mount that reverted after a reboot. Best-effort remount to rw (needs paswordless
+# sudo). Preserves any NFS export. Safe no-op when already writable.
+valark_ensure_writable() {
+    local probe="${DATA_ROOT}/.valark_w_$$"
+    if ( : > "$probe" ) 2>/dev/null; then rm -f "$probe" 2>/dev/null; return 0; fi
+    command -v findmnt >/dev/null 2>&1 || return 1
+    local src fstype
+    src=$(findmnt -no SOURCE --target "$DATA_ROOT" 2>/dev/null)
+    fstype=$(findmnt -no FSTYPE --target "$DATA_ROOT" 2>/dev/null)
+    [ -n "$src" ] || return 1
+    case "$fstype" in
+        fuseblk|ntfs|ntfs3)
+            # Briefly drop any NFS exports (re-synced from /etc/exports afterwards)
+            # so the mount can be released, then remount rw and re-export.
+            sudo -n exportfs -ua 2>/dev/null || true
+            sudo -n umount "$DATA_ROOT" 2>/dev/null || sudo -n umount -l "$DATA_ROOT" 2>/dev/null || true
+            sudo -n ntfsfix -d "$src" 2>/dev/null || true
+            sudo -n ntfs-3g -o rw,remove_hiberfile,force,uid="$(id -u)",gid="$(id -g)",big_writes,nosuid,nodev,allow_other "$src" "$DATA_ROOT" 2>/dev/null || true
+            sudo -n exportfs -ra 2>/dev/null || true
+            ;;
+        *)
+            sudo -n mount -o remount,rw "$DATA_ROOT" 2>/dev/null || true
+            ;;
+    esac
+    ( : > "$probe" ) 2>/dev/null && { rm -f "$probe" 2>/dev/null; return 0; }
+    return 1
 }
 
 # --- Pretty path summary (for status / debugging) -----------------------------

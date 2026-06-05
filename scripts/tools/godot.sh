@@ -46,7 +46,7 @@ Options:
   2. Check for newer releases with arm64 support:
      https://github.com/godotengine/godot/releases
 
-For more info: https://docs.godotengine.org/en/stable/contributing/development/compiling/
+For more info: https://docs.godotengine.org/en/stable/
 "
     fi
 

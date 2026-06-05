@@ -25,8 +25,9 @@ const MODEL_SLUGS = [
   'image-gen', 'nvidia'
 ];
 
-// Platform IDs
-const PLATFORMS = ['jetson', 'ubuntu', 'mac', 'windows'];
+// Platform IDs (aarch64 boards thor/gb10 reuse linux-arm64; openwrt is a
+// content/infra-only router profile)
+const PLATFORMS = ['jetson', 'thor', 'gb10', 'ubuntu', 'mac', 'windows', 'openwrt'];
 
 test.describe('Val Ark Web UI - Navigation', () => {
   test.beforeEach(async ({ page }) => {

@@ -15,15 +15,36 @@
 
 <script>
 // =============================================================================
-// PLATFORM CONFIGURATION (4 platforms)
+// PLATFORM CONFIGURATION
+// All aarch64 boards (Jetson Orin/Thor, GB10 Grace-Blackwell) share the same
+// linux-arm64 artifacts and differ only by GPU/CUDA profile. OpenWRT routers
+// are a lightweight content/infra-only profile that also runs the arm64 builds.
 // =============================================================================
 const PLATFORMS = {
     jetson: {
-        id: 'jetson', label: 'Jetson', fullLabel: 'Jetson (Linux ARM64)',
+        id: 'jetson', label: 'Jetson Orin', fullLabel: 'Jetson Orin (Linux ARM64)',
         toolsBase: './tools/linux-arm64', modelsBase: './models',
         llamaBin: 'llama-server', whisperBin: 'whisper-cli',
         piperBin: 'piper/piper', sdBin: 'sd-cli', sep: '/',
         gpu: 'CUDA SM 8.7', gpuFlag: '-ngl 999',
+        arch: 'linux-arm64', prebuilt: ['piper','onnxruntime','ffmpeg','vosk'],
+        buildFromSource: ['llama.cpp','whisper.cpp','sd.cpp']
+    },
+    thor: {
+        id: 'thor', label: 'Jetson Thor', fullLabel: 'Jetson Thor (Linux ARM64)',
+        toolsBase: './tools/linux-arm64', modelsBase: './models',
+        llamaBin: 'llama-server', whisperBin: 'whisper-cli',
+        piperBin: 'piper/piper', sdBin: 'sd-cli', sep: '/',
+        gpu: 'CUDA Blackwell', gpuFlag: '-ngl 999',
+        arch: 'linux-arm64', prebuilt: ['piper','onnxruntime','ffmpeg','vosk'],
+        buildFromSource: ['llama.cpp','whisper.cpp','sd.cpp']
+    },
+    gb10: {
+        id: 'gb10', label: 'GB10', fullLabel: 'GB10 Grace-Blackwell (Linux ARM64, SBSA)',
+        toolsBase: './tools/linux-arm64', modelsBase: './models',
+        llamaBin: 'llama-server', whisperBin: 'whisper-cli',
+        piperBin: 'piper/piper', sdBin: 'sd-cli', sep: '/',
+        gpu: 'CUDA Grace-Blackwell, SBSA', gpuFlag: '-ngl 999',
         arch: 'linux-arm64', prebuilt: ['piper','onnxruntime','ffmpeg','vosk'],
         buildFromSource: ['llama.cpp','whisper.cpp','sd.cpp']
     },
@@ -53,8 +74,39 @@ const PLATFORMS = {
         gpu: 'CUDA/Vulkan', gpuFlag: '-ngl 999',
         arch: 'windows-x64', prebuilt: ['llama.cpp','whisper.cpp','piper','sd.cpp','onnxruntime','ffmpeg','vosk'],
         buildFromSource: []
+    },
+    openwrt: {
+        id: 'openwrt', label: 'OpenWRT', fullLabel: 'OpenWRT Router (Linux ARM64)',
+        toolsBase: './tools/linux-arm64', modelsBase: './models',
+        llamaBin: 'llama-server', whisperBin: 'whisper-cli',
+        piperBin: 'piper/piper', sdBin: 'sd-cli', sep: '/',
+        gpu: 'none — router/mesh node', gpuFlag: '',
+        arch: 'linux-arm64', prebuilt: [],
+        buildFromSource: []
     }
 };
+
+// aarch64 GPU profiles that reuse the linux-arm64 artifacts and the Jetson
+// (arm64) per-tool status. The router profile is content/infra only.
+const ARM64_ALIAS_PLATFORMS = ['thor', 'gb10'];
+// Lightweight router profile: only content/sync/infra tools, never heavy
+// inference. dev-cli covers jq/ripgrep; the rest map to existing tool ids.
+const OPENWRT_TOOLS = ['kiwix', 'syncthing', 'btop', 'ffmpeg', 'sqlite', 'dev-cli'];
+
+// Derive per-tool status for the new platforms instead of editing every tool:
+// thor/gb10 inherit the tool's jetson (arm64) status; openwrt is 'prebuilt'
+// for allow-listed infra tools and 'n/a' for everything else.
+function deriveToolPlatforms() {
+    for (const tool of TOOLS) {
+        const p = tool.platforms || (tool.platforms = {});
+        for (const alias of ARM64_ALIAS_PLATFORMS) {
+            if (p[alias] === undefined && p.jetson !== undefined) p[alias] = p.jetson;
+        }
+        if (p.openwrt === undefined) {
+            p.openwrt = OPENWRT_TOOLS.includes(tool.id) ? (p.jetson || 'prebuilt') : 'n/a';
+        }
+    }
+}
 
 let currentPlatform = localStorage.getItem('ark-platform') || 'jetson';
 if (!PLATFORMS[currentPlatform]) currentPlatform = 'jetson';
@@ -1963,6 +2015,9 @@ const TOOLS = [
         }
     }
 ];
+
+// Augment every tool with derived thor/gb10/openwrt platform status.
+deriveToolPlatforms();
 
 // =============================================================================
 // TOOL METADATA - License, maker, and attribution info
@@ -4150,9 +4205,10 @@ function renderQuickStart() {
         <h2>2. Choose Your Platform</h2>
         <div class="paths-grid" style="margin-top:12px">`;
     Object.values(PLATFORMS).forEach(p => {
+        const gpuNote = p.gpu.startsWith('none') ? p.gpu : `${p.gpu} acceleration`;
         html += `<div class="path-card" style="cursor:pointer" onclick="setPlatform('${p.id}');window.location.hash='#/quickstart'">
             <h4>${p.fullLabel}</h4>
-            <p style="font-size:0.82em">${p.gpu} acceleration</p>
+            <p style="font-size:0.82em">${gpuNote}</p>
         </div>`;
     });
     html += `</div></div>`;

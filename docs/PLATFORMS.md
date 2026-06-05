@@ -1,30 +1,82 @@
 # Val Ark - Platform Notes
 
-## NVIDIA Jetson (linux-arm64)
+## aarch64 boards: Jetson Orin, Jetson Thor, GB10 (linux-arm64)
+
+All NVIDIA aarch64 boards run the **same `tools/linux-arm64` artifacts**. They are
+distinguished only by GPU/CUDA profile, so the prebuilt CLI tools (FFmpeg, Piper,
+ONNX Runtime, Vosk, Syncthing, Kiwix, btop, SQLite, etc.) are shared across all of
+them — no per-board rebuild needed.
+
+| Profile | GPU / CUDA | CUDA arch | Notes |
+|---------|------------|-----------|-------|
+| Jetson Orin | CUDA SM 8.7 | `87` | Orin Nano / Orin NX |
+| Jetson Thor | CUDA Blackwell | `110` (Blackwell) | Newer Jetson generation |
+| GB10 Grace-Blackwell | CUDA Grace-Blackwell, SBSA | Blackwell | Server-Base System Architecture (SBSA) |
 
 **Tested on:** Jetson Orin Nano, Orin NX
 
 ### Setup
 ```bash
-# CUDA toolkit should be pre-installed via JetPack
+# CUDA toolkit should be pre-installed via JetPack (Jetson) or the SBSA
+# CUDA toolkit (GB10). Verify it is on PATH:
 nvcc --version  # Verify CUDA
 
 ./start.sh setup
 ./start.sh download tools
 ```
 
-### Building AI Engines
+### Building GPU-accelerated AI engines (CUDA source build)
+
+There is **no upstream prebuilt aarch64 CUDA binary** for llama.cpp / whisper.cpp /
+stable-diffusion.cpp, so GPU acceleration on any of these boards requires a CUDA
+source build. Set the CUDA architecture to match the board:
+
 ```bash
 # After downloading tools, build from source with CUDA:
 cd tools/llama.cpp/source
+
+# Jetson Orin  -> SM 8.7
 cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=87
+
+# Jetson Thor / GB10 (Grace-)Blackwell -> use the Blackwell arch (e.g. 110)
+# cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=110
+
 cmake --build build -j$(nproc)
 ```
 
+The same `-DGGML_CUDA=ON` source build applies to whisper.cpp and
+stable-diffusion.cpp.
+
 ### Recommended Models
-- Tier 1 models work well on 8GB RAM Jetson
+- Tier 1 models work well on 8GB RAM Jetson Orin
 - Tier 2 models need 16GB+ RAM
+- Thor / GB10 (large unified memory) can run Tier 3 models comfortably
 - Use Q4_K_M or smaller quants for best performance
+
+---
+
+## OpenWRT Routers (content / infrastructure only)
+
+OpenWRT mesh/router nodes are aarch64 and reuse the **same `tools/linux-arm64`
+artifacts**, but they are a deliberately lightweight profile. Only the
+content-serving, sync, and infrastructure tools are surfaced — **never the heavy
+inference engines** (no llama.cpp / whisper.cpp / stable-diffusion.cpp / ComfyUI on
+a router).
+
+Surfaced tools: Kiwix, Syncthing, btop, FFmpeg, SQLite, and the Dev CLI bundle
+(jq / ripgrep). These let a router act as an offline content mirror, a sync relay,
+and a monitoring node without GPU dependencies.
+
+### Setup
+```bash
+./start.sh setup
+./start.sh download tools
+# Serve offline content from the router:
+./scripts/download-zims.sh serve
+```
+
+There is no GPU on a router node, so the inference engines are intentionally
+marked `n/a` for this profile in the web UI.
 
 ---
 

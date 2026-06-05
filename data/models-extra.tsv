@@ -1,0 +1,58 @@
+# Val Ark - diversity-expansion model catalog (small, high-value, verified).
+# Complements the big LLM/STT/TTS/VLM/image catalog in download-models.sh by
+# broadening MODALITY diversity with mostly-small files (embeddings, rerankers,
+# tiny VLMs, OCR, depth, segmentation, detection, audio, time-series).
+#
+# Schema (pipe-delimited): value|id|category|repo|file|format|gated|bytes|dest|note
+#   value   intrinsic importance 0-1000 (planner derives value/byte for ordering)
+#   format  gguf | onnx | repo (repo = hf download with `file` as --include glob)
+#   gated   no | yes  (yes = needs HF login/license; skipped unless token+accept)
+#   dest    subdir under MODELS_DIR
+#
+# --- Text embeddings (RAG backbone; tiny, run on llama.cpp --embedding / onnxruntime) ---
+850|bge-small-en-v15-gguf|embed|CompendiumLabs/bge-small-en-v1.5-gguf|bge-small-en-v1.5-q8_0.gguf|gguf|no|37748736|embed/bge-small-en|Tiny fast English embedder, great default
+840|all-minilm-l6-v2-onnx|embed|Xenova/all-MiniLM-L6-v2|onnx/model_quantized.onnx|onnx|no|24117248|embed/all-minilm-l6-v2|Classic sentence-transformer, onnxruntime
+835|gte-small-onnx|embed|Xenova/gte-small|onnx/model_quantized.onnx|onnx|no|35651584|embed/gte-small|Tiny ONNX embedder for edge RAG
+830|jina-v2-small-en-onnx|embed|Xenova/jina-embeddings-v2-small-en|onnx/model_quantized.onnx|onnx|no|34603008|embed/jina-v2-small-en|8k-context small embedder
+820|nomic-embed-text-v15-gguf|embed|nomic-ai/nomic-embed-text-v1.5-GGUF|nomic-embed-text-v1.5.Q8_0.gguf|gguf|no|146800640|embed/nomic-embed-text-v15|Top open RAG embedder
+790|e5-base-v2-gguf|embed|ChristianAzinn/e5-base-v2-gguf|e5-base-v2.Q8_0.gguf|gguf|no|125829120|embed/e5-base-v2|Instruction embeddings
+770|bge-large-en-v15-gguf|embed|CompendiumLabs/bge-large-en-v1.5-gguf|bge-large-en-v1.5-q4_k_m.gguf|gguf|no|220200960|embed/bge-large-en|Higher-accuracy English embeddings
+760|mxbai-embed-large-v1-gguf|embed|ChristianAzinn/mxbai-embed-large-v1-gguf|mxbai-embed-large-v1.Q8_0.gguf|gguf|no|377487360|embed/mxbai-embed-large|SOTA-class open embedder
+755|gte-large-gguf|embed|ChristianAzinn/gte-large-gguf|gte-large.Q8_0.gguf|gguf|no|377487360|embed/gte-large|Strong general embeddings (MTEB)
+# --- Rerankers (RAG cross-encoders) ---
+800|jina-reranker-v1-tiny-gguf|reranker|gpustack/jina-reranker-v1-tiny-en-GGUF|jina-reranker-v1-tiny-en-Q8_0.gguf|gguf|no|41943040|reranker/jina-tiny|Ultra-small reranker for edge RAG
+780|bge-reranker-base-onnx|reranker|Xenova/bge-reranker-base|onnx/model_quantized.onnx|onnx|no|78643200|reranker/bge-base|ONNX cross-encoder reranker
+700|bge-reranker-v2-m3-gguf|reranker|gpustack/bge-reranker-v2-m3-GGUF|bge-reranker-v2-m3-Q8_0.gguf|gguf|no|629145600|reranker/bge-v2-m3|Multilingual cross-encoder reranker
+# --- Small multilingual / code LLMs (edge) ---
+720|qwen25-05b-instruct-gguf|small-llm|bartowski/Qwen2.5-0.5B-Instruct-GGUF|Qwen2.5-0.5B-Instruct-Q8_0.gguf|gguf|no|555745280|llm/qwen2.5-0.5b|Smallest capable multilingual chat LLM
+710|smollm2-17b-instruct-gguf|small-llm|bartowski/SmolLM2-1.7B-Instruct-GGUF|SmolLM2-1.7B-Instruct-Q8_0.gguf|gguf|no|1932735283|llm/smollm2-1.7b|Fully-open tiny LLM, permissive license
+700|qwen25-15b-instruct-gguf|small-llm|bartowski/Qwen2.5-1.5B-Instruct-GGUF|Qwen2.5-1.5B-Instruct-Q8_0.gguf|gguf|no|1717986918|llm/qwen2.5-1.5b|Strong tiny multilingual assistant
+690|gemma2-2b-it-gguf|small-llm|bartowski/gemma-2-2b-it-GGUF|gemma-2-2b-it-Q8_0.gguf|gguf|no|3006477107|llm/gemma-2-2b|Best-in-class 2B chat quality
+680|phi35-mini-instruct-gguf|small-llm|bartowski/Phi-3.5-mini-instruct-GGUF|Phi-3.5-mini-instruct-Q4_K_M.gguf|gguf|no|2576980378|llm/phi-3.5-mini|3.8B, 128k context
+700|qwen25-coder-15b-gguf|code|bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF|Qwen2.5-Coder-1.5B-Instruct-Q8_0.gguf|gguf|no|1717986918|code/qwen2.5-coder-1.5b|Tiny code model for edge
+670|qwen25-coder-7b-gguf|code|bartowski/Qwen2.5-Coder-7B-Instruct-GGUF|Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf|gguf|no|5046586573|code/qwen2.5-coder-7b|Best small open coding model
+# --- Tiny VLMs (need text gguf + mmproj; grab all gguf) ---
+640|smolvlm-instruct-gguf|tiny-vlm|ggml-org/SmolVLM-Instruct-GGUF|*.gguf|repo|no|2362232012|vlm/smolvlm|2B VLM, runs in llama.cpp w/ mmproj
+635|smolvlm2-22b-gguf|tiny-vlm|ggml-org/SmolVLM2-2.2B-Instruct-GGUF|*.gguf|repo|no|1717986918|vlm/smolvlm2|Video+image small VLM
+630|moondream2-gguf|tiny-vlm|ggml-org/moondream2-20250414-GGUF|*.gguf|repo|no|1932735283|vlm/moondream2|Tiny VLM, GGUF for llama.cpp
+# --- OCR / document understanding ---
+650|granite-docling-258m-gguf|ocr-doc|ggml-org/granite-docling-258M-GGUF|*.gguf|repo|no|356515840|ocr/granite-docling-258m|Tiny doc-to-markdown/layout VLM
+600|florence-2-base-ft-onnx|ocr-doc|onnx-community/Florence-2-base-ft|onnx/*.onnx|repo|no|262144000|ocr/florence-2-base-onnx|ONNX caption/detect/OCR/grounding VLM
+# --- Speech (VAD / small ASR / extra TTS) ---
+780|silero-vad-onnx|speech-vad|onnx-community/silero-vad|onnx/model.onnx|onnx|no|2097152|stt/silero-vad|De-facto voice-activity detector, runs anywhere
+560|whisper-base-onnx|speech-asr|onnx-community/whisper-base|onnx/*.onnx|repo|no|157286400|stt/whisper-base-onnx|Whisper via onnxruntime path
+640|kokoro-82m-v1-onnx-q8|tts|onnx-community/Kokoro-82M-v1.0-ONNX|onnx/model_q8f16.onnx|onnx|no|94371840|tts/kokoro-q8|Quantized single-file Kokoro for tiny deploy
+# --- Vision: depth / segmentation / detection / image-embed ---
+820|yolo11n-onnx|detection|Ultralytics/YOLO11|yolo11n.pt|repo|no|5662310|vision/yolo11n|Nano object detector, real-time on CPU/edge
+640|depth-anything-v2-small-onnx|depth|onnx-community/depth-anything-v2-small|onnx/model.onnx|onnx|no|104857600|vision/depth-anything-v2-small|SOTA monocular depth, edge-fast
+620|mobilesam|segmentation|dhkim2810/MobileSAM|mobile_sam.pt|repo|no|41943040|vision/mobilesam|Tiny segment-anything for edge
+600|clip-vit-b32-onnx|img-embed|Xenova/clip-vit-base-patch32|onnx/model_quantized.onnx|onnx|no|157286400|vision/clip-b32|Image/text embeddings, zero-shot search
+590|siglip-base-224-onnx|img-embed|Xenova/siglip-base-patch16-224|onnx/model_quantized.onnx|onnx|no|209715200|vision/siglip-base|Stronger zero-shot image-text than CLIP
+# --- Time-series forecasting (modality diversity) ---
+520|chronos-t5-small|time-series|amazon/chronos-t5-small|*.safetensors|repo|no|199229440|timeseries/chronos-t5-small|Pretrained zero-shot forecasting
+510|moirai-1-r-small|time-series|Salesforce/moirai-1.0-R-small|*.safetensors|repo|no|52428800|timeseries/moirai-small|Universal time-series forecaster
+# --- Audio gen / classification ---
+500|clap-htsat-unfused|audio-clf|laion/clap-htsat-unfused|*.safetensors|repo|no|1992294400|audio/clap|Zero-shot audio classification
+480|musicgen-small|audio-gen|facebook/musicgen-small|*.safetensors|repo|no|2362232012|audio/musicgen-small|Text-to-music generation, small
+# --- Safety (open mirror avoids gate) ---
+560|llama-guard-3-8b-gguf|safety|QuantFactory/Llama-Guard-3-8B-GGUF|Llama-Guard-3-8B.Q4_K_M.gguf|gguf|no|5046586573|safety/llama-guard-3-8b|Input/output safety classifier (open mirror)

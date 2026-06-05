@@ -57,6 +57,17 @@ log_error()   { log "${RED}ERROR${NC}: $*"; }
 log_info()    { log "${BLUE}INFO${NC}: $*"; }
 log_warn()    { log "${YELLOW}WARN${NC}: $*"; }
 
+# Human-readable elapsed time since an epoch start (used by orchestrators).
+elapsed_since() {
+    local start="${1:-0}" now diff h m s
+    now=$(date +%s); diff=$(( now - start ))
+    [ "$diff" -lt 0 ] && diff=0
+    h=$(( diff / 3600 )); m=$(( (diff % 3600) / 60 )); s=$(( diff % 60 ))
+    if [ "$h" -gt 0 ]; then echo "${h}h ${m}m ${s}s"
+    elif [ "$m" -gt 0 ]; then echo "${m}m ${s}s"
+    else echo "${s}s"; fi
+}
+
 ensure_dir() {
     if [ -f "$1" ]; then
         # File exists at directory path - move it aside

@@ -81,11 +81,15 @@ verify_local() {
         skip "llama-cli or a small gguf not available for inference check"
     fi
 
-    # 4) web API health (only if already running — don't start it)
-    if curl -fsS --max-time 5 "http://127.0.0.1:3000/api/health" >/dev/null 2>&1; then
-        chk "web server /api/health responds"
+    # 4) web API health — validate it's ACTUALLY the Val Ark server (a bare 200
+    # could be a different app squatting the port), on the configured port.
+    local wport="${VALARK_WEB_PORT:-3000}" hb
+    hb=$(curl -fsS --max-time 5 "http://127.0.0.1:${wport}/api/health" 2>/dev/null)
+    if echo "$hb" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' && \
+       curl -fsS --max-time 5 "http://127.0.0.1:${wport}/" 2>/dev/null | grep -qi "Val Ark"; then
+        chk "Val Ark web server responds (:$wport)"
     else
-        skip "web server not running on :3000"
+        skip "Val Ark web server not running/identified on :$wport"
     fi
 
     # 5) integrity of a sample of managed files (size)

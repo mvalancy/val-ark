@@ -92,12 +92,29 @@ EOF
     fi
 }
 
+# Keep the Val Ark web UI server (which auto-launches Kiwix) running.
+ensure_web_server() {
+    local port="${VALARK_WEB_PORT:-3000}"
+    if curl -fsS --max-time 4 "http://127.0.0.1:${port}/api/health" 2>/dev/null | grep -q '"status".*"ok"'; then
+        log "web server up on :$port (kiwix auto-served)"; return 0
+    fi
+    if ss -tln 2>/dev/null | grep -q ":${port} "; then
+        log "${YELLOW}:$port held by another app${NC} — set VALARK_WEB_PORT in .env to a free port"; return 1
+    fi
+    local node="$HOME/.nvm/versions/node/v20.20.2/bin/node"; [ -x "$node" ] || node="$(command -v node 2>/dev/null)"
+    [ -n "$node" ] || { log "${RED}node not found${NC}; cannot start web server"; return 1; }
+    setsid nohup "$node" "${_DIR}/server.js" "$port" >"${LOG_DIR}/server.out" 2>&1 </dev/null & disown
+    log "${GREEN}started Val Ark web server${NC} on :$port"
+}
+
 loop_once() {
     step "cycle start"
     step "1. ensure data disk writable"
     if valark_ensure_writable; then log "${GREEN}writable${NC}: $DATA_ROOT"; else log "${RED}NOT writable${NC}: $DATA_ROOT (manual remount may be needed)"; fi
 
     step "2. repair layout"; valark_ensure_layout && log "layout ok"
+
+    step "2b. ensure web server + kiwix running"; ensure_web_server
 
     step "3. refresh live catalog (heals stale content links)"
     bash "$LIBRARIAN" refresh >/dev/null 2>&1 && log "catalog refreshed" || log "${YELLOW}catalog refresh failed (cache retained)${NC}"

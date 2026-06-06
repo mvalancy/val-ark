@@ -64,9 +64,19 @@ download_one() {
     case "$source" in
         zim|url)
             mkdir -p "$(dirname "$dest")" 2>/dev/null
-            local tmp="${dest}.part"
-            if curl "${CURL_OPTS[@]}" -C - -o "$tmp" "$url" 2>>"$LL_LOG"; then
-                local sz; sz=$(stat -c%s "$tmp" 2>/dev/null || echo 0)
+            local tmp="${dest}.part" sz got=1
+            # Prefer aria2 (8-connection ~3x faster on per-connection-throttled
+            # mirrors like download.kiwix.org); fall back to single-stream curl
+            # if aria2 is absent or fails. Both resume an existing *.part.
+            if command -v aria2c >/dev/null 2>&1; then
+                aria2c -x8 -s8 -j1 --max-tries=5 --retry-wait=15 --continue=true \
+                    --auto-file-renaming=false --allow-overwrite=true \
+                    --console-log-level=warn --summary-interval=0 \
+                    -d "$(dirname "$dest")" -o "$(basename "$tmp")" "$url" >>"$LL_LOG" 2>&1 && got=0
+            fi
+            [ "$got" -ne 0 ] && { curl "${CURL_OPTS[@]}" -C - -o "$tmp" "$url" 2>>"$LL_LOG" && got=0; }
+            if [ "$got" -eq 0 ]; then
+                sz=$(stat -c%s "$tmp" 2>/dev/null || echo 0)
                 if [ "$bytes" -gt 0 ] && [ "$sz" -lt $(( bytes * 90 / 100 )) ]; then
                     warn "size short for $id ($sz < $bytes) - keeping .part for resume"; return 1
                 fi

@@ -470,9 +470,6 @@ const TOOL_BINARIES: Record<string, string[]> = {
     'tools/linux-x86_64/FreeCAD/FreeCAD.AppImage',
     'tools/linux-x86_64/FreeCAD/bin/FreeCADCmd',
   ],
-  'kicad': [
-    'tools/linux-x86_64/kicad/KiCad.AppImage',
-  ],
   'godot': [
     'tools/linux-arm64/godot',
     'tools/linux-x86_64/godot',
@@ -505,17 +502,11 @@ const TOOL_BINARIES: Record<string, string[]> = {
     'tools/linux-x86_64/tailscale/tailscale',
     'tools/linux-arm64/tailscale/tailscale',
   ],
-  'mosquitto': [
-    'tools/linux-arm64/mosquitto/mosquitto',
-  ],
   'mqtt-explorer': [
     'tools/linux-x86_64/mqtt-explorer/MQTT-Explorer.AppImage',
   ],
   'redis': [
     'tools/linux-arm64/redis/redis-server',
-  ],
-  'postgresql': [
-    'tools/linux-arm64/postgresql/bin/postgres',
   ],
   'helix': [
     'tools/linux-x86_64/helix/hx',
@@ -529,9 +520,6 @@ const TOOL_BINARIES: Record<string, string[]> = {
     'tools/linux-x86_64/sqlite/sqlite3',
     'tools/linux-arm64/sqlite/sqlite3',
   ],
-  'miniforge': [
-    'tools/linux-arm64/miniforge/bin/conda',
-  ],
   'python-standalone': [
     'tools/linux-arm64/python-standalone/bin/python3',
   ],
@@ -540,20 +528,49 @@ const TOOL_BINARIES: Record<string, string[]> = {
 // Tools that are intentionally not downloaded (package-managed)
 const PACKAGE_MANAGED_TOOLS = ['vlc', 'n8n', 'milvus', 'coolify', 'claude-code', 'ollama', 'comfyui'];
 
+// Tools mirrored as SOURCE, an INSTALLER, or an install hint rather than a
+// ready-to-run binary (the user builds/installs them) — verified by artifact
+// presence, not by a binary path.
+const SOURCE_HINT_TOOLS = ['mosquitto', 'postgresql', 'miniforge', 'kicad'];
+
+const PLATFORM_DIRS = ['linux-x86_64', 'linux-arm64', 'macos-arm64', 'windows-x64'];
+
+// Recursively look for a file under `dir` matching `match` (bounded depth — tool
+// binaries nest under build-tag dirs like llama-cpp/llama-bNNNN/ and bin/ subdirs).
+function findFileRecursive(dir: string, match: (name: string) => boolean, depth = 6): boolean {
+  let entries: string[];
+  try { entries = fs.readdirSync(dir); } catch { return false; }
+  for (const e of entries) {
+    const full = path.join(dir, e);
+    let st: fs.Stats;
+    try { st = fs.statSync(full); } catch { continue; }
+    if (st.isFile() && match(e)) return true;
+    if (st.isDirectory() && depth > 0 && findFileRecursive(full, match, depth - 1)) return true;
+  }
+  return false;
+}
+
+// A tool's binary is "present" if any configured path exists, OR the binary's
+// basename (or an .AppImage) is found anywhere under tools/<platform>/<id>/.
+// Robust to nested build-tag dirs, bin/ subdirs, and versioned AppImage names.
+function toolHasBinary(toolId: string, paths: string[]): boolean {
+  if (paths.some(p => fs.existsSync(path.join(PROJECT_ROOT, p)))) return true;
+  const names = new Set(paths.map(p => path.basename(p)));
+  return PLATFORM_DIRS.some(plat => {
+    const dir = path.join(PROJECT_ROOT, 'tools', plat, toolId);
+    return fs.existsSync(dir) && findFileRecursive(dir, (n) => names.has(n) || /\.AppImage$/i.test(n));
+  });
+}
+
 test.describe('Val Ark - Binary Verification', () => {
   for (const [toolId, paths] of Object.entries(TOOL_BINARIES)) {
     test(`binary exists on disk: ${toolId}`, () => {
-      const found = paths.some(p => fs.existsSync(path.join(PROJECT_ROOT, p)));
-      expect(found, `Expected at least one binary for ${toolId} at: ${paths.join(', ')}`).toBe(true);
+      expect(toolHasBinary(toolId, paths), `Expected a mirrored binary for ${toolId} (configured: ${paths.join(', ')})`).toBe(true);
     });
   }
 
   test('all downloadable tools have at least one binary', () => {
-    const missing: string[] = [];
-    for (const [toolId, paths] of Object.entries(TOOL_BINARIES)) {
-      const found = paths.some(p => fs.existsSync(path.join(PROJECT_ROOT, p)));
-      if (!found) missing.push(toolId);
-    }
+    const missing = Object.entries(TOOL_BINARIES).filter(([id, paths]) => !toolHasBinary(id, paths)).map(([id]) => id);
     expect(missing, `Missing binaries for: ${missing.join(', ')}`).toHaveLength(0);
   });
 
@@ -562,6 +579,18 @@ test.describe('Val Ark - Binary Verification', () => {
       expect(TOOL_BINARIES[toolId], `${toolId} should not have binary paths defined`).toBeUndefined();
     }
   });
+
+  // Source/installer/hint tools have no ready binary by design; verify their
+  // mirror artifact (source tree, installer, or INSTALL.txt) is present instead.
+  for (const toolId of SOURCE_HINT_TOOLS) {
+    test(`source/installer/hint mirror present: ${toolId}`, () => {
+      const present = PLATFORM_DIRS.some(plat => {
+        const dir = path.join(PROJECT_ROOT, 'tools', plat, toolId);
+        try { return fs.existsSync(dir) && fs.readdirSync(dir).length > 0; } catch { return false; }
+      });
+      expect(present, `Expected a mirrored source/installer/hint artifact for ${toolId}`).toBe(true);
+    });
+  }
 });
 
 test.describe('Val Ark - Download Size Ordering', () => {

@@ -127,7 +127,10 @@ _build_thelounge() {
         ( cd "$THELOUNGE_SRC" && PATH="${nodedir}:$PATH" yarn install >"${LOG_DIR_CHAT}/thelounge-build.log" 2>&1 \
             && PATH="${nodedir}:$PATH" yarn build >>"${LOG_DIR_CHAT}/thelounge-build.log" 2>&1 )
     else
-        ( cd "$THELOUNGE_SRC" && PATH="${nodedir}:$PATH" npm install >"${LOG_DIR_CHAT}/thelounge-build.log" 2>&1 \
+        # --legacy-peer-deps: The Lounge has an internal peer-dep mismatch
+        # (@textcomplete/core) that strict npm (v7+) refuses; yarn and older npm
+        # tolerated it. This accepts the upstream-intended resolution.
+        ( cd "$THELOUNGE_SRC" && PATH="${nodedir}:$PATH" npm install --legacy-peer-deps >"${LOG_DIR_CHAT}/thelounge-build.log" 2>&1 \
             && PATH="${nodedir}:$PATH" npm run build >>"${LOG_DIR_CHAT}/thelounge-build.log" 2>&1 )
     fi
     if [ -d "${THELOUNGE_SRC}/public" ]; then

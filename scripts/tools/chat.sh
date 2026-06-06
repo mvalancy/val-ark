@@ -25,8 +25,10 @@ NGIRCD_PINNED_TAG="rel-27"
 NGIRCD_PINNED_VER="27"          # tarball is ngircd-${VER}.tar.gz
 
 # The Lounge: pure Node web client, no release binaries -> mirror source.
+# v4.4.3 requires Node >=18 (runs on the common 18/20 baselines, incl. older ARM);
+# v4.5.0 bumped to Node >=22, which many offline hosts won't have yet.
 THELOUNGE_REPO="thelounge/thelounge"
-THELOUNGE_PINNED_TAG="v4.5.0"
+THELOUNGE_PINNED_TAG="v4.4.3"
 
 PLATFORMS="linux-arm64 linux-x86_64 macos-arm64 windows-x64"
 
@@ -90,8 +92,10 @@ download_chat() {
     # ---------------------------------------------------------------------
     # 2) The Lounge web client source (git clone -> .tar.gz for offline use)
     # ---------------------------------------------------------------------
-    local tl_tag
-    tl_tag=$(github_latest_tag "$THELOUNGE_REPO" "$THELOUNGE_PINNED_TAG")
+    # Pin The Lounge to THELOUNGE_PINNED_TAG directly (do NOT follow upstream
+    # latest): newer releases require Node >=22, which many offline/ARM hosts
+    # won't have. v4.4.3 runs on Node >=18.
+    local tl_tag="$THELOUNGE_PINNED_TAG"
 
     local platform dest
     for platform in $PLATFORMS; do

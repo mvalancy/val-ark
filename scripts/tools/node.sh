@@ -42,6 +42,12 @@ download_node() {
     # windows-x64 ships a .zip; mirror it as an archive for offline install.
     download_and_extract "${base}/node-${ver}-win-x64.zip" \
         "${TOOLS_DIR}/windows-x64/node" "node ${ver} windows-x64" 1
+    # unzip ignores --strip-components, so the win zip lands nested one level.
+    # Flatten it so node.exe sits at tools/windows-x64/node/ like the other platforms.
+    local wnest="${TOOLS_DIR}/windows-x64/node/node-${ver}-win-x64"
+    if [ -d "$wnest" ] && [ ! -f "${TOOLS_DIR}/windows-x64/node/node.exe" ]; then
+        mv "$wnest"/* "${TOOLS_DIR}/windows-x64/node/" 2>/dev/null && rmdir "$wnest" 2>/dev/null
+    fi
 
     log_success "${TOOL_NAME} download complete (${ver})."
 }

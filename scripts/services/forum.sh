@@ -63,6 +63,17 @@ detect_platform() {
 }
 PLATFORM="$(detect_platform)"
 
+# Prefer Val Ark's mirrored Node runtime (NodeBB v4 needs Node >=22; many hosts
+# ship older). Falls back to system node. Returns the bin DIR to prepend to PATH.
+valark_node_dir() {
+    local d="${TOOLS_DIR}/${PLATFORM}/node/bin"
+    [ -x "${d}/node" ] && { echo "$d"; return 0; }
+    d="${TOOLS_DIR}/linux-x86_64/node/bin"
+    [ -x "${d}/node" ] && { echo "$d"; return 0; }
+    command -v node >/dev/null 2>&1 && { dirname "$(command -v node)"; return 0; }
+    return 1
+}
+
 # Locate the mirrored NodeBB source (it lives once, under linux-x86_64).
 find_nodebb_dir() {
     local base="${TOOLS_DIR}/linux-x86_64/forum"
@@ -175,8 +186,10 @@ EOF
 # --- NodeBB lifecycle ---------------------------------------------------------
 nodebb_cmd() {
     # NodeBB is driven via ./nodebb in its source dir; --config points at ours.
+    # Run with Val Ark's Node (>=22) on PATH so NodeBB v4's deps (undici) work.
     local dir; dir="$(find_nodebb_dir)" || return 1
-    ( cd "$dir" && "$@" )
+    local nd; nd="$(valark_node_dir)"
+    ( cd "$dir" && PATH="${nd}:$PATH" "$@" )
 }
 
 deps_installed() {
@@ -185,9 +198,9 @@ deps_installed() {
 }
 
 do_start() {
-    if ! command -v node >/dev/null 2>&1; then
-        err "Node.js runtime not found on PATH. NodeBB needs Node 20+."
-        err "Install Node (system pkg or mirror a Node tarball into tools/${PLATFORM}/node/)."
+    if ! valark_node_dir >/dev/null 2>&1; then
+        err "Node.js runtime not found. NodeBB v4 needs Node >=22."
+        err "Mirror it: scripts/tools/node.sh (into tools/${PLATFORM}/node/), or install system Node 22+."
         return 1
     fi
     local dir
@@ -206,6 +219,12 @@ do_start() {
         if ! command -v npm >/dev/null 2>&1; then
             err "npm not found; NodeBB needs Node 20+/npm. Install on host, then re-run."
             return 1
+        fi
+        # NodeBB ships its manifest as install/package.json; the root package.json
+        # is created during bootstrap. Copy it so npm has a manifest to install from.
+        if [ ! -f "${dir}/package.json" ] && [ -f "${dir}/install/package.json" ]; then
+            cp "${dir}/install/package.json" "${dir}/package.json"
+            log "Bootstrapped package.json from install/package.json"
         fi
         # Auto-install on first run (one-time; needs an online or cached registry).
         # --legacy-peer-deps: NodeBB's tree has peer-dep mismatches strict npm rejects.

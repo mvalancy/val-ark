@@ -95,6 +95,11 @@ _ensure_credentials() {
         echo "PASTE_ADMIN_PASSWORD_SAVED='${PASTE_ADMIN_PASSWORD}'"
     } > "$CRED_FILE"
     chmod 600 "$CRED_FILE" 2>/dev/null || true
+    # NTFS/exFAT/FUSE data disks silently ignore chmod and force world-readable
+    # perms. Warn loudly if so — secrets here must NOT be NFS-exported.
+    if [ -n "$(find "$CRED_FILE" -perm /0077 2>/dev/null)" ]; then
+        _log "WARNING: ${CRED_FILE} is world-accessible (this filesystem ignores chmod — likely NTFS/FUSE). Do NOT NFS-export the state tree; relocate secrets to an ext4/POSIX path for real 600 perms."
+    fi
 }
 
 _is_running() {

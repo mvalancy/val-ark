@@ -768,21 +768,29 @@ function serveStatic(res, filePath) {
     });
 }
 
+// HTML-escape untrusted text (filenames from the data disk, paths) before it
+// goes into the autoindex / error pages — prevents stored XSS via attacker-named
+// files. encodeURI keeps href path slashes while encoding metacharacters.
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 function serveDirectory(res, dirPath) {
     const entries = readdirSafe(dirPath);
     const relativePath = dirPath.replace(ROOT, '').replace(/^\//, '');
+    const relSafe = escapeHtml(relativePath);
 
-    let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Index of /${relativePath}</title>
+    let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Index of /${relSafe}</title>
     <style>body{font-family:system-ui,sans-serif;max-width:900px;margin:40px auto;padding:0 20px;background:#0a0e14;color:#e8edf4}
     a{color:#4da6ff;text-decoration:none}a:hover{text-decoration:underline}
     table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px 12px;border-bottom:1px solid #2a3545}
     th{color:#94a3b8}.size{text-align:right;color:#64748b}.dir{color:#4ade80}</style></head>
-    <body><h1>Index of /${relativePath}</h1><table><tr><th>Name</th><th class="size">Size</th><th>Modified</th></tr>`;
+    <body><h1>Index of /${relSafe}</h1><table><tr><th>Name</th><th class="size">Size</th><th>Modified</th></tr>`;
 
     // Add parent directory link if not at root
     if (relativePath) {
         const parent = '/' + relativePath.split('/').slice(0, -1).join('/');
-        html += `<tr><td><a href="${parent || '/'}">..</a></td><td></td><td></td></tr>`;
+        html += `<tr><td><a href="${escapeHtml(encodeURI(parent || '/'))}">..</a></td><td></td><td></td></tr>`;
     }
 
     // List entries
@@ -795,7 +803,7 @@ function serveDirectory(res, dirPath) {
             const isDir = stat.isDirectory();
             const sizeStr = isDir ? '-' : formatSize(stat.size);
             const dateStr = stat.mtime.toISOString().split('T')[0];
-            html += `<tr><td><a href="${href}" class="${isDir ? 'dir' : ''}">${name}${isDir ? '/' : ''}</a></td><td class="size">${sizeStr}</td><td>${dateStr}</td></tr>`;
+            html += `<tr><td><a href="${escapeHtml(encodeURI(href))}" class="${isDir ? 'dir' : ''}">${escapeHtml(name)}${isDir ? '/' : ''}</a></td><td class="size">${sizeStr}</td><td>${dateStr}</td></tr>`;
         } catch (e) {}
     }
 
@@ -1034,7 +1042,10 @@ function startKiwix() {
 // itself report the bad ones.
 function serveWithRetry(kiwixBin, zimFiles, attempt) {
     if (zimFiles.length === 0 || attempt > 25) { kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 }; return; }
-    const proc = spawn(kiwixBin, ['--port', String(KIWIX_PORT), '--urlRootLocation', KIWIX_ROOT, ...zimFiles], { stdio: ['ignore', 'ignore', 'pipe'] });
+    // Bind kiwix to loopback only — it's an internal upstream reached solely via
+    // the same-origin /kiwix/ reverse proxy; never expose unauthenticated content
+    // directly on the LAN.
+    const proc = spawn(kiwixBin, ['--port', String(KIWIX_PORT), '--address', '127.0.0.1', '--urlRootLocation', KIWIX_ROOT, ...zimFiles], { stdio: ['ignore', 'ignore', 'pipe'] });
     kiwixProcess = proc;
     let stderrBuf = '', settled = false;
     proc.stderr.on('data', (c) => { stderrBuf = (stderrBuf + c.toString()).slice(-2000); });
@@ -1087,8 +1098,12 @@ process.on('exit', () => { if (kiwixProcess) kiwixProcess.kill(); });
 process.on('SIGINT', () => { if (kiwixProcess) kiwixProcess.kill(); process.exit(0); });
 process.on('SIGTERM', () => { if (kiwixProcess) kiwixProcess.kill(); process.exit(0); });
 
-server.listen(PORT, () => {
-    console.log(`Val Ark server running at http://localhost:${PORT}`);
+// Bind address: defaults to all interfaces (Val Ark is a LAN hub by design), but
+// honor VALARK_BIND so a security-conscious operator can restrict it (e.g.
+// 127.0.0.1 for host-only access).
+const WEB_BIND = process.env.VALARK_BIND || '0.0.0.0';
+server.listen(PORT, WEB_BIND, () => {
+    console.log(`Val Ark server running at http://localhost:${PORT} (bind ${WEB_BIND})`);
     console.log(`Serving from: ${ROOT}`);
     // Warm the cache on startup
     getToolsStatus();

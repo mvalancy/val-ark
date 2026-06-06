@@ -93,6 +93,13 @@ find_redis_cli() {
 log()  { echo "[forum] $*"; }
 err()  { echo "[forum] ERROR: $*" >&2; }
 
+# Random URL-safe secret (offline; no extra deps).
+_gen_secret() {
+    if command -v openssl >/dev/null 2>&1; then openssl rand -base64 18 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 24
+    elif [ -r /dev/urandom ]; then LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom 2>/dev/null | head -c 24
+    else echo "valark$$"; fi
+}
+
 # --- Process helpers ----------------------------------------------------------
 pid_alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
 
@@ -196,19 +203,38 @@ do_start() {
     write_config
 
     if ! deps_installed; then
-        err "NodeBB dependencies not installed (node_modules missing)."
-        err "Run once on this host (needs npm + an online or cached registry):"
-        err "    cd ${dir} && npm install --omit=dev && ./nodebb setup --config=${CONFIG_FILE}"
-        err "Unattended admin setup can use VALARK_FORUM_ADMIN_USERNAME/_PASSWORD/_EMAIL."
-        return 1
+        if ! command -v npm >/dev/null 2>&1; then
+            err "npm not found; NodeBB needs Node 20+/npm. Install on host, then re-run."
+            return 1
+        fi
+        # Auto-install on first run (one-time; needs an online or cached registry).
+        # --legacy-peer-deps: NodeBB's tree has peer-dep mismatches strict npm rejects.
+        log "Installing NodeBB dependencies (one-time; this takes a while)..."
+        if ! nodebb_cmd npm install --omit=dev --legacy-peer-deps >"${FORUM_STATE}/npm-install.log" 2>&1; then
+            err "npm install failed; see ${FORUM_STATE}/npm-install.log"
+            return 1
+        fi
+        log "NodeBB dependencies installed."
     fi
 
-    # First-run: create the admin account if the forum has never been set up.
-    # NodeBB marks setup completion in Redis; we detect via `./nodebb status`.
-    if ! nodebb_cmd ./nodebb setup --config="$CONFIG_FILE" >/dev/null 2>&1; then
-        # setup is idempotent for an already-set-up install; ignore benign reruns.
-        :
+    # First-run admin: NodeBB setup is interactive unless given the answers as a
+    # JSON string. Take the admin login from VALARK_FORUM_ADMIN_* or generate one,
+    # persist it (chmod 600), and run setup unattended. Idempotent on reruns.
+    local cred="${FORUM_STATE}/admin-credentials.txt"
+    [ -f "$cred" ] && . "$cred"
+    local admin_user admin_pass admin_email
+    admin_user="${VALARK_FORUM_ADMIN_USERNAME:-${FORUM_ADMIN_USER:-admin}}"
+    admin_pass="${VALARK_FORUM_ADMIN_PASSWORD:-${FORUM_ADMIN_PASS:-$(_gen_secret)}}"
+    admin_email="${VALARK_FORUM_ADMIN_EMAIL:-${FORUM_ADMIN_EMAIL:-admin@valark.lan}}"
+    umask 077
+    { echo "FORUM_ADMIN_USER='${admin_user}'"; echo "FORUM_ADMIN_PASS='${admin_pass}'"; echo "FORUM_ADMIN_EMAIL='${admin_email}'"; } > "$cred"
+    chmod 600 "$cred" 2>/dev/null || true
+    if [ -n "$(find "$cred" -perm /0077 2>/dev/null)" ]; then
+        log "WARNING: ${cred} is world-accessible (filesystem ignores chmod — likely NTFS/FUSE). Do NOT NFS-export the state tree; relocate secrets to an ext4 path for real 600."
     fi
+    nodebb_cmd ./nodebb setup --config="$CONFIG_FILE" \
+        "{\"admin:username\":\"${admin_user}\",\"admin:password\":\"${admin_pass}\",\"admin:password:confirm\":\"${admin_pass}\",\"admin:email\":\"${admin_email}\"}" \
+        >"${FORUM_STATE}/setup.log" 2>&1 || log "setup returned non-zero (benign if already set up; see ${FORUM_STATE}/setup.log)"
 
     log "Starting NodeBB on ${BIND}:${FORUM_PORT} (proxied at ${URL_ROOT}/)"
     # ./nodebb start forks a managed loader; we capture its pid for stop/status.

@@ -35,7 +35,11 @@ set -u
 # --- Service constants ---------------------------------------------------------
 IRC_PORT="${VALARK_CHAT_IRC_PORT:-6667}"     # ngIRCd listen port (LAN)
 WEB_PORT="${VALARK_CHAT_WEB_PORT:-9000}"     # The Lounge web UI (localhost only; reverse-proxied at /app/chat/)
-BIND="${VALARK_BIND:-0.0.0.0}"               # IRC bind address; honour VALARK_BIND
+# ngIRCd binds loopback by default (The Lounge connects via 127.0.0.1; the web
+# UI is the supported entry point). Set VALARK_BIND=0.0.0.0 to also let native IRC
+# clients on the LAN connect — if you do, set a connect Password (ngIRCd has none
+# by default, so a LAN bind would accept unauthenticated connections).
+BIND="${VALARK_BIND:-127.0.0.1}"             # IRC bind address; honour VALARK_BIND
 NETWORK_NAME="${VALARK_CHAT_NETWORK:-Val Ark}"
 
 CHAT_HOME="${STATE_DIR}/services/chat"
@@ -244,17 +248,16 @@ _ensure_admin() {
         warn "  THELOUNGE_HOME='${THELOUNGE_HOME}' '${node}' '${THELOUNGE_SRC}/index.js' add ${admin}"
         return 0
     }
-    cat <<EOF
-
-  ============================================================
-   Val Ark IRC Chat - first-run admin account created
-     username: ${admin}
-     password: ${pass}
-   (Set VALARK_CHAT_ADMIN_USER / VALARK_CHAT_ADMIN_PASS in .env
-    to pin these. CHANGE THE PASSWORD after first login.)
-  ============================================================
-
-EOF
+    # Persist the generated credential to a 600 file instead of printing it to
+    # stdout (which lands in logs that may be world-readable / NFS-exported).
+    local cred="${THELOUNGE_HOME}/admin-credentials.txt"
+    umask 077
+    { echo "CHAT_ADMIN_USER='${admin}'"; echo "CHAT_ADMIN_PASS='${pass}'"; } > "$cred"
+    chmod 600 "$cred" 2>/dev/null || true
+    if [ -n "$(find "$cred" -perm /0077 2>/dev/null)" ]; then
+        warn "${cred} is world-accessible (filesystem ignores chmod — likely NTFS/FUSE). Do NOT NFS-export the state tree; relocate secrets to an ext4 path for real 600."
+    fi
+    log "First-run admin '${admin}' created; credential saved to ${cred} (chmod 600). Change it after first login, or pin VALARK_CHAT_ADMIN_USER/_PASS in .env."
 }
 
 ###############################################################################

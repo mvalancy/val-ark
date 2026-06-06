@@ -23,6 +23,13 @@ tools/
 /sources
 /assets
 /installers
+/state
+
+# Service runtime state can hold generated credentials in dev/fallback mode
+# (VAL_ARK_DATA unset -> STATE_DIR=./state). Never let those reach the public repo.
+state/
+credentials.txt
+admin-credentials.txt
 
 # Offline content (ZIM files, very large)
 content/

@@ -172,6 +172,12 @@ detect_platform() {
     MODELS_DIR="${SCRIPT_DIR}/models"
 }
 
+# Locate a tool binary by name anywhere under TOOLS_DIR (binaries install at
+# nested/versioned paths, e.g. llama-cpp/llama-bNNNN/llama-server, piper/piper/piper).
+find_bin() {
+    find "${TOOLS_DIR}" -name "$1" -type f \( -perm -u+x -o -perm -g+x -o -perm -o+x \) 2>/dev/null | head -1
+}
+
 # Find first available model matching pattern
 find_model() {
     local pattern="$1"
@@ -195,10 +201,11 @@ find_model() {
 ai_chat() {
     detect_platform
     local model_hint="${1:-}"
-    local llama_server="${TOOLS_DIR}/llama-server"
+    local llama_server="$(find_bin llama-server)"
+    [ -x "$llama_server" ] || llama_server="${TOOLS_DIR}/llama-server"
 
     if [ ! -x "$llama_server" ]; then
-        echo -e "${RED}Error:${NC} llama-server not found at ${llama_server}"
+        echo -e "${RED}Error:${NC} llama-server not found under ${TOOLS_DIR}"
         echo "Run: ./start.sh download tools"
         exit 1
     fi
@@ -236,9 +243,10 @@ ai_transcribe() {
         exit 1
     fi
 
-    local whisper="${TOOLS_DIR}/whisper-cli"
+    local whisper="$(find_bin whisper-cli)"
+    [ -x "$whisper" ] || whisper="${TOOLS_DIR}/whisper-cli"
     if [ ! -x "$whisper" ]; then
-        echo -e "${RED}Error:${NC} whisper-cli not found at ${whisper}"
+        echo -e "${RED}Error:${NC} whisper-cli not found under ${TOOLS_DIR}"
         echo "Run: ./start.sh download tools"
         exit 1
     fi
@@ -291,9 +299,10 @@ ai_image() {
         exit 1
     fi
 
-    local sd="${TOOLS_DIR}/sd-cli"
+    local sd="$(find_bin sd-cli)"; [ -x "$sd" ] || sd="$(find_bin sd)"
+    [ -x "$sd" ] || sd="${TOOLS_DIR}/sd-cli"
     if [ ! -x "$sd" ]; then
-        echo -e "${RED}Error:${NC} sd-cli not found at ${sd}"
+        echo -e "${RED}Error:${NC} stable-diffusion (sd/sd-cli) not found under ${TOOLS_DIR}"
         echo "Run: ./start.sh download tools"
         exit 1
     fi
@@ -334,9 +343,10 @@ ai_speak() {
         exit 1
     fi
 
-    local piper="${TOOLS_DIR}/piper/piper"
+    local piper="$(find_bin piper)"
+    [ -x "$piper" ] || piper="${TOOLS_DIR}/piper/piper"
     if [ ! -x "$piper" ]; then
-        echo -e "${RED}Error:${NC} piper not found at ${piper}"
+        echo -e "${RED}Error:${NC} piper not found under ${TOOLS_DIR}"
         echo "Run: ./start.sh download tools"
         exit 1
     fi

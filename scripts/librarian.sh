@@ -64,24 +64,35 @@ download_one() {
     case "$source" in
         zim|url)
             mkdir -p "$(dirname "$dest")" 2>/dev/null
-            local tmp="${dest}.part" sz got=1
+            local tmp="${dest}.part" sz got=1 final=""
             # Prefer aria2 (8-connection ~3x faster on per-connection-throttled
             # mirrors like download.kiwix.org); fall back to single-stream curl
             # if aria2 is absent or fails. Both resume an existing *.part.
             if command -v aria2c >/dev/null 2>&1; then
                 aria2c -x8 -s8 -j1 --max-tries=5 --retry-wait=15 --continue=true \
-                    --auto-file-renaming=false --allow-overwrite=true \
+                    --auto-file-renaming=false --allow-overwrite=true --content-disposition=false \
                     --console-log-level=warn --summary-interval=0 \
                     -d "$(dirname "$dest")" -o "$(basename "$tmp")" "$url" >>"$LL_LOG" 2>&1 && got=0
             fi
-            [ "$got" -ne 0 ] && { curl "${CURL_OPTS[@]}" -C - -o "$tmp" "$url" 2>>"$LL_LOG" && got=0; }
+            # aria2 may land the bytes in EITHER the .part or the final name
+            # (it can honour the server filename) — pick whichever has the data.
             if [ "$got" -eq 0 ]; then
-                sz=$(stat -c%s "$tmp" 2>/dev/null || echo 0)
-                if [ "$bytes" -gt 0 ] && [ "$sz" -lt $(( bytes * 90 / 100 )) ]; then
-                    warn "size short for $id ($sz < $bytes) - keeping .part for resume"; return 1
-                fi
-                mv -f "$tmp" "$dest" && manifest_add "$id" "$bucket" "$cat" "$dest" "$sz" "$value" "$source" && return 0
+                if [ -f "$dest" ] && [ "$(stat -c%s "$dest" 2>/dev/null||echo 0)" -ge "$(stat -c%s "$tmp" 2>/dev/null||echo 0)" ]; then final="$dest"
+                elif [ -f "$tmp" ]; then final="$tmp"; fi
             fi
+            if [ -z "$final" ]; then
+                curl "${CURL_OPTS[@]}" -C - -o "$tmp" "$url" 2>>"$LL_LOG" && [ -f "$tmp" ] && final="$tmp"
+            fi
+            if [ -n "$final" ]; then
+                sz=$(stat -c%s "$final" 2>/dev/null || echo 0)
+                if [ "$bytes" -gt 0 ] && [ "$sz" -lt $(( bytes * 90 / 100 )) ]; then
+                    warn "size short for $id ($sz < $bytes)"; rm -f "$tmp" "${tmp}.aria2" 2>/dev/null; return 1
+                fi
+                [ "$final" != "$dest" ] && mv -f "$final" "$dest"
+                rm -f "$tmp" "${dest}.aria2" "${tmp}.aria2" 2>/dev/null   # never leave stubs/control files
+                manifest_add "$id" "$bucket" "$cat" "$dest" "$sz" "$value" "$source" && return 0
+            fi
+            rm -f "$tmp" "${tmp}.aria2" 2>/dev/null   # clean the stub on definitive failure
             return 1 ;;
         hf-file)
             mkdir -p "$dest" 2>/dev/null

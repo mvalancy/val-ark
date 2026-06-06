@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <rect width="48" height="48" rx="10" fill="#5b6ee1"/>
+  <!-- back speech bubble -->
+  <path d="M11 11h18a4 4 0 0 1 4 4v9a4 4 0 0 1-4 4h-9l-6 5v-5h-3a4 4 0 0 1-4-4v-9a4 4 0 0 1 4-4z"
+        fill="#ffffff" opacity="0.45"/>
+  <!-- front speech bubble -->
+  <path d="M21 19h13a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4h-2v5l-6-5h-5a4 4 0 0 1-4-4v-8a4 4 0 0 1 4-4z"
+        fill="#ffffff"/>
+  <!-- thread lines inside front bubble -->
+  <rect x="22" y="24" width="13" height="2.4" rx="1.2" fill="#5b6ee1"/>
+  <rect x="22" y="28.5" width="10" height="2.4" rx="1.2" fill="#5b6ee1"/>
+</svg>

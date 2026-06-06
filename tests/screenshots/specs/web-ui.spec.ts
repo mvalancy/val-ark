@@ -12,6 +12,7 @@ const TOOL_IDS = [
   'freecad', 'kicad', 'godot', 'vlc', 'n8n',
   'influxdb', 'milvus', 'comfyui', 'syncthing', 'coolify',
   'kiwix', 'tailscale', 'mosquitto', 'mqtt-explorer', 'redis',
+  'chat', 'mail', 'forum', 'paste',
   'postgresql', 'telegraf', 'btop', 'tmux', 'helix', 'vscodium',
   'sqlite', 'miniforge', 'python-standalone', 'dev-cli', 'claude-code',
   'audacity', 'kdenlive', 'gimp', 'inkscape', 'yt-dlp', 'open-webui', 'calibre'

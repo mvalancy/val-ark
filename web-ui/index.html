@@ -149,6 +149,7 @@ const TOOL_CATEGORIES = {
     'ai-platform': { label: 'AI Platform', icon: '🔗', desc: 'AI orchestration and data' },
     'creative': { label: 'Creative & Engineering', icon: '🎨', desc: '3D, CAD, EDA, game engines' },
     'media': { label: 'Media', icon: '🎬', desc: 'Audio/video processing' },
+    'community': { label: 'Community & Comms', icon: '💬', desc: 'Chat, mail, boards, file sharing — offline, on your LAN' },
     'infrastructure': { label: 'Infrastructure', icon: '🔧', desc: 'Sync, deploy, monitor' },
     'dev-tools': { label: 'Dev Tools', icon: '⌨', desc: 'Terminal productivity' }
 };
@@ -2013,6 +2014,109 @@ const TOOLS = [
                 {cmd: 'fetch-ebook-metadata --isbn 9780134685991', desc: 'Fetch metadata by ISBN'}
             ]
         }
+    },
+    // ---- Community & Comms: offline LAN services, run on the Val Ark host and
+    // framed in the shell at /app/<id>/ (see scripts/services/<id>.sh + docs/COMMUNITY.md) ----
+    {
+        id: 'chat', name: 'IRC Chat', category: 'community', icon: 'C', iconBg: '#7e57c2', logo: 'logos/chat.svg', downloadTarget: 'chat',
+        desc: 'Offline, federation-free IRC: classic channels + DMs with a persistent-history web client.',
+        size: '~35 MB',
+        platforms: { jetson: 'build', ubuntu: 'build', mac: 'build', windows: 'build' },
+        webApp: { path: '/app/chat/', port: 9000 },
+        downloads: { releases: 'https://github.com/thelounge/thelounge/releases' },
+        details: {
+            overview: 'IRC Chat brings classic real-time text communication to Val Ark: ngIRCd, a tiny portable C IRC daemon, hosts the channels and direct messages, while The Lounge provides a self-hosted web client with persistent, searchable history. It is deliberately federation-free and internet-free — no server-to-server links, no link previews, no external networks — so the whole conversation stays on the LAN. The web UI is reverse-proxied at /app/chat/ and runs on the same Node that already powers Val Ark.',
+            features: [
+                'Classic IRC channels and direct messages over a tiny C daemon (ngIRCd)',
+                'Self-hosted web client (The Lounge) with persistent, searchable SQLite-backed history',
+                'Federation-free and offline by design: no server links, no internet relay, no link prefetch',
+                'Private mode with per-user login; first-run admin account auto-created with a generated password',
+                'Ultralight and ARM-friendly: single C server plus a Node web client, no database service',
+                'Web UI bound to localhost, exposed on the LAN only via the Val Ark reverse proxy at /app/chat/'
+            ],
+            cli: [
+                {cmd: 'scripts/services/chat.sh start', desc: 'Build (first run) and start ngIRCd + The Lounge; LAN-bound, federation-free'},
+                {cmd: 'scripts/services/chat.sh status', desc: 'Show server/web-UI process state, ports, data dir, and a web liveness probe'},
+                {cmd: 'scripts/services/chat.sh stop', desc: 'Stop The Lounge and ngIRCd and free their ports'},
+                {cmd: 'scripts/tools/chat.sh', desc: 'Mirror ngIRCd + The Lounge source into the tools tree for every platform'}
+            ]
+        }
+    },
+    {
+        id: 'mail', name: 'Mail', category: 'community', icon: 'M', iconBg: '#2e7d32', logo: 'logos/mail.svg', downloadTarget: 'mail',
+        desc: 'Offline community email — local mailboxes that never relay to the internet.',
+        size: '~87 MB',
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'build', windows: 'build' },
+        webApp: { path: '/app/mail/', port: 1323 },
+        downloads: { releases: 'https://github.com/foxcpp/maddy/releases' },
+        details: {
+            overview: 'Mail brings self-contained community email to a Val Ark box: maddy provides SMTP submission and IMAP in one static Go binary, and alps gives a lightweight webmail UI framed at /app/mail/. It is offline by design — there is no outbound relay or federation, so mail only ever moves between local per-person mailboxes, and authentication is always required.',
+            features: [
+                'Single-binary maddy server: SMTP submission + IMAP + local delivery, no PHP/Node runtime',
+                'Strictly offline: no outbound relay or federation — non-local recipients are rejected, so mail never leaves the LAN',
+                'Per-person mailboxes with mandatory SASL/IMAP authentication',
+                'alps webmail framed in the Val Ark shell at /app/mail/, plus standard IMAP/submission ports for any mail client',
+                'Data confined to the Val Ark data tree; LAN bind tunable via VALARK_BIND'
+            ],
+            cli: [
+                {cmd: 'scripts/services/mail.sh start', desc: 'Start maddy (IMAP+submission) and alps webmail on the LAN'},
+                {cmd: 'scripts/services/mail.sh creds create user@valark.lan', desc: 'Create a login (prompts for password)'},
+                {cmd: 'scripts/services/mail.sh acct create user@valark.lan', desc: "Create the user's IMAP mailbox"},
+                {cmd: 'scripts/services/mail.sh status', desc: 'Show running state, ports, data dir, and offline/relay posture'}
+            ]
+        }
+    },
+    {
+        id: 'forum', name: 'Message Boards', category: 'community', icon: 'F', iconBg: '#0288d1', logo: 'logos/forum.svg', downloadTarget: 'forum',
+        desc: 'Offline async forums, threads, announcements and Q&A (NodeBB on the mirrored Redis).',
+        size: '~120 MB',
+        platforms: { jetson: 'build', ubuntu: 'build', mac: 'build', windows: 'build' },
+        webApp: { path: '/app/forum/', port: 4567 },
+        downloads: { releases: 'https://github.com/NodeBB/NodeBB/releases' },
+        details: {
+            overview: 'Message Boards is a self-hosted, offline community forum for the Val Ark LAN built on NodeBB, a mature open-source discussion platform offering categories, threads, announcements, and Q&A. It runs entirely on the Redis instance Val Ark already mirrors, so there is no MongoDB and no second datastore to manage. Federation, social login, and outbound webhooks are kept disabled so the box makes zero internet calls at runtime.',
+            features: [
+                'Async forums, threaded discussions, categories, and announcements',
+                'Q&A-style topics with accepted answers and voting',
+                'Redis-backed storage reusing the Val Ark-mirrored Redis (no Mongo)',
+                'Mandatory auth with first-run admin account creation (interactive or via VALARK_FORUM_ADMIN_* env)',
+                'Fully offline: federation/ActivityPub and social login left disabled, no runtime internet calls',
+                'Reverse-proxied same-origin under the Val Ark shell at /app/forum/'
+            ],
+            cli: [
+                {cmd: 'scripts/tools/forum.sh', desc: 'Mirror NodeBB source (pinned v4.12.0, falls back to latest) into the tools tree'},
+                {cmd: 'scripts/services/forum.sh start', desc: 'Ensure Redis, write offline Redis-backed config, then start NodeBB on 127.0.0.1:4567'},
+                {cmd: 'scripts/services/forum.sh status', desc: 'Report Redis + NodeBB state and the proxied URL'},
+                {cmd: 'scripts/services/forum.sh stop', desc: 'Stop NodeBB (leaves the shared Redis running)'}
+            ]
+        }
+    },
+    {
+        id: 'paste', name: 'Files & Pastebin', category: 'community', icon: 'P', iconBg: '#f57c00', logo: 'logos/paste.svg', downloadTarget: 'paste',
+        desc: 'Self-hosted pastebin, file upload and URL shortener for quick offline sharing.',
+        size: '~30 MB',
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        webApp: { path: '/app/paste/', port: 8085 },
+        downloads: { releases: 'https://github.com/szabodanika/microbin/releases' },
+        details: {
+            overview: 'Files & Pastebin is an offline community sharing hub powered by MicroBin, a single self-contained Rust binary that combines a pastebin, file uploads, and a URL shortener. It runs entirely on the LAN with no federation, relay, or outbound calls (telemetry and update-checking are disabled), and stores everything in a local SQLite database under the Val Ark data tree. The Val Ark web server reverse-proxies its UI at /app/paste/ behind HTTP Basic auth.',
+            features: [
+                'Pastebin for text and code snippets with optional syntax highlighting',
+                'File uploads with size limits and optional client/server-side encryption',
+                'Built-in URL shortener',
+                'Burn-after-reading and expiring pastas for ephemeral sharing',
+                'Single static binary: no node, no redis, no external services',
+                'Fully offline: telemetry and update-checking disabled, no federation/relay',
+                'HTTP Basic auth gates the instance; separate admin password for destructive actions'
+            ],
+            screenshots: ['screenshots/paste-1.png'],
+            cli: [
+                {cmd: 'scripts/tools/paste.sh', desc: 'Mirror MicroBin prebuilt binaries into the tools tree for all platforms'},
+                {cmd: 'scripts/services/paste.sh start', desc: 'Start the pastebin service on localhost:8085 (proxied at /app/paste/)'},
+                {cmd: 'scripts/services/paste.sh status', desc: 'Show whether the service is running, plus data/credentials/log paths'},
+                {cmd: 'scripts/services/paste.sh stop', desc: 'Stop the pastebin service'}
+            ]
+        }
     }
 ];
 
@@ -2049,6 +2153,10 @@ const TOOL_META = {
     'dev-cli': { maker: 'Various (BurntSushi, sharkdp, junegunn)', website: 'https://github.com/BurntSushi/ripgrep', license: 'MIT / Apache-2.0', licenseUrl: 'https://github.com/BurntSushi/ripgrep/blob/master/COPYING' },
     'claude-code': { maker: 'Anthropic', website: 'https://claude.ai/code', license: 'Proprietary', licenseUrl: 'https://github.com/anthropics/claude-code/blob/main/LICENSE.md' },
     'kiwix': { maker: 'Kiwix', website: 'https://kiwix.org', license: 'GPL-3.0', licenseUrl: 'https://github.com/kiwix/kiwix-tools/blob/main/COPYING' },
+    'chat': { maker: 'Alexander Barton (ngIRCd) & The Lounge contributors', website: 'https://thelounge.chat/', license: 'GPL-2.0-or-later / MIT', licenseUrl: 'https://github.com/thelounge/thelounge/blob/master/LICENSE' },
+    'mail': { maker: 'Maxim Lebedev (maddy) & emersion/migadu (alps)', website: 'https://maddy.email', license: 'GPL-3.0-or-later / MIT', licenseUrl: 'https://github.com/foxcpp/maddy/blob/master/LICENSE' },
+    'forum': { maker: 'NodeBB Inc.', website: 'https://nodebb.org/', license: 'GPL-3.0-or-later', licenseUrl: 'https://github.com/NodeBB/NodeBB/blob/master/LICENSE.txt' },
+    'paste': { maker: 'Dániel Szabó (szabodanika)', website: 'https://microbin.eu', license: 'BSD-3-Clause', licenseUrl: 'https://github.com/szabodanika/microbin/blob/master/LICENSE' },
     'tailscale': { maker: 'Tailscale Inc.', website: 'https://tailscale.com', license: 'BSD-3-Clause', licenseUrl: 'https://github.com/tailscale/tailscale/blob/main/LICENSE' },
     'mosquitto': { maker: 'Eclipse Foundation', website: 'https://mosquitto.org', license: 'EPL-2.0 / EDL-1.0', licenseUrl: 'https://github.com/eclipse/mosquitto/blob/master/LICENSE.txt' },
     'mqtt-explorer': { maker: 'Thomas Nordquist', website: 'https://mqtt-explorer.com', license: 'CC-BY-ND-4.0', licenseUrl: 'https://github.com/thomasnordquist/MQTT-Explorer/blob/master/LICENSE' },
@@ -3139,6 +3247,8 @@ function router() {
     } else if (route.startsWith('/content/')) {
         const contentId = route.replace('/content/', '');
         html += renderContentDetail(contentId);
+    } else if (route.startsWith('/app/')) {
+        html += renderServiceFrame(route.replace('/app/', ''));
     } else if (route === '/quickstart') {
         html += renderQuickStart();
     } else if (route === '/glossary') {
@@ -3297,7 +3407,7 @@ function renderHome() {
     html += renderStorageBreakdown();
 
     // Tools section grouped by category
-    const toolCatOrder = ['ai-inference', 'ai-platform', 'creative', 'media', 'infrastructure', 'dev-tools'];
+    const toolCatOrder = ['ai-inference', 'ai-platform', 'creative', 'media', 'community', 'infrastructure', 'dev-tools'];
     toolCatOrder.forEach(catId => {
         const cat = TOOL_CATEGORIES[catId];
         const catTools = TOOLS.filter(t => t.category === catId);
@@ -3490,6 +3600,16 @@ function renderToolDetail(toolId) {
         const dlBtn = (INSTALLED_TOOLS[tool.id] === 'missing' && _apiAvailable && tool.downloadTarget)
             ? `<button class="dl-action-btn" id="install-btn-${tool.id}" onclick="this.disabled=true;this.innerHTML='<span class=\\'spinner\\'></span> Mirroring...';triggerDownload('tools','${tool.downloadTarget}')" style="margin-left:10px">Mirror</button>` : '';
         html += `<div style="margin-bottom:16px"><span class="tag" style="background:var(--accent-dim);color:var(--accent);font-size:0.85em;padding:4px 12px">${toolCat.label}</span>${tool.size ? `<span class="tag" style="background:var(--purple-dim);color:var(--purple);font-size:0.85em;padding:4px 12px;margin-left:6px">${tool.size}</span>` : ''}${getInstallBadge(tool.id)}${dlBtn}</div>`;
+    }
+
+    // Launch button for hosted sub-apps (community services framed in the shell)
+    if (tool.webApp) {
+        const svc = _servicesStatus && _servicesStatus[tool.id];
+        html += `<div style="margin-bottom:16px"><a class="dl-action-btn" href="#/app/${tool.id}" style="text-decoration:none;display:inline-block">Launch ${esc(tool.name)} &rarr;</a>`;
+        if (svc && svc.running === false) {
+            html += `<span class="attr-item" style="margin-left:10px;color:var(--text-muted)">not running — start with <code>scripts/services/${esc(tool.id)}.sh start</code></span>`;
+        }
+        html += `</div>`;
     }
 
     // Attribution / License
@@ -3944,6 +4064,27 @@ function renderModelDetail(slug) {
 // =============================================================================
 // CONTENT LIBRARY (ZIM files)
 // =============================================================================
+// Framed view for a community sub-app (route #/app/<id>): the service embedded
+// in the shell, with the fixed Val Ark nav as the persistent back-to-ark header.
+function renderServiceFrame(id) {
+    const tool = TOOLS.find(t => t.id === id && t.webApp);
+    if (!tool) {
+        return '<div class="container" id="main-content"><h1>Service not found</h1><p><a href="#/tools">&larr; Back to Software</a></p></div>';
+    }
+    const svc = _servicesStatus && _servicesStatus[id];
+    let html = '<div class="container" id="main-content">';
+    html += renderBreadcrumb([{label: 'Software', href: '#/tools'}, {label: tool.name}]);
+    html += `<h1>${esc(tool.name)}</h1>`;
+    html += `<p class="section-desc">${esc(tool.desc)} Served on your LAN at <code>${esc(tool.webApp.path)}</code> — offline, no internet.</p>`;
+    if (svc && svc.running === false) {
+        html += `<div class="detail-section" style="margin:0 0 1rem"><p>This service isn't running yet. Start it on the Val Ark host:</p>
+            <div class="code-block"><code>scripts/services/${esc(id)}.sh start</code></div></div>`;
+    }
+    html += renderAppFrame({ id: id + 'Frame', title: tool.name, subtitle: 'offline · LAN-only', src: tool.webApp.path });
+    html += '</div>';
+    return html;
+}
+
 function renderContentLibrary() {
     let html = '<div class="container" id="main-content">';
     html += renderBreadcrumb([{label: 'Content Library'}]);
@@ -4771,6 +4912,7 @@ let _sseConnection = null;
 let _diskData = null;
 let _kiwixStatus = null; // {running, port, url, path, files}
 let _storageData = null; // {categories:[{key,label,color,bytes}], total, zimCount, disk} — live, includes ZIMs
+let _servicesStatus = null; // {id:{port,path,running}} — community sub-apps (chat/mail/forum/paste)
 const _activeDownloads = new Map();
 
 // Kiwix is reverse-proxied at /kiwix/ on this same origin, so the link works on
@@ -4910,6 +5052,12 @@ async function initFromAPI() {
             })
             .catch(() => {});
         loadStorage(24);  // the tools tree (~45k files) can take ~75s to size over FUSE
+
+        // Community sub-app liveness (so detail pages show "Launch" vs "how to start").
+        fetch('/api/status/services')
+            .then(r => r.ok ? r.json() : null)
+            .then(s => { if (s && Object.keys(s).length) { _servicesStatus = s; scheduleRender(); } })
+            .catch(() => {});
         return true;
     } catch (e) {
         return false;

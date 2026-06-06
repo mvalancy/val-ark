@@ -127,6 +127,27 @@ ensure_web_server() {
     _va_start_web "$port" && log "${GREEN}started Val Ark web server${NC} on :$port"
 }
 
+# Keep enabled community services (VALARK_SERVICES in .env, e.g. "chat mail forum
+# paste") running. `<id>.sh start` is idempotent (a no-op when already up), so this
+# both launches them and respawns any that died. Best-effort and non-fatal.
+ensure_services() {
+    local svcs="${VALARK_SERVICES:-}"
+    [ -n "$svcs" ] || { log "no community services enabled (set VALARK_SERVICES in .env)"; return 0; }
+    local id sh
+    for id in $svcs; do
+        sh="${_DIR}/services/${id}.sh"
+        if [ -x "$sh" ] || [ -f "$sh" ]; then
+            if timeout 120 bash "$sh" start >/dev/null 2>&1; then
+                log "service ${GREEN}up${NC}: ${id}"
+            else
+                log "${YELLOW}service ${id} not started${NC} (mirror/build it: scripts/tools/${id}.sh)"
+            fi
+        else
+            log "${YELLOW}unknown service '${id}'${NC} (no scripts/services/${id}.sh)"
+        fi
+    done
+}
+
 # Dynamic UI smoke — exercise the web UI's controls and the "back to the ark"
 # header against the LIVE server (so the embedded library frame is covered too).
 # Best-effort: skipped cleanly if Playwright deps aren't installed.
@@ -155,6 +176,8 @@ loop_once() {
     step "2. repair layout"; valark_ensure_layout && log "layout ok"
 
     step "2b. ensure web server + kiwix running"; ensure_web_server
+
+    step "2c. ensure enabled community services running"; ensure_services
 
     step "3. refresh live catalog (heals stale content links)"
     bash "$LIBRARIAN" refresh >/dev/null 2>&1 && log "catalog refreshed" || log "${YELLOW}catalog refresh failed (cache retained)${NC}"

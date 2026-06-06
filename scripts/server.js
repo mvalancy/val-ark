@@ -628,6 +628,8 @@ function handleAPI(req, res, urlPath) {
                 return sendJSON(res, req, kiwixStatus);
             case '/api/status/storage':
                 return sendJSON(res, req, getStorageStatus());
+            case '/api/status/services':
+                return getServicesStatus().then(d => sendJSON(res, req, d)).catch(() => sendJSON(res, req, {}));
             case '/api/status/all':
                 return sendJSON(res, req, {
                     disk: getDiskStatus(),
@@ -814,18 +816,15 @@ function formatSize(bytes) {
     return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
 }
 
-// Pipe a request straight through to the internal kiwix-serve (which listens on
-// KIWIX_PORT under --urlRootLocation /kiwix). Same-origin proxying means one
-// port and the Val Ark header stays put; we strip any embedding-blocker headers
-// so the library renders inside our in-page reader frame.
-function proxyKiwix(req, res) {
-    if (!kiwixStatus.running) {
-        res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
-        return res.end('<!doctype html><meta charset="utf-8"><body style="font-family:system-ui,sans-serif;background:#0a0e14;color:#e8edf4;padding:40px"><h2>Offline library is starting…</h2><p>The Kiwix content server auto-starts once at least one <code>.zim</code> file is present. <a style="color:#4da6ff" href="/#/content">&larr; Back to Val Ark</a></p></body>');
-    }
+// Generic same-origin reverse proxy to an internal service on 127.0.0.1:<port>.
+// Same-origin means one port to remember and the fixed Val Ark nav stays on
+// screen as a "back to the ark" header; we strip embedding-blocker headers so
+// the service renders inside our in-page frame. No HTML rewriting — each service
+// already serves under its own base path (/kiwix/ or /app/<id>/).
+function pipeProxy(req, res, port, label, pathOverride) {
     const proxyReq = http.request({
-        host: '127.0.0.1', port: KIWIX_PORT, method: req.method, path: req.url,
-        headers: { ...req.headers, host: `127.0.0.1:${KIWIX_PORT}` },
+        host: '127.0.0.1', port, method: req.method, path: pathOverride || req.url,
+        headers: { ...req.headers, host: `127.0.0.1:${port}` },
     }, (proxyRes) => {
         const headers = { ...proxyRes.headers };
         delete headers['x-frame-options'];
@@ -833,12 +832,74 @@ function proxyKiwix(req, res) {
         res.writeHead(proxyRes.statusCode || 502, headers);
         proxyRes.pipe(res);
     });
-    proxyReq.setTimeout(30000, () => proxyReq.destroy(new Error('kiwix upstream timeout')));
-    proxyReq.on('error', (e) => {
-        if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain', ...SECURITY_HEADERS });
-        res.end('Kiwix proxy error: ' + e.message);
+    proxyReq.setTimeout(30000, () => proxyReq.destroy(new Error('upstream timeout')));
+    proxyReq.on('error', () => {
+        if (res.headersSent) return res.end();
+        // Friendly page for a browser hitting a service that isn't up yet.
+        if ((req.headers.accept || '').includes('text/html')) {
+            res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
+            return res.end(`<!doctype html><meta charset="utf-8"><body style="font-family:system-ui,sans-serif;background:#0a0e14;color:#e8edf4;padding:40px"><h2>${label || 'This service'} isn't running yet</h2><p>Start it on the Val Ark host (e.g. <code>scripts/services/&lt;name&gt;.sh start</code>), then reload. <a style="color:#4da6ff" href="/">&larr; Back to Val Ark</a></p></body>`);
+        }
+        res.writeHead(502, { 'Content-Type': 'text/plain', ...SECURITY_HEADERS });
+        res.end('Proxy error (service unreachable)');
     });
     req.pipe(proxyReq);
+}
+
+function proxyKiwix(req, res) {
+    if (!kiwixStatus.running) {
+        res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
+        return res.end('<!doctype html><meta charset="utf-8"><body style="font-family:system-ui,sans-serif;background:#0a0e14;color:#e8edf4;padding:40px"><h2>Offline library is starting…</h2><p>The Kiwix content server auto-starts once at least one <code>.zim</code> file is present. <a style="color:#4da6ff" href="/#/content">&larr; Back to Val Ark</a></p></body>');
+    }
+    pipeProxy(req, res, KIWIX_PORT, 'Offline library');
+}
+
+// Community / sub-app services, each run LAN-bound by scripts/services/<id>.sh
+// and reverse-proxied here at /app/<id>/ so they live inside the Val Ark shell.
+// Ports must match those service scripts. `strip`: true when the upstream serves
+// its routes at ROOT and only PREFIXES generated links (MicroBin), so we remove
+// the /app/<id> prefix before forwarding; false when the upstream genuinely
+// serves under that base path (NodeBB `url`, etc.) and needs the prefix intact.
+const APP_SERVICES = {
+    chat:  { port: 9000, strip: true },    // The Lounge (web client mounts at root)
+    mail:  { port: 1323, strip: true },    // alps webmail
+    forum: { port: 4567, strip: false },   // NodeBB serves under its configured url base
+    paste: { port: 8085, strip: true },    // MicroBin serves at root; PUBLIC_PATH only prefixes links
+};
+function proxyAppService(req, res, id, name) {
+    const svc = APP_SERVICES[id];
+    if (!svc) return send404(res);
+    let targetPath = req.url;
+    if (svc.strip) {
+        targetPath = req.url.replace(new RegExp('^/app/' + id), '');
+        if (!targetPath.startsWith('/')) targetPath = '/' + targetPath;
+    }
+    pipeProxy(req, res, svc.port, name || id, targetPath);
+}
+
+// Liveness of each sub-app (so the UI offers "Launch" only when it's actually
+// up, and a "how to start" hint otherwise). Probed on demand, cached briefly.
+function probePort(port) {
+    return new Promise((resolve) => {
+        const net = require('net');
+        const s = net.connect(port, '127.0.0.1');
+        s.setTimeout(800);
+        const done = (up) => { try { s.destroy(); } catch {} resolve(up); };
+        s.on('connect', () => done(true));
+        s.on('error', () => done(false));
+        s.on('timeout', () => done(false));
+    });
+}
+let _svcCache = { data: null, ts: 0 };
+async function getServicesStatus() {
+    const now = Date.now();
+    if (_svcCache.data && (now - _svcCache.ts) < 5000) return _svcCache.data;
+    const ids = Object.keys(APP_SERVICES);
+    const ups = await Promise.all(ids.map((id) => probePort(APP_SERVICES[id].port)));
+    const data = {};
+    ids.forEach((id, i) => { data[id] = { port: APP_SERVICES[id].port, path: `/app/${id}/`, running: ups[i] }; });
+    _svcCache = { data, ts: now };
+    return data;
 }
 
 // =============================================================================
@@ -866,6 +927,13 @@ const server = http.createServer((req, res) => {
     // /kiwix/* — we just pipe bytes through, no HTML rewriting.
     if (urlPath === '/kiwix' || urlPath.startsWith('/kiwix/')) {
         return proxyKiwix(req, res);
+    }
+
+    // Community sub-apps (chat/mail/forum/paste, …) reverse-proxied at /app/<id>/
+    // so they render inside the Val Ark shell with the same back-to-ark header.
+    const appMatch = urlPath.match(/^\/app\/([a-z0-9-]+)(?:\/|$)/);
+    if (appMatch) {
+        return proxyAppService(req, res, appMatch[1]);
     }
 
     // Static file serving with path traversal protection

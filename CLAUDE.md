@@ -1,5 +1,22 @@
 # Val Ark - Development Guide
 
+Val Ark is an online-optional, local-first mirror of dev/AI tools, AI models, and
+offline content (ZIM via Kiwix), with a zero-dependency web UI. It fills a disk of
+**any** size and keeps itself healthy 24/7.
+
+## Project Context
+
+| Concern | Where | Notes |
+|---------|-------|-------|
+| Data root | `scripts/lib/valark-env.sh` | Resolves `VAL_ARK_DATA` from a git-ignored `.env` (see [`.env.example`](.env.example)) or autodetects the largest mount; falls back to the repo. Models at `<root>/models`; Val Ark trees at `<root>/val-ark/{tools,content,sources,assets,installers,state}`, symlinked back into the repo so per-tool scripts stay path-agnostic. |
+| Librarian engine | `scripts/librarian.sh` + `scripts/lib/{catalog.sh,kiwix_catalog.py,planner.py}` + `data/{installers.tsv,models-extra.tsv}` | Fills any-size disk from **live** catalogs (Kiwix OPDS fetched live — never stale) by priority: diversity -> small-valuable -> fill-remaining -> evict-for-better. Downloads use aria2 multi-connection (curl fallback); resumable, retried, size-verified, atomic, single flock. Commands: `status\|plan\|fill\|verify\|evict\|maintain\|refresh`. See [`docs/LIBRARIAN.md`](docs/LIBRARIAN.md). |
+| Self-healing loop | `scripts/loop.sh` + `scripts/verify.sh` | `loop.sh once` repairs symlinks, ensures the web server is up, refreshes the live catalog, link-checks + repairs, integrity-verifies, top-up fills, and runs functional verification. `loop.sh install [minutes]` registers a flock-guarded cron (default 30). `verify.sh` confirms apps actually run (tools, kiwix serving a real ZIM, a tiny LLM, the web API) and checks remote fleet nodes over SSH. |
+| Web server | `scripts/server.js` | Zero-dep Node: serves the web UI + JSON API + SSE, auto-launches `kiwix-serve` for any complete `.zim` in `content/zim`. Port via `VALARK_WEB_PORT` (`.env`, default 3000). |
+| Mesh | (NFS) | The data disk is NFS-exportable so fleet nodes mount **one** shared mirror and run GPU inference on served models over the network; the verify loop checks this. |
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/PLATFORMS.md`](docs/PLATFORMS.md)
+for the full picture.
+
 ## Adding a New Tool
 
 Every tool integration touches these files. Complete ALL steps before considering the tool "done".
@@ -69,7 +86,8 @@ Add to the TOOLS array in the appropriate category position:
     id: '<name>', name: '<Display Name>', category: '<category>', icon: '<X>', iconBg: '#hex', logo: 'logos/<name>.svg', downloadTarget: '<name>',
     desc: '<One-line description>',
     size: '~XX MB',
-    platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+    platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' }, // thor/gb10 inherit jetson; openwrt derived
+
     downloads: {
         releases: 'https://github.com/owner/repo/releases',
     },
@@ -87,6 +105,15 @@ Add to the TOOLS array in the appropriate category position:
     }
 },
 ```
+
+### Platform Values
+
+The per-tool `platforms` object uses four keys — `jetson` (Linux ARM64), `ubuntu`
+(x86_64), `mac` (Apple Silicon), `windows` (x64) — each `'prebuilt'`, `'build'`, or
+`'none'`. The web UI **derives** the rest: Jetson Thor and GB10 inherit the `jetson`
+(ARM64) status, and OpenWRT routers get the content/sync/infra subset. GPU-accelerated
+llama.cpp / whisper.cpp / sd.cpp on ARM64 have no upstream binary and need a CUDA source
+build, so those are marked `'build'` for `jetson`.
 
 ### Categories
 
@@ -130,6 +157,7 @@ Add the tool ID to the `TOOL_IDS` array (maintains alphabetical order within cat
 | `download_file URL DEST` | Download single file with retry |
 | `download_and_extract URL DEST LABEL STRIP` | Download + extract archive |
 | `clone_repo URL REF DEST` | Shallow git clone |
+| `create_source_tarball SRC_DIR LABEL VERSION` | Pack a checked-out dir into a `.tar.gz` (excludes `.git`) |
 | `write_install_hint DIR TOOL INSTRUCTIONS` | Write INSTALL.txt for non-binary tools |
 | `ensure_dir PATH` | mkdir -p with safety |
 
@@ -142,18 +170,25 @@ Add the tool ID to the `TOOL_IDS` array (maintains alphabetical order within cat
 
 ## Platform Directories
 
+One ARM64 tools tree serves every aarch64 target (Jetson Orin / Thor, GB10
+Grace-Blackwell, OpenWRT routers).
+
 | Directory | Architecture | Examples |
 |-----------|-------------|----------|
-| `linux-arm64` | ARM64 | NVIDIA Jetson, Raspberry Pi |
+| `linux-arm64` | aarch64 | Jetson Orin / Thor, GB10 Grace-Blackwell, OpenWRT routers |
 | `linux-x86_64` | x86_64 | Ubuntu, Debian, Fedora |
 | `macos-arm64` | Apple Silicon | M1/M2/M3/M4 |
 | `windows-x64` | x86_64 | Windows 10/11 |
 
 ## Running Tests
 
+The Playwright suite under `tests/screenshots/` (server-api, web-ui, install-icon
+specs) parametrizes over every tool, so the count scales with the catalog (200+).
+
 ```bash
 export PATH="$HOME/.local/node/bin:$PATH"
 cd tests/screenshots && npx playwright test
 ```
 
-All 211+ tests must pass before committing.
+Bash validators live alongside as `tests/test-*.sh` (run via `tests/run-all.sh`).
+All tests must pass before committing.

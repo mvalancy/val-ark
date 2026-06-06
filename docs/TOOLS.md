@@ -114,12 +114,21 @@ Editors, runtimes, CLI utilities, and AI coding assistants.
 
 ## Platform Support Matrix
 
-| Platform | Architecture | Examples |
-|----------|-------------|----------|
-| linux-arm64 | ARM64 | NVIDIA Jetson (Orin, Xavier), Raspberry Pi |
+All aarch64 boards (Jetson Orin, Jetson Thor, GB10) and OpenWRT routers share the
+**same `tools/linux-arm64` artifacts**. See [PLATFORMS.md](PLATFORMS.md) for per-board
+CUDA profiles and setup.
+
+| Platform | Architecture | Examples / Notes |
+|----------|-------------|------------------|
+| linux-arm64 | ARM64 | Jetson Orin / Thor, GB10 Grace-Blackwell (SBSA), Raspberry Pi |
 | linux-x86_64 | x86_64 | Ubuntu, Debian, Arch, Fedora |
 | macos-arm64 | Apple Silicon | M1 / M2 / M3 / M4 |
 | windows-x64 | x86_64 | Windows 10 / 11 |
+| openwrt | ARM64 | Router nodes — content / sync / infra subset only (no inference engines) |
+
+**Mesh:** the data disk is NFS-exportable, so fleet nodes can mount one shared mirror
+and run GPU inference on the served models over the network. The 24/7 verify loop
+(`scripts/verify.sh`) checks this; see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
@@ -138,8 +147,25 @@ Editors, runtimes, CLI utilities, and AI coding assistants.
 
 ## Build From Source
 
-For platforms without prebuilt binaries, build scripts are generated:
+There is **no upstream prebuilt aarch64 CUDA binary** for llama.cpp, whisper.cpp, or
+stable-diffusion.cpp, so GPU acceleration on Jetson / GB10 requires a source build.
+`scripts/download-tools.sh` clones the source repos; you then compile with the right
+acceleration flag for your platform:
 
-- `build-from-source.sh` - Jetson CUDA builds (llama.cpp, whisper.cpp, sd.cpp)
-- `build-macos.sh` - macOS Metal builds
-- `build-linux-x86_64.sh` - Linux x86_64 with CUDA auto-detection
+| Platform | Flag | Notes |
+|----------|------|-------|
+| Jetson Orin | `-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=87` | SM 8.7 |
+| Jetson Thor / GB10 | `-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=110` | Blackwell |
+| Linux x86_64 | `-DGGML_CUDA=ON` | CUDA auto-detect; CPU build also auto-tunes AVX2/AVX-512/FMA |
+| macOS | `-DGGML_METAL=ON` | Metal (llama.cpp / sd.cpp prebuilt already include it) |
+
+See [PLATFORMS.md](PLATFORMS.md) for full per-board build commands.
+
+---
+
+## Related Docs
+
+- [LIBRARIAN.md](LIBRARIAN.md) — the librarian engine that auto-fills the mirror disk
+- [PLATFORMS.md](PLATFORMS.md) — per-platform setup and CUDA/Metal builds
+- [ARCHITECTURE.md](ARCHITECTURE.md) — system architecture, the 24/7 self-healing loop, and the NFS mesh
+- [MODEL_INVENTORY.md](MODEL_INVENTORY.md) — AI model catalog and tiers

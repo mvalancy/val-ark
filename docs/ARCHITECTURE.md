@@ -2,6 +2,12 @@
 
 [Back to Docs](README.md) | [Back to Project Root](../README.md)
 
+Val Ark is an online-optional, local-first mirror of dev/AI tools, AI models, and
+offline content (ZIM via Kiwix), with a web UI. It fills a disk of *any* size from
+live catalogs and keeps everything intact and verified via a 24/7 self-healing loop.
+For the curation/fill engine see [LIBRARIAN.md](LIBRARIAN.md); for the disk layout
+and `.env` config see the same doc's "Where data lives" section.
+
 ## Architecture Overview
 
 ```mermaid
@@ -16,79 +22,79 @@
 graph TB
     subgraph Entry["Entry Points"]
         style Entry fill:#1a2230,stroke:#4ade80
-        START["start.sh<br/>Interactive Menu + CLI"]
-        CRON["Cron Job<br/>Weekly Auto-Update"]
+        START["start.sh<br/>Menu + CLI"]
+        LOOP["loop.sh<br/>24/7 self-heal cron"]
     end
 
     subgraph WebServer["Web Server"]
         style WebServer fill:#1a2230,stroke:#60a5fa
-        SERVER["server.js<br/>Express API + Static UI<br/>Port 3000"]
-        KIWIX["kiwix-serve<br/>Offline Wikipedia<br/>Port 8888"]
+        SERVER["server.js<br/>zero-dep Node<br/>UI + JSON API + SSE<br/>VALARK_WEB_PORT (3000)"]
+        KIWIX["kiwix-serve<br/>auto-launched<br/>Port 8888"]
     end
 
-    subgraph Scripts["Core Scripts"]
-        style Scripts fill:#1a2230,stroke:#4da6ff
-        SETUP["setup.sh<br/>Dependencies"]
-        UPDATE["update.sh<br/>Tools & Assets"]
-        DOWNLOAD_T["download-tools.sh<br/>AI Engines"]
-        DOWNLOAD_M["download-models.sh<br/>AI Models (Tiered)"]
-        STATUS["status.sh<br/>Inventory"]
-        MONITOR["monitor.sh<br/>Progress"]
-        SCREENSHOTS["screenshots.sh<br/>Playwright + asciinema"]
+    subgraph Engine["Librarian Engine"]
+        style Engine fill:#1a2230,stroke:#4da6ff
+        LIB["librarian.sh<br/>status|plan|fill|verify<br/>evict|maintain|refresh"]
+        CAT["lib/catalog.sh<br/>lib/kiwix_catalog.py<br/>live OPDS catalog"]
+        PLAN["lib/planner.py<br/>priority model"]
+        VERIFY["verify.sh<br/>does it run?"]
     end
 
-    subgraph Storage["Local Storage"]
+    subgraph EnvLayer["Env / Layout"]
+        style EnvLayer fill:#1a2230,stroke:#fbbf24
+        ENV["lib/valark-env.sh<br/>resolve DATA_ROOT (.env)<br/>symlink repo dirs<br/>disk math + reserve"]
+    end
+
+    subgraph Storage["Data Root (any disk)"]
         style Storage fill:#1a2230,stroke:#a78bfa
-        TOOLS["tools/<br/>Prebuilt Binaries"]
-        SOURCES["sources/<br/>Build-from-Source"]
-        ASSETS["assets/<br/>Ollama Installers"]
-        MODELS["~/.ollama/models<br/>AI Model Files"]
-        CONTENT["content/zim/<br/>ZIM Files (Wikipedia)"]
+        MODELS["models/<br/>GGUF + repos"]
+        TOOLS["val-ark/tools/<br/>prebuilt binaries"]
+        CONTENT["val-ark/content/zim/<br/>ZIM (Kiwix)"]
+        INSTALLERS["val-ark/installers/<br/>OS/router images"]
+        STATE["val-ark/state/<br/>manifest + health"]
     end
 
-    subgraph External["External Sources"]
+    subgraph External["Live Catalogs / Sources"]
         style External fill:#1a2230,stroke:#fb923c
-        GITHUB["GitHub Releases"]
+        KIWIXCDN["Kiwix OPDS + CDN"]
         HF["HuggingFace Hub"]
-        OLLAMA_REG["Ollama Registry"]
-        DIRECT["Direct URLs<br/>(SQLite, FFmpeg, EDB)"]
+        GITHUB["GitHub Releases"]
+        DIRECT["Direct URLs"]
     end
 
-    subgraph Client["Web UI"]
-        style Client fill:#1a2230,stroke:#f472b6
-        BROWSER["Browser<br/>Dashboard + Controls"]
-    end
+    START --> LIB
+    START --> SERVER
+    LOOP --> LIB
+    LOOP --> VERIFY
+    LOOP --> SERVER
 
-    BROWSER -->|"API requests"| SERVER
-    SERVER -->|"spawns"| DOWNLOAD_T
-    SERVER -->|"spawns"| DOWNLOAD_M
-    SERVER -->|"auto-launches"| KIWIX
-    KIWIX -->|"serves"| CONTENT
+    SERVER --> ENV
+    LIB --> ENV
+    LIB --> CAT
+    LIB --> PLAN
+    CAT -.-> KIWIXCDN
+    ENV --> Storage
 
-    START --> SETUP
-    START --> UPDATE
-    START --> DOWNLOAD_T
-    START --> DOWNLOAD_M
-    START --> STATUS
-    START --> MONITOR
-    START --> SCREENSHOTS
-    CRON --> UPDATE
+    SERVER -->|API + SSE| TOOLS
+    SERVER -->|auto-launch| KIWIX
+    KIWIX -->|serves| CONTENT
 
-    UPDATE --> TOOLS
-    UPDATE --> SOURCES
-    UPDATE --> ASSETS
-    DOWNLOAD_T --> TOOLS
-    DOWNLOAD_M --> MODELS
-
-    TOOLS -.-> GITHUB
-    TOOLS -.-> DIRECT
-    SOURCES -.-> GITHUB
-    ASSETS -.-> GITHUB
+    LIB -->|aria2 / curl| MODELS
+    LIB --> CONTENT
+    LIB --> INSTALLERS
+    LIB --> STATE
     MODELS -.-> HF
-    MODELS -.-> OLLAMA_REG
+    TOOLS -.-> GITHUB
+    INSTALLERS -.-> DIRECT
+    VERIFY -.-> STATE
 ```
 
-## Download Priority Flow
+## Fill Priority Flow
+
+The Librarian fills the data root in curation order from **live** catalogs. There is
+no fixed tier ceiling — it scales to whatever disk is mounted, stopping at the
+reserve (`max(VALARK_RESERVE_PCT%, VALARK_RESERVE_MIN_GB)`). See
+[LIBRARIAN.md](LIBRARIAN.md) for the full model.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -100,56 +106,77 @@ graph TB
   'tertiaryColor': '#0a0e14'
 }}}%%
 flowchart TD
-    START([Start Download]) --> DISK{Disk Space Check<br/>Hard min: 50GB}
-    DISK -->|Below minimum| ABORT([Skip Download])
-    DISK -->|OK| TOOLS
+    START([fill]) --> REFRESH["Refresh live catalogs<br/>Kiwix OPDS + models + installers"]
+    REFRESH --> PLANNER["planner.py builds ordered plan<br/>budget = fillable bytes"]
+    PLANNER --> P1
 
-    subgraph TOOLS["Tools (smallest first)"]
-        style TOOLS fill:#1a2230,stroke:#4ade80
-        T1["Dev CLI Bundle<br/>rg, fd, bat, jq, fzf, lazygit<br/>~30MB"]
-        T2["Infrastructure<br/>Syncthing, btop, tmux<br/>~20MB"]
-        T3["Networking & IoT<br/>Tailscale, Mosquitto<br/>~25MB"]
-        T4["Databases<br/>SQLite, Redis<br/>~10MB"]
-        T5["Editors<br/>Helix, VSCodium<br/>~115MB"]
-        T6["AI Engines<br/>llama.cpp, whisper.cpp, BitNet.cpp, Piper<br/>~250MB"]
-        T1 --> T2 --> T3 --> T4 --> T5 --> T6
+    subgraph P1["1. Diversity first"]
+        style P1 fill:#1a2230,stroke:#4ade80
+        D1["Smallest item from every<br/>category before deepening any"]
     end
 
-    TOOLS --> TIER1
-
-    subgraph TIER1["Tier 1: Edge/Mobile (~15GB)"]
-        style TIER1 fill:#1a2230,stroke:#4da6ff
-        M1["Small LLMs: Phi, Gemma, Qwen 1-3B"]
-        M2["TTS: Piper voices, Kokoro"]
-        M3["ASR: Whisper tiny/base, Vosk"]
+    P1 --> P2
+    subgraph P2["2. Small valuable"]
+        style P2 fill:#1a2230,stroke:#4da6ff
+        D2["Items by value/byte,<br/>capped per category"]
     end
 
-    TIER1 --> BUDGET1{Budget Check<br/>Buffer: 200GB}
-    BUDGET1 -->|OK| TIER2
-
-    subgraph TIER2["Tier 2: Workstation (~150GB)"]
-        style TIER2 fill:#1a2230,stroke:#a78bfa
-        M4["Medium LLMs: Llama 8B, Mistral 7B"]
-        M5["Vision: LLaVA, Moondream"]
-        M6["Code: CodeLlama, DeepSeek Coder"]
+    P2 --> P3
+    subgraph P3["3. Fill remaining"]
+        style P3 fill:#1a2230,stroke:#a78bfa
+        D3["Big flagships by value<br/>full Wikipedia, large quants, ISOs"]
     end
 
-    TIER2 --> BUDGET2{Budget Check}
-    BUDGET2 -->|OK| TIER3
-
-    subgraph TIER3["Tier 3: Full (~300GB+)"]
-        style TIER3 fill:#1a2230,stroke:#fb923c
-        M7["Large LLMs: Llama 70B, Mixtral"]
-        M8["Specialized: Medical, Legal, Math"]
-        M9["Image Gen: SDXL, Flux"]
+    P3 --> P4
+    subgraph P4["4. Evict for better"]
+        style P4 fill:#1a2230,stroke:#fb923c
+        D4["Disk full + better small item<br/>drop lowest value/byte<br/>never a sole category rep"]
     end
 
-    TIER3 --> DONE([Complete])
-    BUDGET1 -->|Exceeded| DONE
-    BUDGET2 -->|Exceeded| DONE
+    P1 --> DL{Headroom<br/>above reserve?}
+    P2 --> DL
+    P3 --> DL
+    DL -->|No| DONE([stop at reserve])
+    DL -->|Yes| GET["download_one<br/>aria2 -x8 (curl fallback)<br/>resume, retry, size-verify,<br/>atomic rename, flock"]
+    GET --> DONE
 ```
 
-## Offline & P2P Topology
+## Self-Healing Loop
+
+`loop.sh once` runs one maintenance cycle; `loop.sh install [minutes]` registers a
+flock-guarded cron so it survives reboots. Each cycle is safe to run repeatedly and
+concurrently with a standalone fill (the fill flock prevents double-downloading) and
+never aborts on a single failure.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a2230',
+  'primaryBorderColor': '#2a3545',
+  'primaryTextColor': '#e8edf4',
+  'lineColor': '#4da6ff',
+  'secondaryColor': '#131921',
+  'tertiaryColor': '#0a0e14'
+}}}%%
+flowchart TD
+    CRON([cron / loop.sh once]) --> WRITE["1. Ensure disk writable<br/>self-heal ro/NTFS reverts"]
+    WRITE --> LAYOUT["2. Repair repo to disk symlinks"]
+    LAYOUT --> WEB["2b. Ensure web server + kiwix up"]
+    WEB --> REFRESH["3. Refresh live catalog<br/>heals content links, no stale dates"]
+    REFRESH --> LINK["4. Link check + repair<br/>tool/installer URLs, web-ui assets"]
+    LINK --> INTEG["5. Integrity verify<br/>requeue corrupt/short files"]
+    INTEG --> FILL["6. Bounded top-up fill<br/>librarian fill --time"]
+    FILL --> FUNC["7. Functional verification<br/>verify.sh: tools run, kiwix serves,<br/>tiny LLM infers, fleet reachable"]
+    FUNC --> REPORT["8. Health report + coordination<br/>state/health.json"]
+    REPORT --> DONE([cycle complete])
+```
+
+## Mesh Topology
+
+The data root is **NFS-exportable**: fleet nodes mount the single shared mirror and
+run GPU inference on served models over the network. Syncthing additionally offers
+opportunistic P2P replication to peers. `verify.sh fleet` SSHes to each host in
+`VALARK_FLEET` (set in `.env`), confirms it mounts the shared disk, and runs a real
+inference check. Nothing host-specific is committed — see `.env.example`.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -161,41 +188,45 @@ flowchart TD
   'tertiaryColor': '#0a0e14'
 }}}%%
 graph TB
-    subgraph Internet["Internet (one-time download)"]
+    subgraph Internet["Internet (online-optional)"]
         style Internet fill:#1a2230,stroke:#fb923c
-        GITHUB["GitHub Releases"]
-        HF["HuggingFace"]
-        OLLAMA["Ollama Registry"]
+        CAT["Live catalogs<br/>Kiwix / HuggingFace / GitHub"]
     end
 
     subgraph Server["Val Ark Server"]
         style Server fill:#1a2230,stroke:#4ade80
-        SYNC["Syncthing<br/>P2P Daemon"]
-        STORE["Local Storage<br/>tools/ + models/"]
-        WEBUI["Web UI<br/>Browse & Manage"]
+        LIB["librarian.sh + loop.sh"]
+        STORE["Data Root<br/>models + tools + content<br/>(NFS export)"]
+        SYNC["Syncthing<br/>P2P daemon"]
+        WEBUI["server.js Web UI"]
     end
 
-    subgraph Peers["LAN / P2P Peers"]
-        style Peers fill:#1a2230,stroke:#a78bfa
-        PEER1["Peer 1<br/>Jetson Orin"]
-        PEER2["Peer 2<br/>Linux Desktop"]
-        PEER3["Peer 3<br/>MacBook"]
+    subgraph Fleet["Mesh Fleet"]
+        style Fleet fill:#1a2230,stroke:#a78bfa
+        N1["Jetson Orin / Thor"]
+        N2["GB10 Grace-Blackwell"]
+        N3["x86_64 / Apple Silicon"]
+        RT["OpenWRT router<br/>content/sync subset"]
     end
 
-    Internet -->|"Initial sync<br/>(online)"| Server
-    SYNC <-->|"Syncthing P2P<br/>(offline OK)"| PEER1
-    SYNC <-->|"Syncthing P2P<br/>(offline OK)"| PEER2
-    SYNC <-->|"Syncthing P2P<br/>(offline OK)"| PEER3
-    PEER1 <-.->|"Direct LAN"| PEER2
-    PEER2 <-.->|"Direct LAN"| PEER3
+    CAT -->|"initial fill (online)"| LIB
+    LIB --> STORE
+    STORE -->|"NFS mount<br/>(offline OK)"| N1
+    STORE -->|"NFS mount"| N2
+    STORE -->|"NFS mount"| N3
+    N1 -->|"GPU inference<br/>on served models"| STORE
+    N2 -->|"GPU inference"| STORE
+    SYNC <-.->|"Syncthing P2P"| RT
 ```
 
-## Server Architecture
+## Web Server
 
-The web UI is served by `server.js`, which provides a REST API for managing downloads
-and querying system status. Download operations are handled by spawning the relevant
-shell scripts as child processes, with progress streamed back to the browser via
-Server-Sent Events (SSE).
+`server.js` is a **zero-dependency Node** server. It serves the static web UI plus a
+JSON API and Server-Sent Events (SSE) for live progress. Download actions spawn the
+relevant shell scripts as child processes and stream their output back to the browser.
+The listen port comes from `VALARK_WEB_PORT` (`.env`, default 3000); `/api/health`
+returns `{status:"ok", version}` so the loop and `verify.sh` can confirm it is really
+the Val Ark server and not another app squatting the port.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -210,29 +241,31 @@ sequenceDiagram
     participant Browser
     participant server.js
     participant filesystem
-    participant download-tools.sh
+    participant download script
 
-    Browser->>server.js: GET /api/status/tools
-    server.js->>filesystem: scan tools/ directory
-    filesystem-->>server.js: file listing + metadata
+    Browser->>server.js: GET /api/status
+    server.js->>filesystem: scan tools/ + content/zim/
+    filesystem-->>server.js: listing + metadata + kiwix status
     server.js-->>Browser: JSON response
 
-    Browser->>server.js: POST /api/download/tools {target: "ollama"}
-    server.js->>download-tools.sh: spawn child process
+    Browser->>server.js: POST /api/download {target}
+    server.js->>download script: spawn child process
     loop Progress updates
-        download-tools.sh-->>server.js: stdout/stderr output
+        download script-->>server.js: stdout/stderr
         server.js-->>Browser: SSE progress events
     end
-    download-tools.sh-->>server.js: exit code
+    download script-->>server.js: exit code
     server.js-->>Browser: SSE completion event
 ```
 
 ## Content Serving
 
-On startup, `server.js` scans the `content/zim/` directory for ZIM files (offline
-Wikipedia archives). If ZIM files are found, it automatically spawns `kiwix-serve`
-on port 8888 to serve them. The web UI detects that kiwix-serve is running and
-displays a "Browse Wikipedia" banner linking users to the offline encyclopedia.
+On startup (and again whenever the loop heals it), `server.js` scans `content/zim/`
+for complete `.zim` files. If any exist it auto-launches `kiwix-serve` on port 8888
+with the whole ZIM library. The web UI polls `/api/status`, sees kiwix is running,
+and shows a "Browse Wikipedia" banner linking to the offline encyclopedia. The ZIM
+catalog is fetched **live** from the Kiwix OPDS feed, so download dates are never
+stale.
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -249,17 +282,58 @@ sequenceDiagram
     participant kiwix-serve
     participant Browser
 
-    Note over server.js: Startup sequence
-    server.js->>filesystem: scan content/zim/ for .zim files
-    filesystem-->>server.js: ZIM files found
-    server.js->>kiwix-serve: spawn on port 8888 with ZIM library
+    Note over server.js: Startup / loop heal
+    server.js->>filesystem: scan content/zim/ for .zim
+    filesystem-->>server.js: complete ZIM files
+    server.js->>kiwix-serve: spawn on :8888 with library
     kiwix-serve-->>server.js: listening on :8888
 
-    Note over Browser: User opens Web UI
     Browser->>server.js: GET /api/status
     server.js-->>Browser: {kiwix: {running: true, port: 8888}}
     Note over Browser: Shows "Browse Wikipedia" banner
 
-    Browser->>kiwix-serve: GET /wikipedia/article
-    kiwix-serve-->>Browser: Wikipedia article (HTML)
+    Browser->>kiwix-serve: GET /<zim>/article
+    kiwix-serve-->>Browser: article (HTML)
 ```
+
+## Platforms
+
+Tools ship as prebuilt binaries per platform; the web UI lets you pick one and shows
+its availability. GPU-accelerated `llama.cpp` / `whisper.cpp` / `sd.cpp` on aarch64
+require a CUDA source build (no upstream binary) — see [PLATFORMS.md](PLATFORMS.md).
+
+| web-ui platform | Arch / tools dir | Notes |
+|-----------------|------------------|-------|
+| `jetson` | `linux-arm64` | Jetson Orin |
+| `thor` | `linux-arm64` | Jetson Thor (inherits arm64) |
+| `gb10` | `linux-arm64` | GB10 Grace-Blackwell (SBSA) |
+| `ubuntu` | `linux-x86_64` | Ubuntu / Debian / Fedora |
+| `mac` | `macos-arm64` | Apple Silicon |
+| `windows` | `windows-x64` | Windows 10/11 |
+| `openwrt` | `linux-arm64` | Routers; content/sync/infra subset only |
+
+## Project Structure
+
+| Path | Purpose |
+|------|---------|
+| `start.sh` | Interactive menu + CLI (setup, download, update, serve, cron) |
+| `scripts/librarian.sh` | Disk-fill + curation engine (`status\|plan\|fill\|verify\|evict\|maintain\|refresh`) |
+| `scripts/loop.sh` | 24/7 self-healing + verification cycle (`once\|run\|install\|uninstall`) |
+| `scripts/verify.sh` | Functional checks: tools run, kiwix serves, LLM infers, fleet reachable |
+| `scripts/lib/valark-env.sh` | Resolve `DATA_ROOT` from `.env`, symlink repo dirs, disk math |
+| `scripts/lib/catalog.sh` | Build candidate catalog (models/installers + live ZIM) |
+| `scripts/lib/kiwix_catalog.py` | Fetch + parse the live Kiwix OPDS catalog |
+| `scripts/lib/planner.py` | Apply the priority model to produce the ordered plan |
+| `scripts/download-tools.sh` | Mirror prebuilt tool binaries (per `scripts/tools/*.sh`) |
+| `scripts/download-models.sh` | Tiered model downloads |
+| `scripts/server.js` | Zero-dep Node web UI + JSON API + SSE; auto-launches kiwix |
+| `scripts/setup.sh` / `status.sh` / `monitor.sh` | Deps, inventory, progress |
+| `data/installers.tsv`, `data/models-extra.tsv` | Catalog source rows |
+| `web-ui/` | Static dashboard (TOOLS array, logos, screenshots) |
+| `tests/` | Bash validators (`test-*.sh`) + Playwright suite under `tests/screenshots/` |
+| `.env.example` | Documented machine config (`VAL_ARK_DATA`, `VALARK_WEB_PORT`, `VALARK_FLEET`, reserve) |
+
+Val Ark currently mirrors **43** tools (`scripts/tools/*.sh`). The scripts never
+install anything on the server itself — they mirror binaries and write install hints
+for the user. See [TOOLS.md](TOOLS.md) for the catalog and [LIBRARIAN.md](LIBRARIAN.md)
+for the fill engine.

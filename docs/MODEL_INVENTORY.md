@@ -1,21 +1,44 @@
 # AI Model Inventory
 
+The flagship LLM/STT/TTS/VLM/image catalog (~500 GB) is curated by
+`scripts/download-models.sh`. A complementary **diversity catalog** of small,
+high-value models (embeddings, rerankers, tiny VLMs, OCR, depth, segmentation,
+detection, audio, time-series) lives in [`data/models-extra.tsv`](../data/models-extra.tsv)
+and is filled automatically by the [Librarian](LIBRARIAN.md).
+
+## Where models live
+
+Models live at `<DATA_ROOT>/models`, where `<DATA_ROOT>` is the configurable data
+root resolved by `scripts/lib/valark-env.sh` (from a git-ignored `.env`, else the
+largest writable mount, else the repo). `~/models` and the repo-relative `models/`
+dir are symlinked there, so the paths below work unchanged. See
+[LIBRARIAN.md](LIBRARIAN.md) for the layout.
+
 ## Quick Start
 
 ```bash
-# Download everything (~500GB overnight):
-./download-all-models.sh all
+# Priority tiers (recommended):
+scripts/download-models.sh tier1    # Edge/mobile (~15GB)  - small, fast
+scripts/download-models.sh tier2    # Workstation (~150GB) - balanced
+scripts/download-models.sh tier3    # Large (~300GB+)      - highest quality
+scripts/download-models.sh all      # Everything (~500GB, overnight)
 
-# Or download by category:
-./download-all-models.sh llm      # LLM models (~300GB)
-./download-all-models.sh tts      # Text-to-Speech (~15GB)
-./download-all-models.sh stt      # Speech-to-Text (~20GB)
-./download-all-models.sh vision   # Vision Language Models (~40GB)
-./download-all-models.sh image    # Image Generation (~40GB)
-./download-all-models.sh nvidia   # NVIDIA Special (~10GB)
-./download-all-models.sh extra    # Additional quality models (~75GB)
-./download-all-models.sh bitnet   # BitNet 1-bit models (~14GB)
+# Or by category:
+scripts/download-models.sh llm      # LLM models (~300GB)
+scripts/download-models.sh tts      # Text-to-Speech (~15GB)
+scripts/download-models.sh stt      # Speech-to-Text (~20GB)
+scripts/download-models.sh vision   # Vision Language Models (~40GB)
+scripts/download-models.sh image    # Image Generation (~40GB)
+scripts/download-models.sh nvidia   # NVIDIA Special (~24GB)
+scripts/download-models.sh extra    # Additional quality models (~75GB)
+scripts/download-models.sh bitnet   # BitNet 1-bit models (~14GB)
+
+scripts/download-models.sh validate # Pre-check all URLs, download nothing
 ```
+
+Downloads never abort on error, resume (`wget -c`), retry with backoff, and track
+failures for retry. Small diversity models from `models-extra.tsv` instead flow
+through the Librarian, which uses aria2 multi-connection (~3x faster, curl fallback).
 
 ## Category 1: LLM Models (GGUF for llama.cpp) - ~300GB
 
@@ -146,7 +169,7 @@
 
 ---
 
-## Category 6: NVIDIA Special - ~10GB
+## Category 6: NVIDIA Special - ~24GB
 
 | Model | Size | Format | Notes |
 |-------|------|--------|-------|
@@ -154,29 +177,55 @@
 | Canary-1B | ~2 GB | NeMo | Multilingual ASR + translation |
 | Cosmos Tokenizer | ~2 GB | PyTorch | World model tokenizer |
 | Cosmos-Reason1-7B | ~14 GB | PyTorch | Physical AI reasoning |
+| PersonaPlex-7B | ~14 GB | SafeTensors | Conversational persona model |
+
+---
+
+## Diversity Catalog (Librarian)
+
+Beyond the big catalog above, [`data/models-extra.tsv`](../data/models-extra.tsv)
+broadens modality coverage with small, high-value files the
+[Librarian](LIBRARIAN.md) downloads to fill spare disk:
+
+| Modality | Examples |
+|----------|----------|
+| Embeddings / rerankers | bge, nomic, mxbai, gte, jina, e5 (RAG backbone) |
+| Tiny VLMs / OCR | SmolVLM, moondream2, granite-docling, Florence-2 |
+| Speech | silero-vad, whisper-base ONNX, Kokoro-q8 |
+| Vision | YOLO11n, depth-anything-v2, MobileSAM, CLIP, SigLIP |
+| Time-series / audio | chronos-t5, moirai, CLAP, musicgen-small |
+| Safety | Llama-Guard-3-8B |
 
 ---
 
 ## Usage with llama.cpp
 
 ```bash
-# Run a GGUF model:
-cd ~/Code/llama.cpp
-./build/bin/llama-server \
-    -m ~/models/llm/nemotron-3-nano-30b/Nemotron-3-Nano-30B-A3B-Q4_K_M.gguf \
+# Run a GGUF model ($MODELS_DIR resolves to <DATA_ROOT>/models):
+llama-server \
+    -m "$MODELS_DIR/llm/nemotron-3-nano-30b/Nemotron-3-Nano-30B-A3B-Q4_K_M.gguf" \
     -ngl 999 -fa -c 4096 --port 8080
 
 # Run whisper:
-./build/bin/whisper-cli \
-    -m ~/models/stt/whisper-ggml/ggml-large-v3-turbo-q5_0.bin \
+whisper-cli \
+    -m "$MODELS_DIR/stt/whisper-ggml/ggml-large-v3-turbo-q5_0.bin" \
     -f audio.wav
 ```
 
-## Performance Tips for NVIDIA Jetson
+In a mesh, the data root is NFS-exportable: fleet nodes mount one shared mirror and
+run GPU inference on the served models over the network ([PLATFORMS.md](PLATFORMS.md)).
 
-1. Set MAXN power mode: `sudo nvpmodel -m 0 && sudo jetson_clocks`
-2. Compile llama.cpp with CUDA: `cmake -B build -DGGML_CUDA=ON && cmake --build build -j$(nproc)`
+## Performance Tips for NVIDIA (Jetson Orin / Thor / GB10)
+
+1. Set max power mode: `sudo nvpmodel -m 0 && sudo jetson_clocks`
+2. On aarch64 there are no upstream GPU binaries — build llama.cpp/whisper.cpp from
+   source with CUDA: `cmake -B build -DGGML_CUDA=ON && cmake --build build -j$(nproc)`
+   (see [PLATFORMS.md](PLATFORMS.md)).
 3. Always use `-ngl 999` to offload all layers to GPU
 4. Use `-fa` for flash attention (10-15% speed boost)
 5. For MoE models, ensure all experts are GPU-offloaded
 6. Q4_0 benefits from automatic weight repacking on ARM/CUDA
+
+---
+
+[Back to docs](README.md)

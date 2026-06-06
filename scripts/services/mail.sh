@@ -52,6 +52,15 @@ IMAP_PORT="${VALARK_MAIL_IMAP_PORT:-143}"
 # without it. Override with VALARK_MAIL_MX_PORT (e.g. 2525) to force it unprivileged.
 SMTP_MX_PORT="${VALARK_MAIL_MX_PORT:-25}"
 
+# Val Ark usually runs as a NON-root user (loop/cron), which cannot bind the
+# privileged defaults 143/587. Auto-shift those to non-privileged ports
+# (143->1143, 587->1587) unless the operator pinned them or we're root, so the
+# daemon actually starts. Mail clients just point at the shifted ports.
+if [ "$(id -u)" -ne 0 ]; then
+    if [ -z "${VALARK_MAIL_IMAP_PORT:-}" ] && [ "$IMAP_PORT" -lt 1024 ]; then IMAP_PORT=$((IMAP_PORT + 1000)); fi
+    if [ -z "${VALARK_MAIL_SUBMISSION_PORT:-}" ] && [ "$SMTP_SUBMISSION_PORT" -lt 1024 ]; then SMTP_SUBMISSION_PORT=$((SMTP_SUBMISSION_PORT + 1000)); fi
+fi
+
 MAIL_HOME="${STATE_DIR}/services/mail"
 MADDY_STATE="${MAIL_HOME}/maddy"                 # mailboxes + credentials DB
 MADDY_CONF="${MAIL_HOME}/maddy.conf"

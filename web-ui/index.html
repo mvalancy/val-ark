@@ -3249,7 +3249,10 @@ function renderFooter() {
 // =============================================================================
 function renderHome() {
     const totalModels = MODEL_FAMILIES.reduce((s, f) => s + f.variants.length, 0);
-    const totalStorage = STORAGE_DATA.reduce((s, d) => s + d.size, 0);
+    // Live mirrored total when the storage API has reported, else static estimate.
+    const totalStorageLabel = (_storageData && _storageData.total)
+        ? formatBytes(_storageData.total)
+        : '~' + STORAGE_DATA.reduce((s, d) => s + d.size, 0) + ' GB';
 
     let html = '<div class="container" id="main-content">';
 
@@ -3259,7 +3262,7 @@ function renderHome() {
         <h1>Val Ark</h1>
         <p class="subtitle">Complete Offline Software Toolkit</p>
         <p class="hero-intro">Run AI chatbots, generate images, transcribe audio, and access Wikipedia — all running locally on your computer, no internet required. Perfect for privacy, remote locations, or unreliable connections.</p>
-        <p class="stats">${totalModels}+ Models | ${TOOLS.length} Tools | ${Object.keys(PLATFORMS).length} Platforms | ~${totalStorage} GB</p>
+        <p class="stats">${totalModels}+ Models | ${TOOLS.length} Tools | ${Object.keys(PLATFORMS).length} Platforms | ${totalStorageLabel} mirrored</p>
         <div class="hero-actions">
             <a href="#/quickstart" class="btn btn-primary">New Here? Start Guide</a>
             <a href="#/content" class="btn btn-secondary">Just Want Wikipedia?</a>
@@ -3290,18 +3293,8 @@ function renderHome() {
         </div>`;
     }
 
-    // Storage bar
-    html += `<div class="storage-section"><h3>Storage Breakdown (~${totalStorage} GB total)</h3>`;
-    html += '<div class="storage-bar-container">';
-    STORAGE_DATA.forEach(d => {
-        const pct = (d.size / totalStorage * 100).toFixed(1);
-        html += `<div class="storage-segment" style="width:${pct}%;background:${d.color}" title="${d.label}: ~${d.size}GB">${d.size > 12 ? d.size + 'GB' : ''}</div>`;
-    });
-    html += '</div><div class="storage-legend">';
-    STORAGE_DATA.forEach(d => {
-        html += `<div class="storage-legend-item"><div class="storage-dot" style="background:${d.color}"></div>${d.label} (~${d.size}GB)</div>`;
-    });
-    html += '</div></div>';
+    // Storage bar (live — includes the ZIM library, not just models)
+    html += renderStorageBreakdown();
 
     // Tools section grouped by category
     const toolCatOrder = ['ai-inference', 'ai-platform', 'creative', 'media', 'infrastructure', 'dev-tools'];
@@ -3957,21 +3950,19 @@ function renderContentLibrary() {
     html += '<h1>Offline Content Library</h1>';
     html += '<p class="section-desc">Pre-downloaded knowledge bases served by <a href="#/tools/kiwix">Kiwix</a>. Browse Wikipedia, textbooks, and reference material from any device on your network — no internet required.</p>';
 
-    // Show prominent "Browse" banner when Kiwix is running
+    // Embed the offline library IN-PAGE so the fixed Val Ark nav stays on top —
+    // a permanent way back to the ark — instead of stranding readers on a
+    // separate :8888 tab with no link home.
     if (_kiwixStatus && _kiwixStatus.running) {
-        const kiwixUrl = getKiwixUrl();
-        html += `<div class="kiwix-banner">
-            <div class="kiwix-banner-content">
-                <div class="kiwix-banner-icon">W</div>
-                <div>
-                    <div class="kiwix-banner-title">Wikipedia is ready to browse</div>
-                    <div class="kiwix-banner-desc">Open Wikipedia and other content in your browser — works offline, no internet needed.</div>
-                </div>
-            </div>
-            <a href="${kiwixUrl}" target="_blank" class="kiwix-banner-btn">Open Wikipedia</a>
-        </div>`;
+        html += renderAppFrame({
+            id: 'kiwixFrame',
+            title: 'Offline Library',
+            subtitle: (_kiwixStatus.files ? _kiwixStatus.files + ' collections — ' : '') + 'Wikipedia, books, courses & more',
+            src: getKiwixUrl(),
+        });
     }
 
+    html += '<h2 style="margin-top:2.5rem;font-size:1.2em">Collections in this library</h2>';
     html += '<div class="cards-grid">';
 
     for (const item of CONTENT_LIBRARY) {
@@ -3996,19 +3987,19 @@ function renderContentLibrary() {
 
     // Serve instructions - simplified when Kiwix is already running
     if (_kiwixStatus && _kiwixStatus.running) {
-        const kUrl = getKiwixUrl();
+        const absUrl = window.location.origin + getKiwixUrl();
         html += `<div class="detail-section" style="margin-top:2rem">
-            <h3>How to Browse</h3>
-            <p>Content is being served automatically. Open the link below on any device connected to this network:</p>
-            <p style="margin-top:0.5rem"><a href="${kUrl}" target="_blank" style="color:var(--accent);font-weight:600;font-size:1.1em">${kUrl}</a></p>
-            <p style="margin-top:0.5rem;color:var(--text-muted)">Works on phones, tablets, and computers — no internet needed.</p>
+            <h3>Open on another device</h3>
+            <p>The same library is served to your whole network. On any phone, tablet, or computer connected to this network, open:</p>
+            <p style="margin-top:0.5rem"><a href="${getKiwixUrl()}" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600;font-size:1.1em">${esc(absUrl)}</a></p>
+            <p style="margin-top:0.5rem;color:var(--text-muted)">Works completely offline — no internet needed.</p>
         </div>`;
     } else {
         html += `<div class="detail-section" style="margin-top:2rem">
             <h3>Serving Content</h3>
-            <p>Start the Kiwix server to make all downloaded content browsable from any device:</p>
+            <p>The library starts automatically once content is present. To start it manually:</p>
             <div class="code-block"><code>./scripts/download-zims.sh serve</code></div>
-            <p style="margin-top:0.5rem;color:var(--text-muted)">Then open <code>http://&lt;server-ip&gt;:8888</code> in any browser on your network.</p>
+            <p style="margin-top:0.5rem;color:var(--text-muted)">Then it appears right here, embedded in this page.</p>
         </div>`;
     }
 
@@ -4778,17 +4769,56 @@ function setPlatform(platform) {
 let _apiAvailable = false;
 let _sseConnection = null;
 let _diskData = null;
-let _kiwixStatus = null; // {running, port, url, files}
+let _kiwixStatus = null; // {running, port, url, path, files}
+let _storageData = null; // {categories:[{key,label,color,bytes}], total, zimCount, disk} — live, includes ZIMs
 const _activeDownloads = new Map();
 
-// Get Kiwix URL using current page hostname (not localhost)
+// Kiwix is reverse-proxied at /kiwix/ on this same origin, so the link works on
+// whatever host/port the user reached Val Ark by (Tailscale, WiFi IP, :8088…)
+// AND keeps the Val Ark header. Fall back to the direct port for older servers
+// that didn't report a proxy path.
 function getKiwixUrl() {
     if (!_kiwixStatus || !_kiwixStatus.running) return null;
-    // Use the hostname the user is currently accessing (Tailscale, WiFi IP, etc)
+    if (_kiwixStatus.path) return _kiwixStatus.path; // '/kiwix/' — relative, same-origin
     const host = window.location.hostname || 'localhost';
-    const port = _kiwixStatus.port || 8888;
-    return `http://${host}:${port}`;
+    return `http://${host}:${_kiwixStatus.port || 8888}/`;
 }
+
+// Generic "sub-app in a frame" — embeds another local service (the Kiwix library
+// today; webmail / chat / forums as they're added) BELOW the fixed Val Ark nav,
+// so every sub-app shares one consistent header that links back to the ark.
+function renderAppFrame(opts) {
+    const id = opts.id || 'appFrame';
+    const src = opts.src || 'about:blank';
+    const title = esc(opts.title || 'App');
+    const subtitle = opts.subtitle ? `<span class="subapp-sub">${esc(opts.subtitle)}</span>` : '';
+    return `<div class="subapp" id="${id}-wrap">
+        <div class="subapp-bar">
+            <div class="subapp-id"><span class="subapp-dot"></span><strong>${title}</strong>${subtitle}</div>
+            <div class="subapp-actions">
+                <button class="subapp-btn" onclick="reloadFrame('${id}')" title="Reload" aria-label="Reload frame">&#x21bb;</button>
+                <button class="subapp-btn" onclick="toggleFrameFullscreen('${id}')" title="Fullscreen (Esc to exit)" aria-label="Toggle fullscreen">&#x26F6; Fullscreen</button>
+                <a class="subapp-btn" href="${src}" target="_blank" rel="noopener" title="Open in a new tab">Open &#x2197;</a>
+            </div>
+        </div>
+        <iframe id="${id}" class="subapp-frame" src="${src}" title="${title}" loading="lazy"></iframe>
+    </div>`;
+}
+function reloadFrame(id) { const f = document.getElementById(id); if (f) f.src = f.src; }
+function toggleFrameFullscreen(id) {
+    const f = document.getElementById(id);
+    const wrap = f && f.closest('.subapp');
+    if (!wrap) return;
+    const on = wrap.classList.toggle('fullscreen');
+    document.body.classList.toggle('subapp-fullscreen-open', on);
+}
+// Esc exits any fullscreened sub-app frame (the fixed nav stays put regardless).
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.querySelector('.subapp.fullscreen')) {
+        document.querySelectorAll('.subapp.fullscreen').forEach(w => w.classList.remove('fullscreen'));
+        document.body.classList.remove('subapp-fullscreen-open');
+    }
+});
 
 // Debounced router: prevents multiple rapid full-page re-renders
 let _routerTimer = null;
@@ -4802,6 +4832,35 @@ function formatBytes(bytes) {
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return (bytes / Math.pow(1024, i)).toFixed(i > 1 ? 1 : 0) + ' ' + units[i];
+}
+
+// Storage Breakdown — uses LIVE sizes from /api/status/storage (which include
+// the ZIM library, models, tools, installers and sources) once they arrive;
+// falls back to the static estimate for first paint / API-less file:// use.
+function renderStorageBreakdown() {
+    let cats, total, totalLabel;
+    if (_storageData && _storageData.categories && _storageData.categories.length) {
+        cats = _storageData.categories.map(c => ({ label: c.label, bytes: c.bytes, color: c.color }));
+        total = _storageData.total || cats.reduce((s, c) => s + c.bytes, 0);
+        totalLabel = formatBytes(total);
+    } else {
+        cats = STORAGE_DATA.map(d => ({ label: d.label, bytes: d.size * 1073741824, color: d.color }));
+        total = cats.reduce((s, c) => s + c.bytes, 0);
+        totalLabel = '~' + STORAGE_DATA.reduce((s, d) => s + d.size, 0) + ' GB';
+    }
+    if (total <= 0) return '';
+    let html = `<div class="storage-section"><h3>Storage Breakdown (${totalLabel} total)</h3>`;
+    html += '<div class="storage-bar-container">';
+    cats.forEach(c => {
+        const pct = c.bytes / total * 100;
+        html += `<div class="storage-segment" style="width:${pct.toFixed(1)}%;background:${c.color}" title="${esc(c.label)}: ${formatBytes(c.bytes)}">${pct >= 6 ? formatBytes(c.bytes) : ''}</div>`;
+    });
+    html += '</div><div class="storage-legend">';
+    cats.forEach(c => {
+        html += `<div class="storage-legend-item"><div class="storage-dot" style="background:${c.color}"></div>${esc(c.label)} (${formatBytes(c.bytes)})</div>`;
+    });
+    html += '</div></div>';
+    return html;
 }
 
 // Fetch all status in a single request, populate all state, render once
@@ -4838,6 +4897,19 @@ async function initFromAPI() {
 
         // Single render after all data populated
         scheduleRender();
+
+        // Live storage breakdown (includes ZIMs/tools/installers, not just
+        // models). The server computes it with a background du walk, so the first
+        // response may be empty ({computing:true}); retry a few times until the
+        // real numbers land, then refine the breakdown without blocking paint.
+        const loadStorage = (tries) => fetch('/api/status/storage')
+            .then(r => r.ok ? r.json() : null)
+            .then(s => {
+                if (s && s.categories && s.categories.length) { _storageData = s; scheduleRender(); }
+                else if (tries > 0) setTimeout(() => loadStorage(tries - 1), 5000);
+            })
+            .catch(() => {});
+        loadStorage(24);  // the tools tree (~45k files) can take ~75s to size over FUSE
         return true;
     } catch (e) {
         return false;

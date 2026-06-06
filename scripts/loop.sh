@@ -127,6 +127,26 @@ ensure_web_server() {
     _va_start_web "$port" && log "${GREEN}started Val Ark web server${NC} on :$port"
 }
 
+# Dynamic UI smoke — exercise the web UI's controls and the "back to the ark"
+# header against the LIVE server (so the embedded library frame is covered too).
+# Best-effort: skipped cleanly if Playwright deps aren't installed.
+ui_smoke() {
+    local port="${VALARK_WEB_PORT:-3000}"
+    local pw="${PROJECT_ROOT}/tests/screenshots/node_modules/.bin/playwright"
+    [ -x "$pw" ] || { log "ui smoke skipped (playwright not installed: cd tests/screenshots && npm install)"; return 0; }
+    local node nodedir; node="$(_va_node)"; [ -n "$node" ] || { log "ui smoke skipped (node not found)"; return 0; }
+    nodedir="$(dirname "$node")"
+    local out
+    out=$(cd "${PROJECT_ROOT}/tests/screenshots" && \
+        PATH="${nodedir}:$PATH" VALARK_TEST_URL="http://127.0.0.1:${port}" \
+        timeout 180 "$pw" test specs/ui-exercise.spec.ts -g "back-to-ark|offline library|storage breakdown" --reporter=line 2>&1 | tail -4)
+    if echo "$out" | grep -qE '[0-9]+ passed' && ! echo "$out" | grep -qE '[0-9]+ failed'; then
+        log "${GREEN}ui smoke OK${NC}: $(echo "$out" | grep -oE '[0-9]+ passed' | head -1)"
+    else
+        log "${YELLOW}ui smoke issues${NC}: $(echo "$out" | tr '\n' ' ' | tail -c 220)"
+    fi
+}
+
 loop_once() {
     step "cycle start"
     step "1. ensure data disk writable"
@@ -147,6 +167,8 @@ loop_once() {
     FORCE_COLOR=0 bash "$LIBRARIAN" fill --time "$FILL_SECONDS" 2>&1 | tail -1 | sed 's/^/    /'
 
     step "7. functional verification"; FORCE_COLOR="${FORCE_COLOR:-1}" bash "$VERIFY" all 2>&1 | sed 's/^/    /'
+
+    step "7b. UI smoke (dynamic controls + back-to-ark nav)"; ui_smoke
 
     step "8. report + coordination"; bash "$LIBRARIAN" maintain >/dev/null 2>&1; coordination
     log "${GREEN}cycle complete${NC} | fillable $(valark_human "$(valark_fillable_bytes)") | health: ${STATE_DIR}/health.json"

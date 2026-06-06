@@ -1429,8 +1429,8 @@ test.describe('Val Ark Web UI - Skeleton Loading & Print Styles', () => {
   test('styles.css is loaded', async ({ page }) => {
     await page.goto(`file://${WEB_UI}`);
     await page.waitForLoadState('domcontentloaded');
-    // Check that the stylesheet link exists
-    const stylesheetLink = page.locator('link[rel="stylesheet"][href="styles.css"]');
+    // Check that the stylesheet link exists (href may carry a ?v= cache-buster)
+    const stylesheetLink = page.locator('link[rel="stylesheet"][href^="styles.css"]');
     await expect(stylesheetLink).toBeAttached();
   });
 

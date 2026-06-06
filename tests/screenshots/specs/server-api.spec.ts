@@ -169,4 +169,42 @@ test.describe('Val Ark API Server', () => {
     expect(resp.status()).toBe(404);
   });
 
+  test('GET /api/status/storage returns live category breakdown (incl. ZIMs)', async ({ request }) => {
+    // The tools tree (~45k files) can take ~75s to size over FUSE; the walk runs
+    // in the background so the route never blocks. Give the test room to wait.
+    test.setTimeout(180000);
+    // Storage is computed by a background du walk (never blocks the event loop),
+    // so the first responses may be an empty {computing:true} placeholder. Poll
+    // until the real numbers land. The route itself must always respond fast.
+    let data: any;
+    await expect.poll(async () => {
+      const resp = await request.get(`${BASE_URL}/api/status/storage`);
+      if (!resp.ok()) return 0;
+      data = await resp.json();
+      return Array.isArray(data.categories) ? data.categories.length : 0;
+    }, { timeout: 120000, intervals: [1000, 2000, 3000, 5000] }).toBeGreaterThan(0);
+    expect(data.total).toBeGreaterThan(0);
+    for (const c of data.categories) {
+      expect(c.bytes).toBeGreaterThan(0);     // real sizes, not the old hardcoded guess
+      expect(typeof c.label).toBe('string');
+    }
+    expect(data.disk).toBeDefined();
+    expect(data.disk.total).toBeGreaterThan(0);   // the real data mount
+  });
+
+  test('GET /api/status/kiwix advertises the same-origin proxy path', async ({ request }) => {
+    const resp = await request.get(`${BASE_URL}/api/status/kiwix`);
+    expect(resp.ok()).toBeTruthy();
+    const data = await resp.json();
+    expect(data.path).toBe('/kiwix/');
+    expect(typeof data.running).toBe('boolean');
+  });
+
+  test('/kiwix/ proxy route responds (200 served or 503 starting) — never a hard error', async ({ request }) => {
+    const resp = await request.get(`${BASE_URL}/kiwix/`, { maxRedirects: 0 });
+    // Up → 200; not-yet-started → a graceful 503 page that links back to Val Ark.
+    // Either way the route exists and never 404s/500s.
+    expect([200, 503]).toContain(resp.status());
+  });
+
 });

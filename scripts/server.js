@@ -5,7 +5,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { execSync, spawn } = require('child_process');
+const { execSync, execFile, spawn } = require('child_process');
 
 const PORT = parseInt(process.argv[2] || '3000', 10);
 const ROOT = path.resolve(__dirname, '..');
@@ -191,8 +191,12 @@ function getDiskStatus() {
         return statusCache.disk.data;
     }
     try {
+        // Measure the DATA disk (where content/models actually live), not the
+        // repo's home disk — the trees are symlinks onto the data mount.
+        let target = ROOT;
+        try { target = fs.realpathSync(path.join(ROOT, 'content')); } catch {}
         const output = execSync('/usr/bin/df -B1 --output=size,used,avail .', {
-            cwd: ROOT, encoding: 'utf8', timeout: 5000,
+            cwd: target, encoding: 'utf8', timeout: 5000,
         });
         const lines = output.trim().split('\n');
         const parts = lines[1].trim().split(/\s+/);
@@ -356,6 +360,61 @@ function getModelsStatus() {
 
     statusCache.models = { data: models, timestamp: now };
     return models;
+}
+
+// Total bytes under a directory tree, ASYNC so a multi-hundred-GB walk never
+// blocks the single-threaded event loop (a synchronous du here would freeze the
+// whole web server for every client while it ran). `du -sb` is native/fast; no
+// shell. The repo trees (content/, tools/, …) are SYMLINKS onto the data disk
+// and du measures a symlink as ~0 bytes, so resolve to the real target first.
+function duAsync(dir) {
+    return new Promise((resolve) => {
+        let real;
+        try { if (!fs.existsSync(dir)) return resolve(0); real = fs.realpathSync(dir); }
+        catch { return resolve(0); }
+        execFile('du', ['-sb', real], { timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+            if (err) return resolve(0);
+            resolve(parseInt(String(stdout).trim().split(/\s+/)[0], 10) || 0);
+        });
+    });
+}
+
+// Live storage breakdown across every Val Ark tree — so the UI shows the ZIM
+// library (usually the biggest slice) instead of a hardcoded models-only guess.
+// Computed in the background and cached; requests get the cached value instantly
+// and never wait on (or block during) the walk.
+let _storageCache = { data: null, timestamp: 0 };
+let _storageComputing = null;
+const STORAGE_CACHE_TTL = 1800000; // 30 min — the tools tree (~45k files) is slow to du over FUSE; storage moves slowly, so re-walk rarely
+async function computeStorage() {
+    const defs = [
+        { key: 'zim',        label: 'Wikipedia & ZIM Content', color: '#4da6ff', dir: path.join(ROOT, 'content') },
+        { key: 'models',     label: 'AI Models',               color: '#a78bfa', dir: MODEL_ROOT },
+        { key: 'tools',      label: 'Software & Tools',        color: '#4ade80', dir: path.join(ROOT, 'tools') },
+        { key: 'installers', label: 'OS Installers',           color: '#fbbf24', dir: path.join(ROOT, 'installers') },
+        { key: 'sources',    label: 'Source Code',             color: '#f472b6', dir: path.join(ROOT, 'sources') },
+    ];
+    const categories = [];
+    for (const d of defs) {
+        const bytes = await duAsync(d.dir);     // one at a time: kind to the FUSE mount
+        if (bytes > 0) categories.push({ key: d.key, label: d.label, color: d.color, bytes });
+    }
+    const zimCount = readdirSafe(path.join(ROOT, 'content', 'zim')).filter(f => f.endsWith('.zim')).length;
+    const total = categories.reduce((s, c) => s + c.bytes, 0);
+    const data = { categories, total, zimCount, disk: getDiskStatus() };
+    _storageCache = { data, timestamp: Date.now() };
+    return data;
+}
+function getStorageStatus() {
+    const now = Date.now();
+    const fresh = _storageCache.data && (now - _storageCache.timestamp) < STORAGE_CACHE_TTL;
+    if (!fresh && !_storageComputing) {
+        _storageComputing = computeStorage().catch(() => null).finally(() => { _storageComputing = null; });
+    }
+    // Never block a request on the walk: serve cached data if we have it, else a
+    // lightweight "computing" placeholder (the UI shows its static estimate until
+    // real numbers land, then refines).
+    return _storageCache.data || { categories: [], total: 0, zimCount: 0, disk: getDiskStatus(), computing: true };
 }
 
 // Shallow directory info: stat immediate children only, not recursive
@@ -567,6 +626,8 @@ function handleAPI(req, res, urlPath) {
                 return sendJSON(res, req, getModelsStatus());
             case '/api/status/kiwix':
                 return sendJSON(res, req, kiwixStatus);
+            case '/api/status/storage':
+                return sendJSON(res, req, getStorageStatus());
             case '/api/status/all':
                 return sendJSON(res, req, {
                     disk: getDiskStatus(),
@@ -753,6 +814,33 @@ function formatSize(bytes) {
     return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
 }
 
+// Pipe a request straight through to the internal kiwix-serve (which listens on
+// KIWIX_PORT under --urlRootLocation /kiwix). Same-origin proxying means one
+// port and the Val Ark header stays put; we strip any embedding-blocker headers
+// so the library renders inside our in-page reader frame.
+function proxyKiwix(req, res) {
+    if (!kiwixStatus.running) {
+        res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
+        return res.end('<!doctype html><meta charset="utf-8"><body style="font-family:system-ui,sans-serif;background:#0a0e14;color:#e8edf4;padding:40px"><h2>Offline library is starting…</h2><p>The Kiwix content server auto-starts once at least one <code>.zim</code> file is present. <a style="color:#4da6ff" href="/#/content">&larr; Back to Val Ark</a></p></body>');
+    }
+    const proxyReq = http.request({
+        host: '127.0.0.1', port: KIWIX_PORT, method: req.method, path: req.url,
+        headers: { ...req.headers, host: `127.0.0.1:${KIWIX_PORT}` },
+    }, (proxyRes) => {
+        const headers = { ...proxyRes.headers };
+        delete headers['x-frame-options'];
+        delete headers['content-security-policy'];
+        res.writeHead(proxyRes.statusCode || 502, headers);
+        proxyRes.pipe(res);
+    });
+    proxyReq.setTimeout(30000, () => proxyReq.destroy(new Error('kiwix upstream timeout')));
+    proxyReq.on('error', (e) => {
+        if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain', ...SECURITY_HEADERS });
+        res.end('Kiwix proxy error: ' + e.message);
+    });
+    req.pipe(proxyReq);
+}
+
 // =============================================================================
 // Server
 // =============================================================================
@@ -768,6 +856,16 @@ const server = http.createServer((req, res) => {
     // API routes
     if (urlPath.startsWith('/api/')) {
         return handleAPI(req, res, urlPath);
+    }
+
+    // Reverse-proxy the embedded Kiwix server under one origin (/kiwix/*). This
+    // keeps offline content INSIDE the Val Ark shell: same port to remember, and
+    // the fixed top-nav stays on screen as a permanent "back to Val Ark" header
+    // instead of stranding readers on a separate :8888 with no way home. Kiwix
+    // runs with --urlRootLocation /kiwix, so its own links already point at
+    // /kiwix/* — we just pipe bytes through, no HTML rewriting.
+    if (urlPath === '/kiwix' || urlPath.startsWith('/kiwix/')) {
+        return proxyKiwix(req, res);
     }
 
     // Static file serving with path traversal protection
@@ -803,9 +901,10 @@ const server = http.createServer((req, res) => {
 // =============================================================================
 // Kiwix Auto-Launch
 // =============================================================================
-const KIWIX_PORT = 8888;
+const KIWIX_PORT = parseInt(process.env.VALARK_KIWIX_PORT || '8888', 10); // internal; proxied at /kiwix/
+const KIWIX_ROOT = '/kiwix';   // URL prefix (kiwix-serve --urlRootLocation); proxied same-origin
 let kiwixProcess = null;
-let kiwixStatus = { running: false, port: KIWIX_PORT, url: '', files: 0 };
+let kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 };
 
 function findKiwixServe() {
     const arch = require('os').arch();
@@ -849,9 +948,12 @@ function findZimFiles() {
 }
 
 function startKiwix() {
+    // Opt-out (used by the test harness so an ephemeral instance doesn't fight
+    // the production kiwix for the port, and for content-less dev runs).
+    if (process.env.VALARK_DISABLE_KIWIX) { kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 }; return; }
     const kiwixBin = findKiwixServe();
     const zimFiles = findZimFiles();
-    if (!kiwixBin || zimFiles.length === 0) { kiwixStatus = { running: false, port: KIWIX_PORT, url: '', files: 0 }; return; }
+    if (!kiwixBin || zimFiles.length === 0) { kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 }; return; }
     serveWithRetry(kiwixBin, zimFiles, 0);
 }
 
@@ -863,15 +965,15 @@ function startKiwix() {
 // kiwix-manage is far too slow over a network/FUSE mount, so we let kiwix-serve
 // itself report the bad ones.
 function serveWithRetry(kiwixBin, zimFiles, attempt) {
-    if (zimFiles.length === 0 || attempt > 25) { kiwixStatus = { running: false, port: KIWIX_PORT, url: '', files: 0 }; return; }
-    const proc = spawn(kiwixBin, ['--port', String(KIWIX_PORT), ...zimFiles], { stdio: ['ignore', 'ignore', 'pipe'] });
+    if (zimFiles.length === 0 || attempt > 25) { kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 }; return; }
+    const proc = spawn(kiwixBin, ['--port', String(KIWIX_PORT), '--urlRootLocation', KIWIX_ROOT, ...zimFiles], { stdio: ['ignore', 'ignore', 'pipe'] });
     kiwixProcess = proc;
     let stderrBuf = '', settled = false;
     proc.stderr.on('data', (c) => { stderrBuf = (stderrBuf + c.toString()).slice(-2000); });
     proc.on('error', (err) => {
         if (settled) return; settled = true; kiwixProcess = null;
         console.error(`Kiwix failed to start: ${err.message}`);
-        kiwixStatus = { running: false, port: KIWIX_PORT, url: '', files: 0 };
+        kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 };
     });
     proc.on('exit', (code) => {
         if (settled) { kiwixStatus.running = false; kiwixProcess = null; return; } // was serving, then died
@@ -891,7 +993,7 @@ function serveWithRetry(kiwixBin, zimFiles, attempt) {
             serveWithRetry(kiwixBin, zimFiles.filter((z) => z !== bad), attempt + 1);
         } else {
             console.error(`Kiwix exited with code ${code}${stderrBuf ? ': ' + stderrBuf.slice(-300).trim() : ''}`);
-            kiwixStatus = { running: false, port: KIWIX_PORT, url: '', files: 0 };
+            kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 };
         }
     });
     // Probe the port; once kiwix binds it's up (and stays up).
@@ -904,8 +1006,8 @@ function serveWithRetry(kiwixBin, zimFiles, attempt) {
         s.on('connect', () => {
             s.destroy();
             if (settled) return; settled = true;
-            kiwixStatus = { running: true, port: KIWIX_PORT, url: `http://localhost:${KIWIX_PORT}`, files: zimFiles.length };
-            console.log(`Kiwix serving ${zimFiles.length} ZIM file(s) at http://localhost:${KIWIX_PORT}`);
+            kiwixStatus = { running: true, port: KIWIX_PORT, url: `http://localhost:${KIWIX_PORT}${KIWIX_ROOT}/`, path: KIWIX_ROOT + '/', files: zimFiles.length };
+            console.log(`Kiwix serving ${zimFiles.length} ZIM file(s) at http://localhost:${KIWIX_PORT}${KIWIX_ROOT}/ (proxied at /kiwix/)`);
         });
         s.on('error', again); s.on('timeout', again);
     };
@@ -924,6 +1026,7 @@ server.listen(PORT, () => {
     getToolsStatus();
     getContentStatus();
     getModelsStatus();
+    getStorageStatus();   // kicks off the (async, non-blocking) storage walk
     // Auto-start Kiwix content server
     startKiwix();
 });

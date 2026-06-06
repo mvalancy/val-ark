@@ -92,19 +92,39 @@ EOF
     fi
 }
 
-# Keep the Val Ark web UI server (which auto-launches Kiwix) running.
+# Keep the Val Ark web UI server (which auto-launches Kiwix) running AND fresh.
+# server.js launches kiwix-serve only once at startup, so it neither recovers if
+# kiwix dies nor picks up newly-downloaded ZIMs — the loop handles both here.
+_va_node() { local n="$HOME/.nvm/versions/node/v20.20.2/bin/node"; [ -x "$n" ] || n="$(command -v node 2>/dev/null)"; echo "$n"; }
+_va_start_web() {
+    local port="$1" node; node="$(_va_node)"
+    [ -n "$node" ] || { log "${RED}node not found${NC}; cannot start web server"; return 1; }
+    setsid nohup "$node" "${_DIR}/server.js" "$port" >"${LOG_DIR}/server.out" 2>&1 </dev/null & disown
+}
 ensure_web_server() {
     local port="${VALARK_WEB_PORT:-3000}"
     if curl -fsS --max-time 4 "http://127.0.0.1:${port}/api/health" 2>/dev/null | grep -q '"status".*"ok"'; then
-        log "web server up on :$port (kiwix auto-served)"; return 0
+        # Web up — is kiwix running and serving roughly all complete ZIMs?
+        local ks krun kfiles zc
+        ks=$(curl -fsS --max-time 5 "http://127.0.0.1:${port}/api/status/kiwix" 2>/dev/null)
+        krun=$(echo "$ks" | grep -oE '"running":(true|false)' | grep -oE 'true|false')
+        kfiles=$(echo "$ks" | grep -oE '"files":[0-9]+' | grep -oE '[0-9]+'); kfiles=${kfiles:-0}
+        # Count only SERVABLE ZIMs (server.js skips <1MB) so the gap reflects
+        # genuinely-new complete content, not the always-skipped tiny ones.
+        zc=$(find "$ZIM_DIR" -maxdepth 1 -name '*.zim' -size +1M 2>/dev/null | wc -l)
+        if { [ "$krun" = "false" ] && [ "$zc" -gt 0 ]; } || [ $(( zc - kfiles )) -ge 20 ]; then
+            log "${YELLOW}kiwix stale/down${NC} (serving $kfiles of $zc ZIMs) — restarting server to refresh"
+            fuser -k "${port}/tcp" 2>/dev/null; fuser -k 8888/tcp 2>/dev/null
+            _va_start_web "$port" && log "${GREEN}restarted${NC} web server on :$port"
+        else
+            log "web up on :$port (kiwix ${krun:-?}, $kfiles ZIMs)"
+        fi
+        return 0
     fi
     if ss -tln 2>/dev/null | grep -q ":${port} "; then
         log "${YELLOW}:$port held by another app${NC} — set VALARK_WEB_PORT in .env to a free port"; return 1
     fi
-    local node="$HOME/.nvm/versions/node/v20.20.2/bin/node"; [ -x "$node" ] || node="$(command -v node 2>/dev/null)"
-    [ -n "$node" ] || { log "${RED}node not found${NC}; cannot start web server"; return 1; }
-    setsid nohup "$node" "${_DIR}/server.js" "$port" >"${LOG_DIR}/server.out" 2>&1 </dev/null & disown
-    log "${GREEN}started Val Ark web server${NC} on :$port"
+    _va_start_web "$port" && log "${GREEN}started Val Ark web server${NC} on :$port"
 }
 
 loop_once() {

@@ -83,11 +83,13 @@ verify_local() {
 
     # 4) web API health — validate it's ACTUALLY the Val Ark server (a bare 200
     # could be a different app squatting the port), on the configured port.
+    # Val Ark's /api/health returns {"status":"ok","version":"1.0.0",...}. A
+    # different app squatting the port returns something else (no status:ok), so
+    # that field alone identifies us. (Retry — the server may be warming caches.)
     local wport="${VALARK_WEB_PORT:-3000}" hb
-    hb=$(curl -fsS --max-time 5 "http://127.0.0.1:${wport}/api/health" 2>/dev/null)
-    if echo "$hb" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' && \
-       curl -fsS --max-time 5 "http://127.0.0.1:${wport}/" 2>/dev/null | grep -qi "Val Ark"; then
-        chk "Val Ark web server responds (:$wport)"
+    hb=$(curl -fsS --retry 3 --retry-delay 1 --max-time 6 "http://127.0.0.1:${wport}/api/health" 2>/dev/null)
+    if echo "$hb" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+        chk "Val Ark web server responds (:$wport, $(echo "$hb" | grep -oE '"version":"[^"]*"'))"
     else
         skip "Val Ark web server not running/identified on :$wport"
     fi

@@ -92,10 +92,13 @@ searchable, sqlite-backed history. Chosen because ngIRCd is a single small C ser
 database service) and The Lounge is the standard always-on web IRC client; both are
 deliberately federation-free, so the whole conversation stays on the LAN.
 
-- **Runtime deps:** a C toolchain (make/gcc) to build ngIRCd; Node 18+ for The Lounge.
-  Neither ships a portable binary, so `scripts/tools/chat.sh` mirrors source and the
-  service builds in-place on first start (one online run for The Lounge's yarn/npm build,
-  fully offline thereafter). No Redis — The Lounge uses sqlite.
+- **Runtime deps:** a C toolchain (make/gcc) builds ngIRCd; The Lounge (pinned **v4.4.3**,
+  needs Node ≥18 — newer releases require Node 22) builds via npm with `--legacy-peer-deps`.
+  Val Ark mirrors a portable **Node 22** runtime (`scripts/tools/node.sh`, under
+  `tools/<platform>/node`) and the service prefers it, so chat runs with its own Node
+  regardless of the host version. `scripts/tools/chat.sh` mirrors source; `chat.sh start`
+  builds in-place on first run (one online build), fully offline after. No Redis — The
+  Lounge uses sqlite.
 - **Bind:** ngIRCd → `VALARK_BIND:6667` (set `127.0.0.1` for host-only); The Lounge web →
   `127.0.0.1:9000`, reached only via the proxy.
 - **First run:** auto-creates a private-mode admin account and prints a generated 16-char
@@ -111,8 +114,10 @@ PHP/Node/DB runtime), and alps is a thin IMAP/SMTP web front-end.
 - **Runtime deps:** none for the server (static Go binary, prebuilt for Linux arm64/x86_64).
   alps is source-only (SourceHut) and built with Go; until built, IMAP/SMTP clients
   (Thunderbird, K-9, etc.) still work and the script logs that webmail is disabled.
-- **Bind:** maddy IMAP 143 + submission 587 → `VALARK_BIND` (default `0.0.0.0`); local MX
-  :25 only when run as root and bound to `127.0.0.1`; alps web → always `127.0.0.1:1323`.
+- **Bind:** maddy IMAP + submission → `VALARK_BIND` (default `0.0.0.0`). The privileged
+  defaults 143/587 auto-shift to **1143/1587** when not run as root (pin via
+  `VALARK_MAIL_IMAP_PORT` / `_SUBMISSION_PORT`); local MX :25 only when root + `127.0.0.1`;
+  alps web → always `127.0.0.1:1323`.
 - **First run REQUIRES** creating an admin login + mailbox:
   `scripts/services/mail.sh creds create postmaster@valark.lan` then
   `scripts/services/mail.sh acct create postmaster@valark.lan`.
@@ -123,11 +128,13 @@ Async forums: categories, threads, announcements, and Q&A with accepted answers,
 **NodeBB**. Chosen because it is a mature forum platform that runs entirely on the **Redis
 Val Ark already mirrors** — no MongoDB, no second datastore.
 
-- **Runtime deps:** Node 20+ on the serving host (not bundled; only source mirrored) and
-  Redis (uses the mirrored `tools/<platform>/redis`; the service auto-starts a
-  localhost-only Redis on 6379 if none responds). One-time on-host
-  `npm install --omit=dev` + `./nodebb setup` before first start; the script detects
-  missing `node_modules` and prints the exact commands.
+- **Runtime deps:** NodeBB v4 requires **Node ≥22** (its `undici` dep crashes on older
+  Node). Val Ark mirrors a portable Node 22 (`scripts/tools/node.sh`) and `forum.sh` runs
+  NodeBB with it — no system Node 22 needed. Redis comes from the mirrored
+  `tools/<platform>/redis` (the service auto-starts a localhost-only Redis on 6379 if none
+  responds). `forum.sh start` is self-contained: it bootstraps NodeBB's `package.json`,
+  runs `npm install --omit=dev --legacy-peer-deps`, and performs an unattended setup — no
+  manual steps.
 - **Bind:** `VALARK_BIND` (default `127.0.0.1:4567`); internal Redis binds `127.0.0.1` only.
 - **First run:** creates the admin account interactively, or unattended via
   `VALARK_FORUM_ADMIN_USERNAME` / `_PASSWORD` / `_EMAIL`. ActivityPub/federation, social
@@ -150,6 +157,12 @@ that can be forced off.
   `PASTE_AUTH_USER` / `PASTE_AUTH_PASSWORD` / `PASTE_ADMIN_PASSWORD`. Pastas default private.
 
 ## Security Model
+
+> A full multi-agent security audit of Val Ark (repo secrets, the reverse proxy, service
+> scripts, runtime posture, web-UI XSS, and network/filesystem exposure) lives in
+> [`SECURITY-AUDIT.md`](SECURITY-AUDIT.md). It confirmed the app/proxy layer is sound and the
+> repo is secret-free; the residual risks are **host-level** (NFS export scope + FUSE-disk
+> permissions) and need operator action with `sudo` — start there.
 
 This layer is built for a **trusted offline LAN/mesh, not the internet**. The posture is
 explicit and uniform across all four services:

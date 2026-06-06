@@ -851,46 +851,65 @@ function findZimFiles() {
 function startKiwix() {
     const kiwixBin = findKiwixServe();
     const zimFiles = findZimFiles();
+    if (!kiwixBin || zimFiles.length === 0) { kiwixStatus = { running: false, port: KIWIX_PORT, url: '', files: 0 }; return; }
+    serveWithRetry(kiwixBin, zimFiles, 0);
+}
 
-    if (!kiwixBin || zimFiles.length === 0) {
+// kiwix-serve is all-or-nothing: a single corrupt ZIM makes it exit during
+// startup ("Unable to add the ZIM file 'X'"), taking the whole library down.
+// Parse the offending file from stderr, drop it, and retry — so one bad
+// download can't kill the library. A port probe marks it up once it binds
+// (kiwix-serve doesn't exit once serving); validating each ZIM up front with
+// kiwix-manage is far too slow over a network/FUSE mount, so we let kiwix-serve
+// itself report the bad ones.
+function serveWithRetry(kiwixBin, zimFiles, attempt) {
+    if (zimFiles.length === 0 || attempt > 25) { kiwixStatus = { running: false, port: KIWIX_PORT, url: '', files: 0 }; return; }
+    const proc = spawn(kiwixBin, ['--port', String(KIWIX_PORT), ...zimFiles], { stdio: ['ignore', 'ignore', 'pipe'] });
+    kiwixProcess = proc;
+    let stderrBuf = '', settled = false;
+    proc.stderr.on('data', (c) => { stderrBuf = (stderrBuf + c.toString()).slice(-2000); });
+    proc.on('error', (err) => {
+        if (settled) return; settled = true; kiwixProcess = null;
+        console.error(`Kiwix failed to start: ${err.message}`);
         kiwixStatus = { running: false, port: KIWIX_PORT, url: '', files: 0 };
-        return;
-    }
-
-    try {
-        kiwixProcess = spawn(kiwixBin, ['--port', String(KIWIX_PORT), ...zimFiles], {
-            stdio: ['ignore', 'ignore', 'pipe'],
-            detached: false,
+    });
+    proc.on('exit', (code) => {
+        if (settled) { kiwixStatus.running = false; kiwixProcess = null; return; } // was serving, then died
+        settled = true; kiwixProcess = null;
+        const m = stderrBuf.match(/Unable to add the ZIM file '([^']+)'/);
+        if (m) {
+            const bad = m[1];
+            // Quarantine the corrupt file (move it out of content/zim) so it
+            // self-heals: future starts skip it without a re-scan, and the
+            // librarian re-downloads it (the path is now absent).
+            try {
+                const qdir = path.join(path.dirname(bad), '.corrupt');
+                fs.mkdirSync(qdir, { recursive: true });
+                fs.renameSync(bad, path.join(qdir, path.basename(bad)));
+                console.error(`Quarantined corrupt ZIM: ${path.basename(bad)}`);
+            } catch (e) { console.error(`Could not move corrupt ZIM ${path.basename(bad)}: ${e.message}`); }
+            serveWithRetry(kiwixBin, zimFiles.filter((z) => z !== bad), attempt + 1);
+        } else {
+            console.error(`Kiwix exited with code ${code}${stderrBuf ? ': ' + stderrBuf.slice(-300).trim() : ''}`);
+            kiwixStatus = { running: false, port: KIWIX_PORT, url: '', files: 0 };
+        }
+    });
+    // Probe the port; once kiwix binds it's up (and stays up).
+    const net = require('net');
+    const probe = (tries) => {
+        if (settled) return;
+        const s = net.connect(KIWIX_PORT, '127.0.0.1');
+        s.setTimeout(2000);
+        const again = () => { s.destroy(); if (!settled && tries > 0) setTimeout(() => probe(tries - 1), 1000); };
+        s.on('connect', () => {
+            s.destroy();
+            if (settled) return; settled = true;
+            kiwixStatus = { running: true, port: KIWIX_PORT, url: `http://localhost:${KIWIX_PORT}`, files: zimFiles.length };
+            console.log(`Kiwix serving ${zimFiles.length} ZIM file(s) at http://localhost:${KIWIX_PORT}`);
         });
-
-        // Capture stderr for error reporting
-        let stderrBuf = '';
-        kiwixProcess.stderr.on('data', (chunk) => { stderrBuf += chunk.toString().slice(-500); });
-
-        kiwixProcess.on('error', (err) => {
-            console.error(`Kiwix failed to start: ${err.message}`);
-            kiwixStatus.running = false;
-        });
-
-        kiwixProcess.on('exit', (code) => {
-            kiwixStatus.running = false;
-            kiwixProcess = null;
-            if (code !== 0 && code !== null) {
-                console.error(`Kiwix exited with code ${code}${stderrBuf ? ': ' + stderrBuf.trim() : ''}`);
-            }
-        });
-
-        kiwixStatus = {
-            running: true,
-            port: KIWIX_PORT,
-            url: `http://localhost:${KIWIX_PORT}`,
-            files: zimFiles.length,
-        };
-
-        console.log(`Kiwix serving ${zimFiles.length} ZIM file(s) at http://localhost:${KIWIX_PORT}`);
-    } catch (err) {
-        console.error(`Failed to start Kiwix: ${err.message}`);
-    }
+        s.on('error', again); s.on('timeout', again);
+    };
+    setTimeout(() => probe(90), 1000);
 }
 
 // Cleanup on exit

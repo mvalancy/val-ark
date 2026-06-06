@@ -38,18 +38,20 @@ verify_local() {
     echo "── local functional checks ──"
     local td; td=$(native_tools_dir)
 
-    # 1) native tool binaries answer --version/--help
-    local any_tool=0
-    for rel in ffmpeg/ffmpeg syncthing/syncthing btop/btop helix/hx kiwix/kiwix-serve \
-               llama-cpp/llama-cli vosk/.done dev-cli/rg dev-cli/jq; do
-        local bin="$td/${rel}"
-        if [ -x "$bin" ]; then
-            any_tool=1
-            if "$bin" --version >/dev/null 2>&1 || "$bin" --help >/dev/null 2>&1; then
-                chk "tool runs: ${rel##*/}"
-            else
-                bad "tool present but won't run: ${rel##*/} ($bin)"
-            fi
+    # 1) native tool binaries answer --version/--help. Binaries install at
+    # nested paths (btop/bin/btop, piper/piper/piper, llama-cpp/llama-bNNNN/...),
+    # so resolve each by NAME under its tool dir rather than a fixed path.
+    local any_tool=0 tool name bin
+    for pair in ffmpeg:ffmpeg syncthing:syncthing btop:btop helix:hx kiwix:kiwix-serve \
+                llama-cpp:llama-cli sqlite:sqlite3 redis:redis-server tmux:tmux dev-cli:rg dev-cli:jq; do
+        tool="${pair%%:*}"; name="${pair##*:}"
+        bin=$(find "$td/$tool" -name "$name" -type f \( -perm -u+x -o -perm -g+x -o -perm -o+x \) 2>/dev/null | head -1)
+        [ -n "$bin" ] || continue
+        any_tool=1
+        if "$bin" --version >/dev/null 2>&1 || "$bin" --help >/dev/null 2>&1 || "$bin" -V >/dev/null 2>&1; then
+            chk "tool runs: $name"
+        else
+            bad "tool present but won't run: $name ($bin)"
         fi
     done
     [ "$any_tool" = 0 ] && skip "no native tool binaries in $td yet"

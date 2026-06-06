@@ -228,6 +228,13 @@ The listen port comes from `VALARK_WEB_PORT` (`.env`, default 3000); `/api/healt
 returns `{status:"ok", version}` so the loop and `verify.sh` can confirm it is really
 the Val Ark server and not another app squatting the port.
 
+It also acts as a same-origin **reverse proxy** for embedded sub-apps: `/kiwix/`
+fronts the internal kiwix-serve, and `/app/<id>/` fronts each community service
+(chat, mail, forum, paste). Those upstreams bind `127.0.0.1` and are reached only
+through this proxy, so the whole hub lives on one origin under the persistent Val Ark
+header. See [COMMUNITY.md](COMMUNITY.md) for the community/comms layer and its
+LAN-only, no-federation security model.
+
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
   'primaryColor': '#1a2230',

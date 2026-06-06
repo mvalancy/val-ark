@@ -3,8 +3,9 @@
 **Created by Matthew Valancy**
 
 A self-filling, online-optional mirror of 43 dev/AI tools, AI models, and offline
-content (ZIM via Kiwix), with a web UI. Local-first, peer-to-peer, NFS-shareable,
-offline-capable — scales to a disk of any size.
+content (ZIM via Kiwix) — plus an offline **community hub** (chat, mail, message
+boards, file sharing) — all behind one web UI. Local-first, peer-to-peer,
+NFS-shareable, offline-capable — scales to a disk of any size.
 
 ![Val Ark Web UI](docs/screenshots/web-ui-full.png)
 
@@ -163,6 +164,22 @@ also exposes manual tiers:
 - **Tier 2 (Workstation):** Balanced quality/speed models (~150GB)
 - **Tier 3 (Full):** Largest, highest quality models (~300GB+)
 
+## Community & Comms
+
+Val Ark is also an **offline community hub** — a place to message a friend, mail the
+group, post to a board, and share files, all on the LAN with no internet. Each service
+runs on the box and is framed inside the web UI (same origin, one port, with a
+persistent "back to Val Ark" header):
+
+- **IRC Chat** (`/app/chat/`) — ngIRCd + The Lounge web client
+- **Mail** (`/app/mail/`) — maddy SMTP/IMAP, local mailboxes (no internet relay)
+- **Message Boards** (`/app/forum/`) — NodeBB on the mirrored Redis
+- **Files & Pastebin** (`/app/paste/`) — MicroBin
+
+LAN-only, auth-required, no federation. Enable per service via `VALARK_SERVICES` in
+`.env`; the loop keeps them running. See [docs/COMMUNITY.md](docs/COMMUNITY.md) for the
+architecture and security model.
+
 ## Platforms
 
 | Platform | Arch | Tools dir | Notes |
@@ -292,6 +309,8 @@ data root and are gitignored.
 
 - [docs/README.md](docs/README.md) - Documentation index
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System diagrams
+- [docs/COMMUNITY.md](docs/COMMUNITY.md) - Offline community services (chat, mail, boards, files)
+- [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md) - Security audit & posture
 - [docs/LIBRARIAN.md](docs/LIBRARIAN.md) - Self-filling mirror engine design
 - [docs/TOOLS.md](docs/TOOLS.md) - Complete tools catalog (43 tools)
 - [docs/PLATFORMS.md](docs/PLATFORMS.md) - Platform-specific notes

@@ -72,15 +72,25 @@ verify_local() {
         [ -n "$zim" ] || skip "no ZIM downloaded yet to serve"
     fi
 
-    # 3) tiny LLM inference if a small gguf + llama-cli exist
-    local lc="$td/llama-cli"; [ -x "$lc" ] || lc="$td/llama-cpp/llama-cli"
-    local sg; sg=$(find "$MODELS_DIR/llm" "$MODELS_DIR/embed" -name '*.gguf' 2>/dev/null | sort -k1 | head -1)
+    # 3) tiny LLM inference if a small generative gguf + llama-cli exist.
+    # Resolve llama-cli at its nested build-tagged path (llama-cpp/llama-bNNNN/
+    # llama-cli) by NAME, same as the tool check above — a fixed path misses it.
+    # Newer llama-cli auto-enters conversation mode for instruct models and never
+    # exits on stdin EOF (it hangs until killed), so run it single-turn
+    # (-st -no-cnv) with stdin closed: it generates one turn and exits cleanly.
+    # Pick the smallest *generative* model under models/llm — embedding models
+    # under models/embed are BERT-arch and can't text-generate (false FAIL); the
+    # >10M filter also skips zero-byte/stub ggufs. Cold loads off NTFS are slow,
+    # hence the generous timeout; the fast inference path is the fleet GPU.
+    local lc; lc=$(find "$td/llama-cpp" -name 'llama-cli' -type f \( -perm -u+x -o -perm -g+x -o -perm -o+x \) 2>/dev/null | head -1)
+    [ -n "$lc" ] || lc="$td/llama-cli"
+    local sg; sg=$(find "$MODELS_DIR/llm" -name '*.gguf' -size +10M -printf '%s\t%p\n' 2>/dev/null | sort -n | head -1 | cut -f2)
     if [ -x "$lc" ] && [ -n "$sg" ]; then
-        if timeout 90 "$lc" -m "$sg" -p "hello" -n 8 --no-warmup >/dev/null 2>&1; then
+        if timeout 150 "$lc" -m "$sg" -p "hello" -n 8 -st -no-cnv --no-warmup </dev/null >/dev/null 2>&1; then
             chk "llama.cpp inference works ($(basename "$sg"))"
         else bad "llama.cpp inference failed on $(basename "$sg")"; fi
     else
-        skip "llama-cli or a small gguf not available for inference check"
+        skip "llama-cli or a small generative gguf not available for inference check"
     fi
 
     # 4) web API health — validate it's ACTUALLY the Val Ark server (a bare 200

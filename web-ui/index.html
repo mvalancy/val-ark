@@ -3279,12 +3279,28 @@ function router() {
 // =============================================================================
 // SHARED COMPONENTS
 // =============================================================================
+// Short header labels for community sub-apps.
+const COMMUNITY_NAV_LABELS = { chat: 'Chat', mail: 'Mail', forum: 'Forum', paste: 'Files' };
+
 function renderNav(route) {
     const activeSection = route === '/' ? 'home' :
         route.startsWith('/tools') ? 'tools' :
         route.startsWith('/models') ? 'models' :
         route.startsWith('/content') ? 'content' :
         route.startsWith('/quickstart') ? 'quickstart' : 'home';
+
+    // Direct header links to community sub-apps whose web UI is currently up
+    // (driven by live /api/status/services). A service with no web UI — e.g. mail,
+    // reached over IMAP/SMTP — simply won't appear here until/unless its UI runs.
+    let communityLinks = '';
+    if (_servicesStatus) {
+        TOOLS.filter(t => t.category === 'community' && t.webApp && _servicesStatus[t.id] && _servicesStatus[t.id].running)
+            .forEach(t => {
+                const label = COMMUNITY_NAV_LABELS[t.id] || t.name;
+                const active = route === '/app/' + t.id ? 'active' : '';
+                communityLinks += `<a href="#/app/${t.id}" class="nav-link ${active}" onclick="closeMobileNav()">${esc(label)}</a>`;
+            });
+    }
 
     return `
     <nav class="top-nav">
@@ -3297,6 +3313,7 @@ function renderNav(route) {
             <a href="#/tools" class="nav-link ${activeSection === 'tools' ? 'active' : ''}" onclick="closeMobileNav()">Software</a>
             <a href="#/models" class="nav-link ${activeSection === 'models' ? 'active' : ''}" onclick="closeMobileNav()">Models</a>
             <a href="#/content" class="nav-link ${activeSection === 'content' ? 'active' : ''}" onclick="closeMobileNav()">Wikipedia</a>
+            ${communityLinks}
             <a href="#/quickstart" class="nav-link ${activeSection === 'quickstart' ? 'active' : ''}" onclick="closeMobileNav()">Getting Started</a>
         </div>
         <div class="nav-disk" id="nav-disk">${renderDiskBar()}</div>

@@ -144,9 +144,17 @@ flowchart TD
 ## Self-Healing Loop
 
 `loop.sh once` runs one maintenance cycle; `loop.sh install [minutes]` registers a
-flock-guarded cron so it survives reboots. Each cycle is safe to run repeatedly and
-concurrently with a standalone fill (the fill flock prevents double-downloading) and
-never aborts on a single failure.
+flock-guarded cron so it survives reboots. The install adds **two** entries: an
+`@reboot` line (90 s after boot, once the `nofail` fstab mount of the data disk is
+up) so the Ark resumes within ~90 s of a reboot, plus the periodic `*/N` tick that
+keeps it healthy. Each cycle restarts the web server + kiwix + the enabled
+community services (`VALARK_SERVICES`), refreshes the live catalog, link-checks,
+integrity-verifies, runs a bounded top-up fill, and functionally verifies — so a
+reboot needs no manual steps. Each cycle is safe to run repeatedly and concurrently
+with a standalone fill (the fill flock prevents double-downloading) and never aborts
+on a single failure. TLS certs persist under `~/.config/val-ark/tls` and the server
+re-bootstraps them on first boot, so HTTPS comes back automatically too (see
+[`ENCRYPTION.md`](ENCRYPTION.md)).
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {

@@ -205,8 +205,12 @@ cron_install() {
     # No outer flock here: loop.sh 'once' self-guards via run_locked (fd 8 on
     # loop.lock). An outer flock on the same file would dead-lock the inner one.
     local line="*/${every} * * * * cd ${PROJECT_ROOT} && bash ${_DIR}/loop.sh once >> ${LOG_DIR}/loop_cron.log 2>&1 # ${CRON_TAG}"
-    (crontab -l 2>/dev/null | grep -v "${CRON_TAG}"; echo "$line") | crontab -
-    log "installed cron: every ${every} min (tag ${CRON_TAG})"
+    # @reboot: bring the Ark back immediately after a reboot instead of waiting up
+    # to ${every} min for the next periodic tick. The sleep gives the data disk
+    # (FUSE/NTFS via fstab) time to mount before the cycle's writability check.
+    local reboot_line="@reboot sleep 90 && cd ${PROJECT_ROOT} && bash ${_DIR}/loop.sh once >> ${LOG_DIR}/loop_cron.log 2>&1 # ${CRON_TAG}"
+    (crontab -l 2>/dev/null | grep -v "${CRON_TAG}"; echo "$reboot_line"; echo "$line") | crontab -
+    log "installed cron: @reboot + every ${every} min (tag ${CRON_TAG})"
     crontab -l 2>/dev/null | grep "${CRON_TAG}"
 }
 cron_uninstall() {

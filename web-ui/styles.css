@@ -694,6 +694,8 @@ body {
 .subapp-id strong { color: var(--text-primary); white-space: nowrap; }
 .subapp-sub { color: var(--text-muted); font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .subapp-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green, #4ade80); box-shadow: 0 0 6px var(--green, #4ade80); flex: none; }
+.subapp-dot.down { background: var(--red, #f87171); box-shadow: 0 0 6px var(--red, #f87171); }
+.subapp-dot.unknown { background: var(--text-muted, #9aa3ad); box-shadow: none; }
 .subapp-actions { display: flex; gap: 6px; flex: none; }
 .subapp-btn {
     background: var(--bg-card);

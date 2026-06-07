@@ -3407,9 +3407,10 @@ function renderHome() {
     </div>
     <div id="searchStatus" class="search-status" style="display:none"></div>`;
 
-    // Wikipedia/Content browse banner (when Kiwix is serving)
+    // Wikipedia/Content browse banner (when Kiwix is serving). The button opens
+    // the IN-SHELL library view (#/content) — keeping the Val Ark header on top
+    // with a permanent way home — instead of a raw new tab on the bare /kiwix/.
     if (_kiwixStatus && _kiwixStatus.running) {
-        const kUrl = getKiwixUrl();
         html += `<div class="kiwix-banner" style="margin-bottom:2rem">
             <div class="kiwix-banner-content">
                 <div class="kiwix-banner-icon">W</div>
@@ -3418,7 +3419,7 @@ function renderHome() {
                     <div class="kiwix-banner-desc">All of Wikipedia is available right now — no internet needed. Open it on any device on your network.</div>
                 </div>
             </div>
-            <a href="${kUrl}" target="_blank" class="kiwix-banner-btn">Open Wikipedia</a>
+            <a href="#/content" class="kiwix-banner-btn">Browse Wikipedia</a>
         </div>`;
     }
 
@@ -4099,7 +4100,8 @@ function renderServiceFrame(id) {
         html += `<div class="detail-section" style="margin:0 0 1rem"><p>This service isn't running yet. Start it on the Val Ark host:</p>
             <div class="code-block"><code>scripts/services/${esc(id)}.sh start</code></div></div>`;
     }
-    html += renderAppFrame({ id: id + 'Frame', title: tool.name, subtitle: 'offline · LAN-only', src: tool.webApp.path });
+    html += renderAppFrame({ id: id + 'Frame', title: tool.name, subtitle: 'offline · LAN-only', src: tool.webApp.path,
+        status: svc ? (svc.running ? 'up' : 'down') : 'unknown' });
     html += '</div>';
     return html;
 }
@@ -4953,9 +4955,13 @@ function renderAppFrame(opts) {
     const src = opts.src || 'about:blank';
     const title = esc(opts.title || 'App');
     const subtitle = opts.subtitle ? `<span class="subapp-sub">${esc(opts.subtitle)}</span>` : '';
+    // Status dot reflects reality: green=up, red=down, grey=unknown — so a downed
+    // service can't masquerade as "running" behind a stale green dot.
+    const status = opts.status || 'up';
+    const dotClass = status === 'down' ? ' down' : status === 'unknown' ? ' unknown' : '';
     return `<div class="subapp" id="${id}-wrap">
         <div class="subapp-bar">
-            <div class="subapp-id"><span class="subapp-dot"></span><strong>${title}</strong>${subtitle}</div>
+            <div class="subapp-id"><span class="subapp-dot${dotClass}" title="${status}"></span><strong>${title}</strong>${subtitle}</div>
             <div class="subapp-actions">
                 <button class="subapp-btn" onclick="reloadFrame('${id}')" title="Reload" aria-label="Reload frame">&#x21bb;</button>
                 <button class="subapp-btn" onclick="toggleFrameFullscreen('${id}')" title="Fullscreen (Esc to exit)" aria-label="Toggle fullscreen">&#x26F6; Fullscreen</button>

@@ -846,7 +846,9 @@ function pipeProxy(req, res, port, label, pathOverride) {
         // Friendly page for a browser hitting a service that isn't up yet.
         if ((req.headers.accept || '').includes('text/html')) {
             res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
-            return res.end(`<!doctype html><meta charset="utf-8"><body style="font-family:system-ui,sans-serif;background:#0a0e14;color:#e8edf4;padding:40px"><h2>${label || 'This service'} isn't running yet</h2><p>Start it on the Val Ark host (e.g. <code>scripts/services/&lt;name&gt;.sh start</code>), then reload. <a style="color:#4da6ff" href="/">&larr; Back to Val Ark</a></p></body>`);
+            // target="_top" so the link escapes the embedding iframe back to the
+            // real Val Ark shell, instead of nesting the whole SPA inside the frame.
+            return res.end(`<!doctype html><meta charset="utf-8"><body style="font-family:system-ui,sans-serif;background:#0a0e14;color:#e8edf4;padding:40px"><h2>${label || 'This service'} isn't running yet</h2><p>Start it on the Val Ark host (e.g. <code>scripts/services/&lt;name&gt;.sh start</code>), then reload. <a style="color:#4da6ff" target="_top" href="/">&larr; Back to Val Ark</a></p></body>`);
         }
         res.writeHead(502, { 'Content-Type': 'text/plain', ...SECURITY_HEADERS });
         res.end('Proxy error (service unreachable)');
@@ -857,7 +859,7 @@ function pipeProxy(req, res, port, label, pathOverride) {
 function proxyKiwix(req, res) {
     if (!kiwixStatus.running) {
         res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
-        return res.end('<!doctype html><meta charset="utf-8"><body style="font-family:system-ui,sans-serif;background:#0a0e14;color:#e8edf4;padding:40px"><h2>Offline library is starting…</h2><p>The Kiwix content server auto-starts once at least one <code>.zim</code> file is present. <a style="color:#4da6ff" href="/#/content">&larr; Back to Val Ark</a></p></body>');
+        return res.end('<!doctype html><meta charset="utf-8"><body style="font-family:system-ui,sans-serif;background:#0a0e14;color:#e8edf4;padding:40px"><h2>Offline library is starting…</h2><p>The Kiwix content server auto-starts once at least one <code>.zim</code> file is present. <a style="color:#4da6ff" target="_top" href="/#/content">&larr; Back to Val Ark</a></p></body>');
     }
     pipeProxy(req, res, KIWIX_PORT, 'Offline library');
 }

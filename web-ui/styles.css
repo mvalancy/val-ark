@@ -693,6 +693,30 @@ body {
 .subapp-id { display: flex; align-items: center; gap: 8px; font-size: 0.9em; min-width: 0; }
 .subapp-id strong { color: var(--text-primary); white-space: nowrap; }
 .subapp-sub { color: var(--text-muted); font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* TLS / "trust this Ark" banner */
+.tls-banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    margin: 0 0 1.5rem; padding: 14px 18px;
+    border: 1px solid var(--accent, #4da6ff); border-radius: var(--radius, 10px);
+    background: var(--accent-dim, rgba(77,166,255,0.12));
+}
+.tls-banner-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.tls-banner-icon { font-size: 1.4em; flex: none; }
+.tls-banner-title { font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
+.tls-banner-desc { color: var(--text-secondary); font-size: 0.9em; line-height: 1.4; }
+.tls-banner-actions { display: flex; gap: 8px; flex: none; flex-wrap: wrap; }
+.tls-btn {
+    background: var(--bg-card); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: var(--radius-sm, 6px);
+    padding: 8px 14px; font-weight: 600; font-size: 0.88em; text-decoration: none; white-space: nowrap;
+    transition: all 0.15s;
+}
+.tls-btn:hover { border-color: var(--accent); background: var(--accent-dim); }
+.tls-btn-primary { background: var(--accent, #4da6ff); color: #fff; border-color: var(--accent, #4da6ff); }
+.tls-btn-primary:hover { filter: brightness(1.08); background: var(--accent, #4da6ff); }
+.tls-banner-ok { border-color: var(--green, #4ade80); background: rgba(74,222,128,0.10); }
+@media (max-width: 768px) { .tls-banner-actions { width: 100%; } .tls-btn { flex: 1 1 auto; text-align: center; } }
+
 .subapp-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green, #4ade80); box-shadow: 0 0 6px var(--green, #4ade80); flex: none; }
 .subapp-dot.down { background: var(--red, #f87171); box-shadow: 0 0 6px var(--red, #f87171); }
 .subapp-dot.unknown { background: var(--text-muted, #9aa3ad); box-shadow: none; }

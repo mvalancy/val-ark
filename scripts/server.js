@@ -3,9 +3,11 @@
 // Serves web UI + provides status/control endpoints
 
 const http = require('http');
+const https = require('https');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { execSync, execFile, spawn } = require('child_process');
+const { execSync, execFile, execFileSync, spawn } = require('child_process');
 
 const PORT = parseInt(process.argv[2] || '3000', 10);
 const ROOT = path.resolve(__dirname, '..');
@@ -830,6 +832,12 @@ function formatSize(bytes) {
 // the service renders inside our in-page frame. No HTML rewriting — each service
 // already serves under its own base path (/kiwix/ or /app/<id>/).
 function pipeProxy(req, res, port, label, pathOverride) {
+    // Fresh upstream socket per request (agent:false) + drop hop-by-hop headers.
+    // Reusing the default agent's keep-alive sockets races against backends that
+    // close idle connections (e.g. NodeBB): a reused half-closed socket throws
+    // ECONNRESET → a spurious 503. The race surfaced intermittently only under
+    // the added TLS latency of the HTTPS listener. A new socket each time is the
+    // standard, robust behaviour for a small reverse proxy like this.
     const proxyReq = http.request({
         host: '127.0.0.1', port, method: req.method, path: pathOverride || req.url,
         headers: { ...req.headers, host: `127.0.0.1:${port}` },
@@ -913,9 +921,66 @@ async function getServicesStatus() {
 }
 
 // =============================================================================
+// TLS / local-CA: Val Ark runs its own offline certificate authority (see
+// scripts/lib/tls.sh) so the LAN can use HTTPS with no internet/public CA. The
+// CA private key lives OFF the world-readable data disk; we only ever read the
+// generated cert/key here. The CA *certificate* is offered at /ca.crt (over
+// plain HTTP too — you must be able to fetch the trust anchor before HTTPS is
+// trusted) so devices install it once.
+const TLS = {
+    enabled: false,
+    httpsPort: parseInt(process.env.VALARK_HTTPS_PORT || '8443', 10),
+    caRoute: '/ca.crt',
+    domain: process.env.VALARK_TLS_DOMAIN || 'valark.lan',
+    notAfter: null, fingerprint: null, sans: null, dir: null,
+};
+let _caBuf = null;
+function tlsDir() {
+    try { return execFileSync('bash', [path.join(__dirname, 'lib', 'tls.sh'), 'dir'], { encoding: 'utf8' }).trim(); }
+    catch (e) { return path.join(process.env.HOME || require('os').homedir(), '.config', 'val-ark', 'tls'); }
+}
+function loadTls() {
+    if (process.env.VALARK_DISABLE_TLS === '1') return null;
+    const dir = tlsDir();
+    const read = () => ({
+        key: fs.readFileSync(path.join(dir, 'server.key')),
+        cert: fs.readFileSync(path.join(dir, 'server.crt')),
+        ca: fs.readFileSync(path.join(dir, 'ca.crt')),
+        dir,
+    });
+    try { return read(); }
+    catch (e) {
+        // Certs not generated yet — create them once, then retry.
+        try { execFileSync('bash', [path.join(__dirname, 'lib', 'tls.sh'), 'ensure'], { stdio: 'ignore' }); return read(); }
+        catch (e2) { return null; }
+    }
+}
+function serveCaCert(res) {
+    try {
+        if (!_caBuf) _caBuf = fs.readFileSync(path.join(tlsDir(), 'ca.crt'));
+        res.writeHead(200, {
+            'Content-Type': 'application/x-x509-ca-cert',
+            'Content-Disposition': 'attachment; filename="valark-ca.crt"',
+            'Cache-Control': 'no-cache', ...SECURITY_HEADERS,
+        });
+        res.end(_caBuf);
+    } catch (e) {
+        res.writeHead(503, { 'Content-Type': 'text/plain', ...SECURITY_HEADERS });
+        res.end('Val Ark CA not generated yet — run scripts/lib/tls.sh ensure');
+    }
+}
+function serveTlsStatus(res) {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
+    res.end(JSON.stringify({
+        enabled: TLS.enabled, httpsPort: TLS.httpsPort, caDownload: TLS.caRoute,
+        domain: TLS.domain, notAfter: TLS.notAfter, fingerprintSha256: TLS.fingerprint,
+        sans: TLS.sans, forceHttps: process.env.VALARK_FORCE_HTTPS === '1',
+    }));
+}
+
 // Server
 // =============================================================================
-const server = http.createServer((req, res) => {
+function handleRequest(req, res) {
     // Block path traversal attempts early (before URL normalization resolves ..)
     if (req.url.includes('..') || req.url.includes('%2e%2e') || req.url.includes('%2E%2E')) {
         return send404(res);
@@ -923,6 +988,28 @@ const server = http.createServer((req, res) => {
 
     const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
     let urlPath = decodeURIComponent(parsedUrl.pathname);
+
+    // The CA trust anchor must be fetchable over BOTH http and https (you can't
+    // require trusted HTTPS to download the cert that establishes that trust).
+    if (urlPath === '/ca.crt' || urlPath === '/valark-ca.crt') {
+        return serveCaCert(res);
+    }
+    // TLS status for the UI (also served over http so the "switch to HTTPS"
+    // banner can render before the user has trusted the CA).
+    if (urlPath === '/api/status/tls') {
+        return serveTlsStatus(res);
+    }
+
+    // Optional: push LAN visitors to HTTPS (opt-in via VALARK_FORCE_HTTPS=1).
+    // Never redirect the CA download, the API, or loopback/health traffic.
+    if (process.env.VALARK_FORCE_HTTPS === '1' && TLS.enabled && !(req.socket && req.socket.encrypted)) {
+        const host = (req.headers.host || '').split(':')[0];
+        const loopback = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '';
+        if (!loopback && !urlPath.startsWith('/api/')) {
+            res.writeHead(301, { 'Location': `https://${host}:${TLS.httpsPort}${req.url}` });
+            return res.end();
+        }
+    }
 
     // API routes
     if (urlPath.startsWith('/api/')) {
@@ -974,7 +1061,9 @@ const server = http.createServer((req, res) => {
     if (!isPathSafe(webPath, path.join(ROOT, 'web-ui'))) return send404(res);
 
     serveStatic(res, webPath);
-});
+}
+
+const server = http.createServer(handleRequest);
 
 // =============================================================================
 // Kiwix Auto-Launch
@@ -1025,14 +1114,54 @@ function findZimFiles() {
     } catch { return []; }
 }
 
+// Single-shot "is something serving on the kiwix port?" probe.
+function probeKiwixUp(cb) {
+    const net = require('net');
+    const s = net.connect(KIWIX_PORT, '127.0.0.1');
+    let done = false;
+    const fin = (up) => { if (done) return; done = true; try { s.destroy(); } catch (e) {} cb(up); };
+    s.setTimeout(2000);
+    s.on('connect', () => fin(true));
+    s.on('error', () => fin(false));
+    s.on('timeout', () => fin(false));
+}
+
+function markKiwixUp(reason) {
+    const n = findZimFiles().length;
+    kiwixStatus = { running: true, port: KIWIX_PORT, url: `http://localhost:${KIWIX_PORT}${KIWIX_ROOT}/`, path: KIWIX_ROOT + '/', files: n };
+    console.log(`Kiwix serving on :${KIWIX_PORT} (${reason}, ${n} ZIM file(s)) — proxied at /kiwix/`);
+}
+
+// Eventually-consistent status. A big library (1000+ ZIMs over FUSE) can take
+// several minutes to index before kiwix-serve binds — sometimes longer than the
+// initial probe window — and a serving instance can later die. Re-probe on an
+// interval so kiwixStatus (and therefore the /kiwix/ proxy) self-corrects instead
+// of getting stuck "down" while kiwix is actually up (or vice-versa). This is the
+// backstop that prevents the orphaned-kiwix / stuck-status failure mode.
+function reconcileKiwix() {
+    if (process.env.VALARK_DISABLE_KIWIX) return;
+    probeKiwixUp((up) => {
+        if (up && !kiwixStatus.running) markKiwixUp('reconciled');
+        else if (!up && kiwixStatus.running) {
+            kiwixStatus.running = false;
+            console.log(`Kiwix not responding on :${KIWIX_PORT} — marked down (will re-adopt when back)`);
+        }
+    });
+}
+
 function startKiwix() {
     // Opt-out (used by the test harness so an ephemeral instance doesn't fight
     // the production kiwix for the port, and for content-less dev runs).
     if (process.env.VALARK_DISABLE_KIWIX) { kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 }; return; }
-    const kiwixBin = findKiwixServe();
-    const zimFiles = findZimFiles();
-    if (!kiwixBin || zimFiles.length === 0) { kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 }; return; }
-    serveWithRetry(kiwixBin, zimFiles, 0);
+    // Adopt an already-healthy kiwix-serve (e.g. a survivor of a fast web-server
+    // restart) instead of spawning a duplicate that would just fail to bind :8888.
+    probeKiwixUp((up) => {
+        if (up) { markKiwixUp('adopted existing'); return; }
+        const kiwixBin = findKiwixServe();
+        const zimFiles = findZimFiles();
+        if (!kiwixBin || zimFiles.length === 0) { kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 }; return; }
+        serveWithRetry(kiwixBin, zimFiles, 0);
+    });
 }
 
 // kiwix-serve is all-or-nothing: a single corrupt ZIM makes it exit during
@@ -1092,7 +1221,10 @@ function serveWithRetry(kiwixBin, zimFiles, attempt) {
         });
         s.on('error', again); s.on('timeout', again);
     };
-    setTimeout(() => probe(90), 1000);
+    // Scale patience to library size — indexing 1000+ ZIMs over FUSE can take
+    // minutes before the port binds. The periodic reconciler is the ultimate
+    // backstop, but a generous initial probe avoids a multi-minute "down" blip.
+    setTimeout(() => probe(Math.max(180, zimFiles.length)), 1000);
 }
 
 // Cleanup on exit
@@ -1104,14 +1236,48 @@ process.on('SIGTERM', () => { if (kiwixProcess) kiwixProcess.kill(); process.exi
 // honor VALARK_BIND so a security-conscious operator can restrict it (e.g.
 // 127.0.0.1 for host-only access).
 const WEB_BIND = process.env.VALARK_BIND || '0.0.0.0';
+
+// HTTPS for the LAN: serve the SAME app over TLS on VALARK_HTTPS_PORT (default
+// 8443) using the local-CA leaf cert. HTTP on PORT stays up for back-compat,
+// health checks, and the /ca.crt trust-bootstrap. Failure here is non-fatal —
+// the Ark keeps serving HTTP and the UI shows TLS as unavailable.
+function startHttps() {
+    const t = loadTls();
+    if (!t) {
+        console.log('TLS: certs unavailable (run scripts/lib/tls.sh ensure) — serving HTTP only');
+        return;
+    }
+    try {
+        _caBuf = t.ca;
+        const httpsServer = https.createServer({ key: t.key, cert: t.cert }, handleRequest);
+        httpsServer.on('error', (e) => console.error('HTTPS server error:', e.message));
+        httpsServer.listen(TLS.httpsPort, WEB_BIND, () => {
+            TLS.enabled = true;
+            TLS.dir = t.dir;
+            try {
+                const x = new crypto.X509Certificate(t.cert);
+                TLS.notAfter = x.validTo;
+                TLS.fingerprint = x.fingerprint256;
+                TLS.sans = x.subjectAltName || null;
+            } catch (e) { /* cert parse is best-effort */ }
+            console.log(`Val Ark HTTPS running at https://localhost:${TLS.httpsPort} (bind ${WEB_BIND})`);
+        });
+    } catch (e) {
+        console.error('TLS: could not start HTTPS —', e.message, '— serving HTTP only');
+    }
+}
+
 server.listen(PORT, WEB_BIND, () => {
     console.log(`Val Ark server running at http://localhost:${PORT} (bind ${WEB_BIND})`);
     console.log(`Serving from: ${ROOT}`);
+    startHttps();
     // Warm the cache on startup
     getToolsStatus();
     getContentStatus();
     getModelsStatus();
     getStorageStatus();   // kicks off the (async, non-blocking) storage walk
-    // Auto-start Kiwix content server
+    // Auto-start Kiwix content server, then keep its status eventually-consistent
+    // (catches a late-binding library and a died instance — see reconcileKiwix).
     startKiwix();
+    setInterval(reconcileKiwix, 30000);
 });

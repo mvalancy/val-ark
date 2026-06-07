@@ -22,7 +22,9 @@ export default defineConfig({
     // kiwix-serve — it would fight the production instance for the port. The
     // content view is exercised in its kiwix-disabled state; point tests at a
     // live instance (VALARK_TEST_URL) to also cover the embedded library frame.
-    command: 'PATH="$HOME/.local/node/bin:$PATH" VALARK_DISABLE_KIWIX=1 node ../../scripts/server.js 3001',
+    // VALARK_HTTPS_PORT: a unique high port so the test server's HTTPS listener
+    // never collides with a live Ark's 8443 when both run on the same box.
+    command: 'PATH="$HOME/.local/node/bin:$PATH" VALARK_DISABLE_KIWIX=1 VALARK_HTTPS_PORT=13443 node ../../scripts/server.js 3001',
     port: 3001,
     timeout: 20000,
     reuseExistingServer: true,

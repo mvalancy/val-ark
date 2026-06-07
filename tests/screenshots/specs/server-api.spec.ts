@@ -207,4 +207,24 @@ test.describe('Val Ark API Server', () => {
     expect([200, 503]).toContain(resp.status());
   });
 
+  test('GET /api/status/tls reports local-CA HTTPS status', async ({ request }) => {
+    const resp = await request.get(`${BASE_URL}/api/status/tls`);
+    expect(resp.ok()).toBeTruthy();
+    const data = await resp.json();
+    expect(typeof data.enabled).toBe('boolean');
+    expect(typeof data.httpsPort).toBe('number');
+    expect(data.caDownload).toBe('/ca.crt');
+    expect(typeof data.domain).toBe('string');
+  });
+
+  test('GET /ca.crt serves the trust anchor over plain HTTP (bootstrap)', async ({ request }) => {
+    // The CA must be fetchable over HTTP — you can't require trusted HTTPS to
+    // download the cert that establishes that trust.
+    const resp = await request.get(`${BASE_URL}/ca.crt`);
+    expect(resp.ok()).toBeTruthy();
+    expect(resp.headers()['content-type']).toContain('x-x509-ca-cert');
+    const body = await resp.text();
+    expect(body).toContain('BEGIN CERTIFICATE');
+  });
+
 });

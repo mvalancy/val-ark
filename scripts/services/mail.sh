@@ -39,6 +39,8 @@ SCRIPTS_DIR="$(dirname "$SELF")"
 PROJECT_ROOT="$(dirname "$SCRIPTS_DIR")"
 # shellcheck source=../lib/valark-env.sh
 . "${SCRIPTS_DIR}/lib/valark-env.sh"
+# shellcheck source=../lib/tls.sh
+. "${SCRIPTS_DIR}/lib/tls.sh"
 
 # --- config -------------------------------------------------------------------
 MAIL_DOMAIN="${VALARK_MAIL_DOMAIN:-valark.lan}"
@@ -59,6 +61,14 @@ SMTP_MX_PORT="${VALARK_MAIL_MX_PORT:-25}"
 if [ "$(id -u)" -ne 0 ]; then
     if [ -z "${VALARK_MAIL_IMAP_PORT:-}" ] && [ "$IMAP_PORT" -lt 1024 ]; then IMAP_PORT=$((IMAP_PORT + 1000)); fi
     if [ -z "${VALARK_MAIL_SUBMISSION_PORT:-}" ] && [ "$SMTP_SUBMISSION_PORT" -lt 1024 ]; then SMTP_SUBMISSION_PORT=$((SMTP_SUBMISSION_PORT + 1000)); fi
+fi
+
+# Local TLS: ensure the Ark's CA + server cert exist so IMAP/submission can offer
+# STARTTLS. The cert (valark.lan + every LAN/Tailscale IP) lets mail clients
+# connect encrypted. If openssl is unavailable we fall back to plaintext and say so.
+MAIL_TLS="tls off"
+if ensure_valark_tls 2>/dev/null; then
+    MAIL_TLS="tls file ${VALARK_TLS_CERT} ${VALARK_TLS_KEY}"
 fi
 
 MAIL_HOME="${STATE_DIR}/services/mail"
@@ -104,8 +114,11 @@ ensure_layout() {
 #   * insecure_auth + io_debug are off; plaintext auth is permitted on the LAN
 #     (set up TLS certs in maddy.conf if you want STARTTLS).
 write_config() {
-    [ -f "$MADDY_CONF" ] && return 0
-    log "Writing first-run offline config -> ${MADDY_CONF}"
+    # The config is fully generated from env + cert state, so (re)write it every
+    # start — that's how an existing plaintext install picks up STARTTLS. Back up
+    # any prior config once. Mailboxes/credentials live elsewhere and are untouched.
+    if [ -f "$MADDY_CONF" ]; then cp -f "$MADDY_CONF" "${MADDY_CONF}.bak" 2>/dev/null || true; fi
+    log "Writing offline config -> ${MADDY_CONF}"
 
     # Only include the local-MX endpoint when its port is bindable: port 25 is
     # privileged (root-only). Skipping it for non-root runs lets the daemon come
@@ -163,17 +176,18 @@ auth.pass_table local_authdb {
 }
 
 ## --- IMAP (LAN clients) ---------------------------------------------------
-## 'tls off': this is an offline LAN box. To require STARTTLS, drop a cert via
-## 'tls file <cert> <key>' here and on the submission endpoint instead.
+## TLS via the Val Ark local CA (STARTTLS). With a cert present, maddy refuses
+## plaintext AUTH unless the client upgrades to TLS — so credentials are never
+## sent in the clear. '${MAIL_TLS}' is 'tls off' only if openssl was unavailable.
 imap tcp://${VALARK_BIND}:${IMAP_PORT} {
-    tls off
+    ${MAIL_TLS}
     auth &local_authdb
     storage &local_mailboxes
 }
 
 ## --- SMTP submission (LAN clients send through here, auth required) --------
 submission tcp://${VALARK_BIND}:${SMTP_SUBMISSION_PORT} {
-    tls off
+    ${MAIL_TLS}
     hostname \$(hostname)
     auth &local_authdb
     source \$(local_domains) {

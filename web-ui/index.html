@@ -3407,6 +3407,9 @@ function renderHome() {
     </div>
     <div id="searchStatus" class="search-status" style="display:none"></div>`;
 
+    // Security: offer the local-CA cert + an HTTPS switch when on plain HTTP.
+    html += renderSecurityNotice();
+
     // Wikipedia/Content browse banner (when Kiwix is serving). The button opens
     // the IN-SHELL library view (#/content) — keeping the Val Ark header on top
     // with a permanent way home — instead of a raw new tab on the bare /kiwix/.
@@ -4934,12 +4937,46 @@ let _diskData = null;
 let _kiwixStatus = null; // {running, port, url, path, files}
 let _storageData = null; // {categories:[{key,label,color,bytes}], total, zimCount, disk} — live, includes ZIMs
 let _servicesStatus = null; // {id:{port,path,running}} — community sub-apps (chat/mail/forum/paste)
+let _tlsStatus = null; // {enabled, httpsPort, caDownload, domain, notAfter, ...} — local-CA HTTPS
 const _activeDownloads = new Map();
 
 // Kiwix is reverse-proxied at /kiwix/ on this same origin, so the link works on
 // whatever host/port the user reached Val Ark by (Tailscale, WiFi IP, :8088…)
 // AND keeps the Val Ark header. Fall back to the direct port for older servers
 // that didn't report a proxy path.
+// Security notice: when the Ark has a local-CA cert and you're on plain HTTP,
+// offer the one-click CA download + a switch to HTTPS. Honest about scope: this
+// encrypts traffic on the network, it does NOT hide data from the operator.
+function renderSecurityNotice() {
+    if (!_tlsStatus) return '';
+    const onHttps = location.protocol === 'https:';
+    const host = location.hostname || 'localhost';
+    const ca = _tlsStatus.caDownload || '/ca.crt';
+    if (_tlsStatus.enabled && !onHttps) {
+        const httpsUrl = `https://${host}:${_tlsStatus.httpsPort}${location.pathname}${location.hash}`;
+        return `<div class="tls-banner">
+            <div class="tls-banner-main">
+                <span class="tls-banner-icon">&#x1F512;</span>
+                <div>
+                    <div class="tls-banner-title">Encrypted HTTPS is available on this Ark</div>
+                    <div class="tls-banner-desc">You're on an unencrypted connection. Install this Ark's certificate once, then switch to HTTPS so chat, mail and everything else is encrypted on your network. <strong>Note:</strong> this protects traffic on the network — it does not hide data from the Ark's operator.</div>
+                </div>
+            </div>
+            <div class="tls-banner-actions">
+                <a class="tls-btn" href="${ca}" download>Download certificate</a>
+                <a class="tls-btn tls-btn-primary" href="${httpsUrl}">Switch to HTTPS &#x2192;</a>
+            </div>
+        </div>`;
+    }
+    if (onHttps) {
+        return `<div class="tls-banner tls-banner-ok">
+            <span class="tls-banner-icon">&#x1F512;</span>
+            <div class="tls-banner-desc"><strong>Encrypted connection</strong> (Val Ark local CA). Traffic on your network is protected; data at rest is not hidden from the operator. <a href="${ca}" download>Get the certificate for your other devices</a>.</div>
+        </div>`;
+    }
+    return '';
+}
+
 function getKiwixUrl() {
     if (!_kiwixStatus || !_kiwixStatus.running) return null;
     if (_kiwixStatus.path) return _kiwixStatus.path; // '/kiwix/' — relative, same-origin
@@ -5082,6 +5119,12 @@ async function initFromAPI() {
         fetch('/api/status/services')
             .then(r => r.ok ? r.json() : null)
             .then(s => { if (s && Object.keys(s).length) { _servicesStatus = s; scheduleRender(); } })
+            .catch(() => {});
+
+        // Local-CA TLS status (drives the "switch to HTTPS / trust this Ark" banner).
+        fetch('/api/status/tls')
+            .then(r => r.ok ? r.json() : null)
+            .then(t => { if (t) { _tlsStatus = t; scheduleRender(); } })
             .catch(() => {});
         return true;
     } catch (e) {

@@ -23,6 +23,7 @@ source "${TOOLS_SCRIPTS}/_common.sh"
 
 # Setup logging
 LOG_FILE="${LOG_DIR}/tools_$(date +%Y%m%d_%H%M%S).log"
+export LOG_FILE   # per-tool child shells must inherit it (log() writes here)
 ensure_dir "$LOG_DIR"
 SCRIPT_START=$(date +%s)
 

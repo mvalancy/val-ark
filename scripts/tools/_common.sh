@@ -61,6 +61,7 @@ log() {
     local msg="[$(date '+%H:%M:%S')] $*"
     echo -e "$msg"
     [ -n "$LOG_FILE" ] && echo -e "$msg" >> "$LOG_FILE" 2>/dev/null
+    return 0   # a script whose last line is log_success must not exit 1 when LOG_FILE is unset
 }
 log_success() { log "${GREEN}OK${NC}: $*"; }
 log_error()   { log "${RED}ERROR${NC}: $*"; }
@@ -220,6 +221,42 @@ download_file() {
     return 1
 }
 
+# --- Version gating (shared convention — use these, don't hand-roll) ----------
+# A tool's platform dir records its mirrored version in <dir>/.version. Before
+# downloading, gate the dir on the version you are about to mirror; after ALL
+# of that platform's downloads succeeded, stamp it.
+#
+#   version_gate  DIR VERSION   # clears stale/mislabeled content so the
+#                                # download actually runs (keeps .dist history)
+#   version_stamp DIR VERSION   # record success
+#
+# version_gate treats a dir as CURRENT only when the marker matches AND real
+# content exists (a marker over an empty dir self-heals). A missing marker
+# with legacy content counts as stale — one re-mirror migrates it. Only files
+# under DIR are ever touched.
+version_gate() {
+    local dir="$1" ver="$2"
+    [ -n "$dir" ] && [ -n "$ver" ] || return 0
+    [ -d "$dir" ] || return 0
+    local have="" content=""
+    [ -f "${dir}/.version" ] && have=$(cat "${dir}/.version" 2>/dev/null)
+    content=$(find "$dir" -type f ! -name '.tmp_*' ! -name '*.part' \
+                   ! -name '.version' -not -path '*/.dist/*' -print -quit 2>/dev/null)
+    if [ "$have" = "$ver" ] && [ -n "$content" ]; then
+        return 0    # already current
+    fi
+    if [ -n "$content" ] || [ -f "${dir}/.version" ]; then
+        [ -n "$have" ] && log_info "$(basename "$dir"): ${have} -> ${ver} (clearing old artifacts)"
+        find "$dir" -mindepth 1 -maxdepth 1 ! -name '.dist' -exec rm -rf {} + 2>/dev/null
+    fi
+    return 0
+}
+version_stamp() {
+    [ -n "$1" ] && [ -n "$2" ] || return 0
+    mkdir -p "$1" 2>/dev/null
+    printf '%s\n' "$2" > "$1/.version"
+}
+
 # Download and extract an archive
 # Usage: download_and_extract URL DEST_DIR LABEL [STRIP_COMPONENTS]
 download_and_extract() {
@@ -230,12 +267,16 @@ download_and_extract() {
 
     ensure_dir "$dest_dir"
 
-    # Check if already extracted (has real files in dest_dir, not just .tmp_*)
+    # Check if already extracted — count only REAL content: exclude temp/partial
+    # files, the .version marker, and the .dist/ archive-history dir. Counting
+    # .dist would make a version-gated re-mirror skip its own re-extraction and
+    # strand a binary-less dir behind a fresh marker.
     local existing=0
     while IFS= read -r _; do
         existing=$((existing + 1))
         [ $existing -ge 2 ] && break
-    done < <(find "$dest_dir" -type f ! -name '.tmp_*' 2>/dev/null)
+    done < <(find "$dest_dir" -type f ! -name '.tmp_*' ! -name '*.part' \
+                  ! -name '.version' -not -path '*/.dist/*' 2>/dev/null)
     if [ "$existing" -ge 2 ]; then
         log_info "Already extracted: ${label} - skipping"
         DOWNLOAD_SKIPPED=$((DOWNLOAD_SKIPPED + 1))

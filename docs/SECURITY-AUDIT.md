@@ -1,5 +1,7 @@
 # Val Ark Security Audit
 
+**Audit date:** 2026-06-06 (point-in-time record — findings and line numbers reflect
+the tree as scanned; see the dated addendum at the end for what changed since).
 **Scope:** Public GitHub repo, web server / reverse proxy (`scripts/server.js`),
 service standup scripts (`scripts/services/*.sh`), download supply chain
 (`scripts/tools/_common.sh`), and the live runtime posture (binds, NFS exports,
@@ -204,3 +206,68 @@ are coverage limits of this pass.
 10. **No authenticated/fuzz testing of the sub-apps themselves** (MicroBin paste content
     handling, NodeBB post rendering) — the iframe XSS finding assumes a plausible
     stored-XSS in those apps but did not attempt to find one.
+
+---
+
+## Addendum — 2026-07-10 (status update; the report above is the unedited record)
+
+The audit above describes the tree **before** the same-day fix commit
+(`security: apply audit fixes`). Re-verified against the current code
+(grep/read of `server.js`, `loop.sh`, `_common.sh`, the service scripts —
+host runtime state was **not** re-probed):
+
+**Fixed in-repo (2026-06-06/07):**
+
+- `autoindex-filename-xss-1` — `serveDirectory` now HTML-escapes names and
+  `encodeURI`s hrefs via a shared `escapeHtml()` helper.
+- `kiwix-8888-lan-unauth-1` / `kiwix-bind-bypass-1` — kiwix-serve is spawned with
+  `--address 127.0.0.1`; only the `/kiwix/` proxy reaches it.
+- `bind-all-interfaces-1` — `server.js` honors `VALARK_BIND` on every listener
+  (default remains `0.0.0.0`: it is a LAN hub by design).
+- `state-dir-not-gitignored-1` — `/state`, `credentials.txt`, and
+  `admin-credentials.txt` are gitignored.
+- `chat-admin-pw-stdout-leak-1` — the generated admin password is written to a
+  chmod-600 `admin-credentials.txt` (with a loud warning if the filesystem ignored
+  the chmod), no longer echoed to stdout.
+- `ngircd-no-password-lan-1` — ngIRCd now defaults to `127.0.0.1` (LAN IRC is opt-in
+  via `VALARK_BIND`, with a plaintext/unauthenticated warning); a connect `Password`
+  is still not set if opted in.
+- `bind-default-inconsistent-0000-1` — mostly resolved: paste/forum/chat all default
+  `127.0.0.1`; `mail.sh` still defaults `VALARK_BIND=0.0.0.0`.
+- Cleartext-on-the-wire (Completeness item 7) — an Auto-TLS layer (local CA,
+  `scripts/lib/tls.sh`) landed 2026-06-07: HTTPS listener (`VALARK_HTTPS_PORT`,
+  default 8443), optional `VALARK_FORCE_HTTPS` redirect, CA-download route, and maddy
+  gets a real TLS cert (STARTTLS) when the cert exists.
+
+**Still open (re-verified today):** `content-validation-logic-bug-1` (the `&&` is
+still there), `sse-progress-line-xss-1` (`dl.lastLine` still unescaped),
+`content-overview-unescaped-2`, `csp-absent-1` (no CSP; the proxy still strips
+CSP/XFO), `iframe-no-sandbox-1` (frame title/subtitle are now escaped but there is
+still no `sandbox`), `env-sourced-as-code-1`, and `supply-chain-no-checksum-1`
+(`download_file` now downloads to a `.part` temp, resumes, size-verifies against the
+server's Content-Length, and renames atomically — but still no checksums/signatures).
+The host-layer findings (NFS exports, FUSE 777 tree, `.env` perms) are machine state
+and remain as reported until re-probed.
+
+**New attack surface since the audit (2026-07-09/10) — not covered above:**
+
+- `GET /api/archive/<path>` — unauthenticated download of any file, or any directory
+  as a streamed `tar.gz`, under the `tools/models/content/sources/assets/installers`
+  trees (traversal-guarded: normalize + top-dir allowlist + `isPathSafe`). Extends the
+  `no-auth-web-api-1` read surface from listings to bulk fetch.
+- HTTP Range support (206/416) on static files — resumable unauthenticated reads.
+- Multi-port listen via `VALARK_WEB_EXTRA_PORTS` (all extra listeners honor
+  `VALARK_BIND`).
+- `loop.sh` step 2c: when `VALARK_WEB_PUBLIC_PORT` is set (e.g. 80), an
+  iptables/ip6tables NAT `PREROUTING` `REDIRECT` to the web port is re-asserted every
+  cycle on every real interface (LAN **and** tailnet; loopback untouched) — puts the
+  unauthenticated web origin on a standard port.
+- `loop.sh` step 6b: weekly **unattended** tool refresh pulls latest upstream releases
+  (`VALARK_TOOL_REFRESH_DAYS`, default 7) — raises the stakes of
+  `supply-chain-no-checksum-1`, since fetches now happen with no operator watching.
+- New services/mirrors: a SeaweedFS launcher (`scripts/services/seaweedfs.sh`, binds
+  `127.0.0.1` by default) and Grafana added to the tool mirror. Neither has been
+  security-probed.
+
+These deltas have not had the adversarial live-probe treatment of the original sweep;
+a follow-up pass should exercise them.

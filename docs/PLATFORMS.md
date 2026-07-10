@@ -30,6 +30,10 @@ Syncthing, Kiwix, btop, SQLite, etc.) are shared across all of them — no per-b
 
 **Tested on:** Jetson Orin Nano, Orin NX
 
+Non-NVIDIA aarch64 devices — ARM64 NAS appliances on chips such as the Rockchip
+RK3588 — also run the same `tools/linux-arm64` artifacts; see
+[ARM64-NAS.md](ARM64-NAS.md) for appliance bring-up notes.
+
 ### Setup
 ```bash
 # CUDA toolkit ships with JetPack (Jetson) or the SBSA CUDA toolkit (GB10).
@@ -128,23 +132,23 @@ cmake --build build -j$(nproc)
 ```
 
 ### CPU Optimizations
-The build script auto-detects AVX2/AVX-512/FMA and applies appropriate flags.
+The llama.cpp CMake build auto-detects AVX2/AVX-512/FMA and applies appropriate flags.
 
 ---
 
 ## Windows x64
 
 ### Prebuilt Binaries
-Most tools ship prebuilt Windows binaries: llama.cpp (CPU + CUDA), whisper.cpp
-(CPU + CUDA), stable-diffusion.cpp (AVX2 + CUDA), Piper TTS, ONNX Runtime, FFmpeg, Vosk.
+Most tools ship prebuilt Windows binaries: llama.cpp (CPU), whisper.cpp (CPU),
+stable-diffusion.cpp (AVX2), Piper TTS, ONNX Runtime, FFmpeg, Vosk.
 
 ### Usage
 ```powershell
 # Run llama.cpp server
-.\tools\windows-x64\llama-cpp\llama-server.exe -m models\llm\llama-3.2-3b\model.gguf
+.\tools\windows-x64\llama-cpp\llama-server.exe -m models\llm\llama-3.2-3b\Llama-3.2-3B-Instruct-Q8_0.gguf
 
 # Run whisper
-.\tools\windows-x64\whisper.cpp\whisper-cli.exe -m models\stt\whisper-ggml\ggml-base.bin
+.\tools\windows-x64\whisper-cpp\whisper-cli.exe -m models\stt\whisper-ggml\ggml-base.bin
 ```
 
 ---
@@ -163,8 +167,9 @@ size-verified, atomic, single-`flock`.
 ```
 
 A 24/7 self-healing loop ([`scripts/loop.sh`](../scripts/loop.sh)) keeps a node healthy:
-it repairs the symlink layout, refreshes the live catalog, link-checks and re-verifies
-integrity, tops up the fill, and runs functional verification
+it repairs the symlink layout, keeps the web server (and enabled services) up, refreshes
+the live catalog, link-checks and re-verifies integrity, tops up the fill, refreshes
+mirrored tools weekly, and runs functional verification
 ([`scripts/verify.sh`](../scripts/verify.sh)) that the tools actually run, Kiwix serves
 a real ZIM, a tiny LLM responds, and the web API answers.
 

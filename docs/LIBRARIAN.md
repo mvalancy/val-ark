@@ -40,8 +40,10 @@ The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
    sole representative of a category) to make room.
 
 Everything scales from live `df` headroom (`avail − max(2%, 50GB)`); there are no
-hardcoded sizes. Same-content ZIM flavours (maxi/nopic/mini) collapse to the most
-complete one.
+hardcoded sizes. On a shared disk an optional footprint cap bounds Val Ark itself:
+`VALARK_MAX_GB` caps its total usage (budget = min(headroom, cap − used)) and
+`VALARK_MODEL_MAX_GB` skips any single model bigger than N GB. Same-content ZIM
+flavours (maxi/nopic/mini) collapse to the most complete one.
 
 ## Catalogs (sources of candidates)
 
@@ -81,21 +83,30 @@ A `state/STOP` flag halts filling.
 2. repair the repo↔disk symlink layout,
 3. **ensure the web server is up** (`scripts/server.js`, which auto-launches
    `kiwix-serve` for any complete ZIM),
-4. **refresh the live catalog** → content links self-heal (no stale dates),
-5. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
+4. **ensure standard-port access** — when `VALARK_WEB_PUBLIC_PORT` is set (e.g.
+   80), keep an idempotent iptables NAT redirect public→web port in place
+   (LAN + VPN interfaces; loopback untouched),
+5. **keep enabled community services running** (`VALARK_SERVICES` in `.env` —
+   chat, mail, forum, paste),
+6. **refresh the live catalog** → content links self-heal (no stale dates),
+7. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
    are transient, not dead), web-ui assets, symlinks → `state/linkcheck.txt`,
-6. **integrity verify** → requeue corrupt/short downloads,
-7. **top-up fill** (bounded; skipped if a fill already runs),
-8. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
-   real ZIM, a tiny LLM infers, the web API answers, and each configured remote
-   mesh node (`VALARK_FLEET` in `.env`) is reachable and sees the shared content,
-9. health report (`state/health.json`) + a fleet coordination drop
-   (`state/coordination/`).
+8. **integrity verify** → requeue corrupt/short downloads,
+9. **top-up fill** (bounded; skipped if a fill already runs),
+10. **weekly tool refresh** — re-run the tool mirror so apps track their latest
+    upstream versions (`VALARK_TOOL_REFRESH_DAYS`, default 7; a failed pass
+    retries in a day),
+11. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
+    real ZIM, a tiny LLM infers, the web API answers, and each configured remote
+    mesh node (`VALARK_FLEET` in `.env`) is reachable and sees the shared content
+    (plus a Playwright UI smoke when installed),
+12. health report (`state/health.json`) + a fleet coordination drop
+    (`state/coordination/`).
 
 Install it as a durable, reboot-surviving job:
 
 ```bash
-scripts/loop.sh install 30     # run a cycle every 30 min (flock-guarded)
+scripts/loop.sh install 30     # every 30 min + @reboot resume (flock-guarded)
 scripts/loop.sh uninstall
 scripts/loop.sh run 1800       # or run in the foreground forever
 ```

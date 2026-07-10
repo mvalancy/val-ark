@@ -12,6 +12,9 @@ entirely offline and share between machines over the LAN.
 - Sync between machines over LAN — Syncthing P2P, or one NFS-exported shared mirror.
 - A 24/7 loop keeps the mirror current, intact, and verified.
 
+For what the mirror would still be missing if the internet went off today, see
+[OFFLINE-GAPS.md](OFFLINE-GAPS.md).
+
 ## Where data lives (configurable)
 
 All bulk data lives on a single **data root** resolved by `scripts/lib/valark-env.sh`.
@@ -66,8 +69,9 @@ prebuilt binary and a suitable model automatically (no internet needed):
 ./start.sh serve                      # web UI + API + auto kiwix-serve (port 3000)
 ```
 
-Prebuilt binaries live at `tools/<platform>/<tool>/...` (e.g.
-`tools/linux-arm64/llama-cpp/llama-server`, `tools/linux-arm64/piper/piper`); models
+Prebuilt binaries live at `tools/<platform>/<tool>/...` (often at nested/versioned
+paths, e.g. `llama-cpp/llama-b<N>/llama-server`, `piper/piper/piper` — the `start.sh`
+helpers find them wherever they land); models
 live under `$VAL_ARK_DATA/models/{llm,stt,tts,...}`. On aarch64, GPU-accelerated
 llama/whisper/sd require a CUDA source build — see [PLATFORMS.md](PLATFORMS.md).
 
@@ -76,8 +80,8 @@ llama/whisper/sd require a CUDA source build — see [PLATFORMS.md](PLATFORMS.md
 `scripts/loop.sh` keeps an offline mirror healthy without supervision: it ensures the
 disk is writable, repairs symlinks, keeps the web server up, refreshes the live
 catalog (content links self-heal — no stale dates), checks & repairs links, verifies
-integrity, tops up the fill, and runs functional verification. Install it as a
-flock-guarded cron job:
+integrity, tops up the fill, refreshes mirrored tools weekly (latest upstream
+versions), and runs functional verification. Install it as a flock-guarded cron job:
 
 ```bash
 scripts/loop.sh install 30            # one cycle every 30 min (survives reboot)
@@ -142,7 +146,7 @@ graph TB
 
     subgraph Peers["LAN / Mesh Peers (offline OK)"]
         style Peers fill:#1a2230,stroke:#a78bfa
-        NFS["NFS mounts<br/>Jetson / desktop / Mac"]
+        NFS["NFS mounts<br/>Jetson / desktop / Mac<br/>(GPU inference on served models)"]
         ST["Syncthing peers<br/>selective .stignore"]
     end
 
@@ -154,7 +158,6 @@ graph TB
     SYNC --> STORE
     STORE -->|"NFS export<br/>(one shared mirror)"| NFS
     SYNC <-->|"Syncthing P2P"| ST
-    NFS -->|"GPU inference<br/>on served models"| ST
 ```
 
 ## Air-Gapped Transfer
@@ -183,7 +186,8 @@ tar xzf val-ark-tier1.tar.gz -C "$VAL_ARK_DATA"
 ## Storage Recommendations
 
 The Librarian scales to any disk — it fills from live `df` headroom
-(`avail − max(2%, 50 GB)`) with no hardcoded ceiling. The tiers below are convenient
+(`avail − max(2%, 50 GB)`) with no hardcoded ceiling (set `VALARK_MAX_GB` in `.env`
+to cap Val Ark's own footprint on a shared disk). The tiers below are convenient
 starting points; see [MODEL_INVENTORY.md](MODEL_INVENTORY.md) for exact sizes.
 
 | Tier | Storage needed | Suitable devices |

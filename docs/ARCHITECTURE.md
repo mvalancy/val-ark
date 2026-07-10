@@ -93,7 +93,9 @@ graph TB
 
 The Librarian fills the data root in curation order from **live** catalogs. There is
 no fixed tier ceiling — it scales to whatever disk is mounted, stopping at the
-reserve (`max(VALARK_RESERVE_PCT%, VALARK_RESERVE_MIN_GB)`). See
+reserve (`max(VALARK_RESERVE_PCT%, VALARK_RESERVE_MIN_GB)`) and, if set, the
+`VALARK_MAX_GB` footprint cap (bounds Val Ark's own data on a shared disk;
+`VALARK_MODEL_MAX_GB` additionally skips oversized single models). See
 [LIBRARIAN.md](LIBRARIAN.md) for the full model.
 
 ```mermaid
@@ -107,7 +109,7 @@ reserve (`max(VALARK_RESERVE_PCT%, VALARK_RESERVE_MIN_GB)`). See
 }}}%%
 flowchart TD
     START([fill]) --> REFRESH["Refresh live catalogs<br/>Kiwix OPDS + models + installers"]
-    REFRESH --> PLANNER["planner.py builds ordered plan<br/>budget = fillable bytes"]
+    REFRESH --> PLANNER["planner.py builds ordered plan<br/>budget = fillable bytes<br/>(reserve + optional VALARK_MAX_GB cap)"]
     PLANNER --> P1
 
     subgraph P1["1. Diversity first"]
@@ -148,13 +150,15 @@ flock-guarded cron so it survives reboots. The install adds **two** entries: an
 `@reboot` line (90 s after boot, once the `nofail` fstab mount of the data disk is
 up) so the Ark resumes within ~90 s of a reboot, plus the periodic `*/N` tick that
 keeps it healthy. Each cycle restarts the web server + kiwix + the enabled
-community services (`VALARK_SERVICES`), refreshes the live catalog, link-checks,
-integrity-verifies, runs a bounded top-up fill, and functionally verifies — so a
-reboot needs no manual steps. Each cycle is safe to run repeatedly and concurrently
-with a standalone fill (the fill flock prevents double-downloading) and never aborts
-on a single failure. TLS certs persist under `~/.config/val-ark/tls` and the server
-re-bootstraps them on first boot, so HTTPS comes back automatically too (see
-[`ENCRYPTION.md`](ENCRYPTION.md)).
+community services (`VALARK_SERVICES`), keeps the optional standard-port redirect
+in place (`VALARK_WEB_PUBLIC_PORT`), refreshes the live catalog, link-checks,
+integrity-verifies, runs a bounded top-up fill (plus a weekly refresh of the tool
+mirror to the latest upstream versions, `VALARK_TOOL_REFRESH_DAYS`), and
+functionally verifies — so a reboot needs no manual steps. Each cycle is safe to
+run repeatedly and concurrently with a standalone fill (the fill flock prevents
+double-downloading) and never aborts on a single failure. TLS certs persist under
+`~/.config/val-ark/tls` and the server re-bootstraps them on first boot, so HTTPS
+comes back automatically too (see [`ENCRYPTION.md`](ENCRYPTION.md)).
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -169,12 +173,16 @@ flowchart TD
     CRON([cron / loop.sh once]) --> WRITE["1. Ensure disk writable<br/>self-heal ro/NTFS reverts"]
     WRITE --> LAYOUT["2. Repair repo to disk symlinks"]
     LAYOUT --> WEB["2b. Ensure web server + kiwix up"]
-    WEB --> REFRESH["3. Refresh live catalog<br/>heals content links, no stale dates"]
+    WEB --> PUB["2c. Ensure standard-port access<br/>VALARK_WEB_PUBLIC_PORT redirect"]
+    PUB --> SVCS["2d. Ensure enabled community<br/>services up (VALARK_SERVICES)"]
+    SVCS --> REFRESH["3. Refresh live catalog<br/>heals content links, no stale dates"]
     REFRESH --> LINK["4. Link check + repair<br/>tool/installer URLs, web-ui assets"]
     LINK --> INTEG["5. Integrity verify<br/>requeue corrupt/short files"]
     INTEG --> FILL["6. Bounded top-up fill<br/>librarian fill --time"]
-    FILL --> FUNC["7. Functional verification<br/>verify.sh: tools run, kiwix serves,<br/>tiny LLM infers, fleet reachable"]
-    FUNC --> REPORT["8. Health report + coordination<br/>state/health.json"]
+    FILL --> TOOLREF["6b. Weekly tool refresh<br/>mirrored apps to latest upstream"]
+    TOOLREF --> FUNC["7. Functional verification<br/>verify.sh: tools run, kiwix serves,<br/>tiny LLM infers, fleet reachable"]
+    FUNC --> UISMOKE["7b. UI smoke<br/>dynamic controls + back-to-ark nav"]
+    UISMOKE --> REPORT["8. Health report + coordination<br/>state/health.json"]
     REPORT --> DONE([cycle complete])
 ```
 
@@ -232,9 +240,13 @@ graph TB
 `server.js` is a **zero-dependency Node** server. It serves the static web UI plus a
 JSON API and Server-Sent Events (SSE) for live progress. Download actions spawn the
 relevant shell scripts as child processes and stream their output back to the browser.
-The listen port comes from `VALARK_WEB_PORT` (`.env`, default 3000); `/api/health`
+The listen port comes from `VALARK_WEB_PORT` (`.env`, default 3000);
+`VALARK_WEB_EXTRA_PORTS` adds extra listen ports, and the loop can hold a NAT
+redirect from a standard port (`VALARK_WEB_PUBLIC_PORT`, e.g. 80). `/api/health`
 returns `{status:"ok", version}` so the loop and `verify.sh` can confirm it is really
-the Val Ark server and not another app squatting the port.
+the Val Ark server and not another app squatting the port. File downloads support
+HTTP Range (resumable), and `/api/archive/<path>` streams any mirrored file or
+directory (as tar.gz).
 
 It also acts as a same-origin **reverse proxy** for embedded sub-apps: `/kiwix/`
 fronts the internal kiwix-serve, and `/app/<id>/` fronts each community service
@@ -277,8 +289,9 @@ sequenceDiagram
 
 On startup (and again whenever the loop heals it), `server.js` scans `content/zim/`
 for complete `.zim` files. If any exist it auto-launches `kiwix-serve` on port 8888
-with the whole ZIM library. The web UI polls `/api/status`, sees kiwix is running,
-and shows a "Browse Wikipedia" banner linking to the offline encyclopedia. The ZIM
+(loopback-only, fronted by the same-origin `/kiwix/` proxy) with the whole ZIM
+library. The web UI polls `/api/status`, sees kiwix is running, and shows a
+"Browse Wikipedia" banner linking to the offline encyclopedia. The ZIM
 catalog is fetched **live** from the Kiwix OPDS feed, so download dates are never
 stale.
 
@@ -307,8 +320,10 @@ sequenceDiagram
     server.js-->>Browser: {kiwix: {running: true, port: 8888}}
     Note over Browser: Shows "Browse Wikipedia" banner
 
-    Browser->>kiwix-serve: GET /<zim>/article
-    kiwix-serve-->>Browser: article (HTML)
+    Browser->>server.js: GET /kiwix/<zim>/article
+    server.js->>kiwix-serve: proxy to 127.0.0.1:8888
+    kiwix-serve-->>server.js: article (HTML)
+    server.js-->>Browser: article (HTML)
 ```
 
 ## Platforms
@@ -348,7 +363,7 @@ require a CUDA source build (no upstream binary) — see [PLATFORMS.md](PLATFORM
 | `tests/` | Bash validators (`test-*.sh`) + Playwright suite under `tests/screenshots/` |
 | `.env.example` | Documented machine config (`VAL_ARK_DATA`, `VALARK_WEB_PORT`, `VALARK_FLEET`, reserve) |
 
-Val Ark currently mirrors **43** tools (`scripts/tools/*.sh`). The scripts never
+Val Ark currently mirrors **45** tools (`scripts/tools/*.sh`). The scripts never
 install anything on the server itself — they mirror binaries and write install hints
 for the user. See [TOOLS.md](TOOLS.md) for the catalog and [LIBRARIAN.md](LIBRARIAN.md)
 for the fill engine.

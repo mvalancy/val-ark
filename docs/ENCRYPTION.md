@@ -44,7 +44,8 @@ Because the CA is local, browsers and mail clients don't know it yet. Install th
 CA certificate once on each device and everything Val Ark serves becomes trusted:
 
 1. On the Val Ark home page, click **Download certificate** (or fetch
-   `http://<ark>:8088/ca.crt` directly — this is intentionally available over
+   `http://<ark>:3000/ca.crt` directly, on the plain-HTTP web port
+   (`VALARK_WEB_PORT`, default `3000`) — this is intentionally available over
    plain HTTP, since you can't require trusted HTTPS to fetch the trust anchor).
 2. Install it as a trusted **root** CA:
    - **Windows:** double-click → *Install Certificate* → *Local Machine* →

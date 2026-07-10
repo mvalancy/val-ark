@@ -11,7 +11,7 @@ Run a script standalone (`./btop.sh`) or orchestrate them via the parent [`downl
 ./download-tools.sh validate    # Check all download URLs
 ```
 
-> These scripts only mirror the *application binaries*. AI models and offline ZIM content are filled by the **librarian engine** — see [`docs/LIBRARIAN.md`](../../docs/LIBRARIAN.md). The librarian uses aria2 multi-connection downloads; these tool scripts use plain `curl`/`wget` with retries.
+> These scripts only mirror the *application binaries*. AI models and offline ZIM content are filled by the **librarian engine** — see [`docs/LIBRARIAN.md`](../../docs/LIBRARIAN.md). The librarian uses aria2 multi-connection downloads; these tool scripts use `curl`/`wget` with retries — resumable via a `.part` temp file, size-verified against the server, and renamed into place atomically.
 
 ## Lifecycle
 
@@ -61,46 +61,53 @@ GPU-accelerated tools (`llama-cpp`, `whisper-cpp`, `sd-cpp`, `bitnet`) ship preb
 | `blender.sh` | Blender | linux-x86_64, linux-arm64, macos-arm64, windows-x64 |
 | `btop.sh` | btop | linux-arm64, linux-x86_64, macos-arm64 |
 | `calibre.sh` | Calibre | linux-x86_64, linux-arm64, macos-arm64, windows-x64 |
+| `chat.sh` | IRC chat (ngIRCd + The Lounge) | all (source) |
 | `claude-code.sh` | Claude Code | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
-| `comfyui.sh` | ComfyUI | linux-x86_64, linux-arm64, macos-arm64 |
+| `comfyui.sh` | ComfyUI | linux-x86_64, linux-arm64, macos-arm64, windows-x64 |
 | `coolify.sh` | Coolify | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
-| `dev-cli.sh` | Dev CLI bundle (fd, rg, bat, fzf, jq, lazygit) | linux-arm64, linux-x86_64 |
+| `dev-cli.sh` | Dev CLI bundle (fd, rg, bat, fzf, jq, lazygit) | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `ffmpeg.sh` | FFmpeg | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
+| `forum.sh` | Message boards (NodeBB) | all (source) |
 | `freecad.sh` | FreeCAD | linux-x86_64, linux-arm64, macos-arm64, windows-x64 |
 | `gimp.sh` | GIMP | linux-x86_64, linux-arm64, macos-arm64, windows-x64 |
 | `godot.sh` | Godot Engine | linux-x86_64, linux-arm64, macos-arm64, windows-x64 |
+| `grafana.sh` | Grafana OSS | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `helix.sh` | Helix editor | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `influxdb.sh` | InfluxDB | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `inkscape.sh` | Inkscape | linux-x86_64, linux-arm64, macos-arm64, windows-x64 |
-| `kdenlive.sh` | Kdenlive | linux-arm64, macos-arm64, windows-x64 |
+| `kdenlive.sh` | Kdenlive | linux-x86_64, linux-arm64, macos-arm64, windows-x64 |
 | `kicad.sh` | KiCad | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `kiwix.sh` | Kiwix Tools | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `llama-cpp.sh` | llama.cpp | macos-arm64, windows-x64, linux-x86_64; linux-arm64 (source) |
+| `mail.sh` | Mail (maddy + alps) | linux-arm64, linux-x86_64; macos-arm64, windows-x64 (source) |
 | `milvus.sh` | Milvus | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `miniforge.sh` | Miniforge | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `mosquitto.sh` | Mosquitto MQTT | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `mqtt-explorer.sh` | MQTT Explorer | linux-x86_64, linux-arm64, macos-arm64, windows-x64 |
 | `n8n.sh` | n8n | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
+| `node.sh` | Node.js runtime (portable LTS) | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `ollama.sh` | Ollama | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `onnxruntime.sh` | ONNX Runtime | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `open-webui.sh` | Open WebUI | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
+| `paste.sh` | Files & pastebin (MicroBin) | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `piper.sh` | Piper TTS | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `postgresql.sh` | PostgreSQL | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `python-standalone.sh` | Python Standalone | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `redis.sh` | Redis | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `sd-cpp.sh` | stable-diffusion.cpp | macos-arm64, windows-x64, linux-x86_64; linux-arm64 (source) |
+| `seaweedfs.sh` | SeaweedFS | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `sqlite.sh` | SQLite | linux-arm64, linux-x86_64, windows-x64 |
 | `syncthing.sh` | Syncthing | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `tailscale.sh` | Tailscale | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
-| `telegraf.sh` | Telegraf | linux-arm64, macos-arm64, windows-x64 |
+| `telegraf.sh` | Telegraf | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `tmux.sh` | tmux | linux-arm64, linux-x86_64, macos-arm64 |
 | `vlc.sh` | VLC | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `vosk.sh` | Vosk | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `vscodium.sh` | VSCodium | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
-| `whisper-cpp.sh` | whisper.cpp | windows-x64, macos-arm64, linux-x86_64; linux-arm64 (source) |
+| `whisper-cpp.sh` | whisper.cpp | windows-x64; linux-arm64, linux-x86_64, macos-arm64 (source) |
 | `yt-dlp.sh` | yt-dlp | linux-x86_64, linux-arm64, macos-arm64, windows-x64 |
 
-43 tool scripts in total.
+50 tool scripts in total.
 
 ## Shared Helpers (`_common.sh`)
 
@@ -108,13 +115,14 @@ GPU-accelerated tools (`llama-cpp`, `whisper-cpp`, `sd-cpp`, `bitnet`) ship preb
 |----------|---------|
 | `github_latest_tag REPO FALLBACK` | Resolve the latest release tag via the GitHub API; falls back to the pinned version on failure. |
 | `github_asset_url REPO TAG PATTERN` | Find a release asset URL matching a grep pattern for the given tag. |
-| `download_file URL DEST [LABEL]` | Download a single file with retries (skips if already present). |
+| `download_file URL DEST [LABEL]` | Download a single file with retries: resumes a `.part` temp, size-verifies against the server's `Content-Length`, renames into place atomically, and detects stalls (<1 KB/s for 2 min) instead of a hard timeout. Skips files already present at the expected size. |
 | `download_and_extract URL DEST [LABEL] [STRIP]` | Download an archive and extract it (tar.gz/xz/zst, zip, AppImage; rotates `.dist` archive copies). |
+| `version_gate DIR VERSION` / `version_stamp DIR VERSION` | Per-platform `.version` markers: gate a dir on the version about to be mirrored (clears stale artifacts, keeps `.dist` history, never downgrades a newer mirror to an older pin), then stamp on success. |
 | `clone_repo URL REF DEST [LABEL]` | Shallow-clone a git repo at a tag/branch, then build an offline `.tar.gz`. |
-| `write_install_hint DIR TOOL INSTRUCTIONS` | Write an `INSTALL.txt` for tools that require package-manager installation. |
+| `write_install_hint DIR TOOL INSTRUCTIONS` | Write an `INSTALL.txt` for tools that require package-manager installation (rewritten whenever the text changes). |
 | `ensure_dir PATH` | Create a directory (handles a file existing at the path). |
 
-Environment variables: `GITHUB_TOKEN` (optional, raises API rate limits), `MAX_RETRIES` (default 5), `RETRY_DELAY` (default 15s). Downloads are idempotent — existing files are skipped, so re-running is safe and is exactly what the [24/7 self-healing loop](../loop.sh) relies on to top up a mirror.
+Environment variables: `GITHUB_TOKEN` (optional, raises API rate limits). Retry tuning lives in `_common.sh` (`MAX_RETRIES=5`, `RETRY_DELAY=15`s). Downloads are idempotent — complete files are skipped (and re-fetched when their size no longer matches upstream), so re-running is safe and is exactly what the [24/7 self-healing loop](../loop.sh) relies on for its weekly tool-refresh pass (`VALARK_TOOL_REFRESH_DAYS`).
 
 ## Adding a New Tool
 

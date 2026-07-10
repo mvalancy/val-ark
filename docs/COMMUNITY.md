@@ -27,13 +27,14 @@ already lives inside Val Ark:
 
 1. **Mirrored** for offline install. `scripts/tools/<id>.sh` caches the upstream
    binary (or source, when no portable binary exists) into the tools tree per platform,
-   exactly like the 43 existing tool mirrors. Nothing is installed on the server itself.
+   exactly like the 45 existing tool mirrors. Nothing is installed on the server itself.
 2. **Run LAN-bound** on the Val Ark host. `scripts/services/<id>.sh start|stop|restart|status`
    builds (first run, for source-only components) and launches the service, binding its
    web UI to `127.0.0.1` so only the reverse proxy can reach it. Any user-facing protocol
-   ports (IRC, IMAP/submission) bind `VALARK_BIND` (default `0.0.0.0` for the LAN).
+   ports honour `VALARK_BIND` (mail's IMAP/submission default `0.0.0.0` for the LAN;
+   plaintext native IRC defaults `127.0.0.1`).
 3. **Framed** in the web shell at `/app/<id>/`. `server.js` reverse-proxies the service
-   same-origin under one port, so the fixed Val Ark top-nav stays on screen as a permanent
+   same-origin, so the fixed Val Ark top-nav stays on screen as a permanent
    "back to Val Ark" header — the same pattern `/kiwix/` uses today (pipe bytes through,
    no HTML rewriting; services run under their proxy base path so links resolve).
 
@@ -55,7 +56,7 @@ graph TB
     subgraph WebServer["server.js (zero-dep Node, VALARK_WEB_PORT)"]
         style WebServer fill:#1a2230,stroke:#60a5fa
         PROXY["generic /app/&lt;id&gt;/ reverse proxy<br/>+ /kiwix/ (existing)"]
-        SUP["service supervisor<br/>(ensured up by loop.sh)"]
+        SUP["service liveness probes<br/>(loop.sh (re)starts each cycle)"]
     end
 
     subgraph Services["Community Services (LAN-bound, VALARK_BIND)"]
@@ -99,10 +100,13 @@ deliberately federation-free, so the whole conversation stays on the LAN.
   regardless of the host version. `scripts/tools/chat.sh` mirrors source; `chat.sh start`
   builds in-place on first run (one online build), fully offline after. No Redis — The
   Lounge uses sqlite.
-- **Bind:** ngIRCd → `VALARK_BIND:6667` (set `127.0.0.1` for host-only); The Lounge web →
-  `127.0.0.1:9000`, reached only via the proxy.
-- **First run:** auto-creates a private-mode admin account and prints a generated 16-char
-  password once; pin via `VALARK_CHAT_ADMIN_USER` / `VALARK_CHAT_ADMIN_PASS`.
+- **Bind:** ngIRCd → `VALARK_BIND:6667`, defaulting to `127.0.0.1` (The Lounge is the
+  supported entry point; set `VALARK_BIND=0.0.0.0` to let native LAN IRC clients connect —
+  the script warns, since native IRC is plaintext); The Lounge web → `127.0.0.1:9000`,
+  reached only via the proxy.
+- **First run:** auto-creates a private-mode admin account and saves a generated 16-char
+  password to a chmod-600 `admin-credentials.txt` in the chat state dir (not echoed to
+  capturable logs); pin via `VALARK_CHAT_ADMIN_USER` / `VALARK_CHAT_ADMIN_PASS`.
 
 ### Mail — `/app/mail/` (port 1323)
 
@@ -168,10 +172,11 @@ This layer is built for a **trusted offline LAN/mesh, not the internet**. The po
 explicit and uniform across all four services:
 
 - **LAN/mesh-only binding.** Web UIs bind `127.0.0.1` and are reachable only through the
-  Val Ark reverse proxy (one origin, one port). Protocol ports that must face users
-  (IRC 6667, IMAP 143, submission 587) bind `VALARK_BIND` — default `0.0.0.0` for the LAN;
-  set `VALARK_BIND=127.0.0.1` in `.env` for host-only. None of this is intended to be
-  port-forwarded to the public internet.
+  Val Ark reverse proxy (one origin, over HTTP or the local-CA HTTPS listener). Protocol
+  ports that must face users honour `VALARK_BIND`: mail's IMAP 143 + submission 587 default
+  `0.0.0.0` for the LAN, while native IRC 6667 defaults `127.0.0.1` (it is plaintext — web
+  chat rides the proxy). Set `VALARK_BIND=127.0.0.1` in `.env` for host-only. None of this
+  is intended to be port-forwarded to the public internet.
 - **No internet relay or federation.** chat has zero `[Server]` blocks (no server-to-server
   linking, no link prefetch). mail's config has no `target_remote`/relay, so any non-local
   recipient is rejected (`501 5.1.8 only local delivery is allowed`) — mail physically
@@ -181,32 +186,34 @@ explicit and uniform across all four services:
 - **Auth required, always.** chat runs in private mode (login per user); mail mandates
   SASL/IMAP auth; forum requires login with a first-run admin; paste gates the whole
   instance behind HTTP Basic plus a separate admin password. First-run credentials are
-  generated and shown once (or pinned via env) — operators should rotate them after first
-  login.
+  generated and saved to chmod-600 files in each service's state dir (or pinned via env) —
+  operators should rotate them after first login.
 - **Data on the data disk.** All config, credentials, and message history live under the
   Val Ark data tree at `state/services/<id>`, so they ride the same NFS-exportable disk and
   backups as the rest of the mirror.
 - **Runs unprivileged.** Services run as the normal Val Ark user. The only privileged path
   is mail's optional MX on port 25, which is emitted only when running as root; submission
-  + IMAP cover all community mail otherwise. TLS is off on mail's LAN listeners by design
-  for offline simplicity (documented; add `tls file cert key` to require STARTTLS).
+  + IMAP cover all community mail otherwise. Mail's LAN listeners offer STARTTLS via the
+  Ark's own local CA (`scripts/lib/tls.sh`); with a cert present maddy refuses plaintext
+  AUTH unless the client upgrades, falling back to `tls off` only if openssl is unavailable.
 
 ## Supervision & Configuration
 
 **Supervision.** The community services are kept alive by the same self-healing loop that
-already ensures `server.js` and `kiwix-serve` are up. `server.js` holds a small supervisor
-that, for each *enabled* service, probes its internal port and (re)spawns
-`scripts/services/<id>.sh start` if it is down; `loop.sh once` invokes this every cycle
-(step 2b, alongside "ensure web server + kiwix up") so a crashed or post-reboot service
-comes back without manual intervention. `scripts/services/<id>.sh status` gives each
-service's process state, ports, data dir, and a liveness probe for `verify.sh` to assert on.
+already ensures `server.js` and `kiwix-serve` are up. `loop.sh once` runs
+`scripts/services/<id>.sh start` for each *enabled* service every cycle (step 2d, right
+after "ensure web server + kiwix up" in step 2b); `start` is idempotent — a no-op when a
+service is already up — so a crashed or post-reboot service comes back without manual
+intervention. `server.js` probes each service's internal port so the UI only offers
+"Launch" when it is actually running. `scripts/services/<id>.sh status` gives each
+service's process state, ports, data dir, and a liveness probe.
 
 **Configuration** (all in the git-ignored `.env`):
 
 | Key | Purpose |
 |-----|---------|
-| `VALARK_BIND` | LAN bind address for user-facing ports (default `0.0.0.0`; `127.0.0.1` = host-only). |
-| `VALARK_WEB_PORT` | The one origin/port the shell + all `/app/<id>/` proxies are served on (default 3000). |
+| `VALARK_BIND` | LAN bind address for user-facing ports (`127.0.0.1` = host-only everywhere; mail defaults `0.0.0.0`, native IRC and the web UIs default `127.0.0.1`). |
+| `VALARK_WEB_PORT` | The primary origin/port the shell + all `/app/<id>/` proxies are served on (default 3000; also reachable via `VALARK_WEB_EXTRA_PORTS`, the `VALARK_WEB_PUBLIC_PORT` redirect, and HTTPS on `VALARK_HTTPS_PORT`). |
 | `VALARK_SERVICES` | Space-separated enable list, e.g. `"chat mail forum paste"` (empty = none). |
 | `VALARK_CHAT_ADMIN_USER` / `VALARK_CHAT_ADMIN_PASS` | Pin the chat admin login. |
 | `VALARK_FORUM_ADMIN_USERNAME` / `_PASSWORD` / `_EMAIL` | Unattended forum admin creation. |

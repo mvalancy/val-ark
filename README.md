@@ -62,7 +62,7 @@ graph TB
     subgraph WebServer["Web Server (port 3000)"]
         style WebServer fill:#1a2230,stroke:#fb923c
         SERVER["server.js<br/>web UI + JSON API + SSE"]
-        KIWIX["kiwix-serve<br/>Port 8888"]
+        KIWIX["kiwix-serve<br/>loopback :8888, proxied at /kiwix/"]
     end
 
     subgraph Storage["Data Root (any size, NFS-exportable)"]
@@ -258,8 +258,9 @@ network. All tools and models work fully offline after the initial download.
 
 The port defaults to **3000** (override positionally, or set `VALARK_WEB_PORT` in
 `.env` so the loop knows which port to health-check). When complete `.zim` files
-exist in `content/zim/`, the server auto-launches kiwix-serve on port 8888 for
-offline Wikipedia browsing without internet access.
+exist in `content/zim/`, the server auto-launches kiwix-serve (loopback-only on
+internal port 8888) and proxies it same-origin at `/kiwix/` for offline Wikipedia
+browsing without internet access.
 
 ## Project Structure
 
@@ -297,7 +298,7 @@ val-ark/
 ├── tests/
 │   ├── run-all.sh            # Bash test runner
 │   ├── test-*.sh             # Validation scripts (deps, tools, models, urls)
-│   └── screenshots/          # Playwright suite (server + web-ui + install-icon specs)
+│   └── screenshots/          # Playwright suite (server + web-ui + install-icon + ui-exercise specs)
 └── docs/                     # ARCHITECTURE, TOOLS, PLATFORMS, OFFLINE,
                               #   MODEL_INVENTORY, LIBRARIAN
 ```
@@ -321,8 +322,8 @@ data root and are gitignored.
 
 ## Testing
 
-Bash validators (`tests/test-*.sh`) plus a Playwright suite (200+ tests covering
-server API, web UI, and install icons).
+Bash validators (`tests/test-*.sh`) plus a Playwright suite (260+ tests covering
+server API, web UI, install icons, and a full-UI exercise).
 
 ```bash
 ./start.sh test               # Run via menu

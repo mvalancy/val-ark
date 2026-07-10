@@ -22,12 +22,12 @@ Local inference engines for running AI models directly on hardware without cloud
 | # | Tool | Description | Platforms | Method | License |
 |---|------|-------------|-----------|--------|---------|
 | 1 | **llama.cpp** | LLM/VLM inference engine for GGUF quantized models with GPU offloading | arm64, x86_64, mac, windows | Prebuilt binary (mac/win), source build (Linux CUDA) | MIT |
-| 2 | **whisper.cpp** | Fast speech-to-text using OpenAI Whisper models in C/C++ | arm64, x86_64, mac, windows | Prebuilt binary (mac), source build (Linux/Win CUDA) | MIT |
+| 2 | **whisper.cpp** | Fast speech-to-text using OpenAI Whisper models in C/C++ | arm64, x86_64, mac, windows | Prebuilt binary (win), source build (Linux CUDA / mac Metal) | MIT |
 | 3 | **Piper TTS** | Fast neural text-to-speech with VITS/ONNX models, 51 languages | arm64, x86_64, mac, windows | Prebuilt binary | MIT |
 | 4 | **stable-diffusion.cpp** | Image generation from text prompts (SD 1.x, SDXL, SD3.5, FLUX, Wan2.1) | arm64, x86_64, mac, windows | Prebuilt binary (mac/win), source build (Linux CUDA) | MIT |
 | 5 | **ONNX Runtime** | Inference runtime for Kokoro TTS, Silero VAD, Moonshine ASR, and ONNX models | arm64, x86_64, mac, windows | Prebuilt binary | MIT |
 | 6 | **Vosk** | Lightweight offline speech recognition (Kaldi-based), 30+ languages, streaming | arm64, x86_64, mac, windows | Prebuilt binary / pip | Apache-2.0 |
-| 7 | **BitNet.cpp** | 1-bit (ternary) LLM inference, 2-6x CPU speedup over FP16 | arm64, x86_64 | Source build (Python setup) | MIT |
+| 7 | **BitNet.cpp** | 1-bit (ternary) LLM inference, 2-6x CPU speedup over FP16 | arm64, x86_64, mac, windows | Source build (Python setup) | MIT |
 | 8 | **Ollama** | Model manager and server for local LLMs with pull/run/serve workflow | arm64, x86_64, mac, windows | Prebuilt binary | MIT |
 
 ---
@@ -53,10 +53,10 @@ Design, modeling, content creation, and editing tools with scripting capabilitie
 |---|------|-------------|-----------|--------|---------|
 | 13 | **Blender** | 3D modeling, animation, rendering with Python scripting API (bpy) | x86_64, mac, windows | Prebuilt binary | GPL-2.0+ |
 | 14 | **FreeCAD** | Parametric 3D CAD modeler with headless mode (FreeCADCmd) and Python API | x86_64, mac, windows | Prebuilt binary | LGPL-2.1+ |
-| 15 | **KiCad** | PCB/schematic EDA suite with kicad-cli for headless Gerber/BOM/DRC export | x86_64 | Prebuilt binary (AppImage) | GPL-3.0+ |
+| 15 | **KiCad** | PCB/schematic EDA suite with kicad-cli for headless Gerber/BOM/DRC export | x86_64, mac, windows | Prebuilt binary (universal DMG / exe), package manager (Linux) | GPL-3.0+ |
 | 16 | **Godot Engine** | 2D/3D game engine with GDScript, headless export, and CI integration | arm64, x86_64, mac, windows | Prebuilt binary | MIT |
-| 17 | **GIMP** | Raster image editor with batch processing via Script-Fu and Python-Fu | x86_64, mac, windows | Package manager / Flatpak | GPL-3.0 |
-| 18 | **Inkscape** | Vector graphics editor (SVG) with CLI export to PDF/PNG/EPS | x86_64 | Package manager | GPL-2.0+ |
+| 17 | **GIMP** | Raster image editor with batch processing via Script-Fu and Python-Fu | arm64, x86_64, mac, windows | Prebuilt binary (AppImage/DMG/exe) | GPL-3.0 |
+| 18 | **Inkscape** | Vector graphics editor (SVG) with CLI export to PDF/PNG/EPS | x86_64, mac, windows | Prebuilt binary (AppImage/DMG/exe) | GPL-2.0+ |
 | 19 | **Kdenlive** | Non-linear video editor with multi-track timeline, effects, and titling | x86_64, mac, windows | Prebuilt binary (AppImage/DMG/exe) | GPL-3.0 |
 | 20 | **Calibre** | E-book library manager, format converter, and content server | arm64, x86_64, mac, windows | Prebuilt binary | GPL-3.0 |
 
@@ -75,7 +75,7 @@ Media playback, recording, download, and conversion tools.
 
 ---
 
-## Infrastructure (13)
+## Infrastructure (15)
 
 Networking, sync, databases, monitoring, self-hosting, and IoT messaging.
 
@@ -87,7 +87,7 @@ Networking, sync, databases, monitoring, self-hosting, and IoT messaging.
 | 28 | **Kiwix** | Offline content server for ZIM archives (Wikipedia, StackOverflow, etc.) | arm64, x86_64, mac, windows | Prebuilt binary | GPL-3.0 |
 | 29 | **Tailscale** | Mesh VPN / overlay network with zero-config device connectivity | arm64, x86_64, mac, windows | Prebuilt binary | BSD-3-Clause |
 | 30 | **Mosquitto** | Lightweight MQTT broker and clients for IoT device messaging | arm64 | Source build (compiled) | EPL-2.0 / EDL-1.0 |
-| 31 | **MQTT Explorer** | Visual GUI MQTT client for browsing topics and debugging IoT data flows | x86_64 | Prebuilt binary (AppImage) | CC-BY-ND-4.0 |
+| 31 | **MQTT Explorer** | Visual GUI MQTT client for browsing topics and debugging IoT data flows | arm64, x86_64, mac, windows | Prebuilt binary (AppImage/DMG/exe) | CC-BY-ND-4.0 |
 | 32 | **Redis** | In-memory key-value store for caching, pub/sub, and session management | arm64 | Source build (compiled) | RSALv2 / SSPLv1 |
 | 33 | **PostgreSQL** | Relational database with pgvector extension for AI embeddings | arm64 | Source build (compiled) | PostgreSQL License |
 | 34 | **InfluxDB** | Time-series database (OSS 2.x) for metrics and IoT data, mirrored with the influx CLI | arm64, x86_64, mac, windows | Prebuilt binary | MIT / Apache-2.0 |

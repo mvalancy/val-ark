@@ -14,10 +14,15 @@ graph TD
     ROOT --> TESTS[tests/README.md]
 
     DOCS --> ARCH[ARCHITECTURE.md]
+    DOCS --> COMM[COMMUNITY.md]
+    DOCS --> SEC[SECURITY-AUDIT.md]
+    DOCS --> ENC[ENCRYPTION.md]
     DOCS --> LIB[LIBRARIAN.md]
     DOCS --> TOOLS[TOOLS.md]
     DOCS --> PLAT[PLATFORMS.md]
+    DOCS --> NAS[ARM64-NAS.md]
     DOCS --> OFFLINE[OFFLINE.md]
+    DOCS --> GAPS[OFFLINE-GAPS.md]
     DOCS --> MODEL[MODEL_INVENTORY.md]
 ```
 
@@ -26,9 +31,13 @@ graph TD
 | Document | Description |
 |----------|-------------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture diagrams and component overview. |
+| [COMMUNITY.md](COMMUNITY.md) | Offline community services: chat, mail, boards, and file drop. |
+| [SECURITY-AUDIT.md](SECURITY-AUDIT.md) | Security audit and posture: repo, web server, scripts, runtime. |
+| [ENCRYPTION.md](ENCRYPTION.md) | Local certificate authority and TLS for the offline LAN. |
 | [LIBRARIAN.md](LIBRARIAN.md) | The self-filling, self-healing engine: scalable disk-fill, curation, and the 24/7 loop. |
-| [TOOLS.md](TOOLS.md) | Catalog of the 43 mirrored tools and their usage. |
+| [TOOLS.md](TOOLS.md) | Catalog of the 45 mirrored tools and their usage. |
 | [PLATFORMS.md](PLATFORMS.md) | Supported platforms and chips, including builds and the OpenWRT subset. |
+| [ARM64-NAS.md](ARM64-NAS.md) | ARM64 NAS appliances (chips such as the Rockchip RK3588): setup notes and gotchas. |
 | [OFFLINE.md](OFFLINE.md) | Offline operation, P2P sync, and the NFS-shared mesh. |
 | [OFFLINE-GAPS.md](OFFLINE-GAPS.md) | "Internet went off today" gap analysis: ranked missing tools, cold-start warnings, content roadmap. |
 | [MODEL_INVENTORY.md](MODEL_INVENTORY.md) | Model families, tiers, and availability. |

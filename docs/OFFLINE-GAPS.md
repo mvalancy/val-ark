@@ -3,7 +3,7 @@
 *A decision report: if the internet went off today, what would this mirror be
 missing? Produced by a 14-category sweep (each proposal HEAD-verified for real
 offline artifacts on our four platforms) plus an adversarial completeness
-critique. Updated 2026-07-09.*
+critique. Updated 2026-07-10.*
 
 [Back to Docs](README.md) | [Back to Project Root](../README.md)
 
@@ -19,7 +19,7 @@ critique. Updated 2026-07-09.*
 | 6 | **Git client** (PortableGit win + source tarball) | Gitea and every rebuild-from-source flow is useless without a client; fresh Windows/macOS boxes have no offline git today | win binary; src+hints | ~70 MB | GPL-2.0 |
 | 7 | **CMake + Ninja** | Our own catalog marks llama.cpp/whisper.cpp/sd.cpp as CUDA *source builds* on Jetson — blocked day 1 without cmake | all 4 | ~256 MB | BSD/Apache |
 | 8 | **KeePassXC** | Cloud password managers stop syncing immediately; every new LAN service needs offline credential storage | 3 of 4 | ~130 MB | GPL-3.0 |
-| 9 | **Grafana OSS** | Dashboard layer for the InfluxDB/Telegraf data the Ark already collects *(added to the catalog same day as this report)* | all 4 | ~1.4 GB | AGPL-3.0 |
+| 9 | **Grafana OSS** | Dashboard layer for the InfluxDB/Telegraf stack the Ark already mirrors *(added to the catalog same day as this report)* | all 4 | ~1.4 GB | AGPL-3.0 |
 | 10 | **LibreOffice** | Nobody without MS Office can open/edit/print community .docx/.xlsx on day 1 | 3 of 4 (no TDF arm64) | ~880 MB | MPL-2.0 |
 | 11 | **Rescue-boot pack** (Ventoy, Rufus, SystemRescue, Clonezilla, Memtest86+) | Every ISO in installers.tsv is stranded without an offline USB writer; SystemRescue = ddrescue/testdisk/gparted/smartctl in one artifact | writers + x86 ISOs | ~2.0 GB | GPL family |
 | 12 | **Meshtastic suite** (firmware + apps + CLI wheelhouse) | The only item reaching beyond the LAN: encrypted LoRa text mesh when internet AND cell are gone | all 4 + fw + APK | ~220–700 MB | GPL-3.0 |
@@ -75,8 +75,9 @@ Tools that are dead or crippled offline unless pre-seeded at mirror time:
    1.5–2 GB, Meshtastic firmware ~250 MB, Tesseract tessdata ~1 GB.
 5. **Cold-start assets for existing tools** — Godot export templates,
    Open VSX cache, conda-forge subset, Ollama blobs.
-6. **Corpora with no ingestion pipeline today** — NVIDIA JetPack/CUDA archives +
-   OpenWRT sysupgrade images (fleet re-imaging — mission-critical, small),
+6. **Corpora with no ingestion pipeline today** — NVIDIA CUDA/cuDNN/TensorRT
+   archives (`installers.tsv` already carries the Jetson L4T BSP and OpenWRT
+   sysupgrade images, but not the CUDA userspace),
    Kolibri education channels + Anki decks, Hesperian/FEMA/appropriate-tech PDF
    libraries, public-domain media for morale, spare-parts STL packs.
    **Design change required:** the librarian only ingests Kiwix OPDS + two
@@ -86,8 +87,9 @@ Tools that are dead or crippled offline unless pre-seeded at mirror time:
 
 ## 4. Completeness critique (what every sweep missed)
 
-1. **NVIDIA driver/CUDA/JetPack + fleet firmware** (OpenWRT sysupgrade, BIOS) —
-   the AI mission dies the first time a Jetson/GB10/router needs re-imaging.
+1. **NVIDIA driver/CUDA userspace + remaining fleet firmware** (GB10, BIOS) —
+   `installers.tsv` already re-images Orin (L4T BSP) and common OpenWRT routers,
+   but CUDA/cuDNN/TensorRT archives, GB10 recovery, and BIOS updates are missing.
 2. **Time sync**: chrony + GPS-disciplined stratum-0 (gpsd + PPS dongle) — with
    pool.ntp.org gone, clock drift silently breaks our local-CA TLS, mail, and
    builds within months.

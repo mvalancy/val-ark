@@ -3,23 +3,26 @@
 source "$(dirname "$0")/_common.sh"
 
 TOOL_NAME="freecad"
-PINNED_VERSION="1.0.0"
+PINNED_VERSION="1.1.1"
 
 download_freecad() {
     log "Downloading ${TOOL_NAME}..."
 
     local repo="FreeCAD/FreeCAD"
-    local tag="${PINNED_VERSION}"
+    local tag=$(github_latest_tag "$repo" "$PINNED_VERSION")
 
     # linux-x86_64: AppImage
     local dest="${TOOLS_DIR}/linux-x86_64/freecad"
     local url
     url=$(github_asset_url "$repo" "$tag" "x86_64.*AppImage")
     if [ -n "$url" ]; then
+        version_gate "$dest" "$tag"
         ensure_dir "$dest"
         local filename=$(basename "$url")
-        download_file "$url" "${dest}/${filename}" "freecad linux-x86_64"
-        chmod +x "${dest}/${filename}" 2>/dev/null
+        if download_file "$url" "${dest}/${filename}" "freecad linux-x86_64"; then
+            chmod +x "${dest}/${filename}" 2>/dev/null
+            version_stamp "$dest" "$tag"
+        fi
     else
         log_error "Could not find FreeCAD x86_64 AppImage asset"
     fi
@@ -28,32 +31,30 @@ download_freecad() {
     dest="${TOOLS_DIR}/linux-arm64/freecad"
     url=$(github_asset_url "$repo" "$tag" "aarch64.*AppImage")
     if [ -n "$url" ]; then
+        version_gate "$dest" "$tag"
         ensure_dir "$dest"
         local filename=$(basename "$url")
-        download_file "$url" "${dest}/${filename}" "freecad linux-arm64"
-        chmod +x "${dest}/${filename}" 2>/dev/null
+        if download_file "$url" "${dest}/${filename}" "freecad linux-arm64"; then
+            chmod +x "${dest}/${filename}" 2>/dev/null
+            version_stamp "$dest" "$tag"
+        fi
     else
         write_install_hint "$dest" "freecad (linux-arm64)" "FreeCAD - linux-arm64
 ======================
 
-FreeCAD does not currently provide official arm64 Linux AppImage builds.
+FreeCAD ships official Linux aarch64 AppImage builds since 1.0.0, but the
+asset for release ${tag} could not be resolved just now (likely a transient
+GitHub API/network failure). Re-run this mirror script, or download directly:
 
-Options:
-  1. Build from source:
-     sudo apt install build-essential cmake python3-dev libboost-all-dev \\
-       libcoin-dev libeigen3-dev libgts-dev libkdtree++-dev libmedc-dev \\
-       libocct-*-dev libproj-dev libvtk9-dev libx11-dev libxerces-c-dev \\
-       libzipios++-dev occt-draw pybind11-dev python3-matplotlib \\
-       python3-pivy python3-ply python3-pyside2.qtcore
-     git clone https://github.com/FreeCAD/FreeCAD.git
-     cd FreeCAD && mkdir build && cd build
-     cmake ..
-     make -j\$(nproc)
+  https://github.com/FreeCAD/FreeCAD/releases
+  (look for FreeCAD_<version>-Linux-aarch64-*.AppImage)
 
-  2. Use conda-forge:
+Alternatives:
+  1. conda-forge:
      conda install -c conda-forge freecad
 
-For more info: https://wiki.freecad.org/Compile_on_Linux
+  2. Build from source:
+     https://wiki.freecad.org/Compile_on_Linux
 "
     fi
 
@@ -61,9 +62,12 @@ For more info: https://wiki.freecad.org/Compile_on_Linux
     dest="${TOOLS_DIR}/macos-arm64/freecad"
     url=$(github_asset_url "$repo" "$tag" "macOS-arm64.*dmg")
     if [ -n "$url" ]; then
+        version_gate "$dest" "$tag"
         ensure_dir "$dest"
         local filename=$(basename "$url")
-        download_file "$url" "${dest}/${filename}" "freecad macos-arm64"
+        if download_file "$url" "${dest}/${filename}" "freecad macos-arm64"; then
+            version_stamp "$dest" "$tag"
+        fi
     else
         log_error "Could not find FreeCAD macOS-arm64 dmg asset"
     fi
@@ -75,9 +79,12 @@ For more info: https://wiki.freecad.org/Compile_on_Linux
         url=$(github_asset_url "$repo" "$tag" "Windows-x86_64.*zip")
     fi
     if [ -n "$url" ]; then
+        version_gate "$dest" "$tag"
         ensure_dir "$dest"
         local filename=$(basename "$url")
-        download_file "$url" "${dest}/${filename}" "freecad windows-x64"
+        if download_file "$url" "${dest}/${filename}" "freecad windows-x64"; then
+            version_stamp "$dest" "$tag"
+        fi
     else
         log_error "Could not find FreeCAD Windows-x86_64 asset"
     fi

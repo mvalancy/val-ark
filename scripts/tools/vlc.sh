@@ -3,10 +3,34 @@
 source "$(dirname "$0")/_common.sh"
 
 TOOL_NAME="vlc"
-PINNED_VERSION="3.0.21"
+PINNED_VERSION="3.0.23"
+
+# Discover the latest stable VLC version from the official "last" listing
+# (https://get.videolan.org/vlc/last/ contains vlc-X.Y.Z.tar.xz). Falls back
+# to PINNED_VERSION when offline or the parse fails.
+vlc_latest_version() {
+    local ver
+    ver=$(curl -fsSL --max-time 15 "https://get.videolan.org/vlc/last/" 2>/dev/null \
+        | grep -oE 'vlc-[0-9]+\.[0-9]+\.[0-9]+\.tar\.xz' \
+        | head -1 \
+        | sed -E 's/^vlc-([0-9.]+)\.tar\.xz$/\1/')
+    if [ -n "$ver" ]; then
+        echo "$ver"
+    else
+        echo "$PINNED_VERSION"
+    fi
+}
 
 download_vlc() {
     log "Downloading ${TOOL_NAME}..."
+
+    local version
+    version=$(vlc_latest_version)
+    if [ "$version" != "$PINNED_VERSION" ]; then
+        log "VLC latest upstream version: ${version} (pinned fallback: ${PINNED_VERSION})"
+    else
+        log "VLC version: ${version}"
+    fi
 
     # linux-arm64: No official portable build, use install hint
     local dest="${TOOLS_DIR}/linux-arm64/vlc"
@@ -40,14 +64,20 @@ Or via Flatpak:
     # macos-arm64: Universal DMG from official site
     dest="${TOOLS_DIR}/macos-arm64/vlc"
     ensure_dir "$dest"
-    local url="https://get.videolan.org/vlc/${PINNED_VERSION}/macosx/vlc-${PINNED_VERSION}-universal.dmg"
-    download_file "$url" "${dest}/VLC-${PINNED_VERSION}.dmg" "VLC macOS"
+    version_gate "$dest" "$version"
+    local url="https://get.videolan.org/vlc/${version}/macosx/vlc-${version}-universal.dmg"
+    if download_file "$url" "${dest}/VLC-${version}.dmg" "VLC macOS"; then
+        version_stamp "$dest" "$version"
+    fi
 
     # windows-x64: Official installer
     dest="${TOOLS_DIR}/windows-x64/vlc"
     ensure_dir "$dest"
-    url="https://get.videolan.org/vlc/${PINNED_VERSION}/win64/vlc-${PINNED_VERSION}-win64.exe"
-    download_file "$url" "${dest}/VLC-${PINNED_VERSION}-Setup.exe" "VLC Windows"
+    version_gate "$dest" "$version"
+    url="https://get.videolan.org/vlc/${version}/win64/vlc-${version}-win64.exe"
+    if download_file "$url" "${dest}/VLC-${version}-Setup.exe" "VLC Windows"; then
+        version_stamp "$dest" "$version"
+    fi
 
     log_success "VLC download complete"
 }

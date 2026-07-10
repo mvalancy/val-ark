@@ -234,6 +234,13 @@ download_file() {
 # content exists (a marker over an empty dir self-heals). A missing marker
 # with legacy content counts as stale — one re-mirror migrates it. Only files
 # under DIR are ever touched.
+# True when both strings look like versions AND the first is strictly newer.
+# Non-version-shaped strings (rolling build ids etc.) never compare "newer".
+_version_newer() {
+    case "$1" in v[0-9]*|[0-9]*) : ;; *) return 1 ;; esac
+    case "$2" in v[0-9]*|[0-9]*) : ;; *) return 1 ;; esac
+    [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]
+}
 version_gate() {
     local dir="$1" ver="$2"
     [ -n "$dir" ] && [ -n "$ver" ] || return 0
@@ -245,6 +252,14 @@ version_gate() {
     if [ "$have" = "$ver" ] && [ -n "$content" ]; then
         return 0    # already current
     fi
+    # Downgrade protection: when the mirrored version is NEWER than the one
+    # requested, keep it. This is what a pin fallback looks like when the live
+    # version lookup failed (rate limit / offline) — never trade a newer mirror
+    # for an older pin on a flaky network.
+    if [ -n "$content" ] && _version_newer "$have" "$ver"; then
+        log_info "$(basename "$dir"): keeping ${have} (newer than requested ${ver})"
+        return 0
+    fi
     if [ -n "$content" ] || [ -f "${dir}/.version" ]; then
         [ -n "$have" ] && log_info "$(basename "$dir"): ${have} -> ${ver} (clearing old artifacts)"
         find "$dir" -mindepth 1 -maxdepth 1 ! -name '.dist' -exec rm -rf {} + 2>/dev/null
@@ -254,6 +269,11 @@ version_gate() {
 version_stamp() {
     [ -n "$1" ] && [ -n "$2" ] || return 0
     mkdir -p "$1" 2>/dev/null
+    # Never downgrade the recorded version (see version_gate): if the dir kept
+    # its newer content, a skipped re-download must not relabel it older.
+    local have=""
+    [ -f "$1/.version" ] && have=$(cat "$1/.version" 2>/dev/null)
+    _version_newer "$have" "$2" && return 0
     printf '%s\n' "$2" > "$1/.version"
 }
 
@@ -443,7 +463,10 @@ write_install_hint() {
     local instructions="$3"
 
     ensure_dir "$dest_dir"
-    if [ ! -f "${dest_dir}/INSTALL.txt" ]; then
+    # Always (re)write when the text changed — hints are generated content, and
+    # skipping existing files left updated instructions (new PPA names, fixed
+    # URLs) stranded on every deployed mirror forever.
+    if [ ! -f "${dest_dir}/INSTALL.txt" ] || [ "$(cat "${dest_dir}/INSTALL.txt" 2>/dev/null)" != "$instructions" ]; then
         echo "$instructions" > "${dest_dir}/INSTALL.txt"
         log_info "Created install instructions for ${tool_name}"
     fi

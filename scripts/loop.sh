@@ -115,6 +115,7 @@ ensure_web_server() {
         if { [ "$krun" = "false" ] && [ "$zc" -gt 0 ]; } || [ $(( zc - kfiles )) -ge 20 ]; then
             log "${YELLOW}kiwix stale/down${NC} (serving $kfiles of $zc ZIMs) — restarting server to refresh"
             fuser -k "${port}/tcp" 2>/dev/null; fuser -k 8888/tcp 2>/dev/null
+            sleep 2   # let the old process actually release the port
             _va_start_web "$port" && log "${GREEN}restarted${NC} web server on :$port"
         else
             log "web up on :$port (kiwix ${krun:-?}, $kfiles ZIMs)"

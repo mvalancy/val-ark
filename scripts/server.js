@@ -1437,12 +1437,21 @@ function onFirstBind() {
     setInterval(reconcileKiwix, 30000);
 }
 
-function listenOn(port) {
+let boundPorts = 0;
+function listenOn(port, attempt = 0) {
     const srv = (port === PORT) ? server : http.createServer(guardedHandler);
     srv.on('error', (e) => {
         if (e.code === 'EACCES') {
             console.warn(`[port ${port}] permission denied — ports <1024 need:  sudo setcap 'cap_net_bind_service=+ep' $(command -v node)   (skipping)`);
         } else if (e.code === 'EADDRINUSE') {
+            // The predecessor process may still be releasing the port (the
+            // self-heal loop kills + relaunches in quick succession). Retry
+            // the primary port — skipping it would leave a listener-less
+            // zombie the loop's health check can never see past.
+            if (port === PORT && attempt < 15) {
+                setTimeout(() => listenOn(port, attempt + 1), 1000);
+                return;
+            }
             console.warn(`[port ${port}] already in use — skipping`);
         } else {
             console.warn(`[port ${port}] ${e.message} — skipping`);
@@ -1451,6 +1460,7 @@ function listenOn(port) {
     srv.listen(port, WEB_BIND, () => {
         console.log(`Val Ark listening on :${port} (bind ${WEB_BIND})`);
         for (const u of reachableURLs(port)) console.log(`    ${u}`);
+        boundPorts++;
         onFirstBind();
     });
 }
@@ -1459,3 +1469,13 @@ console.log('==================================================');
 console.log(`Val Ark web server — serving from ${ROOT}`);
 console.log('==================================================');
 for (const p of ALL_PORTS) listenOn(p);
+
+// A web server with no listener is a zombie: it holds no port, serves nothing,
+// and the loop's health probe can't distinguish it from "down". Exit non-zero
+// instead so the next self-heal cycle starts a fresh process.
+setTimeout(() => {
+    if (boundPorts === 0) {
+        console.error('No port bound within 30s — exiting for the self-heal loop to restart');
+        process.exit(1);
+    }
+}, 30000).unref();

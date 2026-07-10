@@ -2,7 +2,7 @@
 
 **Created by Matthew Valancy**
 
-A self-filling, online-optional mirror of 43 dev/AI tools, AI models, and offline
+A self-filling, online-optional mirror of 44 dev/AI tools, AI models, and offline
 content (ZIM via Kiwix) — plus an offline **community hub** (chat, mail, message
 boards, file sharing) — all behind one web UI. Local-first, peer-to-peer,
 NFS-shareable, offline-capable — scales to a disk of any size.
@@ -131,7 +131,7 @@ cp .env.example .env            # set VAL_ARK_DATA=/your/disk (git-ignored)
 Commands: `status | plan | fill | verify | evict | maintain | refresh`.
 See **[docs/LIBRARIAN.md](docs/LIBRARIAN.md)** for the full design.
 
-## What's Included (43 Tools)
+## What's Included (44 Tools)
 
 ### AI Inference
 llama.cpp, whisper.cpp, stable-diffusion.cpp, BitNet.cpp, Ollama, ONNX Runtime, Vosk, Piper TTS
@@ -146,7 +146,7 @@ Blender, FreeCAD, KiCad, Godot, GIMP, Inkscape, Kdenlive, Calibre
 FFmpeg, VLC, Audacity, yt-dlp
 
 ### Infrastructure
-Syncthing, Coolify, Kiwix, Tailscale, Mosquitto, MQTT Explorer,
+SeaweedFS, Syncthing, Coolify, Kiwix, Tailscale, Mosquitto, MQTT Explorer,
 Redis, PostgreSQL, InfluxDB, Telegraf, SQLite, btop, tmux
 
 ### Dev Tools
@@ -289,7 +289,7 @@ val-ark/
 │   ├── monitor.sh            # Watch active downloads
 │   ├── screenshots.sh        # Capture screenshots & recordings
 │   ├── release.sh            # Create git release tags
-│   └── tools/                # Per-tool download scripts (43 tools)
+│   └── tools/                # Per-tool download scripts (44 tools)
 ├── data/
 │   ├── installers.tsv        # OS / router / netboot install media catalog
 │   └── models-extra.tsv      # Diversity-expansion model catalog
@@ -312,8 +312,9 @@ data root and are gitignored.
 - [docs/COMMUNITY.md](docs/COMMUNITY.md) - Offline community services (chat, mail, boards, files)
 - [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md) - Security audit & posture
 - [docs/LIBRARIAN.md](docs/LIBRARIAN.md) - Self-filling mirror engine design
-- [docs/TOOLS.md](docs/TOOLS.md) - Complete tools catalog (43 tools)
+- [docs/TOOLS.md](docs/TOOLS.md) - Complete tools catalog (44 tools)
 - [docs/PLATFORMS.md](docs/PLATFORMS.md) - Platform-specific notes
+- [docs/UT2.md](docs/UT2.md) - UT2 / Rockchip RK3588 NAS setup notes, gotchas & NPU angle
 - [docs/OFFLINE.md](docs/OFFLINE.md) - Offline and P2P guide
 - [docs/MODEL_INVENTORY.md](docs/MODEL_INVENTORY.md) - Model details
 

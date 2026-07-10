@@ -10,7 +10,7 @@ const TOOL_IDS = [
   'llama-cpp', 'whisper-cpp', 'piper-tts', 'sd-cpp', 'ffmpeg',
   'onnxruntime', 'vosk', 'bitnet', 'ollama', 'blender',
   'freecad', 'kicad', 'godot', 'vlc', 'n8n',
-  'influxdb', 'milvus', 'comfyui', 'syncthing', 'coolify',
+  'influxdb', 'milvus', 'comfyui', 'seaweedfs', 'syncthing', 'coolify',
   'kiwix', 'tailscale', 'mosquitto', 'mqtt-explorer', 'redis',
   'chat', 'mail', 'forum', 'paste',
   'postgresql', 'telegraf', 'btop', 'tmux', 'helix', 'vscodium',
@@ -473,6 +473,10 @@ const TOOL_BINARIES: Record<string, string[]> = {
   'godot': [
     'tools/linux-arm64/godot',
     'tools/linux-x86_64/godot',
+  ],
+  'seaweedfs': [
+    'tools/linux-x86_64/seaweedfs/weed',
+    'tools/linux-arm64/seaweedfs/weed',
   ],
   'syncthing': [
     'tools/linux-x86_64/syncthing/syncthing',

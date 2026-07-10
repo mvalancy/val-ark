@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <rect width="64" height="64" rx="12" fill="#16a34a"/>
+  <!-- seaweed fronds growing from a seabed -->
+  <path d="M26 52 C18 44 20 34 26 28 C21 33 20 42 24 50 Z" fill="#ffffff" opacity="0.92"/>
+  <path d="M32 54 C30 40 33 24 39 12 C36 26 35 40 36 54 Z" fill="#ffffff"/>
+  <path d="M40 52 C46 44 45 34 40 27 C45 32 47 42 43 50 Z" fill="#ffffff" opacity="0.92"/>
+  <!-- blob "leaves" / stored objects -->
+  <circle cx="39" cy="16" r="3.2" fill="#bbf7d0"/>
+  <circle cx="26" cy="30" r="2.6" fill="#bbf7d0"/>
+  <circle cx="41" cy="30" r="2.6" fill="#bbf7d0"/>
+  <!-- seabed -->
+  <rect x="16" y="52" width="32" height="4" rx="2" fill="#ffffff" opacity="0.85"/>
+</svg>

@@ -798,7 +798,7 @@ function isPathSafe(resolved, baseDir) {
     return path.resolve(resolved).startsWith(base) || path.resolve(resolved) === path.resolve(baseDir);
 }
 
-function serveStatic(res, filePath) {
+function serveStatic(res, filePath, req) {
     fs.stat(filePath, (err, stat) => {
         if (err) return send404(res);
 
@@ -809,13 +809,43 @@ function serveStatic(res, filePath) {
 
         const ext = path.extname(filePath).toLowerCase();
         const mime = MIME[ext] || 'application/octet-stream';
-
-        res.writeHead(200, {
+        const baseHeaders = {
             'Content-Type': mime,
-            'Content-Length': stat.size,
+            'Accept-Ranges': 'bytes',
             'Cache-Control': (ext === '.html' || ext === '.css' || ext === '.js') ? 'no-cache' : 'max-age=3600',
             ...SECURITY_HEADERS,
-        });
+        };
+
+        // HTTP Range support — a mirror serves multi-GB artifacts (models, ZIMs,
+        // installers) and interrupted downloads must be resumable (curl -C -,
+        // wget -c, browser resume). Single-range only; malformed ranges fall
+        // through to a normal 200.
+        const m = req && req.headers && req.headers.range
+            && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+        if (m && (m[1] !== '' || m[2] !== '')) {
+            let start, end;
+            if (m[1] === '') {              // bytes=-N : final N bytes
+                start = Math.max(0, stat.size - parseInt(m[2], 10));
+                end = stat.size - 1;
+            } else {
+                start = parseInt(m[1], 10);
+                end = m[2] === '' ? stat.size - 1 : Math.min(parseInt(m[2], 10), stat.size - 1);
+            }
+            if (start >= stat.size || start > end) {
+                res.writeHead(416, { 'Content-Range': `bytes */${stat.size}`, ...SECURITY_HEADERS });
+                return res.end();
+            }
+            res.writeHead(206, {
+                ...baseHeaders,
+                'Content-Length': end - start + 1,
+                'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+            });
+            const stream = fs.createReadStream(filePath, { start, end });
+            stream.on('error', () => { try { res.destroy(); } catch (_) {} });
+            return stream.pipe(res);
+        }
+
+        res.writeHead(200, { ...baseHeaders, 'Content-Length': stat.size });
         fs.createReadStream(filePath).pipe(res);
     });
 }
@@ -1129,7 +1159,7 @@ function handleRequest(req, res) {
 
     // Route / to web-ui/index.html
     if (normalized === '/' || normalized === path.sep) {
-        return serveStatic(res, path.join(ROOT, 'web-ui', 'index.html'));
+        return serveStatic(res, path.join(ROOT, 'web-ui', 'index.html'), req);
     }
 
     // Serve from project root for known directories
@@ -1139,19 +1169,19 @@ function handleRequest(req, res) {
     if (projectDirs.includes(topLevel)) {
         const fullPath = path.join(ROOT, normalized);
         if (!isPathSafe(fullPath, ROOT)) return send404(res);
-        return serveStatic(res, fullPath);
+        return serveStatic(res, fullPath, req);
     }
 
     // Serve LICENSE from project root
     if (normalized === '/LICENSE' || normalized === path.sep + 'LICENSE') {
-        return serveStatic(res, path.join(ROOT, 'LICENSE'));
+        return serveStatic(res, path.join(ROOT, 'LICENSE'), req);
     }
 
     // Everything else from web-ui/
     const webPath = path.join(ROOT, 'web-ui', normalized);
     if (!isPathSafe(webPath, path.join(ROOT, 'web-ui'))) return send404(res);
 
-    serveStatic(res, webPath);
+    serveStatic(res, webPath, req);
 }
 
 // Never let a single bad request take the whole mirror server down: catch any

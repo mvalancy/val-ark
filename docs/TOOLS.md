@@ -1,15 +1,15 @@
-# Val Ark - Tools Catalog (43 Tools)
+# Val Ark - Tools Catalog (44 Tools)
 
 [Back to Docs](README.md) | [Back to Project Root](../README.md)
 
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'pie1': '#2563eb', 'pie2': '#7c3aed', 'pie3': '#e87d0d', 'pie4': '#16a34a', 'pie5': '#0891b2', 'pie6': '#6366f1'}}}%%
-pie title Tool Categories (43 Total)
+pie title Tool Categories (44 Total)
     "AI Inference (8)" : 8
     "AI Platforms (4)" : 4
     "Creative (8)" : 8
     "Media (4)" : 4
-    "Infrastructure (13)" : 13
+    "Infrastructure (14)" : 14
     "Dev Tools (6)" : 6
 ```
 

@@ -9,6 +9,14 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 
+# Resolve WHERE Val Ark keeps its data (.env / autodetect). Sourcing this gives
+# us DATA_ROOT, the data-tree paths, valark_ensure_layout, and valark_env_summary
+# so setup shows the user the real storage location — not the OS/boot disk.
+if [ -f "${SCRIPT_DIR}/lib/valark-env.sh" ]; then
+    # shellcheck source=lib/valark-env.sh
+    . "${SCRIPT_DIR}/lib/valark-env.sh"
+fi
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -33,15 +41,24 @@ echo ""
 
 log_info "Creating directory structure..."
 
-mkdir -p "${PROJECT_ROOT}/tools"
-mkdir -p "${PROJECT_ROOT}/sources"
-mkdir -p "${PROJECT_ROOT}/assets/ollama"
-mkdir -p "${PROJECT_ROOT}/web-ui/logos"
-mkdir -p "${PROJECT_ROOT}/web-ui/samples"
-mkdir -p "${PROJECT_ROOT}/web-ui/diagrams"
-mkdir -p "${PROJECT_ROOT}/web-ui/screenshots"
+# Repo-local asset dirs (part of the web UI — these genuinely live in the repo).
+mkdir -p "${PROJECT_ROOT}/web-ui/logos" \
+         "${PROJECT_ROOT}/web-ui/samples" \
+         "${PROJECT_ROOT}/web-ui/diagrams" \
+         "${PROJECT_ROOT}/web-ui/screenshots"
 
-log_ok "Directories created"
+# Data trees (tools/models/content/sources/assets/...) belong on the resolved
+# DATA_ROOT, not on the OS/boot volume. valark_ensure_layout creates them there
+# and symlinks them back into the repo so the big disk is always used.
+if command -v valark_ensure_layout >/dev/null 2>&1; then
+    valark_ensure_layout
+    mkdir -p "${ASSETS_DIR}/ollama" 2>/dev/null || true
+    log_ok "Directories created (data trees on ${DATA_ROOT})"
+else
+    mkdir -p "${PROJECT_ROOT}/tools" "${PROJECT_ROOT}/sources" \
+             "${PROJECT_ROOT}/assets/ollama"
+    log_ok "Directories created"
+fi
 
 ###############################################################################
 # Check Dependencies
@@ -141,6 +158,79 @@ else
 fi
 
 ###############################################################################
+# Node.js Runtime (required by the zero-dep web server, scripts/server.js)
+###############################################################################
+# The web UI/API server is plain Node with no npm deps, but it still needs a
+# Node binary. A fresh appliance (e.g. UT2 / RK3588) often ships without one, so
+# bootstrap a portable build into ~/.local/node — exactly where start.sh looks.
+
+echo ""
+log_info "Node.js runtime (web server):"
+NODE_BIN="${HOME}/.local/node/bin/node"
+if command -v node >/dev/null 2>&1; then
+    echo -e "  ${GREEN}✓${NC} node ($(node --version 2>/dev/null)) in PATH"
+elif [ -x "$NODE_BIN" ]; then
+    echo -e "  ${GREEN}✓${NC} node ($("$NODE_BIN" --version 2>/dev/null)) at ~/.local/node"
+else
+    echo -e "  ${YELLOW}~${NC} node not found — the web server (scripts/server.js) needs it."
+    NODE_VER="${VALARK_NODE_VERSION:-v20.18.1}"
+    case "$(uname -m)" in
+        aarch64|arm64) NODE_ARCH="linux-arm64" ;;
+        x86_64|amd64)  NODE_ARCH="linux-x64" ;;
+        *)             NODE_ARCH="" ;;
+    esac
+    if [ "$(uname -s)" != "Linux" ] || [ -z "$NODE_ARCH" ]; then
+        log_warn "No portable Node build known for $(uname -s)/$(uname -m) — install Node manually."
+    else
+        echo -n "  Download portable Node ${NODE_VER} (${NODE_ARCH}) into ~/.local/node? [Y/n]: "
+        read -r answer
+        if [ "$answer" != "n" ] && [ "$answer" != "N" ]; then
+            _url="https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-${NODE_ARCH}.tar.xz"
+            _tmp="$(mktemp -d)"
+            if curl -fL --retry 3 --connect-timeout 15 -o "${_tmp}/node.tar.xz" "$_url"; then
+                mkdir -p "${HOME}/.local/node"
+                if tar -xJf "${_tmp}/node.tar.xz" -C "${HOME}/.local/node" --strip-components=1 \
+                   && [ -x "$NODE_BIN" ]; then
+                    log_ok "Node installed: $("$NODE_BIN" --version) (~/.local/node)"
+                else
+                    log_err "Node extraction failed."
+                fi
+            else
+                log_err "Node download failed: $_url"
+            fi
+            rm -rf "$_tmp"
+        fi
+    fi
+fi
+
+###############################################################################
+# TLS CA bundle (repair a stale system trust store)
+###############################################################################
+# Appliances like the UT2/RK3588 NAS ship an old CA store that fails TLS to newer
+# download hosts (download.kde.org, curl.se, ...). If so, fetch a current bundle
+# into the state dir; _common.sh points every tool download at it via CURL_CA_BUNDLE.
+
+echo ""
+log_info "TLS trust (CA certificates):"
+CA_DEST="${STATE_DIR:-${PROJECT_ROOT}/state}/cacert.pem"
+if curl -fsS --max-time 15 -o /dev/null https://download.kde.org/ 2>/dev/null; then
+    echo -e "  ${GREEN}✓${NC} system CA store validates modern hosts"
+elif [ -s "$CA_DEST" ] && curl -fsS --max-time 15 --cacert "$CA_DEST" -o /dev/null https://download.kde.org/ 2>/dev/null; then
+    echo -e "  ${GREEN}✓${NC} using Val Ark CA bundle: ${CA_DEST}"
+else
+    echo -e "  ${YELLOW}~${NC} system CA store is stale — fetching a current bundle..."
+    mkdir -p "$(dirname "$CA_DEST")"
+    if curl -fsSL --max-time 30 -o "$CA_DEST" \
+         https://raw.githubusercontent.com/bagder/ca-bundle/master/ca-bundle.crt \
+       && grep -q "BEGIN CERTIFICATE" "$CA_DEST"; then
+        log_ok "Fresh CA bundle installed ($(grep -c 'BEGIN CERT' "$CA_DEST") certs) — downloads will use it"
+    else
+        rm -f "$CA_DEST"
+        log_warn "Could not fetch a fresh CA bundle; some tool downloads may fail TLS verification."
+    fi
+fi
+
+###############################################################################
 # Platform Detection
 ###############################################################################
 
@@ -166,8 +256,21 @@ fi
 ###############################################################################
 
 echo ""
-log_info "Disk space:"
-df -h "${PROJECT_ROOT}" | tail -1 | awk '{printf "  Available: %s / %s (%s used)\n", $4, $2, $5}'
+log_info "Storage location (where Val Ark keeps its data):"
+if command -v valark_env_summary >/dev/null 2>&1; then
+    valark_env_summary | sed 's/^/  /'
+    # Loudly warn if the data root resolves onto the OS/boot volume — otherwise
+    # the librarian would try to "fill" the system disk instead of a data disk.
+    _root_src=$(df -P "${DATA_ROOT}" 2>/dev/null | awk 'NR==2{print $1}')
+    _os_src=$(df -P / 2>/dev/null | awk 'NR==2{print $1}')
+    if [ "${DATA_ROOT}" = "${PROJECT_ROOT}" ] || [ "${_root_src}" = "${_os_src}" ]; then
+        echo ""
+        log_warn "DATA_ROOT is on the OS/boot volume — Val Ark would fill your system disk!"
+        log_warn "Point it at a big disk: set VAL_ARK_DATA=/path/to/disk in .env (see .env.example)."
+    fi
+else
+    df -h "${PROJECT_ROOT}" | tail -1 | awk '{printf "  Available: %s / %s (%s used)\n", $4, $2, $5}'
+fi
 
 echo ""
 echo "=================================================================="

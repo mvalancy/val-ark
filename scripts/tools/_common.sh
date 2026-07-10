@@ -23,6 +23,16 @@ LOG_DIR="${LOG_DIR:-${TOOLS_DIR}/.logs}"
 MAX_RETRIES=5
 RETRY_DELAY=15
 
+# Fresh CA bundle: some appliances (e.g. the UT2/RK3588 NAS) ship a stale system
+# CA store that fails TLS to newer download hosts (download.kde.org, curl.se, ...).
+# If Val Ark has fetched a current bundle (setup.sh does this), point curl at it so
+# every download here trusts modern certs. curl honours $CURL_CA_BUNDLE natively.
+if [ -z "${CURL_CA_BUNDLE:-}" ]; then
+    for _va_ca in "${STATE_DIR:-}/cacert.pem" "${ASSETS_DIR:-}/cacert.pem"; do
+        if [ -n "$_va_ca" ] && [ -s "$_va_ca" ]; then export CURL_CA_BUNDLE="$_va_ca"; break; fi
+    done
+fi
+
 # Optional GitHub token for higher API rate limits
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 

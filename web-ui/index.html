@@ -1007,6 +1007,50 @@ const TOOLS = [
     // INFRASTRUCTURE TOOLS
     // =========================================================================
     {
+        id: 'seaweedfs', name: 'SeaweedFS', category: 'infrastructure', icon: 'W', iconBg: '#16a34a', logo: 'logos/seaweedfs.svg', downloadTarget: 'seaweedfs',
+        desc: 'Distributed object/file store with an S3-compatible API - a fast blob layer for models and content across the fleet',
+        size: '~130 MB',
+        screenshots: ['screenshots/seaweedfs-1.png'],
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://github.com/seaweedfs/seaweedfs',
+            releases: 'https://github.com/seaweedfs/seaweedfs/releases',
+            binaries: {
+                'jetson': 'tools/linux-arm64/seaweedfs/weed',
+                'ubuntu': 'tools/linux-x86_64/seaweedfs/weed',
+                'mac': 'tools/macos-arm64/seaweedfs/weed',
+                'windows': 'tools/windows-x64/seaweedfs/weed.exe'
+            }
+        },
+        details: {
+            overview: 'SeaweedFS is a fast distributed storage system for blobs, objects, and files. It stores billions of files and serves them quickly, using an O(1) disk-seek design inspired by Facebook\'s Haystack paper: a lightweight master tracks volumes while volume servers hold the actual data, so a file lookup costs a single disk read regardless of how much is stored.\n\nBeyond raw blob storage, SeaweedFS layers on a POSIX-like Filer (with directory structure and metadata in a pluggable store), an S3-compatible API, WebDAV, and a FUSE mount. For Val Ark this makes it a natural companion to the NFS/Syncthing mirror: models, ZIM content, and tool archives can be served as S3 objects to fleet nodes and applications, with optional replication across drives or machines for durability.\n\nSeaweedFS ships as a single static `weed` binary with subcommands for every role (master, volume, filer, s3, mount). It supports rack-aware replication, erasure coding for cold data, TTL-based expiry, transparent compression, and tiered storage to cloud backends - all configurable without external dependencies.',
+            features: [
+                'Single static `weed` binary; one command per role (master/volume/filer/s3/mount)',
+                'O(1) disk seek per read (Haystack-style) - fast even with billions of files',
+                'S3-compatible API, plus Filer, WebDAV, and FUSE mount interfaces',
+                'Configurable replication (e.g. 001/010/100) across drives, racks, or machines',
+                'Erasure coding for cold data and TTL-based automatic expiry',
+                'Tiered storage to cloud (S3/GCS/Azure) for rarely accessed blobs',
+                'Pluggable Filer metadata stores (LevelDB, Redis, PostgreSQL, and more)',
+                'Cross-platform: Linux (ARM64/x86_64), macOS, Windows'
+            ],
+            cli: [
+                {cmd: 'scripts/services/seaweedfs.sh start', desc: 'Val Ark launcher: all-in-one node using VALARK_SEAWEED_* from .env'},
+                {cmd: 'scripts/services/seaweedfs.sh status', desc: 'Show the data dir, free space, and per-port health'},
+                {cmd: 'weed server -dir=/data_n002/seaweedfs -volume.port=8085 -filer -filer.port=8889 -s3 -s3.port=8333', desc: 'All-in-one on drive 2 (volume 8085 avoids the NAS openresty on 8080)'},
+                {cmd: 'weed volume -dir=/data_n002/seaweedfs/vol -max=0 -mserver=localhost:9333 -port=8085', desc: 'Volume server holding the data (-max=0 = fill the disk)'},
+                {cmd: 'weed s3 -filer=localhost:8889 -port=8333', desc: 'S3-compatible gateway (point AWS-style clients here)'},
+                {cmd: 'weed mount -filer=localhost:8889 -dir=/mnt/seaweed', desc: 'Mount the store as a local FUSE filesystem'}
+            ],
+            api: [
+                {endpoint: 'GET /dir/assign', desc: 'Master: assign a file id + volume server for a new upload'},
+                {endpoint: 'POST /{fid}', desc: 'Volume: upload a file to the assigned file id'},
+                {endpoint: 'GET /{fid}', desc: 'Volume: fetch a stored file by its id'},
+                {endpoint: 'PUT /{bucket}/{key} (S3)', desc: 'S3 gateway: put an object into a bucket'}
+            ]
+        }
+    },
+    {
         id: 'syncthing', name: 'Syncthing', category: 'infrastructure', icon: 'S', iconBg: '#0891b2', logo: 'logos/syncthing.svg', downloadTarget: 'syncthing',
         desc: 'Continuous file synchronization - replicate your AI models and tools across servers',
         size: '~10 MB',
@@ -2042,6 +2086,7 @@ const TOOL_META = {
     'telegraf': { maker: 'InfluxData', website: 'https://www.influxdata.com/time-series-platform/telegraf/', license: 'MIT', licenseUrl: 'https://github.com/influxdata/telegraf/blob/master/LICENSE' },
     'milvus': { maker: 'Zilliz', website: 'https://milvus.io', license: 'Apache-2.0', licenseUrl: 'https://github.com/milvus-io/milvus/blob/master/LICENSE' },
     'comfyui': { maker: 'Comfy Org', website: 'https://www.comfy.org', license: 'GPL-3.0', licenseUrl: 'https://github.com/comfyanonymous/ComfyUI/blob/master/LICENSE' },
+    'seaweedfs': { maker: 'Chris Lu / SeaweedFS', website: 'https://seaweedfs.com', license: 'Apache-2.0', licenseUrl: 'https://github.com/seaweedfs/seaweedfs/blob/master/LICENSE' },
     'syncthing': { maker: 'Syncthing Foundation', website: 'https://syncthing.net', license: 'MPL-2.0', licenseUrl: 'https://github.com/syncthing/syncthing/blob/main/LICENSE' },
     'coolify': { maker: 'coollabs', website: 'https://coolify.io', license: 'Apache-2.0', licenseUrl: 'https://github.com/coollabsio/coolify/blob/v4.x/LICENSE' },
     'btop': { maker: 'aristocratos', website: 'https://github.com/aristocratos/btop', license: 'Apache-2.0', licenseUrl: 'https://github.com/aristocratos/btop/blob/main/LICENSE' },

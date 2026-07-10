@@ -26,6 +26,12 @@ LOG_FILE="${LOG_DIR}/tools_$(date +%Y%m%d_%H%M%S).log"
 ensure_dir "$LOG_DIR"
 SCRIPT_START=$(date +%s)
 
+# Human elapsed time since an epoch timestamp (used in the session summary).
+elapsed_since() {
+    local s=$(( $(date +%s) - ${1:-$(date +%s)} ))
+    printf '%dm%02ds' $(( s / 60 )) $(( s % 60 ))
+}
+
 # Backward compatibility aliases (old names → new script names)
 declare -A ALIASES=(
     [llama]="llama-cpp"

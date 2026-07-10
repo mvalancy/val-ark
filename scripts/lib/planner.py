@@ -219,13 +219,30 @@ def evict(cands, manifest_path, need):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--budget", type=int, required=True, help="fillable bytes (avail - reserve)")
+    ap.add_argument("--budget", type=int, required=True, help="fillable bytes (avail - reserve, capped by footprint budget)")
     ap.add_argument("--small-max", type=int, default=SMALL_MAX_DEFAULT)
+    ap.add_argument("--model-max-bytes", type=int, default=0,
+                    help="drop individual model candidates larger than this (0=no cap) — keeps the fill to small models")
     ap.add_argument("--evict-need", type=int, default=0)
     ap.add_argument("--manifest", default="")
     args = ap.parse_args()
 
+    def _h(n):
+        for u in ("B", "KB", "MB", "GB", "TB"):
+            if n < 1024 or u == "TB":
+                return "%.1f%s" % (n, u)
+            n /= 1024.0
+
     cands = collapse_flavours(read_candidates(sys.stdin))
+
+    # Small-models policy: never propose an oversized model, no matter how
+    # valuable — otherwise phase 3 (flagship fill) would pull the huge ones.
+    if args.model_max_bytes > 0:
+        oversized = [c for c in cands if c["bucket"] == "models" and c["bytes"] > args.model_max_bytes]
+        if oversized:
+            cands = [c for c in cands if not (c["bucket"] == "models" and c["bytes"] > args.model_max_bytes)]
+            sys.stderr.write("planner: skipped %d model(s) larger than %s (small-models policy)\n"
+                             % (len(oversized), _h(args.model_max_bytes)))
 
     if args.evict_need > 0:
         for v in evict(cands, args.manifest, args.evict_need):

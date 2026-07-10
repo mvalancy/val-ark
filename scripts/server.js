@@ -7,9 +7,60 @@ const fs = require('fs');
 const path = require('path');
 const { execSync, spawn } = require('child_process');
 
-const PORT = parseInt(process.argv[2] || '3000', 10);
 const ROOT = path.resolve(__dirname, '..');
-const MODEL_ROOT = path.join(process.env.HOME || require('os').homedir(), 'models');
+
+// --- Config: process env, then .env file, then default ----------------------
+const DOTENV = (() => {
+    const out = {};
+    try {
+        for (const line of fs.readFileSync(path.join(ROOT, '.env'), 'utf8').split('\n')) {
+            if (/^\s*#/.test(line)) continue;
+            const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+            if (m) out[m[1]] = m[2].replace(/^["']|["']$/g, '');
+        }
+    } catch (_) { /* no .env */ }
+    return out;
+})();
+const cfg = (k, d) => (process.env[k] !== undefined ? process.env[k]
+                      : (DOTENV[k] !== undefined ? DOTENV[k] : d));
+
+// Listen ports: primary from argv[2] / VALARK_WEB_PORT (default 3000), plus any
+// VALARK_WEB_EXTRA_PORTS (comma-separated, e.g. "80" for standard HTTP) and any
+// extra numeric CLI args. Privileged ports (<1024) need CAP_NET_BIND_SERVICE on
+// node (setcap) or root; if a port can't bind we warn and keep the others.
+const PORT = parseInt(process.argv[2] || cfg('VALARK_WEB_PORT', '3000'), 10);
+const EXTRA_PORTS = [
+    ...String(cfg('VALARK_WEB_EXTRA_PORTS', '')).split(','),
+    ...process.argv.slice(3),
+].map(s => parseInt(String(s).trim(), 10))
+ .filter(p => Number.isInteger(p) && p > 0 && p !== PORT);
+const ALL_PORTS = [PORT, ...new Set(EXTRA_PORTS)];
+
+// Resolve WHERE Val Ark stores data, mirroring scripts/lib/valark-env.sh, so the
+// web UI's disk stats reflect the DATA disk — not the OS/boot volume the repo
+// happens to sit on. Order: $VAL_ARK_DATA -> VAL_ARK_DATA= in .env -> follow a
+// data symlink onto the big disk -> repo root (single-disk/dev fallback).
+function resolveDataRoot() {
+    const cfgd = cfg('VAL_ARK_DATA');
+    if (cfgd) return cfgd;
+    for (const name of ['tools', 'models', 'content']) {
+        try {
+            const real = fs.realpathSync(path.join(ROOT, name));
+            if (real && real !== path.join(ROOT, name)) return path.dirname(real);
+        } catch (_) { /* symlink absent — try next */ }
+    }
+    return ROOT;
+}
+const DATA_ROOT = resolveDataRoot();
+// Models live at <DATA_ROOT>/models (the repo 'models' symlink points here too),
+// falling back to ~/models for legacy single-disk installs.
+const MODEL_ROOT = (() => {
+    for (const c of [path.join(DATA_ROOT, 'models'),
+                     path.join(process.env.HOME || require('os').homedir(), 'models')]) {
+        try { if (fs.statSync(c).isDirectory()) return c; } catch (_) {}
+    }
+    return path.join(DATA_ROOT, 'models');
+})();
 
 // MIME types for static file serving
 const MIME = {
@@ -191,8 +242,11 @@ function getDiskStatus() {
         return statusCache.disk.data;
     }
     try {
+        // Measure the DATA disk (where tools/models/content live), not the repo.
+        let target = ROOT;
+        try { if (fs.statSync(DATA_ROOT).isDirectory()) target = DATA_ROOT; } catch (_) {}
         const output = execSync('/usr/bin/df -B1 --output=size,used,avail .', {
-            cwd: ROOT, encoding: 'utf8', timeout: 5000,
+            cwd: target, encoding: 'utf8', timeout: 5000,
         });
         const lines = output.trim().split('\n');
         const parts = lines[1].trim().split(/\s+/);
@@ -705,6 +759,47 @@ function serveStatic(res, filePath) {
     });
 }
 
+// Serve a mirrored artifact under the data trees as a DOWNLOAD — this is how site
+// visitors pull app binaries per platform. A file streams as an attachment; a
+// directory streams as a gzipped tar (via system `tar`, zero-dep). Only paths
+// inside the allowed data dirs are served; traversal is rejected.
+const ARCHIVE_DIRS = ['tools', 'models', 'content', 'sources', 'assets', 'installers'];
+function serveArchive(res, req, relPath) {
+    let clean;
+    try { clean = decodeURIComponent(relPath); } catch (_) { clean = relPath; }
+    clean = path.normalize(clean).replace(/^([/\\]|\.\.[/\\]?)+/, '');
+    const top = clean.split(/[/\\]/)[0];
+    if (!ARCHIVE_DIRS.includes(top)) return send404(res);
+    const target = path.join(ROOT, clean);
+    if (!isPathSafe(target, path.join(ROOT, top))) return send404(res);
+
+    fs.stat(target, (err, stat) => {
+        if (err) return send404(res);
+        const base = path.basename(target);
+        if (stat.isDirectory()) {
+            res.writeHead(200, {
+                'Content-Type': 'application/gzip',
+                'Content-Disposition': `attachment; filename="${base}.tar.gz"`,
+                ...SECURITY_HEADERS,
+            });
+            const tar = spawn('tar', ['-czf', '-', '-C', path.dirname(target), base]);
+            tar.stdout.pipe(res);
+            tar.on('error', () => { try { res.destroy(); } catch (_) {} });
+            req.on('close', () => { try { tar.kill(); } catch (_) {} });
+        } else {
+            res.writeHead(200, {
+                'Content-Type': 'application/octet-stream',
+                'Content-Length': stat.size,
+                'Content-Disposition': `attachment; filename="${base}"`,
+                ...SECURITY_HEADERS,
+            });
+            const stream = fs.createReadStream(target);
+            stream.on('error', () => { try { res.destroy(); } catch (_) {} });
+            stream.pipe(res);
+        }
+    });
+}
+
 function serveDirectory(res, dirPath) {
     const entries = readdirSafe(dirPath);
     const relativePath = dirPath.replace(ROOT, '').replace(/^\//, '');
@@ -756,7 +851,7 @@ function formatSize(bytes) {
 // =============================================================================
 // Server
 // =============================================================================
-const server = http.createServer((req, res) => {
+const requestHandler = (req, res) => {
     // Block path traversal attempts early (before URL normalization resolves ..)
     if (req.url.includes('..') || req.url.includes('%2e%2e') || req.url.includes('%2E%2E')) {
         return send404(res);
@@ -798,7 +893,23 @@ const server = http.createServer((req, res) => {
     if (!isPathSafe(webPath, path.join(ROOT, 'web-ui'))) return send404(res);
 
     serveStatic(res, webPath);
+};
+
+// Never let a single bad request take the whole mirror server down: catch any
+// synchronous handler error and return 500 instead of crashing the process.
+const server = http.createServer((req, res) => {
+    try {
+        requestHandler(req, res);
+    } catch (e) {
+        console.error(`[request error] ${req.method} ${req.url}: ${e && e.stack || e}`);
+        try {
+            if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('Internal Server Error');
+        } catch (_) { /* response already gone */ }
+    }
 });
+// Last-resort guard so an async surprise logs instead of killing a public server.
+process.on('uncaughtException', (e) => console.error(`[uncaughtException] ${e && e.stack || e}`));
 
 // =============================================================================
 // Kiwix Auto-Launch
@@ -898,13 +1009,50 @@ process.on('exit', () => { if (kiwixProcess) kiwixProcess.kill(); });
 process.on('SIGINT', () => { if (kiwixProcess) kiwixProcess.kill(); process.exit(0); });
 process.on('SIGTERM', () => { if (kiwixProcess) kiwixProcess.kill(); process.exit(0); });
 
-server.listen(PORT, () => {
-    console.log(`Val Ark server running at http://localhost:${PORT}`);
-    console.log(`Serving from: ${ROOT}`);
-    // Warm the cache on startup
+// Reachable URLs — advertise LAN addresses too, so the site is easy to find
+// (not just localhost) from other machines on the network.
+function reachableURLs(port) {
+    const os = require('os');
+    const urls = [`http://localhost:${port}`];
+    const ifaces = os.networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+        for (const ni of ifaces[name] || []) {
+            if (ni.family === 'IPv4' && !ni.internal) urls.push(`http://${ni.address}:${port}`);
+        }
+    }
+    return urls;
+}
+
+// Warm caches + auto-start Kiwix once, on the first port that binds.
+let started = false;
+function onFirstBind() {
+    if (started) return;
+    started = true;
     getToolsStatus();
     getContentStatus();
     getModelsStatus();
-    // Auto-start Kiwix content server
     startKiwix();
-});
+}
+
+function listenOn(port) {
+    const srv = (port === PORT) ? server : http.createServer(requestHandler);
+    srv.on('error', (e) => {
+        if (e.code === 'EACCES') {
+            console.warn(`[port ${port}] permission denied — ports <1024 need:  sudo setcap 'cap_net_bind_service=+ep' $(command -v node)   (skipping)`);
+        } else if (e.code === 'EADDRINUSE') {
+            console.warn(`[port ${port}] already in use — skipping`);
+        } else {
+            console.warn(`[port ${port}] ${e.message} — skipping`);
+        }
+    });
+    srv.listen(port, () => {
+        console.log(`Val Ark listening on :${port}`);
+        for (const u of reachableURLs(port)) console.log(`    ${u}`);
+        onFirstBind();
+    });
+}
+
+console.log('==================================================');
+console.log(`Val Ark web server — serving from ${ROOT}`);
+console.log('==================================================');
+for (const p of ALL_PORTS) listenOn(p);

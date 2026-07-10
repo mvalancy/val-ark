@@ -100,7 +100,8 @@ gen_candidates() { catalog_all_candidates; }
 
 build_plan() {
     local budget="$1"
-    gen_candidates | python3 "$PLANNER" --budget "$budget" 2> "${TMPDIR_VA}/plan.summary"
+    gen_candidates | python3 "$PLANNER" --budget "$budget" \
+        --model-max-bytes "$(valark_model_max_bytes)" 2> "${TMPDIR_VA}/plan.summary"
 }
 
 # --- commands --------------------------------------------------------------
@@ -112,6 +113,10 @@ cmd_status() {
     local managed=0; [ -f "$MANIFEST" ] && managed=$(wc -l < "$MANIFEST")
     echo "  managed items: $managed   (manifest: $MANIFEST)"
     echo "  fillable now : $(human "$(valark_fillable_bytes)")"
+    if [ -n "$VALARK_MAX_GB" ]; then
+        echo "  footprint cap: ${VALARK_MAX_GB}GB total (used $(human "$(valark_data_used_bytes)"), budget left $(human "$(valark_budget_bytes)"))"
+    fi
+    [ -n "$VALARK_MODEL_MAX_GB" ] && echo "  model cap    : skip any single model > ${VALARK_MODEL_MAX_GB}GB (apps + small models)"
     echo ""
     echo "  ZIM content: $(find "$ZIM_DIR" -maxdepth 1 -name '*.zim' 2>/dev/null | wc -l) files, $(du -sh "$ZIM_DIR" 2>/dev/null | cut -f1)"
     echo "  installers : $(find "$INSTALLERS_DIR" -type f 2>/dev/null | wc -l) files, $(du -sh "$INSTALLERS_DIR" 2>/dev/null | cut -f1)"
@@ -124,7 +129,7 @@ cmd_status() {
 }
 
 cmd_plan() {
-    local budget="${1:-$(valark_fillable_bytes)}"
+    local budget="${1:-$(valark_budget_bytes)}"
     ensure_state
     catalog_refresh_zim >/dev/null 2>&1 || warn "ZIM catalog refresh failed; using cache if any"
     build_plan "$budget" > "${TMPDIR_VA}/plan.tsv"
@@ -151,7 +156,7 @@ cmd_fill() {
     # on the same files. Non-blocking — if another fill holds it, this is a no-op.
     exec 9>"${STATE_DIR}/fill.lock"
     if ! flock -n 9; then warn "another fill is already running; skipping"; return 0; fi
-    [ -z "$budget" ] && budget="$(valark_fillable_bytes)"
+    [ -z "$budget" ] && budget="$(valark_budget_bytes)"
     catalog_refresh_zim >/dev/null 2>&1 || warn "ZIM catalog refresh failed; using cache"
     build_plan "$budget" > "${TMPDIR_VA}/plan.tsv"
     cat "${TMPDIR_VA}/plan.summary" >&2

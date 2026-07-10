@@ -95,7 +95,19 @@ EOF
 # Keep the Val Ark web UI server (which auto-launches Kiwix) running AND fresh.
 # server.js launches kiwix-serve only once at startup, so it neither recovers if
 # kiwix dies nor picks up newly-downloaded ZIMs — the loop handles both here.
-_va_node() { local n="$HOME/.nvm/versions/node/v20.20.2/bin/node"; [ -x "$n" ] || n="$(command -v node 2>/dev/null)"; echo "$n"; }
+# Resolve a Node binary in cron-safe order: the portable install that setup.sh
+# bootstraps (and start.sh uses), any nvm install, then PATH. Cron's PATH has
+# none of these, so never rely on `command -v` alone.
+_va_node() {
+    local n
+    for n in "$HOME/.local/node/bin/node" \
+             "$HOME/.nvm/versions/node/v20.20.2/bin/node" \
+             "$(command -v node 2>/dev/null)"; do
+        [ -n "$n" ] && [ -x "$n" ] && { echo "$n"; return 0; }
+    done
+    n=$(ls -1d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V | tail -1)
+    [ -n "$n" ] && [ -x "$n" ] && echo "$n"
+}
 _va_start_web() {
     local port="$1" node; node="$(_va_node)"
     [ -n "$node" ] || { log "${RED}node not found${NC}; cannot start web server"; return 1; }

@@ -136,6 +136,8 @@ ensure_web_server() {
 ensure_public_port() {
     local pub="${VALARK_WEB_PUBLIC_PORT:-}" web="${VALARK_WEB_PORT:-3000}"
     [ -n "$pub" ] && [ "$pub" != "$web" ] || return 0
+    # sbin isn't on PATH in cron/ssh shells on Debian-family systems
+    local PATH="/usr/sbin:/sbin:$PATH"
     if ! command -v iptables >/dev/null 2>&1; then
         log "${YELLOW}iptables not found${NC} — cannot map :${pub} -> :${web}"; return 0
     fi

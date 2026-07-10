@@ -252,7 +252,12 @@ valark_url_ok() {
 # mount that reverted after a reboot. Best-effort remount to rw (needs paswordless
 # sudo). Preserves any NFS export. Safe no-op when already writable.
 valark_ensure_writable() {
-    local probe="${DATA_ROOT}/.valark_w_$$"
+    # Probe the Val Ark tree when it exists — the data root itself may be a
+    # root-owned mount (NAS appliances pre-create user-owned subvolumes beneath
+    # it), which is fine: Val Ark only ever writes inside its own tree.
+    local dir="$DATA_ROOT"
+    [ -d "$VALARK_HOME" ] && dir="$VALARK_HOME"
+    local probe="${dir}/.valark_w_$$"
     if ( : > "$probe" ) 2>/dev/null; then rm -f "$probe" 2>/dev/null; return 0; fi
     command -v findmnt >/dev/null 2>&1 || return 1
     local src fstype

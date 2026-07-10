@@ -179,6 +179,32 @@ ensure_services() {
     done
 }
 
+# Periodic tool refresh — keep the mirrored apps at their LATEST upstream
+# versions. Tool scripts resolve versions live (github_latest_tag etc.) and
+# skip anything already current, so an up-to-date pass is cheap; when upstream
+# shipped a release, only the changed artifacts download. Weekly by default
+# (VALARK_TOOL_REFRESH_DAYS, 0 = disabled); a failed/partial pass retries in a
+# day (downloads are idempotent + resumable, so retries just fill gaps).
+tool_refresh() {
+    local days="${VALARK_TOOL_REFRESH_DAYS:-7}"
+    [ "$days" = "0" ] && { log "tool refresh disabled"; return 0; }
+    local marker="${STATE_DIR}/tool-refresh.next" now due
+    now=$(date +%s); due=$(cat "$marker" 2>/dev/null || echo 0)
+    if [ "$now" -lt "$due" ]; then
+        log "tool refresh not due yet ($(date -d "@$due" '+%F %H:%M' 2>/dev/null || echo soon))"
+        return 0
+    fi
+    log "refreshing tool mirror to latest upstream versions (bounded $(( ${VALARK_TOOL_REFRESH_TIMEOUT:-7200} / 60 ))min)"
+    if FORCE_COLOR=0 timeout "${VALARK_TOOL_REFRESH_TIMEOUT:-7200}" \
+        bash "${_DIR}/download-tools.sh" all >> "${LOG_DIR}/tool-refresh.log" 2>&1; then
+        echo $(( now + days * 86400 )) > "$marker"
+        log "${GREEN}tool refresh complete${NC} (next in ${days}d)"
+    else
+        echo $(( now + 86400 )) > "$marker"
+        log "${YELLOW}tool refresh incomplete — retrying in 1d (see tool-refresh.log)${NC}"
+    fi
+}
+
 # Dynamic UI smoke — exercise the web UI's controls and the "back to the ark"
 # header against the LIVE server (so the embedded library frame is covered too).
 # Best-effort: skipped cleanly if Playwright deps aren't installed.
@@ -221,6 +247,8 @@ loop_once() {
 
     step "6. top-up fill (<=${FILL_SECONDS}s; skipped if a fill is already running)"
     FORCE_COLOR=0 bash "$LIBRARIAN" fill --time "$FILL_SECONDS" 2>&1 | tail -1 | sed 's/^/    /'
+
+    step "6b. tool refresh (weekly; keeps mirrored apps at latest upstream)"; tool_refresh
 
     step "7. functional verification"; FORCE_COLOR="${FORCE_COLOR:-1}" bash "$VERIFY" all 2>&1 | sed 's/^/    /'
 

@@ -147,38 +147,71 @@ download_file() {
 
     ensure_dir "$(dirname "$dest_path")"
 
+    # Expected size from the server (best-effort; empty when it won't say, e.g.
+    # chunked responses or offline). Used to detect partials at the final name
+    # left by older versions of this function, and to verify completions.
+    local expected=""
+    if command -v curl >/dev/null 2>&1; then
+        expected=$(curl -fsIL --connect-timeout 20 "$url" 2>/dev/null | tr -d '\r' \
+                   | awk 'tolower($1)=="content-length:"{n=$2} END{print n}')
+    fi
+
     if [ -f "$dest_path" ] && [ -s "$dest_path" ]; then
-        log_info "Already exists: ${label} - skipping"
-        DOWNLOAD_SKIPPED=$((DOWNLOAD_SKIPPED + 1))
-        return 0
+        local have
+        have=$(stat -c%s "$dest_path" 2>/dev/null || echo 0)
+        if [ -z "$expected" ] || [ "$have" = "$expected" ]; then
+            log_info "Already exists: ${label} - skipping"
+            DOWNLOAD_SKIPPED=$((DOWNLOAD_SKIPPED + 1))
+            return 0
+        fi
+        log_warn "Existing ${label} is ${have}B but upstream says ${expected}B - re-downloading"
+        rm -f "$dest_path" 2>/dev/null
     fi
 
     [ -f "$dest_path" ] && [ ! -s "$dest_path" ] && rm -f "$dest_path" 2>/dev/null
 
+    # Download to a .part temp and rename into place only when complete (and
+    # size-verified when possible), so an interrupted run can never leave a
+    # partial that later looks like the real artifact. The .part resumes across
+    # retries and runs. Stall detection (<1KB/s for 2min) instead of a hard
+    # --max-time, which killed legitimate multi-GB downloads on slow links.
+    local part="${dest_path}.part"
     while [ $attempt -le $MAX_RETRIES ]; do
         log_info "Downloading ${label} (attempt ${attempt}/${MAX_RETRIES})"
 
+        local status=1
         if command -v curl >/dev/null 2>&1; then
-            curl -fL --progress-bar --connect-timeout 30 --max-time 600 \
-                -o "$dest_path" "$url" 2>&1
+            curl -fL --progress-bar --connect-timeout 30 \
+                --speed-limit 1024 --speed-time 120 \
+                -C - -o "$part" "$url" 2>&1
+            status=$?
+            # 33: server can't resume this URL — restart the transfer fresh
+            [ $status -eq 33 ] && rm -f "$part" 2>/dev/null
         elif command -v wget >/dev/null 2>&1; then
-            wget --progress=dot:mega --timeout=60 --tries=1 \
-                "$url" -O "$dest_path" 2>&1
+            wget --progress=dot:mega --timeout=60 --tries=1 -c \
+                "$url" -O "$part" 2>&1
+            status=$?
         fi
-        local status=$?
 
-        if [ $status -eq 0 ] && [ -f "$dest_path" ] && [ -s "$dest_path" ]; then
-            local size=$(du -h "$dest_path" 2>/dev/null | cut -f1)
-            log_success "Downloaded: ${label} (${size})"
-            DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
-            return 0
-        else
-            attempt=$((attempt + 1))
-            if [ $attempt -le $MAX_RETRIES ]; then
-                local delay=$((RETRY_DELAY * attempt))
-                log_info "Retrying in ${delay}s..."
-                sleep $delay
+        if [ $status -eq 0 ] && [ -f "$part" ] && [ -s "$part" ]; then
+            local got
+            got=$(stat -c%s "$part" 2>/dev/null || echo 0)
+            if [ -n "$expected" ] && [ "$got" != "$expected" ]; then
+                log_warn "${label}: got ${got}B, expected ${expected}B - retrying"
+                rm -f "$part" 2>/dev/null
+            else
+                mv -f "$part" "$dest_path"
+                local size=$(du -h "$dest_path" 2>/dev/null | cut -f1)
+                log_success "Downloaded: ${label} (${size})"
+                DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
+                return 0
             fi
+        fi
+        attempt=$((attempt + 1))
+        if [ $attempt -le $MAX_RETRIES ]; then
+            local delay=$((RETRY_DELAY * attempt))
+            log_info "Retrying in ${delay}s..."
+            sleep $delay
         fi
     done
 

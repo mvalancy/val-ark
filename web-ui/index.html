@@ -5145,7 +5145,9 @@ function renderStorageBreakdown() {
     let html = `<div class="storage-section"><h3>Storage Breakdown (${totalLabel} total)</h3>`;
     html += '<div class="storage-bar-container">';
     cats.forEach(c => {
-        const pct = c.bytes / total * 100;
+        // Clamp tiny-but-present slices to a visible sliver — a fresh mirror's
+        // first megabytes would otherwise round to width:0 and vanish.
+        const pct = Math.max(c.bytes / total * 100, c.bytes > 0 ? 0.4 : 0);
         html += `<div class="storage-segment" style="width:${pct.toFixed(1)}%;background:${c.color}" title="${esc(c.label)}: ${formatBytes(c.bytes)}">${pct >= 6 ? formatBytes(c.bytes) : ''}</div>`;
     });
     html += '</div><div class="storage-legend">';

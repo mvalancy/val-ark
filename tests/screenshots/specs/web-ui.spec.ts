@@ -681,7 +681,12 @@ test.describe('Val Ark - Web UI Data Integrity', () => {
 });
 
 test.describe('Val Ark - Model File Verification', () => {
-  const MODELS_ROOT = path.resolve(process.env.HOME || require('os').homedir(), 'models');
+  // Models live on the resolved data root (repo 'models' symlink); ~/models is
+  // the legacy single-disk fallback.
+  const repoModels = path.resolve(__dirname, '../../../models');
+  const MODELS_ROOT = fs.existsSync(repoModels)
+    ? repoModels
+    : path.resolve(process.env.HOME || require('os').homedir(), 'models');
 
   test('LLM models directory exists and has content', () => {
     const llmDir = path.join(MODELS_ROOT, 'llm');

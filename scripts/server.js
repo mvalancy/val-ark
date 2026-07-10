@@ -54,11 +54,17 @@ function resolveDataRoot() {
     return ROOT;
 }
 const DATA_ROOT = resolveDataRoot();
-// Models live at <DATA_ROOT>/models (the repo 'models' symlink points here too),
-// falling back to ~/models for legacy single-disk installs.
+// Models resolve like valark-env.sh: the VALARK_MODELS_DIR override first, then
+// the repo 'models' symlink (valark_ensure_layout keeps it pointing at the real
+// dir under every configuration), then <DATA_ROOT>/models, then the legacy
+// single-disk ~/models.
 const MODEL_ROOT = (() => {
-    for (const c of [path.join(DATA_ROOT, 'models'),
-                     path.join(process.env.HOME || require('os').homedir(), 'models')]) {
+    const candidates = [cfg('VALARK_MODELS_DIR')];
+    try { candidates.push(fs.realpathSync(path.join(ROOT, 'models'))); } catch (_) {}
+    candidates.push(path.join(DATA_ROOT, 'models'),
+                    path.join(process.env.HOME || require('os').homedir(), 'models'));
+    for (const c of candidates) {
+        if (!c) continue;
         try { if (fs.statSync(c).isDirectory()) return c; } catch (_) {}
     }
     return path.join(DATA_ROOT, 'models');

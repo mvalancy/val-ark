@@ -161,7 +161,8 @@ fi
 # Node.js Runtime (required by the zero-dep web server, scripts/server.js)
 ###############################################################################
 # The web UI/API server is plain Node with no npm deps, but it still needs a
-# Node binary. A fresh appliance (e.g. UT2 / RK3588) often ships without one, so
+# Node binary. A fresh ARM64 NAS appliance (chips such as the Rockchip RK3588)
+# often ships without one, so
 # bootstrap a portable build into ~/.local/node — exactly where start.sh looks.
 
 echo ""
@@ -206,7 +207,7 @@ fi
 ###############################################################################
 # TLS CA bundle (repair a stale system trust store)
 ###############################################################################
-# Appliances like the UT2/RK3588 NAS ship an old CA store that fails TLS to newer
+# ARM64 NAS appliances (e.g. RK3588-class boxes) often ship an old CA store that fails TLS to newer
 # download hosts (download.kde.org, curl.se, ...). If so, fetch a current bundle
 # into the state dir; _common.sh points every tool download at it via CURL_CA_BUNDLE.
 

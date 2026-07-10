@@ -127,6 +127,35 @@ ensure_web_server() {
     _va_start_web "$port" && log "${GREEN}started Val Ark web server${NC} on :$port"
 }
 
+# Standard-port access: when VALARK_WEB_PUBLIC_PORT is set (e.g. 80), keep an
+# idempotent iptables NAT redirect public->web port in place. PREROUTING covers
+# every real interface (LAN + tailscale/VPN) while leaving loopback alone —
+# appliances often pin their own UI to 127.0.0.1:80 — and needs no privileged
+# bind or setcap on node. Re-asserted every cycle, so it survives reboots and
+# firewall reloads. Best-effort: logs and moves on where iptables/sudo are absent.
+ensure_public_port() {
+    local pub="${VALARK_WEB_PUBLIC_PORT:-}" web="${VALARK_WEB_PORT:-3000}"
+    [ -n "$pub" ] && [ "$pub" != "$web" ] || return 0
+    if ! command -v iptables >/dev/null 2>&1; then
+        log "${YELLOW}iptables not found${NC} — cannot map :${pub} -> :${web}"; return 0
+    fi
+    local SUDO=""
+    [ "$(id -u)" = "0" ] || SUDO="sudo -n"
+    local ipt ensured="" failed=""
+    for ipt in iptables ip6tables; do
+        command -v "$ipt" >/dev/null 2>&1 || continue
+        if $SUDO "$ipt" -t nat -C PREROUTING -p tcp --dport "$pub" -j REDIRECT --to-ports "$web" 2>/dev/null \
+           || $SUDO "$ipt" -t nat -A PREROUTING -p tcp --dport "$pub" -j REDIRECT --to-ports "$web" 2>/dev/null; then
+            ensured="${ensured}${ipt} "
+        else
+            failed="${failed}${ipt} "
+        fi
+    done
+    [ -n "$ensured" ] && log "public port ${GREEN}:${pub} -> :${web}${NC} (${ensured% })"
+    [ -n "$failed" ] && log "${YELLOW}could not ensure :${pub} redirect via ${failed% }${NC} (needs passwordless sudo or root)"
+    return 0
+}
+
 # Keep enabled community services (VALARK_SERVICES in .env, e.g. "chat mail forum
 # paste") running. `<id>.sh start` is idempotent (a no-op when already up), so this
 # both launches them and respawns any that died. Best-effort and non-fatal.
@@ -177,7 +206,9 @@ loop_once() {
 
     step "2b. ensure web server + kiwix running"; ensure_web_server
 
-    step "2c. ensure enabled community services running"; ensure_services
+    step "2c. ensure standard-port access (VALARK_WEB_PUBLIC_PORT)"; ensure_public_port
+
+    step "2d. ensure enabled community services running"; ensure_services
 
     step "3. refresh live catalog (heals stale content links)"
     bash "$LIBRARIAN" refresh >/dev/null 2>&1 && log "catalog refreshed" || log "${YELLOW}catalog refresh failed (cache retained)${NC}"

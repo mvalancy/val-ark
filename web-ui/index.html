@@ -1038,8 +1038,8 @@ const TOOLS = [
             cli: [
                 {cmd: 'scripts/services/seaweedfs.sh start', desc: 'Val Ark launcher: all-in-one node using VALARK_SEAWEED_* from .env'},
                 {cmd: 'scripts/services/seaweedfs.sh status', desc: 'Show the data dir, free space, and per-port health'},
-                {cmd: 'weed server -dir=/data_n002/seaweedfs -volume.port=8085 -filer -filer.port=8889 -s3 -s3.port=8333', desc: 'All-in-one on drive 2 (volume 8085 avoids the NAS openresty on 8080)'},
-                {cmd: 'weed volume -dir=/data_n002/seaweedfs/vol -max=0 -mserver=localhost:9333 -port=8085', desc: 'Volume server holding the data (-max=0 = fill the disk)'},
+                {cmd: 'weed server -dir=/data/seaweedfs -volume.port=8085 -filer -filer.port=8889 -s3 -s3.port=8333', desc: 'All-in-one on a second data disk (volume 8085 avoids NAS web stacks on 8080)'},
+                {cmd: 'weed volume -dir=/data/seaweedfs/vol -max=0 -mserver=localhost:9333 -port=8085', desc: 'Volume server holding the data (-max=0 = fill the disk)'},
                 {cmd: 'weed s3 -filer=localhost:8889 -port=8333', desc: 'S3-compatible gateway (point AWS-style clients here)'},
                 {cmd: 'weed mount -filer=localhost:8889 -dir=/mnt/seaweed', desc: 'Mount the store as a local FUSE filesystem'}
             ],

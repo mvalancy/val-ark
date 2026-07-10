@@ -10,7 +10,8 @@
 #                               pinned to a 2nd disk via .env on multi-NVMe boxes)
 #   VALARK_SEAWEED_MASTER_PORT  default 9333
 #   VALARK_SEAWEED_VOLUME_PORT  default 8085  (NOT 8080 — collides with some NAS
-#                                              web stacks, e.g. openresty on UT2)
+#                                              web stacks, e.g. openresty on
+#                                              RK3588-class ARM64 appliances)
 #   VALARK_SEAWEED_FILER_PORT   default 8889
 #   VALARK_SEAWEED_S3_PORT      default 8333
 #

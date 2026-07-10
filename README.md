@@ -314,7 +314,7 @@ data root and are gitignored.
 - [docs/LIBRARIAN.md](docs/LIBRARIAN.md) - Self-filling mirror engine design
 - [docs/TOOLS.md](docs/TOOLS.md) - Complete tools catalog (44 tools)
 - [docs/PLATFORMS.md](docs/PLATFORMS.md) - Platform-specific notes
-- [docs/UT2.md](docs/UT2.md) - UT2 / Rockchip RK3588 NAS setup notes, gotchas & NPU angle
+- [docs/ARM64-NAS.md](docs/ARM64-NAS.md) - ARM64 NAS appliances (chips such as the Rockchip RK3588): setup notes, gotchas & NPU angle
 - [docs/OFFLINE.md](docs/OFFLINE.md) - Offline and P2P guide
 - [docs/MODEL_INVENTORY.md](docs/MODEL_INVENTORY.md) - Model details
 

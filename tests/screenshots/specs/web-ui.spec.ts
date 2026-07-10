@@ -10,7 +10,7 @@ const TOOL_IDS = [
   'llama-cpp', 'whisper-cpp', 'piper-tts', 'sd-cpp', 'ffmpeg',
   'onnxruntime', 'vosk', 'bitnet', 'ollama', 'blender',
   'freecad', 'kicad', 'godot', 'vlc', 'n8n',
-  'influxdb', 'milvus', 'comfyui', 'seaweedfs', 'syncthing', 'coolify',
+  'influxdb', 'grafana', 'milvus', 'comfyui', 'seaweedfs', 'syncthing', 'coolify',
   'kiwix', 'tailscale', 'mosquitto', 'mqtt-explorer', 'redis',
   'chat', 'mail', 'forum', 'paste',
   'postgresql', 'telegraf', 'btop', 'tmux', 'helix', 'vscodium',
@@ -485,6 +485,10 @@ const TOOL_BINARIES: Record<string, string[]> = {
   'influxdb': [
     'tools/linux-x86_64/influxdb',
     'tools/linux-arm64/influxdb',
+  ],
+  'grafana': [
+    'tools/linux-x86_64/grafana',
+    'tools/linux-arm64/grafana',
   ],
   'btop': [
     'tools/linux-x86_64/btop/bin/btop',

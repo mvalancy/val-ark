@@ -864,8 +864,8 @@ const TOOLS = [
     },
     {
         id: 'influxdb', name: 'InfluxDB', category: 'infrastructure', icon: 'I', iconBg: '#22adf6', logo: 'logos/influxdb.png', downloadTarget: 'influxdb',
-        desc: 'Time-series database for metrics, events, and IoT data - OSS 2.7 with built-in dashboards',
-        size: '~100 MB',
+        desc: 'Time-series database for metrics, events, and IoT data - OSS 2.x with built-in dashboards, mirrored with the influx CLI',
+        size: '~110 MB',
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/influxdata/influxdb',
@@ -878,7 +878,7 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'InfluxDB is a purpose-built time-series database optimized for storing and querying timestamped data -- metrics, events, sensor readings, and logs. Unlike general-purpose databases, InfluxDB is designed for high write throughput and fast range queries over time, making it ideal for monitoring AI inference performance, tracking IoT sensor data, and recording experiment metrics.\n\nThe OSS 2.7 release includes a built-in web UI with a dashboard builder, alerting system, and data explorer. You can create visualizations of your AI model\'s tokens-per-second, GPU utilization, request latency, and error rates without installing any additional tools. The Flux query language enables complex analytics including windowing, aggregation, joins, and mathematical transformations.\n\nData is organized into organizations and buckets (with configurable retention policies), and written using the simple line protocol format: measurement,tags field=value timestamp. Client libraries exist for Python, Go, JavaScript, and many other languages, plus Telegraf (a companion agent) can collect metrics from 300+ sources automatically.',
+            overview: 'InfluxDB is a purpose-built time-series database optimized for storing and querying timestamped data -- metrics, events, sensor readings, and logs. Unlike general-purpose databases, InfluxDB is designed for high write throughput and fast range queries over time, making it ideal for monitoring AI inference performance, tracking IoT sensor data, and recording experiment metrics.\n\nThe OSS 2.x line (latest 2.9) includes a built-in web UI with a dashboard builder, alerting system, and data explorer, and Val Ark mirrors the separate `influx` client CLI alongside the server so the database is administrable fully offline. You can create visualizations of your AI model\'s tokens-per-second, GPU utilization, request latency, and error rates without installing any additional tools. The Flux query language enables complex analytics including windowing, aggregation, joins, and mathematical transformations.\n\nData is organized into organizations and buckets (with configurable retention policies), and written using the simple line protocol format: measurement,tags field=value timestamp. Client libraries exist for Python, Go, JavaScript, and many other languages, plus Telegraf (a companion agent) can collect metrics from 300+ sources automatically.',
             features: [
                 'Purpose-built time-series storage engine (TSM) optimized for timestamped data',
                 'Built-in web UI with drag-and-drop dashboard builder',
@@ -907,6 +907,49 @@ const TOOLS = [
                 {endpoint: 'POST /api/v2/query', desc: 'Execute a Flux query and return results'},
                 {endpoint: 'GET /api/v2/buckets', desc: 'List all buckets in the organization'},
                 {endpoint: 'GET /health', desc: 'Check server health status'}
+            ]
+        }
+    },
+    {
+        id: 'grafana', name: 'Grafana', category: 'infrastructure', icon: 'G', iconBg: '#f46800', logo: 'logos/grafana.svg', downloadTarget: 'grafana',
+        desc: 'The observability dashboard - visualize InfluxDB, Prometheus, logs, and 150+ data sources',
+        size: '~1.4 GB (all platforms)',
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+
+        downloads: {
+            source: 'https://github.com/grafana/grafana',
+            releases: 'https://github.com/grafana/grafana/releases',
+            binaries: {
+                'jetson': 'tools/linux-arm64/grafana/bin/grafana',
+                'ubuntu': 'tools/linux-x86_64/grafana/bin/grafana',
+                'mac': 'tools/macos-arm64/grafana/bin/grafana',
+                'windows': 'tools/windows-x64/grafana/bin/grafana.exe'
+            }
+        },
+        details: {
+            overview: 'Grafana is the de-facto standard open-source dashboard and observability platform. It connects to InfluxDB, Prometheus, PostgreSQL, SQLite, MQTT, and 150+ other data sources and turns them into interactive dashboards with alerting, annotations, and templating - the visual front-end for the metrics that Telegraf collects and InfluxDB stores.\n\nFor Val Ark fleets this completes the offline observability stack: Telegraf scrapes GPU/CPU/disk/network metrics on every node, InfluxDB stores them, and Grafana renders NOC-style dashboards for the whole mesh with alert rules that fire over local channels (MQTT, email via the community mail service). No cloud account is required - Grafana OSS runs fully self-contained from a single directory.\n\nThe mirrored tarballs are the official standalone builds: unpack and run bin/grafana server, then browse to port 3000 (default credentials admin/admin). Dashboards are stored in an embedded SQLite database by default, so a backup is a single file copy.',
+            features: [
+                'Interactive dashboards: graphs, heatmaps, gauges, tables, geomaps, logs',
+                '150+ data sources: InfluxDB, Prometheus, PostgreSQL, SQLite, MQTT, CSV, JSON',
+                'Alerting engine with notification channels (email, MQTT, webhooks)',
+                'Dashboard templating and variables for fleet-wide views',
+                'Explore mode for ad-hoc metric and log queries',
+                'Provisioning via YAML - dashboards and datasources as code',
+                'Embedded SQLite storage - zero external dependencies, single-file backup',
+                'Official standalone builds for Linux ARM64/x86_64, macOS arm64, Windows x64'
+            ],
+            screenshots: ['screenshots/grafana-1.png'],
+            cli: [
+                {cmd: 'bin/grafana server', desc: 'Start Grafana (UI at http://localhost:3000, first login admin/admin)'},
+                {cmd: 'GF_SERVER_HTTP_PORT=3001 bin/grafana server', desc: 'Run on an alternate port (Val Ark web UI holds 3000)'},
+                {cmd: 'bin/grafana cli admin reset-admin-password newpass', desc: 'Reset the admin password'},
+                {cmd: 'bin/grafana cli plugins list-remote', desc: 'List installable plugins (needs network; core panels work offline)'}
+            ],
+            api: [
+                {endpoint: 'GET /api/health', desc: 'Health check'},
+                {endpoint: 'GET /api/dashboards/uid/{uid}', desc: 'Fetch a dashboard definition'},
+                {endpoint: 'POST /api/ds/query', desc: 'Query a data source'},
+                {endpoint: 'GET /api/alertmanager/grafana/api/v2/alerts', desc: 'Active alerts'}
             ]
         }
     },
@@ -2189,6 +2232,7 @@ const TOOL_META = {
     'vlc': { maker: 'VideoLAN', website: 'https://www.videolan.org', license: 'GPL-2.0+', licenseUrl: 'https://www.videolan.org/legal.html' },
     'n8n': { maker: 'n8n GmbH', website: 'https://n8n.io', license: 'Sustainable Use', licenseUrl: 'https://github.com/n8n-io/n8n/blob/master/LICENSE.md' },
     'influxdb': { maker: 'InfluxData', website: 'https://www.influxdata.com', license: 'MIT / Apache-2.0', licenseUrl: 'https://github.com/influxdata/influxdb/blob/main/LICENSE-MIT' },
+    'grafana': { maker: 'Grafana Labs', website: 'https://grafana.com', license: 'AGPL-3.0', licenseUrl: 'https://github.com/grafana/grafana/blob/main/LICENSE' },
     'telegraf': { maker: 'InfluxData', website: 'https://www.influxdata.com/time-series-platform/telegraf/', license: 'MIT', licenseUrl: 'https://github.com/influxdata/telegraf/blob/master/LICENSE' },
     'milvus': { maker: 'Zilliz', website: 'https://milvus.io', license: 'Apache-2.0', licenseUrl: 'https://github.com/milvus-io/milvus/blob/master/LICENSE' },
     'comfyui': { maker: 'Comfy Org', website: 'https://www.comfy.org', license: 'GPL-3.0', licenseUrl: 'https://github.com/comfyanonymous/ComfyUI/blob/master/LICENSE' },

@@ -30,6 +30,7 @@ graph TD
 | [TOOLS.md](TOOLS.md) | Catalog of the 43 mirrored tools and their usage. |
 | [PLATFORMS.md](PLATFORMS.md) | Supported platforms and chips, including builds and the OpenWRT subset. |
 | [OFFLINE.md](OFFLINE.md) | Offline operation, P2P sync, and the NFS-shared mesh. |
+| [OFFLINE-GAPS.md](OFFLINE-GAPS.md) | "Internet went off today" gap analysis: ranked missing tools, cold-start warnings, content roadmap. |
 | [MODEL_INVENTORY.md](MODEL_INVENTORY.md) | Model families, tiers, and availability. |
 
 ## Key Concepts

@@ -92,12 +92,19 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Commissioning (Phase 1)
 
-- **Grandfather existing installs or the wizard hijacks working boxes.** A box has no
-  `commissionedAt` until the wizard runs, so shipping first-boot setup naively would show the
-  wizard on every already-deployed Ark. `server.js` `_legacyActive()` treats a box with a
-  **content or model library** (`content/zim` or `MODEL_ROOT` non-empty) as already commissioned.
-  A fresh box (empty library) gets the wizard. Deliberately does NOT count `tools/` — a fresh box
-  may have a mirrored node runtime yet still need setup.
+- **Grandfather existing installs or the wizard hijacks working boxes** — but SNAPSHOT the
+  decision, never derive it live. A box has no `commissionedAt` until setup runs, so naive
+  first-boot would show the wizard on every deployed Ark. `_legacyActive()` treats a box with a
+  **content or model library** as already set up. **Adversarial-review finding (fixed):** deriving
+  `commissioned` *live* from the library was a bypass — the `/api/download/*` scripts `mkdir -p`
+  into `MODEL_ROOT` *before any download*, so an un-authenticated LAN peer could POST to those
+  ungated endpoints, make the library non-empty, and flip a fresh un-owned box to "commissioned",
+  permanently locking its owner out of the web wizard. **Fix:** the grandfather decision is made
+  **once at first server start** (`commission.grandfather()` writes `commissionedAt`); thereafter
+  `boxCommissioned()` reads ONLY the persisted flag, so post-boot library files can't flip it. AND
+  every mutating POST is refused with 409 until the box is commissioned (a fresh box serves the
+  wizard, not the catalog). `_legacyActive` honors `VALARK_ZIM_DIR`/`VALARK_CONTENT_DIR` so it's
+  isolatable; `tests/test-commission.sh` spins a real server to prove the flip is impossible.
 - **Claim gate is fail-closed but localhost-trusted.** From the LAN you must present the printed
   claim token; from the box/localhost you commission without one (physical possession = ownership,
   which also keeps recovery possible). The token is single-use (consumed on commission) and never

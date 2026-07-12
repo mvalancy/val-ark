@@ -33,6 +33,20 @@ function writeSettings(obj, dir) {
 
 function isCommissioned(dir) { return !!readSettings(dir).commissionedAt; }
 
+// One-time migration for boxes set up BEFORE the wizard existed: record them as
+// commissioned so first-boot never hijacks a working Ark. Decided ONCE (at first
+// server start, from whether a library already exists) and made sticky — so content
+// that appears later (e.g. a LAN download on a genuinely fresh box) can NOT flip an
+// un-owned box to "commissioned" and lock its owner out of the wizard.
+function grandfather(dir) {
+  if (isCommissioned(dir)) return false;
+  const s = readSettings(dir);
+  s.commissionedAt = new Date().toISOString();
+  s.via = 'legacy';
+  writeSettings(s, dir);
+  return true;
+}
+
 // A short, human-typeable claim code (no ambiguous 0/O/1/I) proving possession.
 function genToken() {
   const alpha = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

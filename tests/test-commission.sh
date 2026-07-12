@@ -58,5 +58,36 @@ runjs "process.exit(c.commission(d,{},{trusted:true}).error?0:1)" \
 SUM_AFTER="$(cat "$T/content/zim/w.zim" "$T/models/llm/m.gguf" | sha256sum)"
 [ "$SUM_BEFORE" = "$SUM_AFTER" ] && pass || fail "commissioning keeps content+models byte-identical"
 
+# ---- server-level regression: grandfather-flip must be impossible ---------------
+# (A LAN peer must not be able to seed the library to fake "already set up", and a
+#  library appearing after boot must not flip an un-owned box.)
+PORT=3917
+S2="$T/srv"; mkdir -p "$S2/content/zim" "$S2/models"
+VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" \
+  VALARK_STATE_DIR="$S2/state" VALARK_CONTENT_DIR="$S2/content" VALARK_MODELS_DIR="$S2/models" \
+  "$NODE" "$ROOT/scripts/server.js" "$PORT" >"$T/srv.log" 2>&1 &
+SRV_PID=$!
+up=0; for i in $(seq 1 24); do sleep 0.5; curl -sf --max-time 2 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1 && { up=1; break; }; done
+if [ "$up" = 1 ]; then
+    curl -s --max-time 4 "http://127.0.0.1:$PORT/api/setup/state" | grep -q '"commissioned":false' \
+        && pass || fail "fresh server reports un-commissioned"
+    # mutating actions are refused before commissioning (fresh box → wizard, not catalog)
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 -H 'Content-Type: application/json' -d '{"target":"all"}' "http://127.0.0.1:$PORT/api/download/content")
+    [ "$code" = "409" ] && pass || fail "pre-commission download POST refused (got $code, want 409)"
+    # a library appearing AFTER boot (what a download's mkdir -p would create) must NOT
+    # flip the box to commissioned — the decision is snapshotted, not live.
+    mkdir -p "$S2/models/llm/some-model"
+    curl -s --max-time 4 "http://127.0.0.1:$PORT/api/setup/state" | grep -q '"commissioned":false' \
+        && pass || fail "post-boot library must NOT flip the box to commissioned"
+    # the owner (localhost, trusted) can still commission through the wizard
+    curl -s --max-time 6 -H 'Content-Type: application/json' -d '{"name":"box"}' "http://127.0.0.1:$PORT/api/setup/commission" | grep -q '"ok":true' \
+        && pass || fail "localhost can still commission the fresh box"
+    curl -s --max-time 4 "http://127.0.0.1:$PORT/api/setup/state" | grep -q '"commissioned":true' \
+        && pass || fail "box is commissioned after the wizard"
+else
+    fail "test server did not start on :$PORT (see srv.log)"
+fi
+kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null
+
 echo "commission: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

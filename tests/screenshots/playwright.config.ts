@@ -24,7 +24,10 @@ export default defineConfig({
     // live instance (VALARK_TEST_URL) to also cover the embedded library frame.
     // VALARK_HTTPS_PORT: a unique high port so the test server's HTTPS listener
     // never collides with a live Ark's 8443 when both run on the same box.
-    command: 'PATH="$HOME/.local/node/bin:$PATH" VALARK_DISABLE_KIWIX=1 VALARK_HTTPS_PORT=13443 node ../../scripts/server.js 3001',
+    // VALARK_COMMISSIONED: the ephemeral test server has no content library, which
+    // would otherwise trip the first-boot wizard takeover; declare it commissioned so
+    // page tests exercise the normal app (the wizard has its own file:// + VM tests).
+    command: 'PATH="$HOME/.local/node/bin:$PATH" VALARK_DISABLE_KIWIX=1 VALARK_COMMISSIONED=1 VALARK_HTTPS_PORT=13443 node ../../scripts/server.js 3001',
     port: 3001,
     timeout: 20000,
     reuseExistingServer: true,

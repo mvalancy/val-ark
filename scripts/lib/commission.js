@@ -69,6 +69,51 @@ function ensureClaim(dir) {
 }
 function consumeClaim(dir) { try { fs.unlinkSync(claimPath(dir)); } catch (_) {} }
 
+// Recovery code: the one-time reset code printed on the recovery card at setup. Stored
+// (like the claim token) in the 0600 settings file so the card can be reprinted; a LAN
+// device that has it can reset a forgotten admin passcode. Longer than the claim code.
+function genRecoveryCode() {
+  const alpha = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const b = crypto.randomBytes(12);
+  let s = '';
+  for (let i = 0; i < 12; i++) s += alpha[b[i] % alpha.length];
+  return s.slice(0, 4) + '-' + s.slice(4, 8) + '-' + s.slice(8);
+}
+function readRecovery(dir) { return readSettings(dir).recovery || ''; }
+function ensureRecovery(dir) {
+  const s = readSettings(dir);
+  if (!s.recovery) { s.recovery = genRecoveryCode(); writeSettings(s, dir); }
+  return s.recovery;
+}
+function regenerateRecovery(dir) {
+  const s = readSettings(dir);
+  s.recovery = genRecoveryCode();
+  writeSettings(s, dir);
+  return s.recovery;
+}
+function verifyRecovery(code, dir) {
+  const expected = readRecovery(dir);
+  if (!expected) return false;
+  const a = Buffer.from(String(code || '').toUpperCase().replace(/[\s-]/g, ''));
+  const b = Buffer.from(expected.toUpperCase().replace(/[\s-]/g, ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+// Forgot-password: set a new admin passcode. Trusted (localhost/console) may do it
+// with no code; from the LAN you must present the recovery code from the card. On
+// success the code is ROTATED (single-use) and a fresh session is the caller's to take.
+function recoverAdmin(dir, opts, ctx) {
+  opts = opts || {}; ctx = ctx || {};
+  if (!ctx.trusted && !verifyRecovery(opts.code, dir)) {
+    return { error: 'Invalid recovery code. Check the card printed when you set up this box.' };
+  }
+  const pw = String(opts.password || '');
+  if (pw.length < 8) return { error: 'New passcode must be at least 8 characters.' };
+  auth.setPassword(pw, 'admin', dir);
+  const fresh = regenerateRecovery(dir);   // single-use: old code is now dead
+  return { ok: true, recovery: fresh };
+}
+
 // Public state for the wizard — NEVER leaks the claim token itself.
 function state(dir, trusted) {
   const s = readSettings(dir);
@@ -121,12 +166,14 @@ function commission(dir, opts, ctx) {
   s.profile = profile;
   s.emphasis = opts.emphasis || profile;
   s.commissionedAt = new Date().toISOString();
+  s.recovery = s.recovery || genRecoveryCode();   // the one-time code for the recovery card
   writeSettings(s, dir);
   consumeClaim(dir);
-  return { ok: true, commissioned: true, name, profile, useMode, adminSet: auth.status(dir).adminSet };
+  return { ok: true, commissioned: true, name, profile, useMode, adminSet: auth.status(dir).adminSet, recovery: s.recovery };
 }
 
-module.exports = { state, commission, isCommissioned, ensureClaim, readClaim, consumeClaim, readSettings, writeSettings, PROFILES };
+module.exports = { state, commission, isCommissioned, ensureClaim, readClaim, consumeClaim, readSettings, writeSettings, PROFILES,
+  ensureRecovery, readRecovery, regenerateRecovery, verifyRecovery, recoverAdmin, grandfather };
 
 // ---- CLI mode (invoked by scripts/valark) ------------------------------------
 if (require.main === module) {

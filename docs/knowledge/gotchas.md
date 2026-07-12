@@ -113,6 +113,25 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   server, so Playwright previews it offline; `checkSetup()` only redirects when it can reach
   `/api/setup/state` and the box is un-commissioned.
 
+## Access control / sessions (Phase 2)
+
+- **The gate has three tiers.** `ADMIN_ONLY_POSTS` (config/account changes, e.g. `adduser`) always
+  need admin; **use-actions** (downloads/requests/service starts) need admin only when Use Mode is
+  Passworded/Accounts (Open = anyone on the LAN); reads (GET) aren't gated yet (read-wall is a
+  follow-up). `isAdmin(req)` = **localhost/console** (always admin — physical possession) **OR** a
+  valid session. Login/logout/commission are gate-exempt (you can't be authed to log in).
+- **Sessions are stateless HMAC tokens** (`payload.hmac`, signed with a per-box secret in the auth
+  store), so there's no session table. Cookie `varksid` is HttpOnly + SameSite=Lax. **"Sign out
+  everywhere" = rotate the secret** (`auth.rotateSessionSecret`) — a per-client logout only drops
+  the cookie (the token stays cryptographically valid until expiry, the usual stateless tradeoff).
+- **Testing the LAN gate:** localhost always bypasses, so set `VALARK_TEST_FORCE_REMOTE=1` to make
+  the server treat the client as remote and actually exercise the gate. It's **fail-safe** — it only
+  REMOVES the localhost admin bypass, never grants access (safe even if set in prod).
+  `tests/test-access.sh` spins a Passworded server and proves unauthed use → 401, login → cookie,
+  cookie → allowed, forged session → 401.
+- **The login cooldown is per-IP + non-permanent** (8 fails / 10 min → 429), never a hard lock —
+  localhost/console always bypasses, so the owner is never locked out.
+
 ## Git / releases
 
 - **Don't retarget a PR across a rebase-merge divergence.** After a rebase-merge release, `main`

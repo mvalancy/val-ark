@@ -107,9 +107,45 @@ function resetTier1(dir) {
   return true;
 }
 
+// ---- Admin sessions (stateless, HMAC-signed) ---------------------------------
+// A LAN admin proves who they are once (POST /api/auth/login with the passcode) and
+// gets a signed session cookie. Tokens are self-contained (`payload.hmac`); the
+// server keeps no session table. "Sign out everywhere" = rotate the secret.
+function sessionSecret(dir) {
+  const s = readStore(dir);
+  if (!s.sessionSecret) { s.sessionSecret = crypto.randomBytes(32).toString('hex'); writeStore(s, dir); }
+  return s.sessionSecret;
+}
+function issueSession(dir, ttlMs) {
+  const exp = Date.now() + (ttlMs || 12 * 3600 * 1000);
+  const payload = Buffer.from(JSON.stringify({ v: 1, exp })).toString('base64url');
+  const mac = crypto.createHmac('sha256', sessionSecret(dir)).update(payload).digest('hex');
+  return payload + '.' + mac;
+}
+function verifySession(token, dir) {
+  if (typeof token !== 'string') return false;
+  const dot = token.indexOf('.');
+  if (dot < 1) return false;
+  const payload = token.slice(0, dot), mac = token.slice(dot + 1);
+  try {
+    const expected = crypto.createHmac('sha256', sessionSecret(dir)).update(payload).digest('hex');
+    const a = Buffer.from(mac), b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return !!(data && data.exp && data.exp > Date.now());
+  } catch (_) { return false; }
+}
+function rotateSessionSecret(dir) {
+  const s = readStore(dir);
+  s.sessionSecret = crypto.randomBytes(32).toString('hex');
+  writeStore(s, dir);
+  return true;
+}
+
 module.exports = {
   resolveStateDir, hashPassword, verifyHash, readStore, writeStore,
   setPassword, verify, status, listAdmins, setUseMode, resetTier1, storePath,
+  issueSession, verifySession, rotateSessionSecret,
 };
 
 // ---- CLI mode (invoked by scripts/valark) ------------------------------------

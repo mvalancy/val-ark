@@ -204,6 +204,30 @@ deps_installed() {
     [ -d "${dir}/node_modules" ] && [ -f "${dir}/node_modules/.package-lock.json" -o -d "${dir}/node_modules/ioredis" ]
 }
 
+# NodeBB is mirrored once as JS, but its node_modules were installed on the mirror
+# host (x86_64), so native optional deps like `sharp` (image processing) are
+# arch-specific prebuilt binaries. On a different host arch (arm64 Jetson/GB10/
+# RK3588) `require('sharp')` throws "Could not load the sharp module" and NodeBB
+# crashes on boot. Detect that and reinstall the native deps for THIS host's
+# arch/os, so the forum runs on every platform — not just where it was mirrored.
+ensure_native_deps() {
+    local dir; dir="$(find_nodebb_dir)" || return 0
+    local nd; nd="$(valark_node_dir 2>/dev/null)"
+    if ( cd "$dir" && PATH="${nd}:$PATH" node -e "require('sharp')" ) >/dev/null 2>&1; then
+        return 0   # native deps already load on this host
+    fi
+    local cpu os
+    case "$(uname -m)" in x86_64|amd64) cpu=x64;; aarch64|arm64) cpu=arm64;; armv7l) cpu=arm;; *) cpu="";; esac
+    case "$(uname -s)" in Linux) os=linux;; Darwin) os=darwin;; *) os="";; esac
+    [ -n "$cpu" ] && [ -n "$os" ] || { log "sharp not loadable and host arch/os unknown ($(uname -sm)); skipping native rebuild"; return 0; }
+    log "Native module 'sharp' not loadable on $(uname -sm) — reinstalling for --os=${os} --cpu=${cpu} (one-time)..."
+    if nodebb_cmd npm install --os="$os" --cpu="$cpu" --include=optional sharp >"${FORUM_STATE}/native-deps.log" 2>&1; then
+        log "sharp rebuilt for ${os}/${cpu}."
+    else
+        log "sharp reinstall failed (see ${FORUM_STATE}/native-deps.log); NodeBB may error on image ops."
+    fi
+}
+
 do_start() {
     if ! valark_node_dir >/dev/null 2>&1; then
         err "Node.js runtime not found. NodeBB v4 needs Node >=22."
@@ -243,6 +267,10 @@ do_start() {
         log "NodeBB dependencies installed."
     fi
 
+    # Whether deps were just installed or came pre-mirrored, make sure the native
+    # ones (sharp) actually load on THIS host arch — else NodeBB crashes on boot.
+    ensure_native_deps
+
     # First-run admin: NodeBB setup is interactive unless given the answers as a
     # JSON string. Take the admin login from VALARK_FORUM_ADMIN_* or generate one,
     # persist it (chmod 600), and run setup unattended. Idempotent on reruns.
@@ -268,16 +296,22 @@ do_start() {
         NODE_ENV=production \
         nodebb_config="$CONFIG_FILE" \
         ./nodebb start --config="$CONFIG_FILE" >"$LOG_FILE" 2>&1
-    # NodeBB writes its own pidfile; mirror it into our state for consistency.
-    local nb_pid
-    nb_pid="$(cat "${dir}/pidfile" 2>/dev/null || echo "")"
-    [ -n "$nb_pid" ] && echo "$nb_pid" > "$PID_FILE"
-    sleep 1
-    if [ -n "$nb_pid" ] && pid_alive "$nb_pid"; then
-        log "NodeBB started (pid $nb_pid). UI: http://${BIND}:${FORUM_PORT}${URL_ROOT}/  (proxied: /app/forum/)"
-        return 0
-    fi
-    err "NodeBB did not start; see $LOG_FILE"
+    # NodeBB's loader forks and binds the port a few seconds later (much slower on
+    # low-power ARM boards — ~12s on an RK3588). Poll for readiness instead of a
+    # fixed sleep, mirroring the pidfile once it appears. Any HTTP response (incl.
+    # NodeBB's 3xx redirect to its canonical URL) means the server is up.
+    local nb_pid="" i code
+    for i in $(seq 1 40); do
+        [ -z "$nb_pid" ] && nb_pid="$(cat "${dir}/pidfile" 2>/dev/null || echo "")"
+        [ -n "$nb_pid" ] && echo "$nb_pid" > "$PID_FILE"
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:${FORUM_PORT}/" 2>/dev/null)"
+        case "$code" in
+            2??|3??) log "NodeBB up (pid ${nb_pid:-?}, HTTP $code). UI: http://${BIND}:${FORUM_PORT}${URL_ROOT}/  (proxied: /app/forum/)"; return 0;;
+        esac
+        [ -n "$nb_pid" ] && ! pid_alive "$nb_pid" && { err "NodeBB process exited during startup; see $LOG_FILE"; return 1; }
+        sleep 2
+    done
+    err "NodeBB did not become ready in ~80s; see $LOG_FILE"
     return 1
 }
 

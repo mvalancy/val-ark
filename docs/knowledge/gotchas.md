@@ -76,6 +76,50 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   users self‑register on the forum or ask the host; only the operator on the box creates chat/mail
   logins. The UI hides the create form off‑localhost (`isAdminHost()` mirrors the server gate).
 
+## Auth / recovery (Phase 2)
+
+- **Source `valark-env.sh` BEFORE `set -u`.** The shared env file predates nounset hygiene and
+  reads its own guard (`_VALARK_ENV_LOADED`) unguarded → "unbound variable" if you `set -u` first.
+  In a new script: source the env, *then* `set -u` (see `scripts/valark`).
+- **Content-safety invariant is structural.** `STATE_DIR` (=`<VALARK_HOME>/state`, holds
+  `auth.json`) is a sibling of `content/` and a cousin of `models/` (`<DATA_ROOT>/models`) — never a
+  parent. So resets that only remove files *under* `STATE_DIR` provably can't touch the multi-TB
+  library. `valark reset` still asserts `CONTENT_DIR`/`MODELS_DIR` aren't inside `STATE_DIR` before
+  acting, and `tests/test-auth.sh` sha256-checks the sentinels survive a `--tier2` reset.
+- **No default credential, ever.** An un-set admin = Open mode + "localhost/console is admin"
+  (that's what makes password-less recovery safe). The passcode is scrypt-hashed in a 0600 file;
+  the hash/salt must never cross `/api/auth/status`.
+
+## Commissioning (Phase 1)
+
+- **Grandfather existing installs or the wizard hijacks working boxes** — but SNAPSHOT the
+  decision, never derive it live. A box has no `commissionedAt` until setup runs, so naive
+  first-boot would show the wizard on every deployed Ark. `_legacyActive()` treats a box with a
+  **content or model library** as already set up. **Adversarial-review finding (fixed):** deriving
+  `commissioned` *live* from the library was a bypass — the `/api/download/*` scripts `mkdir -p`
+  into `MODEL_ROOT` *before any download*, so an un-authenticated LAN peer could POST to those
+  ungated endpoints, make the library non-empty, and flip a fresh un-owned box to "commissioned",
+  permanently locking its owner out of the web wizard. **Fix:** the grandfather decision is made
+  **once at first server start** (`commission.grandfather()` writes `commissionedAt`); thereafter
+  `boxCommissioned()` reads ONLY the persisted flag, so post-boot library files can't flip it. AND
+  every mutating POST is refused with 409 until the box is commissioned (a fresh box serves the
+  wizard, not the catalog). `_legacyActive` honors `VALARK_ZIM_DIR`/`VALARK_CONTENT_DIR` so it's
+  isolatable; `tests/test-commission.sh` spins a real server to prove the flip is impossible.
+- **Claim gate is fail-closed but localhost-trusted.** From the LAN you must present the printed
+  claim token; from the box/localhost you commission without one (physical possession = ownership,
+  which also keeps recovery possible). The token is single-use (consumed on commission) and never
+  crosses `/api/setup/state` — only `needsClaim`/`hasClaim` booleans do.
+- **The wizard is a `file://`-safe SPA takeover.** `#/setup` renders with inline CSS and no
+  server, so Playwright previews it offline; `checkSetup()` only redirects when it can reach
+  `/api/setup/state` and the box is un-commissioned.
+
+## Git / releases
+
+- **Don't retarget a PR across a rebase-merge divergence.** After a rebase-merge release, `main`
+  and `dev` share content but diverge by SHA. Dependabot PRs are cut from the *pre-release* `main`;
+  retargeting them to `dev` corrupts the merge base into a huge false diff. Leave them on `main`
+  (or set `target-branch: dev` in `dependabot.yml` so future ones start there), don't retarget.
+
 ## Benign, don't "fix"
 
 - **NodeBB `/app/forum/` 503s under rapid bursts** — a transient of `pipeProxy`, self‑recovers.

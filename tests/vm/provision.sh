@@ -80,6 +80,14 @@ if [ -n "$NODE" ]; then
         [ -n "$body" ] && step "web UI renders Val Ark shell" pass 0 || step "web UI renders Val Ark shell" fail 0 "index did not contain 'Val Ark'"
         code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 http://127.0.0.1:3000/bootstrap.sh 2>/dev/null)
         [ "$code" = "200" ] && step "self-replication: /bootstrap.sh served" pass 0 || step "self-replication: /bootstrap.sh served" fail 0 "HTTP $code"
+        # First-boot: a fresh box (empty content/model library) reports un-commissioned
+        # so the web UI takes over with the setup wizard.
+        setup_state=$(curl -s --max-time 4 http://127.0.0.1:3000/api/setup/state 2>/dev/null)
+        if printf '%s' "$setup_state" | grep -q '"commissioned":false'; then
+            step "first-boot: fresh box needs commissioning (wizard)" pass 0
+        else
+            step "first-boot: fresh box needs commissioning (wizard)" fail 0 "expected un-commissioned; got: $(printf '%s' "$setup_state" | cut -c1-120)"
+        fi
     else
         step "web server starts + /api/health ok" fail 0 "server did not answer :3000 (see logs/vm-server.out)"
     fi

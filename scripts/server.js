@@ -1288,6 +1288,29 @@ function loadTls() {
         catch (e2) { return null; }
     }
 }
+// Serve the offline bootstrap script with this Ark's host:port baked in, so the
+// piped one-liner (`curl http://<ark>/bootstrap.sh | bash`) knows where to clone
+// from without the user typing the address. Falls back to the literal file if the
+// Host header is missing (the script then expects the host as an argument).
+function serveBootstrap(req, res) {
+    try {
+        let script = fs.readFileSync(path.join(ROOT, 'bootstrap.sh'), 'utf8');
+        const host = (req.headers && req.headers.host) ? String(req.headers.host) : '';
+        if (host && /^[a-zA-Z0-9.\-:\[\]]+$/.test(host)) {
+            const scheme = (req.socket && req.socket.encrypted) ? 'https' : 'http';
+            script = script.split('__VALARK_HOST__').join(`${scheme}://${host}`);
+        }
+        res.writeHead(200, {
+            'Content-Type': 'text/x-shellscript; charset=utf-8',
+            'Cache-Control': 'no-cache', ...SECURITY_HEADERS,
+        });
+        res.end(script);
+    } catch (e) {
+        res.writeHead(503, { 'Content-Type': 'text/plain', ...SECURITY_HEADERS });
+        res.end('# Val Ark bootstrap unavailable (bootstrap.sh missing on this host)\n');
+    }
+}
+
 function serveCaCert(res) {
     try {
         if (!_caBuf) _caBuf = fs.readFileSync(path.join(tlsDir(), 'ca.crt'));
@@ -1331,6 +1354,13 @@ function handleRequest(req, res) {
     // banner can render before the user has trusted the CA).
     if (urlPath === '/api/status/tls') {
         return serveTlsStatus(res);
+    }
+
+    // Offline self-replication: hand out a bootstrap script with THIS host baked in
+    // so `curl http://<ark>/bootstrap.sh | bash` clones the whole system from the
+    // LAN — no internet. The source bundle/tarball are served from /sources/val-ark/.
+    if (urlPath === '/bootstrap.sh' || urlPath === '/bootstrap') {
+        return serveBootstrap(req, res);
     }
 
     // Optional: push LAN visitors to HTTPS (opt-in via VALARK_FORCE_HTTPS=1).

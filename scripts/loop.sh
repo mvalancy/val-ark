@@ -251,6 +251,9 @@ loop_once() {
 
     step "2d. ensure enabled community services running"; ensure_services
 
+    step "2e. self-mirror (offline: serve our own code for LAN bootstrap)"
+    FORCE_COLOR=0 bash "${_DIR}/mirror-self.sh" 2>&1 | tail -1 | sed 's/^/    /'
+
     step "3. refresh live catalog (heals stale content links)"
     bash "$LIBRARIAN" refresh >/dev/null 2>&1 && log "catalog refreshed" || log "${YELLOW}catalog refresh failed (cache retained)${NC}"
 

@@ -236,6 +236,18 @@ test.describe('Val Ark API Server', () => {
     }
   });
 
+  test('GET /bootstrap.sh serves an offline bootstrap with this host baked in', async ({ request }) => {
+    const resp = await request.get(`${BASE_URL}/bootstrap.sh`);
+    expect(resp.ok()).toBeTruthy();
+    expect(resp.headers()['content-type']).toContain('shellscript');
+    const body = await resp.text();
+    expect(body).toContain('Val Ark');
+    expect(body).toContain('bootstrap');
+    // The __VALARK_HOST__ placeholder must be replaced with the request host.
+    expect(body).not.toContain('__VALARK_HOST__');
+    expect(body).toContain('localhost:3001');
+  });
+
   test('GET /favicon.svg is served', async ({ request }) => {
     const resp = await request.get(`${BASE_URL}/favicon.svg`);
     expect(resp.ok()).toBeTruthy();

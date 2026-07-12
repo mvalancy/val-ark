@@ -63,6 +63,9 @@ c=$(jpost -b "$T/cj" -d '{"target":"all"}' "$B/api/download/content"); [ "$c" !=
 # 6. Admin-only action (adduser) is refused without admin, allowed with.
 [ "$(jpost -d '{"id":"chat","username":"x"}' "$B/api/service/adduser")" = "401" ] && pass || fail "adduser must be 401 without admin"
 c=$(jpost -b "$T/cj" -d '{"id":"forum","username":"x"}' "$B/api/service/adduser"); [ "$c" != "401" ] && pass || fail "adduser must pass the gate for an admin (got $c)"
+# 6b. /api/setup/profile (download-priorities) is admin-only too.
+[ "$(jpost -d '{"profile":"ai"}' "$B/api/setup/profile")" = "401" ] && pass || fail "setup/profile must be 401 without admin"
+c=$(jpost -b "$T/cj" -d '{"profile":"ai"}' "$B/api/setup/profile"); [ "$c" != "401" ] && pass || fail "setup/profile must pass the gate for an admin (got $c)"
 # 7. Logout returns a clearing cookie.
 curl -s -i -X POST "$B/api/auth/logout" 2>/dev/null | tr -d '\r' | grep -i 'set-cookie' | grep -q 'varksid=;' && pass || fail "logout must clear the session cookie"
 # 8. A tampered session is rejected (still 401).

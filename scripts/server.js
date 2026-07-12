@@ -847,7 +847,7 @@ function sessionCookie(token, maxAgeSec, secure) {
 // POSTs that CHANGE the box's config/accounts — always admin (localhost or a
 // logged-in admin), regardless of Use Mode. "Use" actions (downloads/requests/
 // service starts) are gated per Use Mode instead (Open = anyone on the LAN).
-const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser']);
+const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser', '/api/setup/profile']);
 const AUTH_EXEMPT_POSTS = new Set(['/api/auth/login', '/api/auth/logout', '/api/auth/recover', '/api/setup/commission']);
 
 // Peer IP, normalized (node reports LAN/tailnet IPv4 peers as IPv4-mapped IPv6).
@@ -1169,6 +1169,11 @@ function handleAPI(req, res, urlPath) {
                     // the box/localhost is trusted and may commission without one.
                     // (Public peers are already refused by the isLanOrTailnet gate.)
                     result = commission.commission(STATE_DIR, body, { trusted: isLocalhost(req) });
+                    break;
+                case '/api/setup/profile':
+                    // Change the download profile (Downloads & Priorities). Admin-only
+                    // (ADMIN_ONLY_POSTS); drives the librarian's per-bucket curation weights.
+                    result = commission.setProfile(STATE_DIR, body.profile);
                     break;
                 case '/api/service/start':
                     // Bring up an enabled + mirrored community service (chat/mail/forum/paste).

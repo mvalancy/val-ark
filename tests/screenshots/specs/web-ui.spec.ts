@@ -1330,12 +1330,46 @@ test.describe('Val Ark - Consumer Shell (Home status + Settings + Activity)', ()
     expect(expert).toBeGreaterThan(basic);
   });
 
+  test('Settings Downloads & Priorities offers a profile picker', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/settings`);
+    await page.waitForSelector('#downloads', { timeout: 5000 });
+    await expect(page.locator('#downloads')).toContainText('Downloads & Priorities');
+    await expect(page.locator('#downloads .setup-profile')).toHaveCount(4);
+    await expect(page.locator('#downloads .setup-profile[data-profile="knowledge"]')).toBeVisible();
+    expect(await page.evaluate(() => typeof (window as any).setDownloadProfile)).toBe('function');
+  });
+
   test('Activity view renders and reports quiet state', async ({ page }) => {
     await page.goto(`file://${WEB_UI}#/activity`);
     await page.waitForSelector('#main-content', { timeout: 5000 });
     await expect(page.locator('h1')).toHaveText('Activity');
     await expect(page.locator('.home-status .hs-dot')).toBeVisible();
     await expect(page.getByText('Downloads', { exact: false }).first()).toBeVisible();
+    await expect(page.getByText('Nothing downloading', { exact: false })).toBeVisible();
+  });
+
+  test('Activity download queue: rich cards with progress, ETA, status, cancel/retry', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/activity`);
+    await page.waitForSelector('#main-content', { timeout: 5000 });
+    await page.evaluate(() => {
+      // _activeDownloads is a top-level const (a page global, not a window property).
+      // @ts-ignore
+      _activeDownloads.set('1', { id: '1', type: 'content', status: 'running', progress: 40, lastLine: 'Progress: 40%', startedAt: Date.now() - 60000 });
+      // @ts-ignore
+      _activeDownloads.set('2', { id: '2', type: 'models', status: 'failed', progress: 70, lastLine: 'connection lost' });
+      (window as any).scheduleRender();
+    });
+    await page.waitForSelector('.dl-card', { timeout: 3000 });
+    await expect(page.locator('.dl-card')).toHaveCount(2);
+    const running = page.locator('.dl-card:has-text("Library content")');
+    await expect(running.locator('.dl-mini')).toHaveText('Cancel');
+    await expect(running).toContainText('40%');
+    await expect(running).toContainText('left');                       // ETA
+    const failed = page.locator('.dl-card:has-text("AI models")');
+    await expect(failed).toContainText('retries automatically');       // Retry-not-error framing
+    await expect(failed.locator('.dl-mini')).toHaveText('Retry');
+    const fns = await page.evaluate(() => [typeof (window as any).renderDownloadCard, typeof (window as any).loadDownloads, typeof (window as any).retryDownload]);
+    expect(fns).toEqual(['function', 'function', 'function']);
   });
 
   test('the shell renders in light theme too', async ({ page }) => {

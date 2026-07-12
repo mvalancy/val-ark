@@ -36,6 +36,21 @@ later). See [README](README.md).
 - **Deployment:** ship both a **Docker appliance image** *and* the bare‑metal bootstrap; both
   offline, both commissioned from the same wizard.
 
+## 2026‑07 — Consumer shell: Home status + Settings + Activity (roadmap Phase 3, issue #12)
+- Delivered the shell's essence **additively** (no route regressions): a health‑app **Home
+  status summary** (● All good / Working on it / Needs you + one sentence + big area/utility
+  cards), a consolidated **Settings** hub (`#/settings`, Basic/Expert, the design's section list +
+  inline Storage + About/Rescue), and an **Activity** feed (`#/activity`, live downloads + events
+  placeholder). New nav link **Settings**; `computeHealth()` derives green/amber/red from the
+  status the app already fetches (disk, services, downloads).
+- **Why additive, not a full 4‑tab teardown:** ~15 existing tests click the current nav links
+  (Software/Models/Library/Community/Getting Started). Ripping the nav to a literal four tabs would
+  churn them for little user gain right now; the summary‑Home + Settings hub deliver the consumer
+  experience without regressions. The literal 4‑tab cap (folding Software/Models into Home cards,
+  Getting Started into the wizard) is a **noted follow‑up**.
+- Tests: 5 Playwright specs (Home status + 6 cards, Settings nav + hub + inline Storage,
+  Basic/Expert reveal, Activity, light‑theme render). Full suite 319/1 green, no regressions.
+
 ## 2026‑07 — First‑boot commissioning wizard (roadmap Phase 1, issue #11)
 - Shipped the commissioning **core**: `scripts/lib/commission.js` (claim‑token gate + settings
   store, builds on `auth.js`), server `GET /api/setup/state` + `POST /api/setup/commission`

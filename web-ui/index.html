@@ -3346,6 +3346,10 @@ function router() {
         html += renderHome();
     } else if (route === '/community') {
         html += renderCommunity();
+    } else if (route === '/settings' || route.startsWith('/settings/')) {
+        html += renderSettings();
+    } else if (route === '/activity') {
+        html += renderActivity();
     } else if (route === '/https' || route === '/trust') {
         html += renderHttpsGuide();
     } else if (route === '/tools') {
@@ -3414,6 +3418,7 @@ function renderNav(route) {
         route.startsWith('/models') ? 'models' :
         (route.startsWith('/content') || route.startsWith('/library')) ? 'content' :
         (route.startsWith('/community') || route.startsWith('/app')) ? 'community' :
+        (route.startsWith('/settings') || route.startsWith('/activity')) ? 'settings' :
         route.startsWith('/quickstart') ? 'quickstart' : 'home';
 
     return `
@@ -3428,6 +3433,7 @@ function renderNav(route) {
             <a href="#/models" class="nav-link ${activeSection === 'models' ? 'active' : ''}" onclick="closeMobileNav()">Models</a>
             <a href="#/content" class="nav-link ${activeSection === 'content' ? 'active' : ''}" onclick="closeMobileNav()">Library</a>
             <a href="#/community" class="nav-link ${activeSection === 'community' ? 'active' : ''}" onclick="closeMobileNav()">Community</a>
+            <a href="#/settings" class="nav-link ${activeSection === 'settings' ? 'active' : ''}" onclick="closeMobileNav()">Settings</a>
             <a href="#/quickstart" class="nav-link ${activeSection === 'quickstart' ? 'active' : ''}" onclick="closeMobileNav()">Getting Started</a>
         </div>
         <div class="nav-disk" id="nav-disk">${renderDiskBar()}</div>
@@ -3490,6 +3496,158 @@ function renderFooter() {
 // =============================================================================
 // HOME PAGE
 // =============================================================================
+// ===================== Consumer shell: Home status + Settings + Activity ======
+// The single-glance "is it well?" answer, driven by the live status the app already
+// fetches (disk, services, downloads). Green / amber / red, plus one sentence.
+function computeHealth() {
+    let active = 0;
+    try { for (const d of _activeDownloads.values()) if (d.status === 'running') active++; } catch (_) {}
+    let diskPct = 0;
+    if (_diskData && _diskData.total) diskPct = _diskData.used / _diskData.total * 100;
+    else if (_storageData && _storageData.disk && _storageData.disk.total) diskPct = _storageData.disk.used / _storageData.disk.total * 100;
+    let down = 0;
+    if (_servicesStatus) for (const id in _servicesStatus) { const s = _servicesStatus[id]; if (s.enabled && s.mirrored && !s.running && !s.starting) down++; }
+    if (diskPct >= 97) return { level: 'attention', text: 'Storage is almost full — free up some space.' };
+    if (down > 0) return { level: 'attention', text: down + (down > 1 ? ' services need' : ' service needs') + ' a restart.' };
+    if (active > 0) return { level: 'working', text: 'Downloading — ' + active + ' in progress. Keeps working offline.' };
+    return { level: 'good', text: "All good — everything's running and offline-ready." };
+}
+
+function renderHomeStatus() {
+    const h = computeHealth();
+    const dot = { good: 'ok', working: 'busy', attention: 'warn' }[h.level];
+    const glance = { good: 'All good', working: 'Working on it', attention: 'Needs you' }[h.level];
+    const diskPct = (_diskData && _diskData.total) ? Math.round(_diskData.used / _diskData.total * 100) + '% full' : '';
+    let active = 0; try { for (const d of _activeDownloads.values()) if (d.status === 'running') active++; } catch (_) {}
+    let online = 0; if (_servicesStatus) for (const id in _servicesStatus) if (_servicesStatus[id].running) online++;
+    const models = MODEL_FAMILIES.reduce((s, f) => s + f.variants.length, 0);
+    const meta = [diskPct, active ? active + ' downloading' : ''].filter(Boolean).join(' · ');
+    return `${_SHELL_CSS}<div class="home-status" role="status" aria-live="polite">
+        <span class="hs-dot hs-${dot}" aria-hidden="true"></span>
+        <span class="hs-glance" data-level="${h.level}">${glance}</span>
+        <span class="hs-text">${esc(h.text)}</span>
+        ${meta ? `<span class="hs-meta">${esc(meta)}</span>` : ''}
+    </div>
+    <div class="home-cards">
+        <a class="home-card area" href="#/content"><span class="hc-ic" aria-hidden="true">📚</span><span class="hc-b"><span class="hc-t">Library</span><span class="hc-s">Wikipedia, wikis, books &amp; more</span></span></a>
+        <a class="home-card area" href="#/models"><span class="hc-ic" aria-hidden="true">🤖</span><span class="hc-b"><span class="hc-t">AI Helper</span><span class="hc-s">${models}+ local models — ask anything</span></span></a>
+        <a class="home-card area" href="#/community"><span class="hc-ic" aria-hidden="true">💬</span><span class="hc-b"><span class="hc-t">Community</span><span class="hc-s">${online ? online + ' online' : 'Chat · Mail · Boards'}</span></span></a>
+        <a class="home-card util" href="#/activity"><span class="hc-ic" aria-hidden="true">⬇</span><span class="hc-b"><span class="hc-t">Activity</span><span class="hc-s">${active ? active + ' downloading' : 'Downloads &amp; events'}</span></span></a>
+        <a class="home-card util" href="#/settings"><span class="hc-ic" aria-hidden="true">💽</span><span class="hc-b"><span class="hc-t">Storage</span><span class="hc-s">${diskPct || 'Usage &amp; cleanup'}</span></span></a>
+        <a class="home-card util" href="#/settings"><span class="hc-ic" aria-hidden="true">⚙</span><span class="hc-b"><span class="hc-t">Settings</span><span class="hc-s">Manage this box</span></span></a>
+    </div>`;
+}
+
+// The admin console: one Settings list (Basic by default, Expert reveals the rest).
+// Read is open per Use Mode; every *change* is admin (localhost/console free, LAN
+// prompts for the passcode) — enforced on the underlying action, not here.
+let _settingsExpert = false;
+const SETTINGS_SECTIONS = [
+    { id: 'storage',   ic: '💽', name: 'Storage',              purpose: 'How much space, what’s using it, free some up', href: '#/settings#storage', adv: false },
+    { id: 'downloads', ic: '⬇',  name: 'Downloads & Priorities', purpose: 'Pick what matters; watch & control downloads', href: '#/activity', adv: false },
+    { id: 'apps',      ic: '🧩', name: 'Apps & Services',       purpose: 'Turn features on/off; manage app accounts', href: '#/community', adv: false },
+    { id: 'network',   ic: '🌐', name: 'Network & Access',      purpose: 'The box’s name/address; who can get in; HTTPS', href: '#/https', adv: false },
+    { id: 'health',    ic: '❤️', name: 'Health',                purpose: 'Is everything running? Any alerts?', href: '#/activity', adv: true },
+    { id: 'activity',  ic: '📋', name: 'Activity',              purpose: 'What happened, and any problems', href: '#/activity', adv: true },
+    { id: 'update',    ic: '⤴️', name: 'Update',                purpose: 'Get the latest, safely — with rollback', href: '#/settings#update', adv: true },
+    { id: 'replicate', ic: '🧬', name: 'Backup & Replicate',    purpose: 'Copy Val Ark to another box (offline)', href: '/bootstrap.sh', adv: true },
+    { id: 'about',     ic: 'ℹ️', name: 'About & Rescue',        purpose: 'Version, factory reset, rescue mode', href: '#/settings#about', adv: false },
+];
+
+function toggleSettingsMode(expert) { _settingsExpert = !!expert; router(); }
+
+function renderSettings() {
+    const h = computeHealth();
+    const dot = { good: 'ok', working: 'busy', attention: 'warn' }[h.level];
+    let html = `${_SHELL_CSS}<div class="container" id="main-content">`;
+    html += renderBreadcrumb([{ label: 'Settings' }]);
+    html += `<div class="settings-head"><h1>Settings</h1>
+        <div class="seg" role="tablist" aria-label="Settings detail level">
+            <button class="seg-btn ${!_settingsExpert ? 'on' : ''}" onclick="toggleSettingsMode(false)">Basic</button>
+            <button class="seg-btn ${_settingsExpert ? 'on' : ''}" onclick="toggleSettingsMode(true)">Expert</button>
+        </div></div>`;
+    html += `<div class="home-status" role="status"><span class="hs-dot hs-${dot}" aria-hidden="true"></span><span class="hs-text">${esc(h.text)}</span></div>`;
+    const shown = SETTINGS_SECTIONS.filter(s => _settingsExpert || !s.adv);
+    html += '<div class="settings-grid">';
+    for (const s of shown) {
+        const external = s.href.startsWith('/');
+        html += `<a class="settings-item" href="${s.href}"${external ? ' target="_blank" rel="noopener"' : ''} data-section="${s.id}">
+            <span class="si-ic" aria-hidden="true">${s.ic}</span>
+            <span class="si-b"><span class="si-name">${esc(s.name)}</span><span class="si-p">${esc(s.purpose)}</span></span>
+            <span class="si-arrow" aria-hidden="true">&rsaquo;</span>
+        </a>`;
+    }
+    html += '</div>';
+    // Storage detail is the most-used control — surface the live breakdown inline.
+    html += `<div id="storage" class="detail-section" style="margin-top:1.5rem"><h2>Storage</h2>${renderStorageBreakdown()}
+        <p style="color:var(--text-muted);font-size:.9em">Val Ark keeps itself under its footprint cap and evicts the lowest-priority content when it needs room. Change the cap in <code>.env</code> (<code>VALARK_MAX_GB</code>) — a slider is coming to Advanced.</p></div>`;
+    html += `<div id="about" class="detail-section" style="margin-top:1.5rem"><h2>About &amp; Rescue</h2>
+        <p>Val Ark — offline-first knowledge &amp; AI appliance. Forgot the admin passcode or need to start over? It’s always recoverable from the box itself:</p>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/valark reset --tier1   # forget admin, keep everything</div>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/valark setpassword     # set a new admin passcode</div>
+        <p style="color:var(--text-muted);font-size:.9em">Resets never touch your Library or models — content is physically separate from settings.</p></div>`;
+    html += '</div>';
+    return html;
+}
+
+function renderActivity() {
+    let html = `${_SHELL_CSS}<div class="container" id="main-content">`;
+    html += renderBreadcrumb([{ label: 'Activity' }]);
+    html += '<h1>Activity</h1>';
+    const h = computeHealth();
+    const dot = { good: 'ok', working: 'busy', attention: 'warn' }[h.level];
+    html += `<div class="home-status"><span class="hs-dot hs-${dot}" aria-hidden="true"></span><span class="hs-text">${esc(h.text)}</span></div>`;
+    // Live downloads
+    const items = [];
+    try { for (const [id, d] of _activeDownloads) items.push({ id, ...d }); } catch (_) {}
+    html += '<h2>Downloads</h2>';
+    if (items.length) {
+        html += '<div class="activity-list">';
+        for (const d of items) {
+            const pct = Math.max(0, Math.min(100, d.progress || 0));
+            html += `<div class="activity-row"><span class="ar-type">${esc(d.type || 'download')}</span>
+                <span class="ar-bar"><span class="ar-fill" style="width:${pct}%"></span></span>
+                <span class="ar-line">${esc((d.lastLine || d.status || '').toString().slice(0, 60))}</span></div>`;
+        }
+        html += '</div>';
+    } else {
+        html += '<p class="activity-empty">Nothing downloading right now — all quiet. New content you request shows up here with live progress, and resumes after a power loss.</p>';
+    }
+    html += `<h2 style="margin-top:1.5rem">Events</h2>
+        <p class="activity-empty">The self-heal loop keeps services running and repairs itself in the background. A plain event feed with one-click repairs lands here next; raw logs live under <code>&lt;data&gt;/val-ark/state/logs</code>.</p>`;
+    return html;
+}
+
+const _SHELL_CSS = `<style>
+.home-status{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.8rem 1rem;margin:0 0 1rem;border:1px solid var(--border,#2a2d34);border-radius:12px;background:var(--card-bg,var(--bg,#16181d))}
+.hs-dot{width:12px;height:12px;border-radius:50%;flex:none;box-shadow:0 0 0 3px rgba(0,0,0,.06)}
+.hs-ok{background:#2fbf71}.hs-busy{background:#e6a817}.hs-warn{background:#e0553a}
+.hs-glance{font-weight:700}.hs-text{color:var(--text-muted,#aab)}
+.hs-meta{margin-left:auto;color:var(--text-muted,#8a8f98);font-size:.9em;font-variant-numeric:tabular-nums}
+.home-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:.8rem;margin:0 0 2rem}
+.home-card{display:flex;gap:.75rem;align-items:center;padding:1rem;border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--card-bg,var(--bg,#16181d));color:var(--text,#e8eaed);text-decoration:none}
+.home-card:hover{border-color:var(--accent,#e0603a)}
+.home-card.area{background:linear-gradient(180deg,var(--card-bg,#16181d),rgba(224,96,58,.05))}
+.hc-ic{font-size:1.7rem;line-height:1}.hc-b{display:flex;flex-direction:column;gap:.15rem}
+.hc-t{font-weight:700}.hc-s{color:var(--text-muted,#8a8f98);font-size:.86rem}
+.settings-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--border,#2a2d34);border-radius:9px;overflow:hidden}
+.seg-btn{padding:.4rem .9rem;background:transparent;color:var(--text,#e8eaed);border:0;cursor:pointer;font-size:.9rem}
+.seg-btn.on{background:var(--accent,#e0603a);color:#fff}
+.settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.7rem;margin:1rem 0}
+.settings-item{display:flex;gap:.75rem;align-items:center;padding:.9rem 1rem;border:1px solid var(--border,#2a2d34);border-radius:12px;background:var(--card-bg,var(--bg,#16181d));color:var(--text,#e8eaed);text-decoration:none}
+.settings-item:hover{border-color:var(--accent,#e0603a)}
+.si-ic{font-size:1.3rem}.si-b{display:flex;flex-direction:column;gap:.1rem;flex:1}
+.si-name{font-weight:650}.si-p{color:var(--text-muted,#8a8f98);font-size:.84rem}
+.si-arrow{color:var(--text-muted,#8a8f98);font-size:1.3rem}
+.activity-list{display:flex;flex-direction:column;gap:.5rem}
+.activity-row{display:grid;grid-template-columns:120px 1fr;gap:.4rem .8rem;align-items:center;padding:.6rem .8rem;border:1px solid var(--border,#2a2d34);border-radius:10px}
+.ar-type{font-weight:650}.ar-bar{grid-column:1/3;height:6px;border-radius:4px;background:var(--border,#2a2d34);overflow:hidden}
+.ar-fill{display:block;height:100%;background:var(--accent,#e0603a)}
+.ar-line{grid-column:1/3;color:var(--text-muted,#8a8f98);font-size:.84rem}
+.activity-empty{color:var(--text-muted,#8a8f98)}
+</style>`;
+
 function renderHome() {
     const totalModels = MODEL_FAMILIES.reduce((s, f) => s + f.variants.length, 0);
     // Live mirrored total when the storage API has reported, else static estimate.
@@ -3498,6 +3656,10 @@ function renderHome() {
         : '~' + STORAGE_DATA.reduce((s, d) => s + d.size, 0) + ' GB';
 
     let html = '<div class="container" id="main-content">';
+
+    // Consumer shell: a calm "is it well?" status summary + big area/utility cards,
+    // shown first (a health-app glance), with the full catalog below to explore.
+    html += renderHomeStatus();
 
     // Hero
     html += `

@@ -778,6 +778,24 @@ function isAdmin(req) {
 function isSecureReq(req) {
     return !!(req.socket && req.socket.encrypted) || req.headers?.['x-forwarded-proto'] === 'https';
 }
+
+// Read-wall: content/data paths that reveal what's on the box. The UI shell, auth,
+// setup, health and the CA are NOT gated (so the login wall can render + you can sign
+// in). Gated paths are refused for un-authed LAN visitors in Passworded/Accounts mode.
+function isReadGated(urlPath) {
+    if (urlPath.startsWith('/api/auth/') || urlPath.startsWith('/api/setup/')) return false;
+    if (urlPath === '/api/health' || urlPath === '/api/status/tls') return false;
+    if (urlPath.startsWith('/api/status/') || urlPath.startsWith('/api/catalog/') ||
+        urlPath.startsWith('/api/archive/') || urlPath === '/api/downloads/stream') return true;
+    if (urlPath === '/kiwix' || urlPath.startsWith('/kiwix/')) return true;
+    if (/^\/app\//.test(urlPath)) return true;
+    return false;   // the static UI shell + assets are always served (wall renders in it)
+}
+function readAllowed(req) {
+    const mode = auth.status(STATE_DIR).useMode;
+    if (mode !== 'passworded' && mode !== 'accounts') return true;   // Open: reads are open
+    return isAdmin(req);   // gated modes: localhost/console or a valid session
+}
 // Login cooldown (not a permanent lock): slow down passcode guessing. Per-IP AND a
 // global cap, so an attacker can't just rotate source IPs (NIC aliases) to multiply
 // their guess budget. localhost/console always bypasses (owner is never locked out).
@@ -1592,6 +1610,14 @@ function handleRequest(req, res) {
             res.writeHead(301, { 'Location': `https://${host}:${TLS.httpsPort}${req.url}` });
             return res.end();
         }
+    }
+
+    // Read-wall: in Passworded/Accounts mode an un-authed LAN visitor can't read the
+    // library, catalog, downloads or apps — they get a 401 and the SPA shows a login
+    // wall. The shell/auth/setup/health/CA above are always reachable so the wall can
+    // render and you can sign in; localhost/console is always in.
+    if (isReadGated(urlPath) && !readAllowed(req)) {
+        return sendJSON(res, req, { error: 'Sign in to view this Val Ark.', needsAuth: true }, 401);
     }
 
     // API routes

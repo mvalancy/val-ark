@@ -117,9 +117,17 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 - **The gate has three tiers.** `ADMIN_ONLY_POSTS` (config/account changes, e.g. `adduser`) always
   need admin; **use-actions** (downloads/requests/service starts) need admin only when Use Mode is
-  Passworded/Accounts (Open = anyone on the LAN); reads (GET) aren't gated yet (read-wall is a
-  follow-up). `isAdmin(req)` = **localhost/console** (always admin — physical possession) **OR** a
-  valid session. Login/logout/commission are gate-exempt (you can't be authed to log in).
+  Passworded/Accounts (Open = anyone on the LAN); and the **read-wall** (`isReadGated`/`readAllowed`)
+  gates content READS (`/api/status/*`, `/api/catalog/*`, `/api/archive/*`, `/kiwix/*`, `/app/*`) in
+  Passworded/Accounts mode. `isAdmin(req)` = **localhost/console** (always admin — physical
+  possession) **OR** a valid session. Login/logout/commission are gate-exempt (you can't be authed
+  to log in).
+- **The read-wall is two-layer.** Server: content endpoints 401 for un-authed LAN visitors in
+  Passworded/Accounts mode — but the **UI shell + `/api/auth/*` + `/api/setup/*` + `/api/health` +
+  `/ca.crt` stay open** so the login wall can render and you can sign in. Client: `checkAccess()`
+  renders a full-page wall (`renderAccessWall`) before loading the app. Open mode is unchanged, so
+  the existing (Open-default) tests don't regress; the wall is exercised via `VALARK_TEST_FORCE_REMOTE`
+  in `test-access.sh` and a forced-state Playwright render.
 - **Sessions are stateless HMAC tokens** (`payload.hmac`, signed with a per-box secret in the auth
   store), so there's no session table. Cookie `varksid` is HttpOnly + SameSite=Lax. **"Sign out
   everywhere" = rotate the secret** (`auth.rotateSessionSecret`) — a per-client logout only drops

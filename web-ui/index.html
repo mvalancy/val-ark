@@ -4457,6 +4457,10 @@ async function checkContentStatus() {
 function renderQuickStart() {
     const p = PLATFORMS[currentPlatform];
     const s = p.sep;
+    // This Ark's address, so the offline bootstrap one-liner is copy-paste ready.
+    // Falls back to a placeholder when viewed from a file:// (non-served) context.
+    const arkOrigin = (location.protocol.indexOf('http') === 0 && location.host)
+        ? location.origin : 'http://your-ark-host:3000';
     let html = '<div class="container" id="main-content">';
     html += renderBreadcrumb([{label: 'Getting Started'}]);
     html += `<h1 style="font-size:1.6em;margin-bottom:8px">Getting Started</h1>`;
@@ -4540,10 +4544,12 @@ function renderQuickStart() {
 
     // Step 1: Get Val Ark
     html += `<div class="detail-section">
-        <h2>1. Download Val Ark</h2>
-        <p style="margin-bottom:12px">Clone the repository or download the latest release:</p>
-        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>git clone https://github.com/mvalancy/val-ark.git && cd val-ark</div>
-        <p style="font-size:0.85em;color:var(--text-secondary);margin-top:8px">Or <a href="https://github.com/mvalancy/val-ark/releases" style="color:var(--accent)" target="_blank">download a release</a> and extract it.</p>
+        <h2>1. Get Val Ark onto a new machine</h2>
+        <p style="margin-bottom:10px"><strong>Offline, from this Ark</strong> — no internet needed. Run this on the new machine; it clones the whole system (code + setup) straight off this box over your LAN:</p>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>curl -fsSL ${arkOrigin}/bootstrap.sh | bash</div>
+        <div class="code-label">Self-replicates from this trusted host — survives a power cut or a dead uplink. Then pull whatever tools, models &amp; library content you want from the same UI.</div>
+        <p style="font-size:0.85em;color:var(--text-secondary);margin-top:12px">Prefer a manual clone? Grab the offline bundle: <code>git clone ${arkOrigin}/sources/val-ark/val-ark.bundle val-ark</code></p>
+        <p style="font-size:0.85em;color:var(--text-secondary);margin-top:6px"><strong>Online / first node:</strong> <a href="https://github.com/mvalancy/val-ark" style="color:var(--accent)" target="_blank">github.com/mvalancy/val-ark</a> — <code>git clone …/val-ark.git &amp;&amp; cd val-ark</code></p>
     </div>`;
 
     // Step 2: Pick platform

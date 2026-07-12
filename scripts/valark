@@ -49,9 +49,16 @@ _node() {
     return 1
 }
 
+COMMISSION_JS="${SELF_DIR}/lib/commission.js"
+
 _auth() {  # _auth <subcommand> [args...]   (passcode passed via VALARK_PW env)
     local node; node="$(_node)" || { err "node not found (mirror it: scripts/tools/node.sh)"; return 127; }
     "$node" "$AUTH_JS" "$@"
+}
+
+_commission() {  # _commission <subcommand>
+    local node; node="$(_node)" || { err "node not found (mirror it: scripts/tools/node.sh)"; return 127; }
+    "$node" "$COMMISSION_JS" "$@"
 }
 
 # Read a passcode into VALARK_PW: use $1 if given, else prompt (hidden).
@@ -117,6 +124,8 @@ case "${1:-help}" in
                      *)      err "usage: valark auth {status|list}"; exit 2 ;;
                  esac ;;
     usemode)     shift; _auth setmode "${1:-}" ;;
+    claim)       _commission claim ;;
+    setup-status) _commission status ;;
     reset)       shift; cmd_reset "$@" ;;
     help|-h|--help)
         sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;

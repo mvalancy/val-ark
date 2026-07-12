@@ -1293,6 +1293,35 @@ test.describe('Val Ark - Mobile Navigation', () => {
   });
 });
 
+test.describe('Val Ark - First-boot Commissioning Wizard', () => {
+  test('#/setup renders the full-page wizard (no server needed for preview)', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/setup`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.setup-card', { timeout: 5000 });
+    await expect(page.locator('.setup-card')).toBeVisible();
+    await expect(page.locator('.setup-card h1')).toContainText('Welcome to Val Ark');
+    await expect(page.locator('.setup-dots .setup-dot').first()).toBeVisible();
+    // wizard + captive-redirect helpers are wired up
+    const fns = await page.evaluate(() => [typeof (window as any).renderSetup, typeof (window as any).checkSetup, typeof (window as any).setupFinish]);
+    expect(fns).toEqual(['function', 'function', 'function']);
+  });
+
+  test('wizard steps Welcome → Name → (skip admin) → Focus → Review', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/setup`);
+    await page.waitForSelector('.setup-card', { timeout: 5000 });
+    await page.locator('.setup-btn:has-text("Start")').click();
+    await expect(page.locator('#setup-name')).toBeVisible();
+    await page.fill('#setup-name', 'homelab');
+    await page.locator('.setup-btn:has-text("Continue")').click();      // → admin
+    await expect(page.locator('#setup-pass')).toBeVisible();
+    await page.locator('.setup-btn:has-text("Skip")').click();          // → focus
+    await expect(page.locator('.setup-profile').first()).toBeVisible();
+    await page.locator('.setup-btn:has-text("Continue")').click();      // → review
+    await expect(page.locator('.setup-review')).toContainText('homelab');
+    await expect(page.locator('#setup-finish-btn')).toBeVisible();
+  });
+});
+
 test.describe('Val Ark - Community Hub', () => {
   test('Community nav link exists and navigates', async ({ page }) => {
     await page.goto(`file://${WEB_UI}`);

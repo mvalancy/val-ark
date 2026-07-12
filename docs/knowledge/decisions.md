@@ -36,6 +36,22 @@ later). See [README](README.md).
 - **Deployment:** ship both a **Docker appliance image** *and* the bare‑metal bootstrap; both
   offline, both commissioned from the same wizard.
 
+## 2026‑07 — First‑boot commissioning wizard (roadmap Phase 1, issue #11)
+- Shipped the commissioning **core**: `scripts/lib/commission.js` (claim‑token gate + settings
+  store, builds on `auth.js`), server `GET /api/setup/state` + `POST /api/setup/commission`
+  (fail‑closed on the claim token from the LAN; localhost/console trusted), a startup **claim‑code
+  console banner**, `valark claim｜setup-status`, and a **full‑page web wizard** (`#/setup`:
+  Welcome → Claim → Name → Admin → Focus → Done) that auto‑takes‑over an un‑commissioned box.
+- **Grandfather rule** so existing installs aren't hijacked: a box with a content/model library is
+  treated as commissioned (see gotchas). Fresh box (empty library) → wizard.
+- **Deferred to follow‑ups** (noted in the PR): the OS‑level discovery/enablement — mDNS
+  `valark.local` (avahi), hostname set, captive‑portal at the network layer, the port‑80 toggle
+  wiring, `setup.sh --VALARK_YES` integration, the on‑screen TUI, and the topic‑picker → curation
+  weight mapping. The state machine + claim gate + wizard + create‑admin (wired to #10) are the core.
+- Tests: `tests/test-commission.sh` (10 checks incl. fail‑closed + single‑use token +
+  content‑safety), server‑api `/api/setup/state` shape+no‑leak, web‑ui wizard render+step‑through,
+  and a fresh‑VM commissioning assertion in `provision.sh`.
+
 ## 2026‑07 — Access identity + recovery foundation (roadmap Phase 2, issue #10)
 - **Safety net lands first** (research's #1 lesson). Shipped the backend + CLI foundation, no UI
   gating yet (Open stays default): `scripts/lib/auth.js` (scrypt‑hashed admin store, shared by

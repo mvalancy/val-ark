@@ -90,6 +90,22 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   (that's what makes password-less recovery safe). The passcode is scrypt-hashed in a 0600 file;
   the hash/salt must never cross `/api/auth/status`.
 
+## Commissioning (Phase 1)
+
+- **Grandfather existing installs or the wizard hijacks working boxes.** A box has no
+  `commissionedAt` until the wizard runs, so shipping first-boot setup naively would show the
+  wizard on every already-deployed Ark. `server.js` `_legacyActive()` treats a box with a
+  **content or model library** (`content/zim` or `MODEL_ROOT` non-empty) as already commissioned.
+  A fresh box (empty library) gets the wizard. Deliberately does NOT count `tools/` — a fresh box
+  may have a mirrored node runtime yet still need setup.
+- **Claim gate is fail-closed but localhost-trusted.** From the LAN you must present the printed
+  claim token; from the box/localhost you commission without one (physical possession = ownership,
+  which also keeps recovery possible). The token is single-use (consumed on commission) and never
+  crosses `/api/setup/state` — only `needsClaim`/`hasClaim` booleans do.
+- **The wizard is a `file://`-safe SPA takeover.** `#/setup` renders with inline CSS and no
+  server, so Playwright previews it offline; `checkSetup()` only redirects when it can reach
+  `/api/setup/state` and the box is un-commissioned.
+
 ## Git / releases
 
 - **Don't retarget a PR across a rebase-merge divergence.** After a rebase-merge release, `main`

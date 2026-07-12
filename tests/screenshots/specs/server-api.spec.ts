@@ -71,6 +71,21 @@ test.describe('Val Ark API Server', () => {
     expect(data.models).toBeDefined();
   });
 
+  test('GET /api/setup/state reports commissioning state without leaking the claim token', async ({ request }) => {
+    const resp = await request.get(`${BASE_URL}/api/setup/state`);
+    expect(resp.ok()).toBeTruthy();
+    const d = await resp.json();
+    expect(typeof d.commissioned).toBe('boolean');
+    expect(typeof d.trusted).toBe('boolean');
+    expect(typeof d.hasClaim).toBe('boolean');
+    expect(typeof d.needsClaim).toBe('boolean');
+    expect(['open', 'passworded', 'accounts']).toContain(d.useMode);
+    // the actual claim token must NEVER be exposed — only whether one is needed.
+    const body = JSON.stringify(d);
+    expect(body).not.toContain('claim-token');
+    expect(body.toLowerCase()).not.toContain('"token"');
+  });
+
   test('GET /api/auth/status reports admin/access state without leaking secrets', async ({ request }) => {
     const resp = await request.get(`${BASE_URL}/api/auth/status`);
     expect(resp.ok()).toBeTruthy();

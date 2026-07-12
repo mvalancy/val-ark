@@ -73,9 +73,24 @@ const MODEL_ROOT = (() => {
 // Admin identity store. STATE_DIR mirrors valark-env.sh: config lives under
 // <VALARK_HOME>/state, physically separate from the content/model libraries.
 const auth = require('./lib/auth');
+const commission = require('./lib/commission');
 const STATE_DIR = process.env.VALARK_STATE_DIR
     || (process.env.VALARK_HOME ? path.join(process.env.VALARK_HOME, 'state')
         : path.join(DATA_ROOT === ROOT ? ROOT : path.join(DATA_ROOT, 'val-ark'), 'state'));
+
+// Grandfather existing installs: a box set up the old way (before the wizard) already
+// holds mirrored tools/content/models — don't hijack a working Ark with first-boot
+// setup. Only a genuinely fresh box (empty data) gets the commissioning takeover.
+function _legacyActive() {
+    // "Already a working Ark" = it already holds a content or model LIBRARY. (Tools
+    // alone — e.g. a mirrored node runtime — don't count; a fresh box can have those
+    // yet still need the wizard.)
+    for (const d of [path.join(ROOT, 'content', 'zim'), MODEL_ROOT]) {
+        try { if (fs.readdirSync(d).some((n) => !n.startsWith('.'))) return true; } catch (_) {}
+    }
+    return false;
+}
+function boxCommissioned() { return commission.isCommissioned(STATE_DIR) || _legacyActive(); }
 
 // MIME types for static file serving
 const MIME = {
@@ -837,6 +852,16 @@ function handleAPI(req, res, urlPath) {
                 // trusted box/localhost. No gating is enforced yet (Open default);
                 // the commissioning wizard + access layer build on this.
                 return sendJSON(res, req, { ...auth.status(STATE_DIR), trusted: isLocalhost(req) });
+            case '/api/setup/state': {
+                // First-boot state for the wizard. Never leaks the claim token; only
+                // whether one is needed (LAN) or bypassed (this box/localhost). A
+                // grandfathered (already-working) box reports commissioned so the
+                // wizard never hijacks it.
+                const st = commission.state(STATE_DIR, isLocalhost(req));
+                st.commissioned = st.commissioned || _legacyActive();
+                if (st.commissioned) { st.hasClaim = false; st.needsClaim = false; }
+                return sendJSON(res, req, st);
+            }
             case '/api/catalog/content':
                 return sendJSON(res, req, getCatalog('content'));
             case '/api/catalog/models':
@@ -951,6 +976,16 @@ function handleAPI(req, res, urlPath) {
                     }
                     break;
                 }
+                case '/api/setup/commission':
+                    // First-boot setup. Fail-closed on the claim token from the LAN;
+                    // the box/localhost is trusted and may commission without one.
+                    // (Public peers are already refused by the isLanOrTailnet gate.)
+                    if (_legacyActive() && !commission.isCommissioned(STATE_DIR)) {
+                        result = { error: 'This Val Ark is already set up.' };
+                    } else {
+                        result = commission.commission(STATE_DIR, body, { trusted: isLocalhost(req) });
+                    }
+                    break;
                 case '/api/service/start':
                     // Bring up an enabled + mirrored community service (chat/mail/forum/paste).
                     result = startService(body.id);
@@ -1786,6 +1821,20 @@ function listenOn(port, attempt = 0) {
 console.log('==================================================');
 console.log(`Val Ark web server — serving from ${ROOT}`);
 console.log('==================================================');
+// First-boot: an un-commissioned box prints its claim code so the setup wizard
+// (from another device on the LAN) can prove physical possession. On the box
+// itself / localhost you don't need it. The code is consumed once setup completes.
+try {
+    if (!boxCommissioned()) {
+        const claim = commission.ensureClaim(STATE_DIR);
+        console.log('');
+        console.log('  This Val Ark is NOT set up yet. Open it and follow the wizard:');
+        console.log(`     http://valark.local/   (or  http://<this-ip>/ )`);
+        console.log(`  Setup claim code (enter it in the wizard from another device): ${claim}`);
+        console.log('  (On this box / localhost you can skip the code.)');
+        console.log('');
+    }
+} catch (_) { /* never let commissioning banner block startup */ }
 for (const p of ALL_PORTS) listenOn(p);
 
 // A web server with no listener is a zombie: it holds no port, serves nothing,

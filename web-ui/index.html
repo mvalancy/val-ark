@@ -3704,15 +3704,22 @@ function _activityLive() { if (getRoute() === '/activity') scheduleRender(); }
 //   heal    = health.json snapshot (space, verify tallies, link counts, this-cycle repairs)
 //   verify  = verify.json functional checks (per-component pass/fail)
 //   events  = heal-events.jsonl feed (genuine repairs, newest first)
-let _healthData = null, _healthTimer = null, _healthPoll = null;
+let _healthData = null, _healthTimer = null, _healthPoll = null, _metricsData = null;
 
 function loadHealth() {
     fetch('/api/status/health').then(r => r.ok ? r.json() : null).then(d => {
         if (d) { _healthData = d; if (getRoute() === '/health') scheduleRender(); }
     }).catch(() => {});
 }
-function startHealthLive() { stopHealthLive(); loadHealth(); _healthTimer = setInterval(loadHealth, 15000); }
-function stopHealthLive() { if (_healthTimer) { clearInterval(_healthTimer); _healthTimer = null; } if (_healthPoll) { clearTimeout(_healthPoll); _healthPoll = null; } }
+// Live host gauges. Fires on the SAME 15s cadence as loadHealth — that interval is
+// exactly what spaces the server's two-sample CPU%/net-rate deltas (first poll → null).
+function loadMetrics() {
+    fetch('/api/status/metrics').then(r => r.ok ? r.json() : null).then(d => {
+        if (d) { _metricsData = d; if (getRoute() === '/health') scheduleRender(); }
+    }).catch(() => {});
+}
+function startHealthLive() { stopHealthLive(); loadHealth(); loadMetrics(); _healthTimer = setInterval(() => { loadHealth(); loadMetrics(); }, 15000); }
+function stopHealthLive() { if (_healthTimer) { clearInterval(_healthTimer); _healthTimer = null; } if (_healthPoll) { clearTimeout(_healthPoll); _healthPoll = null; } _metricsData = null; }
 
 function _ago(iso) {
     if (!iso) return '';
@@ -3805,6 +3812,26 @@ function computeComponents() {
     } else comps.push({ key: 'selfheal', icon: '🔧', label: 'Self-heal', level: 'good', state: 'Waiting for first cycle',
         detail: 'The maintenance loop hasn’t completed a cycle yet on this box. It runs on a timer and after every reboot.', fault: null, repair: null });
 
+    // 8) System load — one additive card from the live gauges (only once metrics land).
+    // Informational: a busy box isn't a one-click fix (repair:null), and it never goes
+    // red. Warn is driven by the RELIABLE signals (CPU%/memory); temperature is shown in
+    // the tiles but doesn't gate the level (naive thermal-zone reads are too hardware-
+    // variable to trust as an alert). CPU% is null on the very first poll — don't warn then.
+    if (_metricsData) {
+        const cpu = _metricsData.cpu && typeof _metricsData.cpu.percent === 'number' ? _metricsData.cpu.percent : null;
+        const memp = _metricsData.mem && typeof _metricsData.mem.percent === 'number' ? _metricsData.mem.percent : null;
+        const busy = (cpu != null && cpu >= 90) || (memp != null && memp >= 90);
+        const bits = [];
+        if (cpu != null) bits.push('CPU ' + cpu + '%');
+        else if (_metricsData.cpu && _metricsData.cpu.loadavg) bits.push('load ' + _metricsData.cpu.loadavg[0]);
+        if (memp != null) bits.push('memory ' + memp + '%');
+        comps.push({ key: 'system', icon: '🧭', label: 'System load',
+            level: busy ? 'warn' : 'good', state: bits.join(' · ') || 'Live',
+            detail: busy ? 'The box is working hard right now. It’ll catch up on its own as downloads and jobs finish — nothing to fix.'
+                         : 'Processor, memory and temperature are in a healthy range.',
+            fault: busy ? 'box' : null, repair: null });
+    }
+
     return comps;
 }
 function _healthOverall(comps) {
@@ -3825,6 +3852,39 @@ function _repairBtn(c) {
     return '';
 }
 
+function _fmtUptime(s) {
+    if (s == null) return '—';
+    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+    if (d > 0) return d + 'd ' + h + 'h';
+    if (h > 0) return h + 'h ' + m + 'm';
+    return m + 'm';
+}
+function _fmtRate(bps) {
+    if (bps == null) return '—';
+    const u = ['B/s', 'KB/s', 'MB/s', 'GB/s']; let i = 0, v = bps;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return (v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)) + ' ' + u[i];
+}
+// Friendly live gauges. Every tile is skipped when its source field is null, so a
+// non-Linux/CI server (no /proc) still shows what it can (load, uptime) and never blanks.
+function _renderSystemTiles() {
+    const m = _metricsData;
+    if (!m) return '';
+    const tile = (label, value, sub) => `<div class="hp-tile"><div class="hp-tile-v">${esc(String(value))}</div><div class="hp-tile-l">${esc(label)}</div>${sub ? `<div class="hp-tile-s">${esc(sub)}</div>` : ''}</div>`;
+    const cpu = m.cpu || {}, mem = m.mem || {}, net = m.net || {};
+    const tiles = [];
+    tiles.push(tile('Processor', cpu.percent != null ? cpu.percent + '%' : '—',
+        cpu.loadavg ? 'load ' + cpu.loadavg.join(' ') : (cpu.cores ? cpu.cores + ' cores' : '')));
+    if (mem.percent != null) tiles.push(tile('Memory', mem.percent + '%', mem.total ? formatBytes(mem.used) + ' / ' + formatBytes(mem.total) : ''));
+    if (cpu.loadavg) tiles.push(tile('Load (1m)', cpu.loadavg[0], cpu.cores ? 'of ' + cpu.cores + ' cores' : ''));
+    if (m.host && m.host.uptime != null) tiles.push(tile('Uptime', _fmtUptime(m.host.uptime), ''));
+    if (net && (net.rxRate != null || net.txRate != null)) tiles.push(tile('Network', '↓ ' + _fmtRate(net.rxRate), '↑ ' + _fmtRate(net.txRate)));
+    if (m.temp != null) tiles.push(tile('Temperature', m.temp + '°C', ''));
+    // Neutral: live gauges never depend on the retention stack; history is the upgrade.
+    const hist = `<span class="hp-hist" title="Live gauges work with no extra services. Telegraf + InfluxDB add history &amp; graphs (Advanced).">History: live-only</span>`;
+    return `<div class="hp-sys"><div class="hp-sys-h"><span class="hp-sys-t">System</span>${hist}</div><div class="hp-tiles">${tiles.join('')}</div></div>`;
+}
+
 function renderHealth() {
     let html = `${_SHELL_CSS}${_HEALTH_CSS}<div class="container" id="main-content">`;
     html += renderBreadcrumb([{ label: 'Settings', href: '#/settings' }, { label: 'Health' }]);
@@ -3840,6 +3900,10 @@ function renderHealth() {
             <div><div class="hp-glance" data-level="${ov.level}">${ov.glance}</div><div class="hp-htext">${esc(ov.text)}</div></div></div>
         <button class="hp-fix-all" onclick="runSelfHeal(this)" ${running ? 'disabled' : ''} title="Run the self-heal cycle now">${running ? '<span class="spinner"></span> Repairing…' : '↻ Run self-heal'}</button>
     </div>`;
+
+    // Live System tiles — friendly gauges, not a raw dashboard. Rendered only once the
+    // metrics land; degrades field-by-field (a tile is skipped when its value is null).
+    html += _renderSystemTiles();
 
     html += '<div class="hp-grid" role="list">';
     for (const c of comps) {
@@ -3919,6 +3983,15 @@ const _HEALTH_CSS = `<style>
 .hp-ev-ago{color:var(--text-muted,#8a8f98);font-size:.8rem;white-space:nowrap;font-variant-numeric:tabular-nums}
 .hp-empty,.hp-note{color:var(--text-muted,#8a8f98);font-size:.9rem;line-height:1.5}
 .hp-note{margin-top:1rem}
+.hp-sys{margin:0 0 1.2rem;padding:.9rem 1.1rem;border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--card-bg,#16181d)}
+.hp-sys-h{display:flex;align-items:baseline;justify-content:space-between;gap:.6rem;margin-bottom:.7rem}
+.hp-sys-t{font-weight:700;font-size:.95rem}
+.hp-hist{color:var(--text-muted,#8a8f98);font-size:.78rem}
+.hp-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:.6rem}
+.hp-tile{padding:.6rem .7rem;border:1px solid var(--border,#23262d);border-radius:10px;background:rgba(127,127,127,.05)}
+.hp-tile-v{font-weight:800;font-size:1.25rem;font-variant-numeric:tabular-nums;line-height:1.1}
+.hp-tile-l{color:var(--text-muted,#aab);font-size:.78rem;margin-top:.15rem;text-transform:uppercase;letter-spacing:.03em}
+.hp-tile-s{color:var(--text-muted,#8a8f98);font-size:.76rem;margin-top:.2rem;font-variant-numeric:tabular-nums}
 </style>`;
 
 // Change the download focus (Settings → Downloads & Priorities) → curation weights.

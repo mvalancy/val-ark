@@ -80,6 +80,15 @@ if [ -n "$NODE" ]; then
         [ -n "$body" ] && step "web UI renders Val Ark shell" pass 0 || step "web UI renders Val Ark shell" fail 0 "index did not contain 'Val Ark'"
         code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 http://127.0.0.1:3000/bootstrap.sh 2>/dev/null)
         [ "$code" = "200" ] && step "self-replication: /bootstrap.sh served" pass 0 || step "self-replication: /bootstrap.sh served" fail 0 "HTTP $code"
+        # Live metrics degrade gracefully on a bare Ubuntu box (no telegraf/influxd ever
+        # mirrored): the zero-dep server reads /proc + os itself and reports source:live
+        # with a real memory number. Proves the Health System tiles work day one, offline.
+        metrics=$(curl -s --max-time 4 http://127.0.0.1:3000/api/status/metrics 2>/dev/null)
+        if printf '%s' "$metrics" | grep -q '"source":"live"' && printf '%s' "$metrics" | grep -qE '"total":[0-9]+'; then
+            step "metrics: live host gauges (no InfluxDB needed)" pass 0
+        else
+            step "metrics: live host gauges (no InfluxDB needed)" fail 0 "no live metrics; got: $(printf '%s' "$metrics" | cut -c1-120)"
+        fi
         # First-boot: a fresh box (empty content/model library) reports un-commissioned
         # so the web UI takes over with the setup wizard.
         setup_state=$(curl -s --max-time 4 http://127.0.0.1:3000/api/setup/state 2>/dev/null)

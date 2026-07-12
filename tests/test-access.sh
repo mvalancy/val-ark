@@ -68,5 +68,23 @@ curl -s -i -X POST "$B/api/auth/logout" 2>/dev/null | tr -d '\r' | grep -i 'set-
 # 8. A tampered session is rejected (still 401).
 [ "$(jpost -H 'Cookie: varksid=forged.deadbeef' -d '{"target":"all"}' "$B/api/download/content")" = "401" ] && pass || fail "forged session must be rejected"
 
+# 9. Read-wall: content reads are gated for un-authed LAN visitors in Passworded mode,
+#    but the shell/auth/health stay open so the wall can render + you can sign in.
+gcode() { curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$@"; }
+[ "$(gcode "$B/api/status/disk")" = "401" ] && pass || fail "unauthed content read must be 401 (read-wall)"
+[ "$(gcode "$B/api/health")" = "200" ] && pass || fail "/api/health must stay open (wall reachable)"
+[ "$(gcode "$B/api/auth/status")" = "200" ] && pass || fail "/api/auth/status must stay open"
+[ "$(gcode "$B/")" = "200" ] && pass || fail "static shell / must stay open so the wall can render"
+c=$(gcode -b "$T/cj" "$B/api/status/disk"); [ "$c" = "200" ] && pass || fail "authed content read must be allowed (got $c)"
+
+# 10. Regression (adversarial-review finding): the RAW data trees served straight from
+#     ROOT by the static router must be gated too — they're the same library bytes.
+for p in content models tools sources assets docs; do
+    [ "$(gcode "$B/$p/")" = "401" ] && pass || fail "unauthed /$p/ must be 401 (data-tree read-wall)"
+done
+c=$(gcode -b "$T/cj" "$B/content/"); [ "$c" != "401" ] && pass || fail "authed data-tree read must be allowed (got $c)"
+# the UI shell + its assets stay open so the login wall can render
+[ "$(gcode "$B/styles.css")" = "200" ] && pass || fail "/styles.css must stay open for the wall"
+
 echo "access: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

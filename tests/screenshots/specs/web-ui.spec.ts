@@ -1359,6 +1359,18 @@ test.describe('Val Ark - Consumer Shell (Home status + Settings + Activity)', ()
     await page.locator('#signin-overlay button:has-text("Cancel")').click();
     await expect(page.locator('#signin-overlay')).toHaveCount(0);
   });
+
+  test('read-wall renders for a private (Passworded) box when not signed in', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/`);
+    await page.waitForSelector('.home-status', { timeout: 5000 });   // open box → normal app
+    // Simulate a Passworded box with no session, then render the wall.
+    await page.evaluate(() => { (window as any)._authState = { useMode: 'passworded', authed: false, trusted: false }; (window as any).renderAccessWall(); });
+    await expect(page.locator('#wall-card')).toBeVisible();
+    await expect(page.locator('#wall-card h1')).toContainText('private');
+    await expect(page.locator('#wall-pass')).toBeVisible();
+    const fns = await page.evaluate(() => [typeof (window as any).checkAccess, typeof (window as any).wallSignIn]);
+    expect(fns).toEqual(['function', 'function']);
+  });
 });
 
 test.describe('Val Ark - First-boot Commissioning Wizard', () => {

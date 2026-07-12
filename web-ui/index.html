@@ -6108,6 +6108,44 @@ async function signOut() {
 // Any gated action can call this on a 401 {needsAuth:true} to prompt + let the user retry.
 function isNeedsAuth(resp, data) { return resp && resp.status === 401 && data && data.needsAuth; }
 
+// Read-wall: on a Passworded/Accounts box, an un-authed LAN visitor sees a full-page
+// sign-in wall instead of the library (the server also 401s the content endpoints).
+function renderAccessWall() {
+    const app = document.getElementById('app-root'); if (!app) return;
+    const mode = (_authState && _authState.useMode) || 'passworded';
+    app.innerHTML = `${_SETUP_CSS}<div class="setup-wrap"><div class="setup-card" id="wall-card">
+        <div class="setup-brand"><span class="setup-logo">&#x259A;</span> Val Ark</div>
+        <div class="setup-stepbody">
+            <h1>This Val Ark is private</h1>
+            <p class="setup-lead">Enter the ${mode === 'accounts' ? 'account' : 'access'} passcode to view the library. On the box itself you don't need to.</p>
+            <input id="wall-pass" class="setup-input" type="password" placeholder="passcode" autocomplete="current-password">
+            <div id="wall-msg" class="setup-msg"></div>
+            <div class="setup-nav"><span></span><button class="setup-btn" onclick="wallSignIn()">Sign in &rarr;</button></div>
+        </div>
+    </div></div>`;
+    const inp = document.getElementById('wall-pass');
+    if (inp) { inp.focus(); inp.addEventListener('keydown', e => { if (e.key === 'Enter') wallSignIn(); }); }
+}
+async function wallSignIn() {
+    const pass = (document.getElementById('wall-pass') || {}).value || '';
+    const msg = document.getElementById('wall-msg');
+    try {
+        const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pass }) });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) { location.reload(); }
+        else if (msg) { msg.className = 'setup-msg bad'; msg.textContent = d.error || ('Sign-in failed (HTTP ' + r.status + ')'); }
+    } catch (e) { if (msg) { msg.className = 'setup-msg bad'; msg.textContent = (e && e.message) || 'request failed'; } }
+}
+// Returns false (and renders the wall) when this box is private and you're not in.
+async function checkAccess() {
+    if (!_authState) await refreshAuthState();
+    const s = _authState;
+    if (!s) return true;   // static preview / no server → never wall
+    const gated = (s.useMode === 'passworded' || s.useMode === 'accounts') && !s.authed && !s.trusted;
+    if (gated) { renderAccessWall(); return false; }
+    return true;
+}
+
 function renderProgressPanel() {
     let panel = document.getElementById('dl-panel');
     if (!panel) {
@@ -6151,7 +6189,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     // loading the rest of the app. (No-op on a static preview or once commissioned.)
     const ready = await checkSetup();
     if (!ready) return;
-    refreshAuthState();   // learn admin/authed state so Settings can offer sign-in
+    await refreshAuthState();      // learn admin/authed state (for the read-wall + Settings)
+    if (!(await checkAccess())) return;   // private box + not signed in → show the wall
 
     // Show loading indicator
     const diskEl = document.getElementById('nav-disk');

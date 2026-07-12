@@ -22,10 +22,11 @@
     --pink: #f472b6;
     --cyan: #22d3ee;
     --badge-top: #2563eb;
-    --radius: 10px;
-    --radius-sm: 6px;
-    --shadow: 0 4px 24px rgba(0,0,0,0.3);
-    --mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', monospace;
+    /* Engineering-brutalist: sharp corners, flat surfaces (modeled on valpatel.com) */
+    --radius: 5px;
+    --radius-sm: 3px;
+    --shadow: 0 2px 10px rgba(0,0,0,0.28);
+    --mono: 'SF Mono', 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
 }
 
 /* Light Theme */
@@ -1697,3 +1698,69 @@ html[data-theme="light"] .theme-toggle .icon-moon { display: inline !important; 
 .svc-off { color: var(--text-muted); background: var(--bg-tertiary); }
 .svc-hint { font-size: 0.8em; color: var(--text-muted); }
 .svc-hint code { font-size: 0.9em; }
+
+/* =========================================================================
+   Aesthetic layer — engineering-brutalist, modeled on valpatel.com.
+   Restrained palette, sharp corners, monospace tech accents, flat cards,
+   generous whitespace. Fully offline: system + monospace stacks only, no CDN.
+   ========================================================================= */
+
+/* Monospace on the "engineering" surfaces: logo, labels, tags, buttons, stats.
+   This is the signature that reads as tooling/infra rather than a consumer app. */
+.nav-logo,
+.category-title,
+.hero .stats,
+.tag,
+.dl-action-btn,
+.btn,
+.svc-badge,
+.platform-badge,
+.top-badge,
+.breadcrumb,
+.card-meta .tag,
+.catalog-more,
+.nav-disk span {
+    font-family: var(--mono);
+}
+.nav-logo { font-weight: 700; letter-spacing: 0.01em; }
+.hero .stats { letter-spacing: 0.02em; }
+
+/* Tags / badges as terminal-style chips: small, upper, tracked. */
+.tag,
+.svc-badge,
+.platform-badge,
+.top-badge {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.7em;
+    font-weight: 600;
+}
+
+/* Tighter, more assertive headings — an engineering statement, not marketing. */
+h1, h2, h3 { letter-spacing: -0.015em; }
+.hero h1 { font-weight: 800; letter-spacing: -0.03em; }
+
+/* Flat cards: thin border, no drop shadow, no lift. Hover shifts the border to
+   the accent and lightens the fill — restrained, precise, not bouncy. */
+.card {
+    box-shadow: none;
+    border: 1px solid var(--border);
+    transition: border-color .14s ease, background-color .14s ease;
+}
+.card:hover {
+    transform: none;
+    box-shadow: none;
+    border-color: var(--accent);
+    background: var(--bg-card-hover);
+}
+
+/* CTAs: sharp, monospace, confident. */
+.dl-action-btn,
+.btn {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+/* A touch more breathing room between sections (valpatel's generous rhythm). */
+.category-section { margin-top: 2.6rem; }
+.section-desc { max-width: 68ch; }

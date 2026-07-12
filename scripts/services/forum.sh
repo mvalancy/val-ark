@@ -83,20 +83,27 @@ find_nodebb_dir() {
     return 1
 }
 
+# A mirrored binary can be PRESENT but the wrong architecture (e.g. an x86_64
+# redis landing in the arm64 tree) — the +x bit says nothing about whether it runs
+# on THIS machine. Verify it actually executes (`--version`) before preferring it
+# over the system binary, so a bad mirror falls back to a working system redis
+# instead of failing with "Exec format error".
+_bin_runs() { [ -x "$1" ] && "$1" --version >/dev/null 2>&1; }
+
 # Locate a usable Redis (prefer the Val Ark-mirrored build, else system redis).
 find_redis_server() {
     local cand="${TOOLS_DIR}/${PLATFORM}/redis/bin/redis-server"
-    [ -x "$cand" ] && { echo "$cand"; return 0; }
+    _bin_runs "$cand" && { echo "$cand"; return 0; }
     cand="${TOOLS_DIR}/${PLATFORM}/redis/src/redis-server"
-    [ -x "$cand" ] && { echo "$cand"; return 0; }
+    _bin_runs "$cand" && { echo "$cand"; return 0; }
     command -v redis-server >/dev/null 2>&1 && { command -v redis-server; return 0; }
     return 1
 }
 find_redis_cli() {
     local cand="${TOOLS_DIR}/${PLATFORM}/redis/bin/redis-cli"
-    [ -x "$cand" ] && { echo "$cand"; return 0; }
+    _bin_runs "$cand" && { echo "$cand"; return 0; }
     cand="${TOOLS_DIR}/${PLATFORM}/redis/src/redis-cli"
-    [ -x "$cand" ] && { echo "$cand"; return 0; }
+    _bin_runs "$cand" && { echo "$cand"; return 0; }
     command -v redis-cli >/dev/null 2>&1 && { command -v redis-cli; return 0; }
     return 1
 }
@@ -128,7 +135,7 @@ ensure_redis() {
         return 0
     fi
     local server; server="$(find_redis_server)" || {
-        err "No redis-server found. Mirror it first: scripts/tools/redis.sh"
+        err "No working redis-server found (mirror wrong-arch/absent). Mirror it (scripts/tools/redis.sh) or install one: apt-get install redis-server"
         return 1
     }
     mkdir -p "$REDIS_DATA"

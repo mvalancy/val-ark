@@ -6,6 +6,23 @@ later). See [README](README.md).
 
 ---
 
+## 2026‑07 — Community chat is open (no-login) by default
+- **Context:** on the real box a visitor opening `/app/chat/` hit The Lounge's **private-mode login
+  wall with no way to create an account** (accounts were host-only, via `thelounge add`) — chat was
+  effectively unusable without shell access. Plus ngIRCd's default `MaxNickLength=9` rejected
+  ordinary names ("nickname too long"), and there was only one empty room.
+- **Decision:** default chat to **public / no-login** (`VALARK_CHAT_PUBLIC=1`) — pick a nickname and
+  join. Val Ark's reverse proxy + Use Mode already gate *who* reaches `/app/chat/`, so The Lounge
+  needn't re-auth. Operators wanting per-user logins + persistent history set `VALARK_CHAT_PUBLIC=0`.
+  Also: `MaxNickLength=30`, starter channels (`#valark #general #help #random`), a MOTD teaching
+  `/list` + `/join`, an ark-themed leave message, and an idempotent start (real pid + port fallback).
+- **Why:** the appliance principle is "it just works" — a trusted-LAN community box should let people
+  in with zero friction, not gate casual chat behind account provisioning. `COMMUNITY_ACCOUNTS.chat`
+  tracks the mode (`open`↔`host`) so the account panel and `adduser` stay correct either way.
+- **Proven on the deployed ARM64 box** (not just CI): a 20-char nick registers, `/list` shows the
+  channels, `/join` creates one, repeat `start` is a no-op. Real-box verification caught what the
+  green test suite didn't — the login wall, the nick limit, the write-once config.
+
 ## 2026‑07 — Versioning re-baselined to honest pre‑1.0 (0.1.x)
 - **Context:** early releases had jumped to a 1.x line (v1.0.0–v1.5.0), which implies a real,
   supported 1.0 user release we are nowhere near.

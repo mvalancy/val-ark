@@ -36,6 +36,26 @@ later). See [README](README.md).
 - **Deployment:** ship both a **Docker appliance image** *and* the bare‑metal bootstrap; both
   offline, both commissioned from the same wizard.
 
+## 2026‑07 — Download queue as the monitoring surface (roadmap Phase 5, part 1)
+- Rebuilt the **Activity** view into a live download **queue**: rich per‑item cards (plain‑language
+  label, animated progress bar + %, **ETA** from `startedAt`+progress, status pill, last line),
+  **Cancel** (running) / **Retry** (failed), a "resumes automatically after a power loss" note, and
+  **Retry‑not‑error framing** — a failed download reads "Interrupted — retries automatically" (true:
+  the self‑heal loop re‑runs it), never a scary red error.
+- **Live**: reuses the existing SSE stream — `start` stamps a client `startedAt` (for ETA),
+  `progress`/`complete` re‑render the queue only when on `#/activity` (`_activityLive`, rAF‑debounced);
+  `loadDownloads()` merges `/api/status/downloads` (server truth incl. `startedAt`) once on load to
+  catch downloads already running. No backend changes, no new endpoints.
+- **Deferred:** true pause/resume + reorder need backend support (the download scripts are aria2/curl
+  subprocesses — only cancel exists today); noted as a follow‑up.
+- **Profiles → curation weighting (part 2):** the wizard's profile pick now drives REAL librarian
+  priority. `catalog.sh` resolves the profile (`VALARK_PROFILE` env → `settings.json` → `balanced`)
+  and applies a **per‑bucket multiplier** on each candidate's value (knowledge 1.6× content, ai 1.6×
+  models, tools 1.6× tools; off‑buckets 0.8–0.9×), so the box fills what the owner asked for; the
+  planner still sorts by value/bytes. A Settings → **Downloads & Priorities** picker changes it live
+  via admin‑only `POST /api/setup/profile` (validated to the 4 profiles). `test-profile.sh` proves a
+  profile shifts the fill; requesting a specific item still jumps the queue (pins).
+
 ## 2026‑07 — Access-mode enforcement + admin sessions (roadmap Phase 2 depth)
 - The access layer now **enforces** (was "no gating yet"): stateless HMAC **admin sessions**
   (`auth.issueSession/verifySession`, `varksid` HttpOnly cookie), `POST /api/auth/login｜logout`

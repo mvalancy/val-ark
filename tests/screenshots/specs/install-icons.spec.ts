@@ -87,8 +87,10 @@ test.describe('Val Ark - Install vs Download', () => {
     await page.goto(`${BASE_URL}/#/tools/vosk`);
     await page.waitForTimeout(500);
 
-    // Check if Mirror button exists and has correct onclick
-    const mirrorBtn = page.locator('.dl-action-btn:has-text("Mirror")');
+    // Check if the per-tool Mirror button exists and has the correct onclick. Target
+    // the unique #install-btn-<id>: the download section also renders a "Mirror all
+    // platforms" button, so :has-text("Mirror") would match two (strict-mode error).
+    const mirrorBtn = page.locator('#install-btn-vosk');
     const btnCount = await mirrorBtn.count();
 
     if (btnCount > 0) {

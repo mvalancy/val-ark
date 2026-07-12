@@ -1,0 +1,3 @@
+# Val Ark — review routing. Anything not otherwise owned needs a maintainer review.
+# Branch protection requires CODEOWNERS review on PRs to main/dev (see docs/knowledge/governance.md).
+* @mvalancy

@@ -1,0 +1,51 @@
+# Val Ark — CI (continual testing gate). See docs/knowledge/governance.md.
+# SECURITY: uses `pull_request` (NOT `pull_request_target`), so code from FORK PRs runs with a
+# read-only token and NO repository secrets — a malicious stranger PR cannot exfiltrate secrets
+# or write to the repo just by triggering CI. CI only *tests*; it never deploys or pushes.
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev]
+
+# Least privilege: CI needs only to read the code.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Bash validators + Playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright + browser
+        working-directory: tests/screenshots
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: Run the suite (bash validators + Playwright; VM matrix skipped in CI)
+        env:
+          VALARK_NO_VM: '1'          # GitHub runners can't launch KVM VMs
+          VALARK_DISABLE_KIWIX: '1'  # no kiwix binary in CI; content view runs kiwix-disabled
+        run: bash tests/run-all.sh
+
+      - name: Upload the offline test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: valark-test-report
+          path: tests/results/
+          if-no-files-found: warn

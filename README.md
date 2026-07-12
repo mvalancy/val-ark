@@ -21,8 +21,8 @@ NFS-shareable, offline-capable — scales to a disk of any size.
 ### Tool Detail
 ![Tool Detail](docs/screenshots/tool-detail.png)
 
-### Wikipedia / Content Library
-![Wikipedia](docs/screenshots/wikipedia-page.png)
+### Library (Wikipedia, StackExchange, wikis, courses & more)
+![Library](docs/screenshots/wikipedia-page.png)
 
 ### Light Mode
 ![Light Mode](docs/screenshots/light-mode.png)
@@ -207,6 +207,23 @@ cp .env.example .env              # optional: set VAL_ARK_DATA (else autodetecte
 ./scripts/loop.sh install 30      # 24/7 self-healing loop (every 30 min)
 ```
 
+Once a node is up, anyone on the LAN can **browse and one-click download** what
+isn't mirrored yet — a specific ZIM (including all of Wikipedia), a model, or an
+app — from the web UI's **Library**, **Models**, and **Software** sections. Val Ark
+makes room automatically under its footprint cap (evicting lower-priority content
+first) and the self-healing loop keeps user-requested items filled.
+
+### Add another node — offline, from a trusted Ark
+
+Val Ark is offline-first, so it **self-replicates** without the internet: a running
+Ark serves its own source. On a new machine, no GitHub required:
+
+```bash
+curl -fsSL http://<ark-host>:3000/bootstrap.sh | bash   # clones + sets up from the LAN
+```
+
+The Getting Started page shows this one-liner pre-filled with the host's address.
+
 ## Offline & P2P
 
 ```mermaid
@@ -253,8 +270,12 @@ network. All tools and models work fully offline after the initial download.
 
 - Live tool status and disk space info
 - SSE-based download progress streaming
-- Software catalog and model browser
-- Content Library tab for offline ZIM files
+- Software catalog, model browser, and **Library** (Wikipedia + StackExchange + wikis + courses)
+- **Community** hub — start/launch the offline chat, mail, boards & file services
+- **One-click requests** — browse the live catalog and pull any not-yet-mirrored
+  ZIM / model / app (`/api/catalog/*`, `/api/request`); LAN + tailnet, cap-guarded
+- **Self-replication** — serves its own source + a host-aware `/bootstrap.sh` so a
+  new node clones the whole system over the LAN with no internet
 
 The port defaults to **3000** (override positionally, or set `VALARK_WEB_PORT` in
 `.env` so the loop knows which port to health-check). When complete `.zim` files
@@ -322,20 +343,21 @@ data root and are gitignored.
 
 ## Testing
 
-Bash validators (`tests/test-*.sh`) plus a Playwright suite (260+ tests covering
-server API, web UI, install icons, and a full-UI exercise).
+One runner covers every layer and renders a **self-contained, offline HTML report**
+(`tests/results/report.html`) — bash validators, a Playwright suite (300+ tests),
+community-services e2e, and fresh-Ubuntu (22.04/24.04/26.04) setup VMs. See
+[tests/README.md](tests/README.md).
 
 ```bash
-./start.sh test               # Run via menu
-./tests/run-all.sh            # Bash validators
-./start.sh screenshots        # Capture web + terminal screenshots
-./start.sh screenshots web    # Web UI only
-./start.sh screenshots terminal  # Terminal recordings only
+./tests/run-all.sh                                   # all suites -> tests/results/report.html
+VALARK_URL=http://nas-5sgf:3000 ./tests/run-all.sh   # + community-services e2e vs a live Ark
+VALARK_RUN_VM=1 ./tests/run-all.sh                   # + fresh-VM setup matrix (multipass + KVM)
+cd tests/results && python3 -m http.server 8099      # host the report offline
 ```
 
 ```bash
 export PATH="$HOME/.local/node/bin:$PATH"
-cd tests/screenshots && npx playwright test   # Playwright suite
+cd tests/screenshots && npx playwright test          # Playwright suite on its own
 ```
 
 ## Releases

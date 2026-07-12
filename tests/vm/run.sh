@@ -28,7 +28,12 @@ if ! command -v multipass >/dev/null 2>&1; then
 fi
 
 # Package the current committed source (what we'd ship) as the "download".
-SRC="$(mktemp -d)/val-ark-src.tar.gz"
+# NOTE: multipass is snap-confined — its `home` interface can read only NON-hidden
+# files under $HOME (a /tmp path or any dot-dir like ~/.cache fails with
+# "sftp cannot access / permission denied"). Stage inside the repo (non-hidden,
+# git-ignored under tests/results/).
+mkdir -p "${PROJECT_ROOT}/tests/results" 2>/dev/null
+SRC="${PROJECT_ROOT}/tests/results/vm-src.tar.gz"
 if ! git -C "$PROJECT_ROOT" archive --format=tar.gz --prefix=val-ark/ -o "$SRC" HEAD 2>/dev/null; then
     tar --exclude=./.git --exclude=./tools --exclude=./content --exclude=./models \
         --exclude=./sources --exclude=./assets --exclude=./installers --exclude=node_modules \
@@ -52,10 +57,18 @@ for v in $VERSIONS; do
     e=$(date +%s%3N 2>/dev/null || echo 0)
     results_case "[${v}] VM launch" pass "$((e-s))"
 
-    multipass transfer "$SRC" "${name}:/tmp/val-ark-src.tar.gz" >/dev/null 2>&1
-    multipass transfer "${_DIR}/provision.sh" "${name}:/tmp/provision.sh" >/dev/null 2>&1
+    # Transfer into the default user's HOME (reliably writable; multipass' scp to an
+    # absolute /tmp path is flaky across versions). Verify it landed before running.
+    terr="$(multipass transfer "$SRC" "${name}:val-ark-src.tar.gz" 2>&1)"; trc=$?
+    multipass transfer "${_DIR}/provision.sh" "${name}:provision.sh" >/dev/null 2>&1
+    if [ "$trc" -ne 0 ] || ! multipass exec "$name" -- test -f val-ark-src.tar.gz 2>/dev/null; then
+        results_case "[${v}] source transfer" fail 0 "multipass transfer failed: $(printf '%s' "$terr" | tr '\n' ' ' | cut -c1-160)"
+        [ "${VALARK_VM_KEEP:-0}" != "1" ] && multipass delete --purge "$name" >/dev/null 2>&1
+        continue
+    fi
+    results_case "[${v}] source transfer" pass 0
 
-    out="$(timeout 900 multipass exec "$name" -- bash /tmp/provision.sh /tmp/val-ark-src.tar.gz 2>&1)"
+    out="$(timeout 900 multipass exec "$name" -- bash ./provision.sh ./val-ark-src.tar.gz 2>&1)"
     # Parse STEP|name|status|ms|detail lines into report cases.
     got_steps=0
     while IFS='|' read -r tag sname sstatus sms sdetail; do

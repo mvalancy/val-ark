@@ -258,6 +258,9 @@ loop_once() {
 
     step "5. integrity verify"; bash "$LIBRARIAN" verify 2>&1 | tail -1 | sed 's/^/    /'
 
+    step "5b. re-fill pinned requests (user-requested items win before generic fill)"
+    FORCE_COLOR=0 bash "$LIBRARIAN" pins --refill 2>&1 | tail -1 | sed 's/^/    /'
+
     step "6. top-up fill (<=${FILL_SECONDS}s; skipped if a fill is already running)"
     FORCE_COLOR=0 bash "$LIBRARIAN" fill --time "$FILL_SECONDS" 2>&1 | tail -1 | sed 's/^/    /'
 

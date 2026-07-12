@@ -57,10 +57,11 @@ def derive_direct_url(href):
     u = href
     if u.endswith(".meta4"):
         u = u[: -len(".meta4")]
-    # The catalog points at a mirror (lbo./master./...); canonical host serves
-    # the same path and redirects to a live mirror.
-    for host in ("https://lbo.download.kiwix.org", "https://master.download.kiwix.org",
-                 "http://download.kiwix.org"):
+    # The catalog points at a mirror (lb./lbo./master./...); the canonical host
+    # serves the same path and redirects to a live mirror. Rewrite any
+    # *.download.kiwix.org (and plain http) to the canonical https host.
+    for host in ("https://lb.download.kiwix.org", "https://lbo.download.kiwix.org",
+                 "https://master.download.kiwix.org", "http://download.kiwix.org"):
         if u.startswith(host):
             u = "https://download.kiwix.org" + u[len(host):]
             break

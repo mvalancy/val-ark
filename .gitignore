@@ -72,3 +72,7 @@ docs/screenshots/.last-run.json
 # Logs
 *.log
 logs/
+
+# Python bytecode (planner.py etc. compiled by py_compile / imports)
+__pycache__/
+*.pyc

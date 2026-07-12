@@ -155,6 +155,49 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   (40/10min) on top of per-IP so NIC-alias IP rotation can't multiply guesses; (5) min passcode
   length raised to **8**.
 
+## Recovery card / forgot-password (Phase 2)
+
+- **Recovery code = the paper backup, so it's stored plaintext (0600), like the claim token** —
+  the whole point is to reprint it on the recovery card. It lives in `<state>/settings.json`
+  (`recovery`), off the world-readable content disk. `verifyRecovery` is a constant-time compare;
+  the code is **single-use** (rotated on every successful recover — old card is dead, new one
+  returned to reprint).
+- **Two recovery paths, mirroring the design:** `localhost`/console resets the admin passcode with
+  **no code** (physical possession); a **LAN** device must present the recovery code from the card.
+  `POST /api/auth/recover` (in `AUTH_EXEMPT_POSTS` — you can't be authed to recover) enforces both,
+  shares the **login cooldown** (it's a code-guessing surface), and auto-signs-in the recovered admin.
+- **The card endpoint leaks a secret, so it's admin-only.** `GET /api/setup/recovery-card` returns
+  the code ⇒ `isAdmin` required (localhost or a session); un-authed peers get 401. The code is shown
+  in the clear exactly twice: the wizard's "All set!" screen and an admin's Settings → Show recovery
+  card.
+
+## Safe Mode (Phase 2)
+
+- **Distinguish MISSING config from CORRUPT config.** `readSettings`/`readStore` swallow parse
+  errors and return defaults, so a corrupt `settings.json`/`auth.json` would silently look like a
+  fresh box. `commission.configHealth` checks explicitly: ENOENT = fine (fresh), present-but-
+  unparseable = **Safe Mode**. Surfaced on `/api/health` (`status:"safe-mode"`) + `/api/setup/state`,
+  and the UI takes over with a "needs attention → Reset & recover" screen (never a dead port).
+- **Safe Mode must WIN over grandfather.** `_legacyActive()` (content present) would otherwise run
+  `grandfather()` at startup, which **overwrites** the corrupt `settings.json` — silently masking
+  the corruption and losing the recovery code. The startup block now checks Safe Mode FIRST and
+  skips grandfather/ensureClaim when corrupt. (This is what the safemode test caught.)
+- **Auth/recovery endpoints must bypass the "not set up yet" 409 gate.** A corrupt-config box reads
+  as un-commissioned, so the `boxCommissioned()` POST gate would 409 `/api/auth/recover` — locking
+  you out of recovery. The gate now exempts all `AUTH_EXEMPT_POSTS` (login/logout/recover/commission),
+  not just commission. Recovery from **localhost** (no code) repairs both `auth.json` (setPassword)
+  and a corrupt `settings.json` (reset to a minimal commissioned state) so Safe Mode clears with no
+  restart; content is never touched.
+- **Safe Mode must FAIL CLOSED (adversarial-review finding, medium).** Surfacing `safeMode` isn't
+  enough — a corrupt `auth.json` makes `auth.status().useMode` read as the swallowed default `'open'`,
+  which would DROP the read-wall + open every use-action. So `readAllowed` and the POST access gate
+  now treat `safeModeState().safeMode` as "requires admin" (localhost/session), independent of the
+  useMode read from the corrupt store. `safeModeState()` is cached ~3s (it's on the read/POST hot
+  path) and invalidated on recover.
+- **`loginAllowed` MUST bypass for localhost (review finding).** The doc said "the owner is never
+  locked out" but the global login cap applied to localhost too — a LAN peer could trip it and 429
+  the owner's own recovery. `loginAllowed` now `return true` for `isLocalhost(req)` first.
+
 ## Git / releases
 
 - **Don't retarget a PR across a rebase-merge divergence.** After a rebase-merge release, `main`

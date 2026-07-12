@@ -86,5 +86,16 @@ c=$(gcode -b "$T/cj" "$B/content/"); [ "$c" != "401" ] && pass || fail "authed d
 # the UI shell + its assets stay open so the login wall can render
 [ "$(gcode "$B/styles.css")" = "200" ] && pass || fail "/styles.css must stay open for the wall"
 
+# 11. Recovery card + forgot-password (the one-time recovery code).
+[ "$(gcode "$B/api/setup/recovery-card")" = "401" ] && pass || fail "recovery card must be admin-only (401 un-authed)"
+CARD="$(curl -s -b "$T/cj" "$B/api/setup/recovery-card")"
+echo "$CARD" | grep -q '"recovery"' && pass || fail "authed recovery card returns the code"
+RCODE="$(printf '%s' "$CARD" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).recovery||"")}catch(e){}})')"
+[ "$(jpost -d '{"code":"WRON-GWRO-NGXX","password":"brandnew9"}' "$B/api/auth/recover")" = "401" ] && pass || fail "recover with a wrong code must be 401"
+RESP="$(curl -s -X POST -H 'Content-Type: application/json' -d "{\"code\":\"$RCODE\",\"password\":\"brandnew9\"}" "$B/api/auth/recover")"
+printf '%s' "$RESP" | grep -qE '"ok" ?: ?true' && pass || fail "recover with the correct code must succeed"
+printf '%s' "$RESP" | grep -q '"recovery"' && pass || fail "recover returns a fresh (rotated) recovery code"
+[ "$(jpost -d "{\"code\":\"$RCODE\",\"password\":\"another99\"}" "$B/api/auth/recover")" = "401" ] && pass || fail "old recovery code must be single-use (dead after use)"
+
 echo "access: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

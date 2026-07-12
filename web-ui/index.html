@@ -3324,6 +3324,15 @@ function getRoute() {
 
 function router() {
     let route = getRoute();
+    // First-boot commissioning is a full-page takeover (no nav/footer) — a fresh box
+    // sends you here until it's set up.
+    if (route === '/setup') {
+        const app = document.getElementById('app-root');
+        app.innerHTML = renderSetup();
+        window.scrollTo(0, 0);
+        bindSetup();
+        return;
+    }
     // #/library is the friendlier alias for the content section (it holds Wikipedia
     // plus StackExchange, wikis, textbooks, courses & more — a whole offline library,
     // not just Wikipedia). Keep #/content working for any existing links/bookmarks.
@@ -5695,6 +5704,186 @@ async function cancelDownload(id) {
     } catch (e) {}
 }
 
+// ===================== First-boot commissioning wizard =======================
+// A full-page takeover shown until the box is set up. The claim step only appears
+// off-localhost (the server tells us via needsClaim); on the box you skip it.
+let _setupState = null;
+let _setupStep = 0;
+const _setupData = { token: '', name: 'valark', password: '', useMode: 'open', profile: 'balanced' };
+
+const _PROFILES = [
+    { id: 'balanced',  icon: '⚖️', label: 'A bit of everything', desc: 'Wikipedia, how-to, an AI helper and tools — a sensible starter mix.' },
+    { id: 'knowledge', icon: '📚', label: 'Knowledge & reference', desc: 'Wikipedia, wikis, textbooks and Q&A — the biggest library.' },
+    { id: 'ai',        icon: '🤖', label: 'AI helper',            desc: 'Local chat models and the docs they answer from.' },
+    { id: 'tools',     icon: '🛠️', label: 'Software & tools', desc: 'Offline installers and dev/creative apps for every platform.' },
+];
+
+function _setupSteps() {
+    const steps = ['welcome'];
+    if (_setupState && _setupState.needsClaim) steps.push('claim');
+    steps.push('name', 'admin', 'profile', 'finish');
+    return steps;
+}
+
+function renderSetup() {
+    const steps = _setupSteps();
+    if (_setupStep >= steps.length) _setupStep = steps.length - 1;
+    const key = steps[_setupStep];
+    const dots = steps.map((s, i) => `<span class="setup-dot${i === _setupStep ? ' on' : ''}${i < _setupStep ? ' done' : ''}"></span>`).join('');
+    return `${_SETUP_CSS}<div class="setup-wrap"><div class="setup-card" id="setup-root">
+        <div class="setup-brand"><span class="setup-logo">&#x259A;</span> Val Ark setup</div>
+        <div class="setup-dots" title="Step ${_setupStep + 1} of ${steps.length}">${dots}</div>
+        <div class="setup-stepbody">${_renderSetupStep(key)}</div>
+        <div id="setup-msg" class="setup-msg"></div>
+    </div></div>`;
+}
+
+function _renderSetupStep(key) {
+    const back = _setupStep > 0 ? `<button class="setup-btn ghost" onclick="setupBack()">Back</button>` : '<span></span>';
+    switch (key) {
+        case 'welcome':
+            return `<h1>Welcome to Val Ark</h1>
+                <p class="setup-lead">Your offline knowledge box. This takes about a minute — no accounts, no internet needed.</p>
+                <div class="setup-nav"><span></span><button class="setup-btn" onclick="setupNext()">Start &rarr;</button></div>`;
+        case 'claim':
+            return `<h1>Claim this box</h1>
+                <p class="setup-lead">Enter the <strong>setup code</strong> shown on the box's screen or printed on its label — it proves the box is yours.</p>
+                <input id="setup-token" class="setup-input setup-code" placeholder="XXXX-XXXX" autocomplete="off" spellcheck="false" value="${esc(_setupData.token)}">
+                <p class="setup-hint">On the box itself you won't be asked for a code.</p>
+                <div class="setup-nav">${back}<button class="setup-btn" onclick="setupNext()">Continue &rarr;</button></div>`;
+        case 'name':
+            return `<h1>Name this box</h1>
+                <p class="setup-lead">You'll open it at <code>http://<span id="setup-name-echo">${esc(_setupData.name || 'valark')}</span>.local/</code></p>
+                <input id="setup-name" class="setup-input" value="${esc(_setupData.name || 'valark')}" oninput="var e=document.getElementById('setup-name-echo');if(e)e.textContent=(this.value||'valark')" maxlength="40" autocomplete="off">
+                <div class="setup-nav">${back}<button class="setup-btn" onclick="setupNext()">Continue &rarr;</button></div>`;
+        case 'admin':
+            return `<h1>Set an admin passcode</h1>
+                <p class="setup-lead">So only you can change settings. <strong>Optional</strong> — until you set one, only this box can administer (which is what keeps recovery safe).</p>
+                <input id="setup-pass" class="setup-input" type="password" placeholder="admin passcode (optional)" autocomplete="new-password" value="${esc(_setupData.password)}" oninput="_setupPwMeter(this.value)">
+                <div id="setup-pw-meter" class="setup-meter"></div>
+                <div class="setup-nav">${back}<span class="setup-navr"><button class="setup-btn ghost" onclick="setupSkipAdmin()">Skip for now</button><button class="setup-btn" onclick="setupNext()">Continue &rarr;</button></span></div>`;
+        case 'profile':
+            return `<h1>What do you want on it?</h1>
+                <p class="setup-lead">Pick a starting focus — change it any time. Val Ark fills the disk in the background.</p>
+                <div class="setup-profiles">${_PROFILES.map(p => `
+                    <button class="setup-profile${_setupData.profile === p.id ? ' on' : ''}" onclick="_setupPickProfile('${p.id}')">
+                        <span class="setup-profile-ic">${p.icon}</span>
+                        <span class="setup-profile-tx"><strong>${p.label}</strong><span class="setup-profile-desc">${p.desc}</span></span>
+                    </button>`).join('')}</div>
+                <div class="setup-nav">${back}<button class="setup-btn" onclick="setupNext()">Continue &rarr;</button></div>`;
+        case 'finish': {
+            const prof = _PROFILES.find(p => p.id === _setupData.profile) || _PROFILES[0];
+            return `<h1>Ready to go</h1>
+                <ul class="setup-review">
+                    <li><span>Name</span><strong>${esc(_setupData.name || 'valark')}</strong></li>
+                    <li><span>Admin passcode</span><strong>${_setupData.password ? 'set' : 'skipped (box-only for now)'}</strong></li>
+                    <li><span>Focus</span><strong>${prof.icon} ${esc(prof.label)}</strong></li>
+                </ul>
+                <div class="setup-nav">${back}<button class="setup-btn" id="setup-finish-btn" onclick="setupFinish()">Set up Val Ark &rarr;</button></div>`;
+        }
+        default:
+            return '<h1>All set!</h1>';
+    }
+}
+
+function _setupPickProfile(id) { _setupData.profile = id; paintSetup(); }
+function _setupPwMeter(v) {
+    const m = document.getElementById('setup-pw-meter'); if (!m) return;
+    if (!v) { m.textContent = ''; return; }
+    const score = Math.min(4, Math.floor(v.length / 3) + (/[^a-zA-Z0-9]/.test(v) ? 1 : 0));
+    m.textContent = 'Strength: ' + ['very weak', 'weak', 'ok', 'good', 'strong'][score];
+}
+function paintSetup() { const r = document.getElementById('app-root'); if (r) { r.innerHTML = renderSetup(); bindSetup(); } }
+function _setupCollect() {
+    const key = _setupSteps()[_setupStep];
+    let el;
+    if (key === 'claim' && (el = document.getElementById('setup-token'))) _setupData.token = el.value.trim();
+    if (key === 'name'  && (el = document.getElementById('setup-name')))  _setupData.name = (el.value.trim() || 'valark');
+    if (key === 'admin' && (el = document.getElementById('setup-pass')))  _setupData.password = el.value;
+}
+function setupNext() {
+    _setupCollect();
+    if (_setupSteps()[_setupStep] === 'claim' && !_setupData.token) { _setupMsg('Enter the setup code from the box.', true); return; }
+    _setupStep++; paintSetup();
+}
+function setupBack() { _setupCollect(); if (_setupStep > 0) _setupStep--; paintSetup(); }
+function setupSkipAdmin() { _setupData.password = ''; _setupStep++; paintSetup(); }
+function _setupMsg(t, bad) { const m = document.getElementById('setup-msg'); if (m) { m.textContent = t; m.className = 'setup-msg' + (bad ? ' bad' : ' ok'); } }
+async function setupFinish() {
+    _setupCollect();
+    const btn = document.getElementById('setup-finish-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Setting up…'; }
+    try {
+        const body = { name: _setupData.name, profile: _setupData.profile, useMode: _setupData.useMode };
+        if (_setupData.password) body.password = _setupData.password;
+        if (_setupData.token) body.token = _setupData.token;
+        const r = await fetch('/api/setup/commission', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) {
+            _setupState = { commissioned: true };
+            const root = document.getElementById('app-root');
+            if (root) root.innerHTML = `${_SETUP_CSS}<div class="setup-wrap"><div class="setup-card"><div class="setup-stepbody">
+                <div class="setup-done-ic">&#x2713;</div><h1>All set!</h1>
+                <p class="setup-lead">${esc(_setupData.name || 'Val Ark')} is ready. It'll start filling with content in the background and keeps working even offline.</p>
+                <div class="setup-nav"><span></span><a class="setup-btn" href="#/" onclick="setTimeout(function(){location.reload();},60)">Open Val Ark &rarr;</a></div>
+            </div></div></div>`;
+        } else {
+            _setupMsg(d.error || ('Setup failed (HTTP ' + r.status + ')'), true);
+            if (btn) { btn.disabled = false; btn.textContent = 'Set up Val Ark →'; }
+        }
+    } catch (e) {
+        _setupMsg((e && e.message) || 'Setup request failed', true);
+        if (btn) { btn.disabled = false; btn.textContent = 'Set up Val Ark →'; }
+    }
+}
+function bindSetup() { const f = document.querySelector('#setup-root .setup-input'); if (f) { try { f.focus(); } catch (_) {} } }
+// Captive step: an un-commissioned box sends any visitor to the wizard first.
+async function checkSetup() {
+    try {
+        const r = await fetch('/api/setup/state');
+        if (!r.ok) return true;
+        _setupState = await r.json();
+        if (!_setupState.commissioned && getRoute() !== '/setup') { location.hash = '#/setup'; router(); return false; }
+    } catch (_) { /* static preview / no server: skip the takeover */ }
+    return true;
+}
+
+const _SETUP_CSS = `<style>
+.setup-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg,#0e0f12)}
+.setup-card{width:100%;max-width:520px;background:var(--card-bg,var(--bg,#16181d));border:1px solid var(--border,#2a2d34);border-radius:16px;padding:36px 34px;box-shadow:0 12px 48px rgba(0,0,0,.28)}
+.setup-brand{font-size:.82rem;letter-spacing:.14em;text-transform:uppercase;color:var(--text-muted,#8a8f98);display:flex;align-items:center;gap:.5rem}
+.setup-logo{color:var(--accent,#e0603a);font-size:1.1rem}
+.setup-dots{display:flex;gap:.4rem;margin:14px 0 22px}
+.setup-dot{width:26px;height:4px;border-radius:3px;background:var(--border,#2a2d34)}
+.setup-dot.on{background:var(--accent,#e0603a)}.setup-dot.done{background:var(--accent,#e0603a);opacity:.5}
+.setup-stepbody h1{font-size:1.7rem;margin:0 0 .5rem;line-height:1.15}
+.setup-lead{color:var(--text-muted,#aab);font-size:1rem;line-height:1.5;margin:0 0 20px}
+.setup-hint{color:var(--text-muted,#8a8f98);font-size:.85rem;margin:8px 0 0}
+.setup-input{width:100%;box-sizing:border-box;padding:.7rem .85rem;border:1px solid var(--border,#2a2d34);border-radius:9px;background:var(--bg,#0e0f12);color:var(--text,#e8eaed);font-size:1.05rem}
+.setup-input:focus{outline:2px solid var(--accent,#e0603a);outline-offset:1px}
+.setup-code{text-transform:uppercase;letter-spacing:.18em;text-align:center;font-family:ui-monospace,monospace}
+.setup-meter{min-height:1.1rem;font-size:.82rem;color:var(--text-muted,#8a8f98);margin-top:6px}
+.setup-nav{display:flex;justify-content:space-between;align-items:center;gap:.6rem;margin-top:26px}
+.setup-navr{display:flex;gap:.6rem}
+.setup-btn{display:inline-flex;align-items:center;gap:.4rem;padding:.62rem 1.15rem;border-radius:9px;border:1px solid var(--accent,#e0603a);background:var(--accent,#e0603a);color:#fff;font-size:1rem;font-weight:600;cursor:pointer;text-decoration:none}
+.setup-btn:hover{filter:brightness(1.06)}
+.setup-btn.ghost{background:transparent;color:var(--text,#e8eaed);border-color:var(--border,#2a2d34)}
+.setup-btn:disabled{opacity:.6;cursor:default}
+.setup-profiles{display:flex;flex-direction:column;gap:.6rem}
+.setup-profile{display:flex;gap:.85rem;align-items:flex-start;text-align:left;padding:.85rem 1rem;border:1px solid var(--border,#2a2d34);border-radius:11px;background:var(--bg,#0e0f12);color:var(--text,#e8eaed);cursor:pointer}
+.setup-profile.on{border-color:var(--accent,#e0603a);box-shadow:0 0 0 1px var(--accent,#e0603a) inset}
+.setup-profile-ic{font-size:1.4rem;line-height:1}
+.setup-profile-tx{display:flex;flex-direction:column;gap:.15rem}
+.setup-profile-desc{color:var(--text-muted,#8a8f98);font-size:.85rem}
+.setup-review{list-style:none;padding:0;margin:0 0 8px}
+.setup-review li{display:flex;justify-content:space-between;padding:.6rem 0;border-bottom:1px solid var(--border,#2a2d34)}
+.setup-review li span{color:var(--text-muted,#8a8f98)}
+.setup-msg{min-height:1.2rem;margin-top:14px;font-size:.9rem}
+.setup-msg.bad{color:var(--danger,#e05a52)}.setup-msg.ok{color:var(--success,#4caf50)}
+.setup-done-ic{width:56px;height:56px;border-radius:50%;background:var(--success,#2e7d32);color:#fff;display:flex;align-items:center;justify-content:center;font-size:1.9rem;margin:0 auto 14px}
+@media(max-width:560px){.setup-card{padding:26px 20px}}
+</style>`;
+
 function renderProgressPanel() {
     let panel = document.getElementById('dl-panel');
     if (!panel) {
@@ -5733,6 +5922,11 @@ window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', async () => {
     if (!window.location.hash) window.location.hash = '#/';
     router();
+
+    // First-boot: if this box isn't set up yet, take over with the wizard before
+    // loading the rest of the app. (No-op on a static preview or once commissioned.)
+    const ready = await checkSetup();
+    if (!ready) return;
 
     // Show loading indicator
     const diskEl = document.getElementById('nav-disk');

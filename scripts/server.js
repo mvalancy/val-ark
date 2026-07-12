@@ -112,11 +112,23 @@ try {
     VALID_TOOL_TARGETS.add('sd');
     VALID_TOOL_TARGETS.add('onnx');
 } catch (e) {}
-const VALID_MODEL_TIERS = new Set(['all', 'tier1', 'tier2', 'tier3']);
+// Model download targets: priority tiers + per-category selectors that
+// download-models.sh accepts (main models are downloaded by category, not per-file).
+const VALID_MODEL_TIERS = new Set(['all', 'tier1', 'tier2', 'tier3',
+    'llm', 'tts', 'stt', 'vision', 'image', 'nvidia', 'extra', 'bitnet']);
 const VALID_CONTENT_TARGETS = new Set(['all', 'wikipedia', 'serve']);
+// Per-item user requests routed through librarian.sh (content ZIM / model / tool).
+const VALID_REQUEST_KINDS = new Set(['content', 'model', 'tool']);
 
 function isAlphanumDash(str) {
     return typeof str === 'string' && /^[a-zA-Z0-9_-]+$/.test(str);
+}
+// Catalog ids carry a bucket prefix and dots (e.g. "zim:wikipedia_en_all_maxi_eng",
+// "model:bge-small"). Allow those chars but nothing shell-special (defence in depth;
+// ids are passed to spawn as an arg array, never through a shell).
+function isCatalogId(str) {
+    return typeof str === 'string' && str.length > 0 && str.length <= 256
+        && /^[a-zA-Z0-9_:.-]+$/.test(str);
 }
 
 // =============================================================================
@@ -475,6 +487,62 @@ function getStorageStatus() {
     return _storageCache.data || { categories: [], total: 0, zimCount: 0, disk: getDiskStatus(), computing: true };
 }
 
+// Catalog of downloadable-but-absent resources (live Kiwix OPDS for content, the
+// curated data/models-extra.tsv for models). Computed in the BACKGROUND by shelling
+// to `librarian.sh catalog` so a browse request never blocks on the OPDS fetch; the
+// result is cached and the UI one-click-requests any item (POST /api/request).
+const _catalogCache = { content: { data: null, ts: 0 }, models: { data: null, ts: 0 } };
+const _catalogComputing = { content: null, models: null };
+const CATALOG_TTL = 3600000;               // 1h — OPDS moves slowly; re-walked in background
+const CATALOG_MAX_ITEMS = 4000;            // bound the JSON payload
+// Browse the English catalog by default (thousands of ZIMs per language would swamp
+// the UI); operators can widen with VALARK_CATALOG_LANGS.
+const CATALOG_LANGS = String(cfg('VALARK_CATALOG_LANGS', 'eng')).trim();
+
+function parseCatalogTSV(stdout) {
+    // planner --list-absent rows: id bucket cat value bytes source url dest extra phase
+    const items = [];
+    for (const line of String(stdout).split('\n')) {
+        if (!line) continue;
+        const p = line.split('\t');
+        if (p.length < 9) continue;
+        const bytes = parseInt(p[4], 10) || 0;
+        const name = path.basename(p[7] || '') || p[8] || p[0];
+        items.push({
+            id: p[0],
+            category: String(p[2] || '').replace(/^zim:|^model:/, '') || 'other',
+            value: parseInt(p[3], 10) || 0,
+            bytes,
+            name,
+        });
+        if (items.length >= CATALOG_MAX_ITEMS) break;
+    }
+    return items;
+}
+function computeCatalog(kind) {
+    const arg = kind === 'models' ? 'model' : 'content';
+    return new Promise((resolve) => {
+        execFile('/usr/bin/bash', [path.join(ROOT, 'scripts/librarian.sh'), 'catalog', arg], {
+            cwd: ROOT, timeout: 160000, maxBuffer: 48 * 1024 * 1024,
+            env: { ...process.env, FORCE_COLOR: '0', VALARK_ZIM_LANGS: CATALOG_LANGS },
+        }, (err, stdout) => {
+            const items = err ? (_catalogCache[kind].data || []) : parseCatalogTSV(stdout);
+            _catalogCache[kind] = { data: items, ts: Date.now() };
+            resolve(items);
+        });
+    });
+}
+function getCatalog(kind) {
+    if (kind !== 'content' && kind !== 'models') return { items: [], count: 0, computing: false };
+    const c = _catalogCache[kind];
+    const now = Date.now();
+    const fresh = c.data && (now - c.ts) < CATALOG_TTL;
+    if (!fresh && !_catalogComputing[kind]) {
+        _catalogComputing[kind] = computeCatalog(kind).finally(() => { _catalogComputing[kind] = null; });
+    }
+    return { items: c.data || [], count: (c.data || []).length, computing: !c.data };
+}
+
 // Shallow directory info: stat immediate children only, not recursive
 function shallowDirInfo(dirPath) {
     let size = 0;
@@ -650,6 +718,59 @@ function isLocalhost(req) {
     return false;
 }
 
+// Peer IP, normalized (node reports LAN/tailnet IPv4 peers as IPv4-mapped IPv6).
+function clientIp(req) {
+    let a = req.socket?.remoteAddress || '';
+    if (a.startsWith('::ffff:')) a = a.slice(7);
+    return a;
+}
+
+// Is the request from the LAN or the tailnet? Val Ark is a community appliance
+// reachable ONLY on the local network and the tailscale tailnet (never the public
+// internet — see docs/ARM64-NAS.md), so members can one-click downloads from those
+// peers. Every trigger is still guarded (allowlist targets, footprint-cap eviction,
+// single-flight fill lock, per-IP rate limit); public/unknown peers are refused.
+function isLanOrTailnet(req) {
+    if (isLocalhost(req)) return true;
+    const a = clientIp(req);
+    if (!a) return true;                       // unix socket
+    const m = a.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (m) {
+        const o = m.slice(1, 5).map(Number);
+        if (o.some(n => n > 255)) return false;
+        if (o[0] === 127) return true;                                 // loopback
+        if (o[0] === 10) return true;                                  // 10.0.0.0/8
+        if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true;     // 172.16.0.0/12
+        if (o[0] === 192 && o[1] === 168) return true;                 // 192.168.0.0/16
+        if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return true;    // 100.64.0.0/10 CGNAT (tailnet)
+        if (o[0] === 169 && o[1] === 254) return true;                 // link-local
+        return false;
+    }
+    const low = a.toLowerCase();
+    if (low === '::1') return true;
+    if (/^f[cd][0-9a-f]{2}:/.test(low)) return true;   // ULA fc00::/7 (tailnet fd7a:…⊂ this)
+    if (/^fe[89ab][0-9a-f]:/.test(low)) return true;   // link-local fe80::/10
+    return false;
+}
+
+// Per-IP token bucket for expensive POST triggers (download / request / service
+// start). Prevents a single LAN client from spamming multi-GB fetches or NodeBB
+// builds. Sliding 60s window; the map is pruned opportunistically.
+const rateBuckets = new Map();
+const RATE_MAX = 30;              // triggers per window per IP
+const RATE_WINDOW_MS = 60000;
+function rateLimitOk(req) {
+    const key = clientIp(req) || 'local';
+    const now = Date.now();
+    let b = rateBuckets.get(key);
+    if (!b || (now - b.start) >= RATE_WINDOW_MS) { b = { start: now, n: 0 }; rateBuckets.set(key, b); }
+    b.n++;
+    if (rateBuckets.size > 512) {
+        for (const [k, v] of rateBuckets) if ((now - v.start) >= RATE_WINDOW_MS) rateBuckets.delete(k);
+    }
+    return b.n <= RATE_MAX;
+}
+
 function handleAPI(req, res, urlPath) {
     const corsOrigin = getCORSOrigin(req);
 
@@ -703,6 +824,10 @@ function handleAPI(req, res, urlPath) {
                 }
                 return sendJSON(res, req, active);
             }
+            case '/api/catalog/content':
+                return sendJSON(res, req, getCatalog('content'));
+            case '/api/catalog/models':
+                return sendJSON(res, req, getCatalog('models'));
             case '/api/downloads/stream':
                 // SSE connection limit
                 if (sseClients.size >= MAX_SSE_CONNECTIONS) {
@@ -729,14 +854,20 @@ function handleAPI(req, res, urlPath) {
         }
     }
 
-    // POST endpoints - restricted to localhost for security
+    // POST endpoints - trigger downloads / service starts. Allowed from the LAN and
+    // the tailnet (this appliance is not exposed to the public internet); each trigger
+    // is validated against an allowlist, disk/footprint-cap guarded, single-flight,
+    // and per-IP rate limited. Public/unknown peers are refused.
     if (req.method === 'POST') {
-        // Download/control endpoints are restricted to localhost only
-        // This prevents remote exploitation while allowing local browser access
-        if (!isLocalhost(req)) {
+        if (!isLanOrTailnet(req)) {
             return sendJSON(res, req, {
-                error: 'Download operations are only available from localhost for security.'
+                error: 'Downloads can be triggered only from the local network or tailnet.'
             }, 403);
+        }
+        if (!rateLimitOk(req)) {
+            return sendJSON(res, req, {
+                error: 'Too many requests — please slow down and try again in a minute.'
+            }, 429);
         }
 
         readBody(req).then((body) => {
@@ -784,6 +915,32 @@ function handleAPI(req, res, urlPath) {
                 }
                 case '/api/download/cancel':
                     result = cancelDownload(body.id);
+                    break;
+                case '/api/request': {
+                    // One-click per-item request: pin + fetch a specific catalog item,
+                    // auto-evicting lowest-priority unpinned content to fit the cap.
+                    const kind = body.kind;
+                    const id = body.id;
+                    if (!VALID_REQUEST_KINDS.has(kind)) {
+                        result = { error: 'Invalid kind. Use: content, model, tool' };
+                    } else if (kind === 'tool') {
+                        if (!isAlphanumDash(id) || !VALID_TOOL_TARGETS.has(id)) {
+                            result = { error: 'Unknown tool: ' + String(id).slice(0, 40) };
+                        } else {
+                            result = startDownload('request',
+                                path.join(ROOT, 'scripts/librarian.sh'), ['request', 'tool', id]);
+                        }
+                    } else if (!isCatalogId(id)) {
+                        result = { error: 'Invalid item id' };
+                    } else {
+                        result = startDownload('request',
+                            path.join(ROOT, 'scripts/librarian.sh'), ['request', kind, id]);
+                    }
+                    break;
+                }
+                case '/api/service/start':
+                    // Bring up an enabled + mirrored community service (chat/mail/forum/paste).
+                    result = startService(body.id);
                     break;
                 default:
                     return sendJSON(res, req, { error: 'Unknown endpoint' }, 404);
@@ -1035,6 +1192,45 @@ function probePort(port) {
         s.on('timeout', () => done(false));
     });
 }
+// A service is ENABLED when the operator listed it in VALARK_SERVICES (.env), and
+// MIRRORED when its binary/source is present in the tools tree for any platform.
+// The Community section uses these to offer a one-click Start (only for services
+// the operator already opted into + mirrored — never build/mirror on demand).
+function serviceEnabled(id) {
+    return String(cfg('VALARK_SERVICES', '')).split(/\s+/).filter(Boolean).includes(id);
+}
+function serviceMirrored(id) {
+    for (const plat of ['linux-arm64', 'linux-x86_64', 'macos-arm64', 'windows-x64']) {
+        const d = path.join(ROOT, 'tools', plat, id);
+        try { if (fs.existsSync(d) && fs.readdirSync(d).length > 0) return true; } catch (_) {}
+    }
+    return false;
+}
+
+// In-flight service starts: forum/chat first-run builds take minutes, so a start is
+// spawned detached and tracked here to (a) dedupe repeat clicks and (b) show "starting…".
+const startingServices = new Map();
+function startService(id) {
+    if (!isAlphanumDash(id) || !APP_SERVICES[id]) return { error: 'Unknown service' };
+    if (!serviceEnabled(id)) {
+        return { error: `Service '${id}' is not enabled. Add it to VALARK_SERVICES in .env.` };
+    }
+    if (!serviceMirrored(id)) {
+        return { error: `Service '${id}' is not mirrored yet. Run: scripts/tools/${id}.sh` };
+    }
+    if (startingServices.has(id)) return { id, status: 'starting' };
+    const proc = spawn('/usr/bin/bash', [path.join(ROOT, 'scripts/services', id + '.sh'), 'start'], {
+        cwd: ROOT, detached: true, stdio: 'ignore',
+        env: { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || ''), FORCE_COLOR: '0' },
+    });
+    startingServices.set(id, Date.now());
+    proc.on('exit', () => { startingServices.delete(id); _svcCache.ts = 0; });
+    proc.on('error', () => { startingServices.delete(id); });
+    proc.unref();
+    _svcCache.ts = 0;   // force the next status probe to re-check
+    return { id, status: 'starting' };
+}
+
 let _svcCache = { data: null, ts: 0 };
 async function getServicesStatus() {
     const now = Date.now();
@@ -1042,7 +1238,17 @@ async function getServicesStatus() {
     const ids = Object.keys(APP_SERVICES);
     const ups = await Promise.all(ids.map((id) => probePort(APP_SERVICES[id].port)));
     const data = {};
-    ids.forEach((id, i) => { data[id] = { port: APP_SERVICES[id].port, path: `/app/${id}/`, running: ups[i] }; });
+    ids.forEach((id, i) => {
+        const running = ups[i];
+        const enabled = serviceEnabled(id);
+        const mirrored = serviceMirrored(id);
+        const starting = startingServices.has(id);
+        data[id] = {
+            port: APP_SERVICES[id].port, path: `/app/${id}/`, running,
+            enabled, mirrored, starting,
+            startable: enabled && mirrored && !running && !starting,
+        };
+    });
     _svcCache = { data, ts: now };
     return data;
 }

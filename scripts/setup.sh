@@ -29,6 +29,18 @@ log_info() { echo -e "[${BLUE}INFO${NC}] $*"; }
 log_warn() { echo -e "[${YELLOW}WARN${NC}] $*"; }
 log_err() { echo -e "[${RED}ERROR${NC}] $*"; }
 
+# Headless mode: set VALARK_YES=1 (or run with no controlling TTY — cloud-init,
+# the LAN bootstrap installer, CI / VM tests) to auto-accept prompts so unattended
+# setup completes. Interactive runs keep their prompts + defaults. Without this a
+# fresh machine could never finish setup non-interactively (e.g. no Node runtime).
+ASSUME_YES=0
+{ [ -n "${VALARK_YES:-}" ] || [ ! -t 0 ]; } && ASSUME_YES=1
+# prompt_yes "<prompt text>" -> echoes the answer; auto-"y" in headless mode.
+prompt_yes() {
+    if [ "$ASSUME_YES" = 1 ]; then echo "y"; return 0; fi
+    printf '%s' "$1" >&2; local a=""; read -r a || true; printf '%s' "$a"
+}
+
 echo ""
 echo "=================================================================="
 echo "  Val Ark - Setup"
@@ -112,16 +124,14 @@ if [ -n "$MISSING" ]; then
     echo ""
 
     if command -v apt-get &>/dev/null; then
-        echo -n "  Install with apt? [y/N]: "
-        read -r answer
+        answer="$(prompt_yes "  Install with apt? [y/N]: ")"
         if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
             sudo apt-get update -qq
             sudo apt-get install -y $MISSING
             log_ok "Dependencies installed"
         fi
     elif command -v brew &>/dev/null; then
-        echo -n "  Install with brew? [y/N]: "
-        read -r answer
+        answer="$(prompt_yes "  Install with brew? [y/N]: ")"
         if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
             brew install $MISSING
             log_ok "Dependencies installed"
@@ -146,8 +156,7 @@ if python3 -c "from PIL import Image" 2>/dev/null; then
 else
     echo -e "  ${YELLOW}~${NC} Pillow (optional, for image optimization)"
     if command -v pip3 &>/dev/null; then
-        echo -n "  Install Pillow with pip? [y/N]: "
-        read -r answer
+        answer="$(prompt_yes "  Install Pillow with pip? [y/N]: ")"
         if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
             pip3 install --user Pillow
             log_ok "Pillow installed"
@@ -183,21 +192,36 @@ else
     if [ "$(uname -s)" != "Linux" ] || [ -z "$NODE_ARCH" ]; then
         log_warn "No portable Node build known for $(uname -s)/$(uname -m) — install Node manually."
     else
-        echo -n "  Download portable Node ${NODE_VER} (${NODE_ARCH}) into ~/.local/node? [Y/n]: "
-        read -r answer
+        answer="$(prompt_yes "  Download portable Node ${NODE_VER} (${NODE_ARCH}) into ~/.local/node? [Y/n]: ")"
         if [ "$answer" != "n" ] && [ "$answer" != "N" ]; then
-            _url="https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-${NODE_ARCH}.tar.xz"
-            _tmp="$(mktemp -d)"
-            if curl -fL --retry 3 --connect-timeout 15 -o "${_tmp}/node.tar.xz" "$_url"; then
-                mkdir -p "${HOME}/.local/node"
-                if tar -xJf "${_tmp}/node.tar.xz" -C "${HOME}/.local/node" --strip-components=1 \
-                   && [ -x "$NODE_BIN" ]; then
-                    log_ok "Node installed: $("$NODE_BIN" --version) (~/.local/node)"
-                else
-                    log_err "Node extraction failed."
+            _tmp="$(mktemp -d)"; _got=0
+            # OFFLINE-FIRST: pull a Node runtime mirrored by the source Ark
+            # (VALARK_HOST, set by bootstrap.sh) before ever touching the internet —
+            # the whole point of an offline self-replicating mirror. Uses the tools
+            # tree platform naming (linux-arm64 / linux-x86_64).
+            case "$(uname -m)" in aarch64|arm64) _nplat="linux-arm64";; x86_64|amd64) _nplat="linux-x86_64";; *) _nplat="";; esac
+            if [ -n "${VALARK_HOST:-}" ] && [ -n "$_nplat" ]; then
+                _base="${VALARK_HOST%/}"; case "$_base" in http*) ;; *) _base="http://$_base";; esac
+                _aurl="${_base}/sources/val-ark/node-${_nplat}.tar.gz"
+                if curl -fL --retry 2 --connect-timeout 10 -o "${_tmp}/node.tgz" "$_aurl" 2>/dev/null; then
+                    mkdir -p "${HOME}/.local/node"
+                    tar -xzf "${_tmp}/node.tgz" -C "${HOME}/.local/node" 2>/dev/null && [ -x "$NODE_BIN" ] && _got=1
+                    [ "$_got" = 1 ] && log_ok "Node from Ark ${_base} (offline): $("$NODE_BIN" --version)"
                 fi
-            else
-                log_err "Node download failed: $_url"
+            fi
+            # Fallback: nodejs.org (needs internet — the first/online node's path).
+            if [ "$_got" != 1 ]; then
+                _url="https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-${NODE_ARCH}.tar.xz"
+                if curl -fL --retry 3 --connect-timeout 15 -o "${_tmp}/node.tar.xz" "$_url"; then
+                    mkdir -p "${HOME}/.local/node"
+                    if tar -xJf "${_tmp}/node.tar.xz" -C "${HOME}/.local/node" --strip-components=1 && [ -x "$NODE_BIN" ]; then
+                        log_ok "Node installed: $("$NODE_BIN" --version) (~/.local/node)"
+                    else
+                        log_err "Node extraction failed."
+                    fi
+                else
+                    log_err "Node unavailable from the Ark and nodejs.org — mirror it or install Node manually."
+                fi
             fi
             rm -rf "$_tmp"
         fi

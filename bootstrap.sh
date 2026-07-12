@@ -69,7 +69,10 @@ fi
 cd "$DIR"
 echo "==> running setup (scripts/setup.sh)"
 if [ -x scripts/setup.sh ] || [ -f scripts/setup.sh ]; then
-    bash scripts/setup.sh || echo "   (setup reported issues — review its output; you can still ./start.sh)"
+    # Headless (VALARK_YES) and point setup at THIS Ark so it fetches the Node
+    # runtime + deps from the LAN, not the internet — the offline promise.
+    VALARK_YES="${VALARK_YES:-1}" VALARK_HOST="$BASE" bash scripts/setup.sh \
+        || echo "   (setup reported issues — review its output; you can still ./start.sh)"
 fi
 
 cat <<EOF

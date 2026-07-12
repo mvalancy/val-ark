@@ -1,11 +1,16 @@
 version: 2
+# NOTE: Dependabot reads this file from the DEFAULT branch (main), so target-branch
+# only takes effect once this change ships to main. Until then Dependabot still
+# opens PRs against main; we consolidate those onto dev by hand (see the deps chore).
 updates:
   - package-ecosystem: npm
     directory: /tests/screenshots
+    target-branch: dev            # integration line; deps land on dev, release to main
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
     labels: [dependencies, needs-triage]
   - package-ecosystem: github-actions
     directory: /
+    target-branch: dev
     schedule: { interval: weekly }
     labels: [dependencies, ci, needs-triage]

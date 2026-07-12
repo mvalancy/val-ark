@@ -67,14 +67,36 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   `local user="$1" pass="$2"` **crashes** when `adduser` is called without a password. **Fix:**
   default optional positionals — `local user="${1:-}" pass="${2:-}"`. Bit both `chat.sh` and
   `mail.sh` `cmd_adduser`.
-- **Account model differs per service — don't force one signup UX.** IRC (chat) + maddy (mail)
-  have no safe self‑signup → the **host provisions** logins (`<svc>.sh adduser <name>`); NodeBB
-  (forum) has its **own Register page** (self‑service); MicroBin (paste) is **one shared gated
-  instance** (no per‑user accounts). The server encodes this as `COMMUNITY_ACCOUNTS[id].signup`
-  = `host｜self｜shared`, surfaced in `/api/status/services` and the UI signup panel.
-- **Minting a login is an admin action → `POST /api/service/adduser` is localhost‑only.** LAN
-  users self‑register on the forum or ask the host; only the operator on the box creates chat/mail
-  logins. The UI hides the create form off‑localhost (`isAdminHost()` mirrors the server gate).
+- **Account model differs per service — don't force one signup UX.** chat is **open** by default
+  (public/no-login — pick a nickname and join); maddy (mail) has no safe self‑signup → the **host
+  provisions** logins (`mail.sh adduser <name>`); NodeBB (forum) has its **own Register page**
+  (self‑service); MicroBin (paste) is **one shared gated instance**. The server encodes this as
+  `COMMUNITY_ACCOUNTS[id].signup` = `open｜host｜self｜shared`, surfaced in `/api/status/services`
+  and the UI panel. **chat's model is dynamic** (`open` unless `VALARK_CHAT_PUBLIC=0`, then `host`)
+  — keep it in sync with the mode, or a private operator's `adduser` breaks. `open`/`self`/`shared`
+  short‑circuit `addServiceUser` **before** username/password validation, so validation tests must
+  target a **host** service (mail), not chat.
+- **The Lounge (chat) defaults to PUBLIC / no-login.** A trusted-LAN community box shouldn't make a
+  visitor hit a login wall with no way to make an account (the old private-mode default did exactly
+  that — the box was unusable without shell access). Val Ark's reverse proxy + Use Mode already gate
+  *who* reaches `/app/chat/`, so The Lounge needn't re-auth. `VALARK_CHAT_PUBLIC=0` restores per-user
+  logins + persistent history.
+- **A "write-once if exists" config can never change on a deployed box.** `chat.sh` used to write
+  The Lounge `config.js` only when absent, so flipping the access mode never took effect on a box
+  that already had one. Config writers that carry a *setting* must **regenerate every start** (back
+  up to `.bak`), like `_write_ngircd_conf` already did.
+- **ngIRCd `MaxNickLength` defaults to 9 (classic IRC).** Ordinary names — even The Lounge's own
+  default nick — get rejected "nickname too long". Set it in `[Limits]` (30 is safe, within the
+  compiled limit). Also pre-create a few `[Channel]` blocks + a multi-line MOTD teaching `/list`
+  and `/join`, so a first-timer isn't stuck in one empty room.
+- **The Lounge start must capture the REAL pid (nohup, not setsid).** `setsid` forks, so `$!` was
+  the dead parent → a wrong pidfile → the loop's per-cycle `start` spawned duplicate instances that
+  fought over `:9000`. Use `nohup ... & echo $!` for the true pid, plus a **port-based liveness
+  fallback** (`_lounge_up`) so a stale pidfile can never trigger a duplicate start.
+- **Minting a login is an admin action → `POST /api/service/adduser` is admin‑gated.** LAN
+  users self‑register on the forum, join chat with just a nickname, or ask the host; only the
+  operator (localhost/admin) provisions **mail** logins. The UI hides the create form off‑admin
+  (`isAdminHost()` mirrors the server gate).
 
 ## Auth / recovery (Phase 2)
 

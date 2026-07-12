@@ -359,10 +359,27 @@ EOF
     fi
 }
 
+# Create a chat login (The Lounge private mode). Users can't self-register on IRC,
+# so the host runs this; the UI's Community "Accounts & access" points here.
+cmd_adduser() {
+    local user="$1" pass="$2"
+    [ -n "$user" ] || { echo "usage: chat.sh adduser <name> [password]"; return 1; }
+    local node nodedir; node="$(_chat_node)"; [ -n "$node" ] || { err "node not found (mirror it: scripts/tools/node.sh)"; return 1; }
+    nodedir="$(dirname "$node")"
+    [ -d "${THELOUNGE_SRC}/public" ] || { err "The Lounge isn't built yet — start chat first (scripts/services/chat.sh start)"; return 1; }
+    local args=(index.js add "$user"); [ -n "$pass" ] && args+=(--password "$pass")
+    if ( cd "$THELOUNGE_SRC" && THELOUNGE_HOME="$THELOUNGE_HOME" PATH="${nodedir}:$PATH" "$node" "${args[@]}" ); then
+        log "chat user '${user}' created — log in at /app/chat/"
+    else
+        err "could not create '${user}' (already exists?)"; return 1
+    fi
+}
+
 case "${1:-status}" in
     start)  cmd_start ;;
     stop)   cmd_stop ;;
     restart) cmd_stop; sleep 1; cmd_start ;;
     status) cmd_status ;;
+    adduser) shift; cmd_adduser "$@" ;;
     *) echo "Usage: $0 {start|stop|restart|status}" >&2; exit 2 ;;
 esac

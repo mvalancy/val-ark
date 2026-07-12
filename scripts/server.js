@@ -785,8 +785,9 @@ function handleAPI(req, res, urlPath) {
         return res.end();
     }
 
-    // GET endpoints
-    if (req.method === 'GET') {
+    // GET endpoints (HEAD too — the UI probes /api/archive availability with HEAD
+    // before downloading; serveArchive answers HEAD with headers only).
+    if (req.method === 'GET' || req.method === 'HEAD') {
         switch (urlPath) {
             case '/api/health':
                 return sendJSON(res, req, {
@@ -1037,6 +1038,16 @@ function serveArchive(res, req, relPath) {
     fs.stat(target, (err, stat) => {
         if (err) return send404(res);
         const base = path.basename(target);
+        // HEAD preflight (the UI probes availability before downloading) — answer the
+        // headers without spawning a tar / opening the file for every probe.
+        if (req && req.method === 'HEAD') {
+            res.writeHead(200, {
+                'Content-Type': stat.isDirectory() ? 'application/gzip' : 'application/octet-stream',
+                'Content-Disposition': `attachment; filename="${base}${stat.isDirectory() ? '.tar.gz' : ''}"`,
+                ...SECURITY_HEADERS,
+            });
+            return res.end();
+        }
         if (stat.isDirectory()) {
             res.writeHead(200, {
                 'Content-Type': 'application/gzip',

@@ -36,6 +36,15 @@ if [ -t 1 ] && [ "${FORCE_COLOR:-}" != "0" ]; then RED=$'\033[0;31m'; GREEN=$'\0
 log(){ local m="[$(date '+%F %T')] $*"; echo -e "$m"; mkdir -p "$LOG_DIR" 2>/dev/null; echo "$m" >> "$LOOP_LOG" 2>/dev/null; }
 step(){ log "${CYAN}== $* ==${NC}"; }
 
+# Self-heal telemetry: what THIS cycle actually repaired. The Health page reads
+# health.json (latest snapshot) + heal-events.jsonl (the timestamped feed of real
+# repairs). heal_event records a fix as it happens; write_health serialises both.
+HEALTH_JSON="${STATE_DIR}/health.json"
+HEAL_EVENTS_LOG="${STATE_DIR}/heal-events.jsonl"
+HEAL_EVENTS=()                       # "kind|detail" appended by the fixers this cycle
+heal_event(){ HEAL_EVENTS+=("$1|$2"); }
+_hj_str(){ local s="$1"; s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\t'/ }; s=${s//$'\n'/ }; s=${s//$'\r'/}; printf '"%s"' "$s"; }
+
 # --- step 4: link check + repair -------------------------------------------
 link_check_repair() {
     : > "$LINKREPORT"
@@ -128,7 +137,7 @@ ensure_web_server() {
             log "${YELLOW}kiwix stale/down${NC} (serving $kfiles of $zc ZIMs) — restarting server to refresh"
             fuser -k "${port}/tcp" 2>/dev/null; fuser -k 8888/tcp 2>/dev/null
             sleep 2   # let the old process actually release the port
-            _va_start_web "$port" && log "${GREEN}restarted${NC} web server on :$port"
+            _va_start_web "$port" && { log "${GREEN}restarted${NC} web server on :$port"; heal_event restart "Refreshed the library server (was serving $kfiles of $zc collections)"; }
         else
             log "web up on :$port (kiwix ${krun:-?}, $kfiles ZIMs)"
         fi
@@ -137,7 +146,7 @@ ensure_web_server() {
     if ss -tln 2>/dev/null | grep -q ":${port} "; then
         log "${YELLOW}:$port held by another app${NC} — set VALARK_WEB_PORT in .env to a free port"; return 1
     fi
-    _va_start_web "$port" && log "${GREEN}started Val Ark web server${NC} on :$port"
+    _va_start_web "$port" && { log "${GREEN}started Val Ark web server${NC} on :$port"; heal_event start "Started the web server (it was down)"; }
 }
 
 # Standard-port access: when VALARK_WEB_PUBLIC_PORT is set (e.g. 80), keep an
@@ -238,6 +247,50 @@ ui_smoke() {
     fi
 }
 
+# --- step 8b: write the self-heal snapshot the Health page reads --------------
+# health.json = latest cycle summary (space, verify tallies, link/asset counts,
+# what was repaired this cycle). heal-events.jsonl = the append-only, capped feed
+# of genuine repairs (a "restart" or "start" this cycle), newest last.
+write_health() {
+    mkdir -p "$STATE_DIR" 2>/dev/null
+    local dead=0 miss=0
+    if [ -f "$LINKREPORT" ]; then
+        dead=$(grep -c '^DEAD' "$LINKREPORT" 2>/dev/null); dead=${dead:-0}
+        miss=$(grep -c '^MISSING-ASSET' "$LINKREPORT" 2>/dev/null); miss=${miss:-0}
+    fi
+    local vp=0 vf=0 vs=0
+    if [ -f "${STATE_DIR}/verify.json" ]; then
+        vp=$(grep -oE '"pass"[[:space:]]*:[[:space:]]*[0-9]+' "${STATE_DIR}/verify.json" | grep -oE '[0-9]+$' | head -1); vp=${vp:-0}
+        vf=$(grep -oE '"fail"[[:space:]]*:[[:space:]]*[0-9]+' "${STATE_DIR}/verify.json" | grep -oE '[0-9]+$' | head -1); vf=${vf:-0}
+        vs=$(grep -oE '"skip"[[:space:]]*:[[:space:]]*[0-9]+' "${STATE_DIR}/verify.json" | grep -oE '[0-9]+$' | head -1); vs=${vs:-0}
+    fi
+    # overall reflects the BOX's own health (unresolved after this cycle). Dead
+    # upstream links are an internet transient the catalog re-resolves, not a box
+    # fault, so they don't flip overall — the UI frames them as "recovering".
+    local overall="good"
+    { [ "$vf" -gt 0 ] || [ "$miss" -gt 0 ]; } && overall="attention"
+    local ts; ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    local reps="" e kind detail first=1
+    for e in "${HEAL_EVENTS[@]}"; do
+        kind="${e%%|*}"; detail="${e#*|}"
+        [ "$first" = 1 ] && first=0 || reps="${reps},"
+        reps="${reps}"$'\n'"    { \"kind\": $(_hj_str "$kind"), \"detail\": $(_hj_str "$detail") }"
+        printf '{"ts":"%s","kind":%s,"detail":%s}\n' "$ts" "$(_hj_str "$kind")" "$(_hj_str "$detail")" >> "$HEAL_EVENTS_LOG"
+    done
+    if [ -f "$HEAL_EVENTS_LOG" ] && [ "$(wc -l < "$HEAL_EVENTS_LOG" 2>/dev/null || echo 0)" -gt 200 ]; then
+        tail -n 200 "$HEAL_EVENTS_LOG" > "${HEAL_EVENTS_LOG}.tmp" && mv -f "${HEAL_EVENTS_LOG}.tmp" "$HEAL_EVENTS_LOG"
+    fi
+    local tmp="${HEALTH_JSON}.tmp"
+    {
+        printf '{ "ts": "%s", "overall": "%s",\n' "$ts" "$overall"
+        printf '  "deadLinks": %d, "missingAssets": %d,\n' "$dead" "$miss"
+        printf '  "fillable": %s,\n' "$(_hj_str "$(valark_human "$(valark_fillable_bytes 2>/dev/null)" 2>/dev/null)")"
+        printf '  "verify": { "pass": %d, "fail": %d, "skip": %d },\n' "$vp" "$vf" "$vs"
+        printf '  "repairs": [%s\n  ] }\n' "$reps"
+    } > "$tmp" && mv -f "$tmp" "$HEALTH_JSON"
+    log "health written: ${HEALTH_JSON} (overall=$overall, ${#HEAL_EVENTS[@]} repair(s) this cycle)"
+}
+
 loop_once() {
     step "cycle start"
     step "1. ensure data disk writable"
@@ -274,6 +327,7 @@ loop_once() {
     step "7b. UI smoke (dynamic controls + back-to-ark nav)"; ui_smoke
 
     step "8. report + coordination"; bash "$LIBRARIAN" maintain >/dev/null 2>&1; coordination
+    step "8b. self-heal snapshot (health.json + heal-events feed)"; write_health
     log "${GREEN}cycle complete${NC} | fillable $(valark_human "$(valark_fillable_bytes)") | health: ${STATE_DIR}/health.json"
 }
 

@@ -36,6 +36,50 @@ later). See [README](README.md).
 - **Deployment:** ship both a **Docker appliance image** *and* the bare‑metal bootstrap; both
   offline, both commissioned from the same wizard.
 
+## 2026‑07 — Live host metrics, live-first (roadmap Phase 6, part 2 — monitoring)
+- A scout→3-design→judge **workflow** weighed live-first vs stack-faithful vs MVP for the
+  Telegraf+InfluxDB phase. Verdict: ship an **S-effort live-first MVP** and DEFER the whole
+  named stack — because the zero-dep server can read `/proc` + `os` itself, so the Health
+  page's **System tiles work day one on a bare box** (CI/VM, no services) and the retention
+  layer becomes a pure enhancement, never a dependency.
+- **This branch (`feat/metrics-live-gauges`):** one read-gated `GET /api/status/metrics`
+  (`getHostMetrics()` — CPU%/mem/load/net-rate/temp/uptime + reused `getDiskStatus()`), a client
+  `loadMetrics()` on the existing 15s Health cadence, a friendly **System tiles** strip + ONE
+  additive `{key:'system'}` component card (informational: good/warn, `repair:null`, never red),
+  and a **neutral "History: live-only"** indicator. NO new POST, NO service, NO secret, NO npm
+  dep — so its adversarial surface is a pure local read (same class as `/api/status/disk`).
+- **Why live-first beats stack-faithful here:** InfluxDB 2.x needs token-authed first-run setup
+  (a real secret + onboarding dance); coupling the visible gauges to that daemon would make the
+  Health strip blank whenever it's down. Live-first inverts it — always-on gauges, optional history.
+- **Deferred to focused follow-up branches** (named precisely so they graft in additively):
+  `scripts/services/{influxdb,telegraf}.sh` daemons + `telegraf.conf` (branch 2); a
+  `GET /api/status/metrics/history` **InfluxDB passthrough** via a zero-dep `queryInflux()` —
+  THE adversarial-review deliverable (injection/SSRF: never interpolate client range/metric into
+  the Flux/URL, pin host to 127.0.0.1, `ECONNREFUSED → {influx:false}` at 200); `.env` token/URL
+  keys (git-ignored / auto-minted to 0600 state, PUBLIC repo); `scripts/services/grafana.sh` at
+  `/app/grafana/` under Advanced (branch 3); fleet aggregation + SSE metrics push (later).
+
+## 2026‑07 — Health & Repairs page (roadmap Phase 6, part 1 — self-heal UX)
+- Shipped the **Health/Repairs UX** first (metrics stack is a separate branch): a `#/health`
+  page with **strict green/yellow/red** per-component cards, **fault attribution** (drive / this
+  box / internet / config), a **healed-events feed**, and **one-click Repair**. Matches
+  [errors-selfheal.md](../design/errors-selfheal.md) to the letter.
+- **Data flows from reports the loop already should have produced.** `verify.sh` now serialises
+  each functional check into `verify.json` as `checks[]` (`{status, comp, label}`); `loop.sh`
+  now actually **writes `health.json`** (a long-standing log line promised a file nothing wrote)
+  + an append-only, capped **`heal-events.jsonl`** feed of genuine repairs. `GET
+  /api/status/health` (read-gated) composes them; the **UI computes the component list
+  client-side** (`computeComponents()`) from those + the live disk/services/kiwix status the
+  shell already fetches — no duplicated health logic on the server, minimal new server surface.
+- **One repair endpoint, not many.** `POST /api/maintenance/repair` (admin-only) runs the loop's
+  own fixers via a **fixed argv** (`loop.sh once`) — the honest "fix everything" button — so no
+  request data reaches a shell. Targeted fixes reuse what exists: per-service **Restart** →
+  `POST /api/service/start`; Safe-Mode → the existing **Recover** flow. Deduped + 30s rate-limit.
+- **Adversarial-reviewed** (new gated endpoint) before merge; `test-health.sh` + `health.spec.ts`
+  cover the report shapes, the composition endpoint, the read-gate, and the admin-gate (the last
+  via the fail-safe `VALARK_TEST_NO_SPAWN` hook so CI never runs the heavy loop).
+- **Next:** stand up Telegraf + InfluxDB as mirrored services and feed live metrics into the strip.
+
 ## 2026‑07 — Download queue as the monitoring surface (roadmap Phase 5, part 1)
 - Rebuilt the **Activity** view into a live download **queue**: rich per‑item cards (plain‑language
   label, animated progress bar + %, **ETA** from `startedAt`+progress, status pill, last line),

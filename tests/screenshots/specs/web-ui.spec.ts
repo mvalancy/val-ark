@@ -1345,6 +1345,32 @@ test.describe('Val Ark - Consumer Shell (Home status + Settings + Activity)', ()
     await expect(page.locator('.settings-grid')).toBeVisible();
     await expect(page.locator('.home-status')).toBeVisible();
   });
+
+  test('Settings offers admin sign-in and the sign-in modal opens', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/settings`);
+    await page.waitForSelector('.settings-signin', { timeout: 5000 });
+    const signInBtn = page.locator('.settings-signin button:has-text("Sign in")');
+    await expect(signInBtn).toBeVisible();      // static preview → not authed → Sign in shown
+    const fns = await page.evaluate(() => [typeof (window as any).signIn, typeof (window as any).signOut, typeof (window as any).submitSignIn]);
+    expect(fns).toEqual(['function', 'function', 'function']);
+    await signInBtn.click();
+    await expect(page.locator('#signin-overlay')).toBeVisible();
+    await expect(page.locator('#signin-pass')).toBeVisible();
+    await page.locator('#signin-overlay button:has-text("Cancel")').click();
+    await expect(page.locator('#signin-overlay')).toHaveCount(0);
+  });
+
+  test('read-wall renders for a private (Passworded) box when not signed in', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/`);
+    await page.waitForSelector('.home-status', { timeout: 5000 });   // open box → normal app
+    // Simulate a Passworded box with no session, then render the wall.
+    await page.evaluate(() => { (window as any)._authState = { useMode: 'passworded', authed: false, trusted: false }; (window as any).renderAccessWall(); });
+    await expect(page.locator('#wall-card')).toBeVisible();
+    await expect(page.locator('#wall-card h1')).toContainText('private');
+    await expect(page.locator('#wall-pass')).toBeVisible();
+    const fns = await page.evaluate(() => [typeof (window as any).checkAccess, typeof (window as any).wallSignIn]);
+    expect(fns).toEqual(['function', 'function']);
+  });
 });
 
 test.describe('Val Ark - First-boot Commissioning Wizard', () => {

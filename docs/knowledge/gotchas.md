@@ -113,6 +113,48 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   server, so Playwright previews it offline; `checkSetup()` only redirects when it can reach
   `/api/setup/state` and the box is un-commissioned.
 
+## Access control / sessions (Phase 2)
+
+- **The gate has three tiers.** `ADMIN_ONLY_POSTS` (config/account changes, e.g. `adduser`) always
+  need admin; **use-actions** (downloads/requests/service starts) need admin only when Use Mode is
+  Passworded/Accounts (Open = anyone on the LAN); and the **read-wall** (`isReadGated`/`readAllowed`)
+  gates content READS (`/api/status/*`, `/api/catalog/*`, `/api/archive/*`, `/kiwix/*`, `/app/*`) in
+  Passworded/Accounts mode. `isAdmin(req)` = **localhost/console** (always admin — physical
+  possession) **OR** a valid session. Login/logout/commission are gate-exempt (you can't be authed
+  to log in).
+- **The read-wall is two-layer.** Server: content endpoints 401 for un-authed LAN visitors in
+  Passworded/Accounts mode — but the **UI shell + `/api/auth/*` + `/api/setup/*` + `/api/health` +
+  `/ca.crt` stay open** so the login wall can render and you can sign in. Client: `checkAccess()`
+  renders a full-page wall (`renderAccessWall`) before loading the app. Open mode is unchanged, so
+  the existing (Open-default) tests don't regress; the wall is exercised via `VALARK_TEST_FORCE_REMOTE`
+  in `test-access.sh` and a forced-state Playwright render.
+- **A read-wall must gate the raw STATIC data dirs, not just the API doors** (adversarial-review
+  finding, high). The static router serves `/content`, `/models`, `/tools`, `/sources`, `/assets`,
+  `/docs` straight from ROOT (symlinks to the data disk) — the **same library bytes** that `/kiwix/*`
+  and `/api/archive/*` gate. Gating only the `/api`/`/kiwix`/`/app` prefixes left the front door
+  open (`curl /content/zim/wikipedia.zim` un-authed). `isReadGated` now also matches
+  `^/(content|models|tools|sources|assets|installers|docs)(/|$)`. Lesson: gate by **what the bytes
+  are**, not just by URL prefix — a mirror has many doors to the same content.
+- **Sessions are stateless HMAC tokens** (`payload.hmac`, signed with a per-box secret in the auth
+  store), so there's no session table. Cookie `varksid` is HttpOnly + SameSite=Lax. **"Sign out
+  everywhere" = rotate the secret** (`auth.rotateSessionSecret`) — a per-client logout only drops
+  the cookie (the token stays cryptographically valid until expiry, the usual stateless tradeoff).
+- **Testing the LAN gate:** localhost always bypasses, so set `VALARK_TEST_FORCE_REMOTE=1` to make
+  the server treat the client as remote and actually exercise the gate. It's **fail-safe** — it only
+  REMOVES the localhost admin bypass, never grants access (safe even if set in prod).
+  `tests/test-access.sh` spins a Passworded server and proves unauthed use → 401, login → cookie,
+  cookie → allowed, forged session → 401.
+- **The login cooldown is per-IP + non-permanent** (8 fails / 10 min → 429), never a hard lock —
+  localhost/console always bypasses, so the owner is never locked out.
+- **Session hardening (from the adversarial review — the HMAC/gate core was sound, these are
+  defense-in-depth):** (1) sessions are **IP-bound** (`issueSession(dir, ttl, ip)` / `verifySession(…,
+  ip)`) so a cookie captured on the wire can't be replayed from another host; (2) the cookie gets
+  **`Secure` only over TLS** (`isSecureReq` — marking it Secure on the default plain HTTP would
+  silently drop it); (3) `pipeProxy` **strips `varksid`** before forwarding to sub-apps (NodeBB/
+  kiwix/…) so the admin token never reaches third-party backends; (4) a **global** login cap
+  (40/10min) on top of per-IP so NIC-alias IP rotation can't multiply guesses; (5) min passcode
+  length raised to **8**.
+
 ## Git / releases
 
 - **Don't retarget a PR across a rebase-merge divergence.** After a rebase-merge release, `main`

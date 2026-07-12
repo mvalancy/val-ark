@@ -17,12 +17,27 @@ _LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 . "${_LIB}/valark-env.sh"
 
 PASS=0; FAIL=0; SKIP=0
-RESULTS=""
+RESULT_LINES=()   # "STATUS|label" per check → serialized into verify.json for the Health page
 RED=''; GREEN=''; YELLOW=''; NC=''
 if [ -t 1 ] && [ "${FORCE_COLOR:-}" != "0" ]; then RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; NC=$'\033[0m'; fi
-chk()  { PASS=$((PASS+1)); echo -e "  ${GREEN}PASS${NC} $*"; RESULTS="${RESULTS}PASS|$*\n"; }
-bad()  { FAIL=$((FAIL+1)); echo -e "  ${RED}FAIL${NC} $*"; RESULTS="${RESULTS}FAIL|$*\n"; }
-skip() { SKIP=$((SKIP+1)); echo -e "  ${YELLOW}SKIP${NC} $*"; RESULTS="${RESULTS}SKIP|$*\n"; }
+chk()  { PASS=$((PASS+1)); echo -e "  ${GREEN}PASS${NC} $*"; RESULT_LINES+=("PASS|$*"); }
+bad()  { FAIL=$((FAIL+1)); echo -e "  ${RED}FAIL${NC} $*"; RESULT_LINES+=("FAIL|$*"); }
+skip() { SKIP=$((SKIP+1)); echo -e "  ${YELLOW}SKIP${NC} $*"; RESULT_LINES+=("SKIP|$*"); }
+
+# JSON-escape a controlled string (labels are ours; guard \, ", and whitespace/control).
+_json_str() { local s="$1"; s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\t'/ }; s=${s//$'\n'/ }; s=${s//$'\r'/}; printf '"%s"' "$s"; }
+# Attribute a check to a Health-page component so faults point at the right thing.
+_verify_comp() {
+    case "$1" in
+        *kiwix*|*ZIM*|*zim*)                 echo library ;;
+        *"tool runs"*|*"tool present"*|*"native tool"*) echo apps ;;
+        *llama*|*inference*|*gguf*)          echo models ;;
+        *"web server"*|*"SAFE MODE"*)        echo server ;;
+        *integrity*)                         echo integrity ;;
+        *fleet*)                             echo mesh ;;
+        *) echo other ;;
+    esac
+}
 
 native_tools_dir() {
     local a; a=$(uname -m)
@@ -170,9 +185,17 @@ EOF
 
 write_report() {
     mkdir -p "$STATE_DIR" 2>/dev/null
-    cat > "${STATE_DIR}/verify.json" <<EOF
-{ "ts": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "pass": $PASS, "fail": $FAIL, "skip": $SKIP }
-EOF
+    local tmp="${STATE_DIR}/verify.json.tmp" checks="" line status label comp first=1
+    for line in "${RESULT_LINES[@]}"; do
+        status="${line%%|*}"; label="${line#*|}"; comp="$(_verify_comp "$label")"
+        [ "$first" = 1 ] && first=0 || checks="${checks},"
+        checks="${checks}"$'\n'"    { \"status\": \"${status}\", \"comp\": \"${comp}\", \"label\": $(_json_str "$label") }"
+    done
+    {
+        printf '{ "ts": "%s", "pass": %d, "fail": %d, "skip": %d,\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PASS" "$FAIL" "$SKIP"
+        printf '  "checks": [%s\n  ] }\n' "$checks"
+    } > "$tmp" && mv -f "$tmp" "${STATE_DIR}/verify.json"
 }
 
 case "${1:-all}" in

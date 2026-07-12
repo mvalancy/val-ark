@@ -198,6 +198,33 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   locked out" but the global login cap applied to localhost too — a LAN peer could trip it and 429
   the owner's own recovery. `loginAllowed` now `return true` for `isLocalhost(req)` first.
 
+## Health / self-heal (Phase 6)
+
+- **`health.json` was promised but never written.** `loop.sh`'s final log line advertised
+  `health: <state>/health.json` for months, but no code wrote it (only `verify.json` existed,
+  and only as aggregate counts). If a doc/log references a state file, grep for the *writer*
+  before you build a reader on top of it. `write_health()` (step 8b) now emits it every cycle.
+- **Emitting JSON from bash — escape, and only trust program-controlled strings.** `verify.sh`
+  `_json_str` / `loop.sh` `_hj_str` escape `\` + `"` and strip tab/newline/CR. That's safe
+  *because* every interpolated value is our own (check labels, repair sentences, `date -u`,
+  integer counts). The moment you interpolate an attacker-influenceable value (a ZIM/model
+  **filename**, a URL, a service id) into a bash-built JSON string, that escaper is the only
+  thing between you and JSON/field injection — keep such values out, or escape them the same way.
+  Write atomically (`.tmp` → `mv`) so a reader never sees a half-written report.
+- **`/api/status/health` is read-gated for free — because `isReadGated` matches the prefix.**
+  Any new `/api/status/*` GET is caught by `startsWith('/api/status/')`, so it inherits the
+  read-wall (Passworded/Accounts LAN visitors must be authed). Don't add a bespoke gate; don't
+  put box-revealing detail on an *un*-gated path (only `/api/health` + `/api/status/tls` are
+  exempt, and they're deliberately minimal so the login wall can render).
+- **The self-heal "Repair" button must carry NO request data into the command.** `POST
+  /api/maintenance/repair` runs a **fixed argv** (`bash loop.sh once`) via `spawn` (no shell) —
+  the loop's own fixers, nothing from the body. That's what makes a "run a shell script" endpoint
+  safe to expose. It's `ADMIN_ONLY_POSTS`, deduped (`_repairProc`) + rate-limited (30s).
+- **Test hooks must only ever *subtract* capability.** `VALARK_TEST_NO_SPAWN=1` makes the repair
+  endpoint skip the actual `loop.sh` spawn (so CI/Playwright never runs the heavy loop) but it
+  runs **after** the auth gate and only *prevents* the action — never grants access. Same
+  fail-safe direction as `VALARK_TEST_FORCE_REMOTE=1` (which only removes the localhost bypass).
+
 ## Git / releases
 
 - **Don't retarget a PR across a rebase-merge divergence.** After a rebase-merge release, `main`

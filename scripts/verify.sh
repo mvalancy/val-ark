@@ -100,7 +100,9 @@ verify_local() {
     # that field alone identifies us. (Retry — the server may be warming caches.)
     local wport="${VALARK_WEB_PORT:-3000}" hb
     hb=$(curl -fsS --retry 3 --retry-delay 1 --max-time 6 "http://127.0.0.1:${wport}/api/health" 2>/dev/null)
-    if echo "$hb" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+    if echo "$hb" | grep -q '"safeMode"[[:space:]]*:[[:space:]]*true'; then
+        bad "Val Ark is in SAFE MODE — config corrupt; recover from the box UI or 'valark setpassword' (content is safe)"
+    elif echo "$hb" | grep -qE '"status"[[:space:]]*:[[:space:]]*"(ok|safe-mode)"'; then
         chk "Val Ark web server responds (:$wport, $(echo "$hb" | grep -oE '"version":"[^"]*"'))"
     else
         skip "Val Ark web server not running/identified on :$wport"

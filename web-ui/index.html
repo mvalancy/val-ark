@@ -6237,6 +6237,28 @@ async function submitRecover() {
     } catch (e) { if (msg) msg.textContent = (e && e.message) || 'request failed'; }
 }
 
+// ---- Safe Mode: the box booted with broken config → recovery-only takeover -------
+function renderSafeMode(reasons) {
+    const app = document.getElementById('app-root'); if (!app) return;
+    const why = (reasons && reasons.length) ? ' (' + esc(reasons.join('; ')) + ')' : '';
+    app.innerHTML = `${_SETUP_CSS}${_REC_CSS}<div class="setup-wrap"><div class="setup-card"><div class="setup-stepbody">
+        <div class="setup-brand"><span class="setup-logo">&#x259A;</span> Val Ark — Safe Mode</div>
+        <h1>Val Ark needs attention</h1>
+        <p class="setup-lead">Something's wrong with this box's settings${why}. <strong>Your Library, models and content are safe</strong> — nothing has been deleted. Reset the admin passcode to recover.</p>
+        <div class="setup-nav"><span></span><button class="setup-btn" onclick="recoverFlow()">Reset &amp; recover &rarr;</button></div>
+        <p class="setup-hint" style="margin-top:1rem">On the box itself you can reset with no code. From another device, use the recovery code from your recovery card.</p>
+    </div></div></div>`;
+}
+async function checkSafeMode() {
+    try {
+        const r = await fetch('/api/health');
+        if (!r.ok) return false;
+        const h = await r.json();
+        if (h && h.safeMode) { renderSafeMode(h.safeModeReasons || []); return true; }
+    } catch (_) { /* no server / static preview → not safe mode */ }
+    return false;
+}
+
 function renderProgressPanel() {
     let panel = document.getElementById('dl-panel');
     if (!panel) {
@@ -6275,6 +6297,10 @@ window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', async () => {
     if (!window.location.hash) window.location.hash = '#/';
     router();
+
+    // Safe Mode: if the box booted with broken config, take over with the recovery
+    // screen before anything else (never a dead port). No-op on a static preview.
+    if (await checkSafeMode()) return;
 
     // First-boot: if this box isn't set up yet, take over with the wizard before
     // loading the rest of the app. (No-op on a static preview or once commissioned.)

@@ -171,6 +171,24 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   in the clear exactly twice: the wizard's "All set!" screen and an admin's Settings → Show recovery
   card.
 
+## Safe Mode (Phase 2)
+
+- **Distinguish MISSING config from CORRUPT config.** `readSettings`/`readStore` swallow parse
+  errors and return defaults, so a corrupt `settings.json`/`auth.json` would silently look like a
+  fresh box. `commission.configHealth` checks explicitly: ENOENT = fine (fresh), present-but-
+  unparseable = **Safe Mode**. Surfaced on `/api/health` (`status:"safe-mode"`) + `/api/setup/state`,
+  and the UI takes over with a "needs attention → Reset & recover" screen (never a dead port).
+- **Safe Mode must WIN over grandfather.** `_legacyActive()` (content present) would otherwise run
+  `grandfather()` at startup, which **overwrites** the corrupt `settings.json` — silently masking
+  the corruption and losing the recovery code. The startup block now checks Safe Mode FIRST and
+  skips grandfather/ensureClaim when corrupt. (This is what the safemode test caught.)
+- **Auth/recovery endpoints must bypass the "not set up yet" 409 gate.** A corrupt-config box reads
+  as un-commissioned, so the `boxCommissioned()` POST gate would 409 `/api/auth/recover` — locking
+  you out of recovery. The gate now exempts all `AUTH_EXEMPT_POSTS` (login/logout/recover/commission),
+  not just commission. Recovery from **localhost** (no code) repairs both `auth.json` (setPassword)
+  and a corrupt `settings.json` (reset to a minimal commissioned state) so Safe Mode clears with no
+  restart; content is never touched.
+
 ## Git / releases
 
 - **Don't retarget a PR across a rebase-merge divergence.** After a rebase-merge release, `main`

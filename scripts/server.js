@@ -93,6 +93,12 @@ function _legacyActive() {
     }
     return false;
 }
+// Safe Mode: the box's config (settings.json/auth.json) is present but corrupt. It
+// still boots — into a recovery-only state — rather than a dead port; content is never
+// touched. Recomputed live so fixing/resetting the config exits Safe Mode with no restart.
+function safeModeState() {
+    try { return commission.configHealth(STATE_DIR); } catch (_) { return { safeMode: false, reasons: [] }; }
+}
 function boxCommissioned() {
     // Explicit operator/CI override: a managed deployment (or the test harness) can
     // declare the box already set up so the first-boot wizard never takes over.
@@ -905,13 +911,17 @@ function handleAPI(req, res, urlPath) {
     // before downloading; serveArchive answers HEAD with headers only).
     if (req.method === 'GET' || req.method === 'HEAD') {
         switch (urlPath) {
-            case '/api/health':
+            case '/api/health': {
+                const sm = safeModeState();
                 return sendJSON(res, req, {
-                    status: 'ok',
+                    status: sm.safeMode ? 'safe-mode' : 'ok',
+                    safeMode: sm.safeMode,
+                    safeModeReasons: sm.reasons,
                     uptime: process.uptime(),
                     version: '1.0.0',
                     timestamp: new Date().toISOString()
                 });
+            }
             case '/api/status/disk':
                 return sendJSON(res, req, getDiskStatus());
             case '/api/status/tools':
@@ -954,6 +964,8 @@ function handleAPI(req, res, urlPath) {
                 const st = commission.state(STATE_DIR, isLocalhost(req));
                 st.commissioned = boxCommissioned();
                 if (st.commissioned) { st.hasClaim = false; st.needsClaim = false; }
+                const sm = safeModeState();
+                st.safeMode = sm.safeMode; st.safeModeReasons = sm.reasons;
                 return sendJSON(res, req, st);
             }
             case '/api/setup/recovery-card': {
@@ -1021,7 +1033,9 @@ function handleAPI(req, res, urlPath) {
         // until it's commissioned — except commissioning itself. This closes the
         // grandfather-flip vector (a LAN peer can't seed the library to fake setup)
         // and matches the "fresh box → wizard" design.
-        if (!boxCommissioned() && urlPath !== '/api/setup/commission') {
+        if (!boxCommissioned() && !AUTH_EXEMPT_POSTS.has(urlPath)) {
+            // auth + recovery + commission must work even before/without commissioning
+            // (and in Safe Mode, where a corrupt config reads as un-commissioned).
             return sendJSON(res, req, {
                 error: 'Val Ark isn’t set up yet — finish the setup wizard first.'
             }, 409);
@@ -1993,7 +2007,17 @@ console.log('==================================================');
 // (from another device on the LAN) can prove physical possession. On the box
 // itself / localhost you don't need it. The code is consumed once setup completes.
 try {
-    if (process.env.VALARK_COMMISSIONED !== '1' && !commission.isCommissioned(STATE_DIR)) {
+    const _sm = safeModeState();
+    if (_sm.safeMode) {
+        // Config present but CORRUPT → Safe Mode wins. Do NOT grandfather/ensureClaim
+        // (that would silently overwrite the broken config, masking it + losing the
+        // recovery code). The box boots into the recovery-only UI; content is untouched.
+        console.log('');
+        console.log(`  ⚠ Val Ark is in SAFE MODE — ${_sm.reasons.join('; ')}.`);
+        console.log('  Open the box and choose "Reset & recover", or run: scripts/valark setpassword');
+        console.log('  Your Library, models and content are safe.');
+        console.log('');
+    } else if (process.env.VALARK_COMMISSIONED !== '1' && !commission.isCommissioned(STATE_DIR)) {
         if (_legacyActive()) {
             // Existing install (already has a content/model library) → snapshot it as
             // commissioned ONCE. This both stops the wizard hijacking a working Ark and

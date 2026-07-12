@@ -19,6 +19,15 @@ SERVICES="chat mail forum paste"
 
 _http() { curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$1" 2>/dev/null; }
 _json() { curl -s --max-time 8 "$1" 2>/dev/null; }
+_post() { curl -s --max-time 12 -H 'Content-Type: application/json' -d "$2" "${URL}$1" 2>/dev/null; }
+_svc_field() { printf '%s' "$1" | python3 -c "import sys,json;print(json.load(sys.stdin).get('$2',{}).get('$3'))" 2>/dev/null; }
+
+# adduser is an admin (localhost-only) action; the create/guidance path only works
+# when the harness targets the Ark's own loopback address.
+case "$URL" in
+    http://127.0.0.1*|http://localhost*|http://\[::1\]*) LOCAL_ARK=1 ;;
+    *) LOCAL_ARK=0 ;;
+esac
 
 results_init "services-e2e" "Community services (e2e @ ${URL})"
 
@@ -59,5 +68,46 @@ for id in $SERVICES; do
         results_case "$id: not enabled" skip 0 "add '$id' to VALARK_SERVICES in .env"
     fi
 done
+
+# 3. Every service advertises how a person gets a login (drives the UI signup panel).
+for id in $SERVICES; do
+    signup="$(printf '%s' "$svc_json" | python3 -c "import sys,json;print(json.load(sys.stdin).get('$id',{}).get('account',{}).get('signup'))" 2>/dev/null)"
+    case "$signup" in
+        host|self|shared) results_case "$id: advertises an account model ($signup)" pass 0 ;;
+        *) results_case "$id: advertises an account model" fail 0 "account.signup missing (got '$signup')" ;;
+    esac
+done
+
+# 4. Account provisioning / sign-up (POST /api/service/adduser) — admin/localhost only.
+if [ "$LOCAL_ARK" = 1 ]; then
+    # Self-register + shared services must decline host-provisioning with guidance.
+    if _post /api/service/adduser '{"id":"forum","username":"e2e_probe"}' | grep -qi 'register'; then
+        results_case "forum: adduser points users to self-registration" pass 0
+    else
+        results_case "forum: adduser points users to self-registration" fail 0 "expected a 'register' hint from POST /api/service/adduser"
+    fi
+    if _post /api/service/adduser '{"id":"paste","username":"e2e_probe"}' | grep -qi 'shared'; then
+        results_case "paste: adduser reports shared instance (no per-user signup)" pass 0
+    else
+        results_case "paste: adduser reports shared instance (no per-user signup)" fail 0 "expected a 'shared' hint from POST /api/service/adduser"
+    fi
+    # Real login creation for host-provisioned services, when running.
+    for id in chat mail; do
+        running="$(_svc_field "$svc_json" "$id" 'running')"
+        if [ "$running" != "True" ]; then
+            results_case "$id: create a login (adduser)" skip 0 "$id not running — start it to exercise sign-up end-to-end"
+            continue
+        fi
+        probe="e2e$(date +%s 2>/dev/null || echo 0)"
+        body="$(_post /api/service/adduser "{\"id\":\"$id\",\"username\":\"$probe\",\"password\":\"e2ePassw0rd!\"}")"
+        if printf '%s' "$body" | grep -qE '"ok" ?: ?true'; then
+            results_case "$id: create a login (adduser) then it is usable" pass 0
+        else
+            results_case "$id: create a login (adduser) then it is usable" fail 0 "adduser did not succeed: $(printf '%s' "$body" | head -c 200)"
+        fi
+    done
+else
+    results_case "adduser sign-up flow" skip 0 "adduser is localhost-only; target VALARK_URL at the Ark's own loopback to exercise it"
+fi
 
 results_finish

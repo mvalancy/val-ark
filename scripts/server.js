@@ -943,6 +943,16 @@ function handleAPI(req, res, urlPath) {
                     // Bring up an enabled + mirrored community service (chat/mail/forum/paste).
                     result = startService(body.id);
                     break;
+                case '/api/service/adduser':
+                    // Provision a login on a host-managed service (chat/mail). Minting a
+                    // login is an admin action, so it is localhost-only (the host operator);
+                    // LAN users self-register on the forum or use the shared paste instance.
+                    if (!isLocalhost(req)) {
+                        result = { error: 'Account creation is available only from the Ark host (localhost). LAN users: register on the forum, or ask your host for a chat/mail login.' };
+                    } else {
+                        result = addServiceUser(body.id, body.username, body.password);
+                    }
+                    break;
                 default:
                     return sendJSON(res, req, { error: 'Unknown endpoint' }, 404);
             }
@@ -1242,6 +1252,48 @@ function startService(id) {
     return { id, status: 'starting' };
 }
 
+// Per-service account model — how a person actually gets a login. One source of
+// truth for the UI's Community "Accounts & sign-up" panel and for validating
+// /api/service/adduser. The underlying tech dictates the model: IRC/mail have no
+// safe self-signup (host provisions), NodeBB has its own registration page, and
+// MicroBin is a single shared gated instance.
+const COMMUNITY_ACCOUNTS = {
+    chat:  { signup: 'host',   label: 'Chat',              note: 'IRC has no self-signup — the host creates your login, then you sign in at /app/chat/.' },
+    mail:  { signup: 'host',   label: 'Mail',              note: 'The host provisions your mailbox (login + IMAP account); sign in at /app/mail/.' },
+    forum: { signup: 'self',   label: 'Message Boards',    registerPath: '/app/forum/register', note: 'Create your own account on the forum’s Register page.' },
+    paste: { signup: 'shared', label: 'Files & Pastebin',  note: 'One shared, access-gated instance — get the access code from your host (no per-user signup).' },
+};
+
+// Create a login on a host-provisioned community service (chat/mail). Minting a
+// mail/chat login is an ADMIN action, so the caller localhost-gates it. forum users
+// self-register and paste is a shared instance — neither is provisioned here.
+function addServiceUser(id, username, password) {
+    const model = COMMUNITY_ACCOUNTS[id];
+    if (!model) return { error: 'Unknown service' };
+    if (model.signup === 'self')   return { error: `Sign up for ${model.label} on its own Register page.`, registerPath: model.registerPath };
+    if (model.signup === 'shared') return { error: `${model.label} is a shared instance — ask your host for the access code (no per-user signup).` };
+    if (typeof username !== 'string' || !/^[a-zA-Z0-9._-]{1,32}$/.test(username)) {
+        return { error: 'Invalid username (letters, digits, dot, dash, underscore; max 32).' };
+    }
+    if (password != null && (typeof password !== 'string' || password.length > 128 || /[\x00-\x1f\x7f]/.test(password))) {
+        return { error: 'Invalid password (max 128 chars, no control characters).' };
+    }
+    if (!serviceMirrored(id)) return { error: `Service '${id}' is not mirrored yet. Run: scripts/tools/${id}.sh` };
+    // spawn with an argv array (no shell) — username/password are data, never a command.
+    const args = [path.join(ROOT, 'scripts/services', id + '.sh'), 'adduser', username];
+    if (password) args.push(password);
+    try {
+        const out = execFileSync('/usr/bin/bash', args, {
+            cwd: ROOT, timeout: 20000, encoding: 'utf8',
+            env: { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || ''), FORCE_COLOR: '0' },
+        });
+        return { ok: true, id, username, message: (out || '').trim().split('\n').filter(Boolean).pop() || 'account created' };
+    } catch (e) {
+        const detail = ((e.stderr || '') + (e.stdout || '')).trim().split('\n').filter(Boolean).pop() || e.message || 'unknown error';
+        return { error: `Could not create the account: ${detail}` };
+    }
+}
+
 let _svcCache = { data: null, ts: 0 };
 async function getServicesStatus() {
     const now = Date.now();
@@ -1258,6 +1310,7 @@ async function getServicesStatus() {
             port: APP_SERVICES[id].port, path: `/app/${id}/`, running,
             enabled, mirrored, starting,
             startable: enabled && mirrored && !running && !starting,
+            account: COMMUNITY_ACCOUNTS[id] || null,   // how a person gets a login (UI signup panel)
         };
     });
     _svcCache = { data, ts: now };

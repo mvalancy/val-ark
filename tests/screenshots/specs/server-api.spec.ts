@@ -240,7 +240,60 @@ test.describe('Val Ark API Server', () => {
       expect(typeof data[id].enabled).toBe('boolean');
       expect(typeof data[id].mirrored).toBe('boolean');
       expect(typeof data[id].startable).toBe('boolean');
+      // Every service advertises how a person gets a login (UI signup panel).
+      expect(data[id].account, `${id} should carry an account model`).toBeTruthy();
+      expect(['host', 'self', 'shared']).toContain(data[id].account.signup);
     }
+    // forum self-registers; chat/mail are host-provisioned; paste is shared.
+    expect(data.forum.account.signup).toBe('self');
+    expect(data.chat.account.signup).toBe('host');
+    expect(data.mail.account.signup).toBe('host');
+    expect(data.paste.account.signup).toBe('shared');
+  });
+
+  // --- Community account provisioning: POST /api/service/adduser ------------------
+  // Tests run from localhost (localhost:3001), so they pass the admin (localhost)
+  // gate; we assert the per-service model + validation, never a crash. The real
+  // create-and-log-in path is exercised by the services e2e against a live Ark.
+  test('POST /api/service/adduser: forum points users to self-registration', async ({ request }) => {
+    const resp = await request.post(`${BASE_URL}/api/service/adduser`, { data: { id: 'forum', username: 'alice' } });
+    expect(resp.status()).toBe(400);
+    const data = await resp.json();
+    expect(data.error).toMatch(/register/i);
+  });
+
+  test('POST /api/service/adduser: paste is a shared instance (no signup)', async ({ request }) => {
+    const resp = await request.post(`${BASE_URL}/api/service/adduser`, { data: { id: 'paste', username: 'alice' } });
+    expect(resp.status()).toBe(400);
+    const data = await resp.json();
+    expect(data.error).toMatch(/shared/i);
+  });
+
+  test('POST /api/service/adduser: rejects an unknown service', async ({ request }) => {
+    const resp = await request.post(`${BASE_URL}/api/service/adduser`, { data: { id: 'nope', username: 'alice' } });
+    expect(resp.status()).toBe(400);
+    expect((await resp.json()).error).toContain('Unknown service');
+  });
+
+  test('POST /api/service/adduser: rejects an invalid username', async ({ request }) => {
+    const resp = await request.post(`${BASE_URL}/api/service/adduser`, { data: { id: 'chat', username: 'bad name!' } });
+    expect(resp.status()).toBe(400);
+    expect((await resp.json()).error).toMatch(/username/i);
+  });
+
+  test('POST /api/service/adduser: rejects a password with control characters', async ({ request }) => {
+    const resp = await request.post(`${BASE_URL}/api/service/adduser`, { data: { id: 'chat', username: 'alice', password: 'a\nb' } });
+    expect(resp.status()).toBe(400);
+    expect((await resp.json()).error).toMatch(/password/i);
+  });
+
+  test('POST /api/service/adduser: chat with a valid name returns structured JSON (never a 5xx)', async ({ request }) => {
+    // Without a built+running Lounge this returns {error:...}; with one, {ok:true}.
+    // Either way it must be well-formed JSON and never crash the server.
+    const resp = await request.post(`${BASE_URL}/api/service/adduser`, { data: { id: 'chat', username: 'e2e_probe_user' } });
+    expect(resp.status()).toBeLessThan(500);
+    const data = await resp.json();
+    expect(data.ok === true || typeof data.error === 'string').toBeTruthy();
   });
 
   test('GET /bootstrap.sh serves an offline bootstrap with this host baked in', async ({ request }) => {

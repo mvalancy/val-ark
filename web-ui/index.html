@@ -6248,7 +6248,7 @@ function renderCommunity() {
     html += `<div class="detail-section" style="margin-top:2rem"><h3>Accounts &amp; sign-up</h3>
         <table class="detail-table">
             <tr><td><strong>Message Boards</strong> (forum)</td><td>Self-service — ${forumReg ? `<a href="${forumReg}">create your account &rarr;</a>` : 'open the forum and click <strong>Register</strong>'} to sign up.</td></tr>
-            <tr><td><strong>Chat</strong></td><td>Host-provisioned login (IRC has no self-signup). ${adminOr}<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/services/chat.sh adduser &lt;name&gt;</div></td></tr>
+            <tr><td><strong>Chat</strong></td><td>Open — just pick a nickname at Chat and join. No account needed. Type <code>/list</code> to see channels, <code>/join #name</code> to make one. (Operators can require per-user logins with <code>VALARK_CHAT_PUBLIC=0</code>.)</td></tr>
             <tr><td><strong>Mail</strong></td><td>Host-provisioned mailbox — one step creates the login + IMAP account. ${adminOr}<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/services/mail.sh adduser &lt;name&gt;</div>Then sign in at Mail, or point any mail app at this host (IMAP + submission).</td></tr>
             <tr><td><strong>Files &amp; Pastebin</strong></td><td>One shared, access-gated instance — no per-user signup. The host shares the access code:<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/services/paste.sh creds</div></td></tr>
         </table>`;

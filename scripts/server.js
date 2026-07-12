@@ -1675,8 +1675,13 @@ function startService(id) {
 // /api/service/adduser. The underlying tech dictates the model: IRC/mail have no
 // safe self-signup (host provisions), NodeBB has its own registration page, and
 // MicroBin is a single shared gated instance.
+// chat's model tracks its actual access mode: PUBLIC (default) => open, just pick a
+// nickname (no account); private (VALARK_CHAT_PUBLIC=0) => host-provisioned like mail.
+const _chatPublic = !/^(0|false|no|off)$/i.test(String(cfg('VALARK_CHAT_PUBLIC', '1')));
 const COMMUNITY_ACCOUNTS = {
-    chat:  { signup: 'host',   label: 'Chat',              note: 'IRC has no self-signup — the host creates your login, then you sign in at /app/chat/.' },
+    chat:  _chatPublic
+        ? { signup: 'open', label: 'Chat', note: 'Open chat — just pick a nickname at /app/chat/ and join. No account needed.' }
+        : { signup: 'host', label: 'Chat', note: 'IRC has no self-signup — the host creates your login (chat.sh adduser), then you sign in at /app/chat/.' },
     mail:  { signup: 'host',   label: 'Mail',              note: 'The host provisions your mailbox (login + IMAP account); sign in at /app/mail/.' },
     forum: { signup: 'self',   label: 'Message Boards',    registerPath: '/app/forum/register', note: 'Create your own account on the forum’s Register page.' },
     paste: { signup: 'shared', label: 'Files & Pastebin',  note: 'One shared, access-gated instance — get the access code from your host (no per-user signup).' },
@@ -1690,6 +1695,7 @@ function addServiceUser(id, username, password) {
     if (!model) return { error: 'Unknown service' };
     if (model.signup === 'self')   return { error: `Sign up for ${model.label} on its own Register page.`, registerPath: model.registerPath };
     if (model.signup === 'shared') return { error: `${model.label} is a shared instance — ask your host for the access code (no per-user signup).` };
+    if (model.signup === 'open')   return { error: `${model.label} is open — just pick a nickname at /app/${id}/ and join. No account needed.` };
     if (typeof username !== 'string' || !/^[a-zA-Z0-9._-]{1,32}$/.test(username)) {
         return { error: 'Invalid username (letters, digits, dot, dash, underscore; max 32).' };
     }

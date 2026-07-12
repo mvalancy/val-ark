@@ -1649,3 +1649,51 @@ html[data-theme="light"] .theme-toggle .icon-moon { display: inline !important; 
         display: none;
     }
 }
+
+/* =========================================================================
+   Catalog browse + one-click request + community hub  (offline, theme-aware)
+   ========================================================================= */
+.catalog-section { margin-top: 2.5rem; }
+.catalog-search {
+    width: 100%;
+    max-width: 480px;
+    margin: 0.5rem 0 1rem;
+    padding: 10px 14px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 0.95em;
+}
+.catalog-search:focus { outline: none; border-color: var(--accent); }
+.catalog-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.catalog-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    cursor: default;
+}
+.catalog-card h3 { margin: 0; }
+.catalog-card .dl-action-btn { margin-top: auto; align-self: flex-start; }
+.catalog-loading { color: var(--text-muted); padding: 1rem 0; grid-column: 1 / -1; }
+.catalog-more { color: var(--text-muted); font-size: 0.85em; margin-top: 1rem; }
+
+/* Whole-category mirror button in the models list */
+.category-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.cat-mirror-btn { font-size: 0.8em; padding: 6px 12px; }
+
+/* Full-Wikipedia hero reuses the kiwix-banner look */
+.wiki-hero .kiwix-banner-btn { border: none; cursor: pointer; font: inherit; }
+
+/* Community service cards */
+.community-card { display: flex; flex-direction: column; cursor: default; }
+.community-action { margin-top: 12px; }
+.community-action .dl-action-btn { text-decoration: none; display: inline-block; }
+.community-about { font-size: 0.82em; color: var(--text-muted); margin-top: 10px; text-decoration: none; }
+.community-about:hover { color: var(--accent); }
+.svc-badge { font-size: 0.72em; font-weight: 600; padding: 2px 8px; border-radius: 999px; margin-left: 6px; vertical-align: middle; }
+.svc-on { color: var(--green); background: var(--green-dim); }
+.svc-starting { color: var(--accent); background: var(--accent-dim); }
+.svc-off { color: var(--text-muted); background: var(--bg-tertiary); }
+.svc-hint { font-size: 0.8em; color: var(--text-muted); }
+.svc-hint code { font-size: 0.9em; }

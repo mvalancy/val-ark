@@ -4,7 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Val Ark - Complete Offline Software Toolkit</title>
-<link rel="stylesheet" href="styles.css?v=2">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="mask-icon" href="favicon.svg" color="#4da6ff">
+<meta name="theme-color" content="#0d1420">
+<link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
 <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -2276,10 +2279,13 @@ const CONTENT_LIBRARY = [
         icon: 'W', iconBg: '#1a73e8',
         desc: 'All Simple English Wikipedia articles with images — accessible knowledge for all reading levels',
         size: '3.1 GB',
-        file: 'content/zim/wikipedia_en_simple_all_maxi_2025-11.zim',
+        file: 'content/zim/wikipedia_en_simple_all_maxi.zim',
+        // Date-independent presence match (the mirror rotates dates and en_simple/en-simple naming).
+        match: 'wikipedia_en[_-]simple.*maxi',
+        requestId: 'zim:wikipedia_en_simple_all_maxi_eng',
         source: 'https://en.wikipedia.org/wiki/Simple_English_Wikipedia',
         articles: '~240,000',
-        updated: '2025-11',
+        updated: 'latest',
         details: {
             overview: 'The Simple English Wikipedia uses basic vocabulary and shorter sentences to explain topics. Ideal for English learners, children, and quick reference. Includes all articles with images.',
             features: [
@@ -2296,11 +2302,14 @@ const CONTENT_LIBRARY = [
         id: 'wikipedia-full', name: 'Wikipedia English (Full)', category: 'encyclopedia',
         icon: 'W', iconBg: '#1a73e8',
         desc: 'Complete English Wikipedia — all 6.8M articles with all images, the full human knowledge base',
-        size: '111 GB',
-        file: 'content/zim/wikipedia_en_all_maxi_2025-08.zim',
+        size: '~124 GB',
+        file: 'content/zim/wikipedia_en_all_maxi.zim',
+        // Matches any dated maxi build (…_2026-02.zim etc.); never the text-only nopic.
+        match: 'wikipedia_en_all_maxi',
+        requestId: 'zim:wikipedia_en_all_maxi_eng',
         source: 'https://en.wikipedia.org',
         articles: '~6,800,000',
-        updated: '2025-08',
+        updated: 'latest',
         details: {
             overview: 'The complete English Wikipedia with all articles and all images. This is the largest and most comprehensive offline knowledge base available — the entire sum of human knowledge accessible without internet.',
             features: [
@@ -3314,13 +3323,20 @@ function getRoute() {
 }
 
 function router() {
-    const route = getRoute();
+    let route = getRoute();
+    // #/library is the friendlier alias for the content section (it holds Wikipedia
+    // plus StackExchange, wikis, textbooks, courses & more — a whole offline library,
+    // not just Wikipedia). Keep #/content working for any existing links/bookmarks.
+    if (route === '/library') route = '/content';
+    else if (route.startsWith('/library/')) route = '/content/' + route.slice('/library/'.length);
     const app = document.getElementById('app-root');
 
     let html = renderNav(route);
 
     if (route === '/') {
         html += renderHome();
+    } else if (route === '/community') {
+        html += renderCommunity();
     } else if (route === '/tools') {
         html += renderToolsList();
     } else if (route === '/tools/ollama') {
@@ -3361,9 +3377,19 @@ function router() {
         });
     }
 
+    // Once per navigation (not on every rAF repaint): pull the live catalog for the
+    // browse panels and refresh community-service status for the Community hub.
+    if (route !== _lastRoute) {
+        _lastRoute = route;
+        if (route === '/content') loadCatalog('content');
+        else if (route === '/models') loadCatalog('models');
+        else if (route === '/community') refreshServices();
+    }
+
     // Check download link availability after render
     setTimeout(checkDownloads, 100);
 }
+let _lastRoute = null;
 
 // =============================================================================
 // SHARED COMPONENTS
@@ -3375,21 +3401,9 @@ function renderNav(route) {
     const activeSection = route === '/' ? 'home' :
         route.startsWith('/tools') ? 'tools' :
         route.startsWith('/models') ? 'models' :
-        route.startsWith('/content') ? 'content' :
+        (route.startsWith('/content') || route.startsWith('/library')) ? 'content' :
+        (route.startsWith('/community') || route.startsWith('/app')) ? 'community' :
         route.startsWith('/quickstart') ? 'quickstart' : 'home';
-
-    // Direct header links to community sub-apps whose web UI is currently up
-    // (driven by live /api/status/services). A service with no web UI — e.g. mail,
-    // reached over IMAP/SMTP — simply won't appear here until/unless its UI runs.
-    let communityLinks = '';
-    if (_servicesStatus) {
-        TOOLS.filter(t => t.category === 'community' && t.webApp && _servicesStatus[t.id] && _servicesStatus[t.id].running)
-            .forEach(t => {
-                const label = COMMUNITY_NAV_LABELS[t.id] || t.name;
-                const active = route === '/app/' + t.id ? 'active' : '';
-                communityLinks += `<a href="#/app/${t.id}" class="nav-link ${active}" onclick="closeMobileNav()">${esc(label)}</a>`;
-            });
-    }
 
     return `
     <nav class="top-nav">
@@ -3401,8 +3415,8 @@ function renderNav(route) {
             <a href="#/" class="nav-link ${activeSection === 'home' ? 'active' : ''}" onclick="closeMobileNav()">Home</a>
             <a href="#/tools" class="nav-link ${activeSection === 'tools' ? 'active' : ''}" onclick="closeMobileNav()">Software</a>
             <a href="#/models" class="nav-link ${activeSection === 'models' ? 'active' : ''}" onclick="closeMobileNav()">Models</a>
-            <a href="#/content" class="nav-link ${activeSection === 'content' ? 'active' : ''}" onclick="closeMobileNav()">Wikipedia</a>
-            ${communityLinks}
+            <a href="#/content" class="nav-link ${activeSection === 'content' ? 'active' : ''}" onclick="closeMobileNav()">Library</a>
+            <a href="#/community" class="nav-link ${activeSection === 'community' ? 'active' : ''}" onclick="closeMobileNav()">Community</a>
             <a href="#/quickstart" class="nav-link ${activeSection === 'quickstart' ? 'active' : ''}" onclick="closeMobileNav()">Getting Started</a>
         </div>
         <div class="nav-disk" id="nav-disk">${renderDiskBar()}</div>
@@ -3479,11 +3493,11 @@ function renderHome() {
     <div class="hero">
         <h1>Val Ark</h1>
         <p class="subtitle">Complete Offline Software Toolkit</p>
-        <p class="hero-intro">Run AI chatbots, generate images, transcribe audio, and access Wikipedia — all running locally on your computer, no internet required. Perfect for privacy, remote locations, or unreliable connections.</p>
+        <p class="hero-intro">Run AI chatbots, generate images, transcribe audio, and browse a whole offline library — Wikipedia, StackExchange, wikis, textbooks and courses — all running locally, no internet required. Perfect for privacy, remote locations, or unreliable connections.</p>
         <p class="stats">${totalModels}+ Models | ${TOOLS.length} Tools | ${Object.keys(PLATFORMS).length} Platforms | ${totalStorageLabel} mirrored</p>
         <div class="hero-actions">
             <a href="#/quickstart" class="btn btn-primary">New Here? Start Guide</a>
-            <a href="#/content" class="btn btn-secondary">Just Want Wikipedia?</a>
+            <a href="#/content" class="btn btn-secondary">Browse the Library</a>
         </div>
     </div>`;
 
@@ -3503,15 +3517,16 @@ function renderHome() {
     // the IN-SHELL library view (#/content) — keeping the Val Ark header on top
     // with a permanent way home — instead of a raw new tab on the bare /kiwix/.
     if (_kiwixStatus && _kiwixStatus.running) {
+        const libCount = _kiwixStatus.files ? _kiwixStatus.files + ' collections' : 'The full library';
         html += `<div class="kiwix-banner" style="margin-bottom:2rem">
             <div class="kiwix-banner-content">
-                <div class="kiwix-banner-icon">W</div>
+                <div class="kiwix-banner-icon">📚</div>
                 <div>
-                    <div class="kiwix-banner-title">Browse Wikipedia Offline</div>
-                    <div class="kiwix-banner-desc">All of Wikipedia is available right now — no internet needed. Open it on any device on your network.</div>
+                    <div class="kiwix-banner-title">Browse the Offline Library</div>
+                    <div class="kiwix-banner-desc">${libCount} — Wikipedia, StackExchange, wikis, textbooks & courses — available right now, no internet needed. Open it on any device on your network.</div>
                 </div>
             </div>
-            <a href="#/content" class="kiwix-banner-btn">Browse Wikipedia</a>
+            <a href="#/content" class="kiwix-banner-btn">Browse the Library</a>
         </div>`;
     }
 
@@ -3719,7 +3734,13 @@ function renderToolDetail(toolId) {
         const svc = _servicesStatus && _servicesStatus[tool.id];
         html += `<div style="margin-bottom:16px"><a class="dl-action-btn" href="#/app/${tool.id}" style="text-decoration:none;display:inline-block">Launch ${esc(tool.name)} &rarr;</a>`;
         if (svc && svc.running === false) {
-            html += `<span class="attr-item" style="margin-left:10px;color:var(--text-muted)">not running — start with <code>scripts/services/${esc(tool.id)}.sh start</code></span>`;
+            if (svc.startable) {
+                html += `<button class="dl-action-btn" onclick="startCommunityService('${tool.id}',this)" style="margin-left:10px">Start service</button>`;
+            } else if (svc.starting) {
+                html += `<span class="attr-item" style="margin-left:10px;color:var(--accent)"><span class="spinner"></span> starting…</span>`;
+            } else {
+                html += `<span class="attr-item" style="margin-left:10px;color:var(--text-muted)">not running — start with <code>scripts/services/${esc(tool.id)}.sh start</code></span>`;
+            }
         }
         html += `</div>`;
     }
@@ -4006,10 +4027,21 @@ function renderModelsList() {
         <input type="text" id="searchInput" placeholder="Search model families...">
     </div>`;
 
+    // Whole-category mirror targets (download-models.sh args + rough footprints).
+    const catMirror = {
+        LLM: { arg: 'llm', size: '~300 GB' }, TTS: { arg: 'tts', size: '~15 GB' },
+        STT: { arg: 'stt', size: '~20 GB' }, Vision: { arg: 'vision', size: '~40 GB' },
+        ImageGen: { arg: 'image', size: '~40 GB' }, NVIDIA: { arg: 'nvidia', size: '~24 GB' },
+    };
+
     categories.forEach(cat => {
         const families = MODEL_FAMILIES.filter(f => f.category === cat);
         if (families.length === 0) return;
-        html += `<div class="category-section"><div class="category-title">${categoryLabels[cat]}</div>`;
+        const cm = catMirror[cat];
+        const mirrorBtn = (_apiAvailable && cm)
+            ? `<button class="dl-action-btn cat-mirror-btn" onclick="if(confirm('Mirror all ${esc(categoryLabels[cat])} models (${cm.size})? This runs in the background and can be large.'))triggerDownload('models','${cm.arg}')">Mirror all ${cm.size} →</button>`
+            : '';
+        html += `<div class="category-section"><div class="category-title category-title-row"><span>${categoryLabels[cat]}</span>${mirrorBtn}</div>`;
         html += '<div class="cards-grid">';
         families.forEach(f => {
             const hasTopPick = f.topPick || f.variants.some(v => v.topPick);
@@ -4033,6 +4065,13 @@ function renderModelsList() {
         });
         html += '</div></div>';
     });
+
+    // Curated bonus models you can add per-item (embedders, VAD, small detectors) —
+    // small, high value-per-byte, one-click via the librarian request path.
+    if (_apiAvailable) {
+        html += renderCatalogSection('models', 'Add more models',
+            'A curated set of small, high-value models — sentence embedders for RAG, voice-activity detection, tiny detectors — that aren\'t bundled above. Pick one and Val Ark fetches it into the shared models tree.');
+    }
 
     html += '</div>';
     return html;
@@ -4198,11 +4237,45 @@ function renderServiceFrame(id) {
     return html;
 }
 
+// The full English Wikipedia is the flagship collection — surface it prominently:
+// browse it in-place when present, or request it (124 GB) with one click when not.
+function renderFullWikipediaHero() {
+    const full = CONTENT_LIBRARY.find(c => c.id === 'wikipedia-full');
+    if (!full) return '';
+    const present = CONTENT_STATUS['wikipedia-full'] === 'installed';
+    let cta;
+    if (present && _kiwixStatus && _kiwixStatus.running) {
+        cta = `<a href="${getKiwixUrl()}" class="kiwix-banner-btn" target="_blank" rel="noopener">Open Wikipedia →</a>`;
+    } else if (present) {
+        cta = `<span class="svc-badge svc-on">● Mirrored</span>`;
+    } else if (_apiAvailable) {
+        cta = `<button class="kiwix-banner-btn" data-kind="content" data-id="${full.requestId}" onclick="triggerRequestFromEl(this)">Download all of Wikipedia (${full.size})</button>`;
+    } else {
+        cta = `<span class="svc-badge svc-off">Not mirrored</span>`;
+    }
+    const desc = present
+        ? 'All 6.8 million articles with images are here and served to your whole network — no internet needed.'
+        : 'All 6.8 million articles with images. One click mirrors the complete encyclopedia into your shared library.';
+    return `<div class="kiwix-banner wiki-hero" style="margin:1.5rem 0">
+        <div class="kiwix-banner-content">
+            <div class="kiwix-banner-icon" style="background:#1a73e8">W</div>
+            <div>
+                <div class="kiwix-banner-title">Complete English Wikipedia</div>
+                <div class="kiwix-banner-desc">${desc}</div>
+            </div>
+        </div>
+        ${cta}
+    </div>`;
+}
+
 function renderContentLibrary() {
     let html = '<div class="container" id="main-content">';
-    html += renderBreadcrumb([{label: 'Content Library'}]);
-    html += '<h1>Offline Content Library</h1>';
-    html += '<p class="section-desc">Pre-downloaded knowledge bases served by <a href="#/tools/kiwix">Kiwix</a>. Browse Wikipedia, textbooks, and reference material from any device on your network — no internet required.</p>';
+    html += renderBreadcrumb([{label: 'Library'}]);
+    html += '<h1>Offline Library</h1>';
+    html += '<p class="section-desc">Whole websites, mirrored offline and served by <a href="#/tools/kiwix">Kiwix</a> — Wikipedia, StackExchange, wikis, textbooks, courses and reference material. Browse from any device on your network, no internet required.</p>';
+
+    // Full-Wikipedia hero: browse it when present, or one-click request it when not.
+    html += renderFullWikipediaHero();
 
     // Embed the offline library IN-PAGE so the fixed Val Ark nav stays on top —
     // a permanent way back to the ark — instead of stranding readers on a
@@ -4239,6 +4312,13 @@ function renderContentLibrary() {
 
     html += '</div>';
 
+    // Browse & one-click-request anything from the live Kiwix index that isn't
+    // mirrored yet (thousands of ZIMs — Wikipedias, wikis, StackExchange, courses).
+    if (_apiAvailable) {
+        html += renderCatalogSection('content', 'Add more to the library',
+            'Anything on the live Kiwix index you don\'t have yet. Pick something and Val Ark downloads it into the shared library — it makes room automatically by clearing lower-priority content when space is tight.');
+    }
+
     // Serve instructions - simplified when Kiwix is already running
     if (_kiwixStatus && _kiwixStatus.running) {
         const absUrl = window.location.origin + getKiwixUrl();
@@ -4267,7 +4347,7 @@ function renderContentDetail(contentId) {
 
     let html = '<div class="container" id="main-content">';
     html += renderBreadcrumb([
-        {label: 'Content', href: '#/content'},
+        {label: 'Library', href: '#/content'},
         {label: item.name}
     ]);
 
@@ -4294,7 +4374,13 @@ function renderContentDetail(contentId) {
     html += `<tr><td>File</td><td><code>${item.file}</code></td></tr>`;
     html += '</table>';
     if (statusClass !== 'installed' && _apiAvailable) {
-        html += `<button class="dl-action-btn" onclick="triggerDownload('content','${item.id}')" style="margin-top:12px">Mirror</button>`;
+        // Route through the per-item request path when we have a live-catalog id
+        // (resolves the current dated build + auto-evicts to fit); else the legacy bulk target.
+        if (item.requestId) {
+            html += `<button class="dl-action-btn" data-kind="content" data-id="${item.requestId}" onclick="triggerRequestFromEl(this)" style="margin-top:12px">Mirror (${item.size})</button>`;
+        } else {
+            html += `<button class="dl-action-btn" onclick="triggerDownload('content','${item.id}')" style="margin-top:12px">Mirror</button>`;
+        }
     }
     html += '</div>';
 
@@ -4322,16 +4408,31 @@ function renderContentDetail(contentId) {
 const CONTENT_STATUS = {};
 const CONTENT_INFO = {}; // {filename: {size, lastModified}}
 
+// Presence match that survives the mirror rotating ZIM dates. Kiwix filenames carry
+// a build date (wikipedia_en_all_maxi_2026-02.zim), so an exact-filename check would
+// wrongly report a present collection as "Not Mirrored". Match the stable pattern
+// (item.match) against the live content keys instead. Returns the matched {info} or false.
+function contentPresent(item, contentData) {
+    if (!contentData) return false;
+    if (item.match) {
+        let re; try { re = new RegExp(item.match, 'i'); } catch (_) { re = null; }
+        if (re) for (const k in contentData) { if (re.test(k)) return { info: contentData[k] }; }
+        return false;
+    }
+    const relPath = item.file.replace(/^content\//, '');
+    return contentData[relPath] ? { info: contentData[relPath] } : false;
+}
+
 async function checkContentStatus() {
     try {
         const resp = await fetch('/api/status/content');
         if (resp.ok) {
             const contentData = await resp.json();
             for (const item of CONTENT_LIBRARY) {
-                const relPath = item.file.replace(/^content\//, '');
-                if (contentData[relPath]) {
+                const hit = contentPresent(item, contentData);
+                if (hit) {
                     CONTENT_STATUS[item.id] = 'installed';
-                    CONTENT_INFO[item.id] = contentData[relPath];
+                    CONTENT_INFO[item.id] = hit.info;
                 } else {
                     CONTENT_STATUS[item.id] = 'missing';
                 }
@@ -5175,10 +5276,10 @@ async function initFromAPI() {
         // Populate content
         if (data.content) {
             for (const item of CONTENT_LIBRARY) {
-                const relPath = item.file.replace(/^content\//, '');
-                if (data.content[relPath]) {
+                const hit = contentPresent(item, data.content);
+                if (hit) {
                     CONTENT_STATUS[item.id] = 'installed';
-                    CONTENT_INFO[item.id] = data.content[relPath];
+                    CONTENT_INFO[item.id] = hit.info;
                 } else {
                     CONTENT_STATUS[item.id] = 'missing';
                 }
@@ -5302,6 +5403,178 @@ async function triggerDownload(type, target) {
     } catch (e) {
         alert('Failed to start installation: ' + e.message);
     }
+}
+
+// --- One-click per-item requests + community-service start (LAN/tailnet) --------
+// Downloads that aren't mirrored yet: a specific ZIM (incl. full Wikipedia), a
+// curated model, or an app. Routed through /api/request -> librarian, which pins
+// the item and auto-evicts lowest-priority unpinned content to fit the footprint
+// cap. Progress + auto-refresh come free via the same SSE panel as triggerDownload.
+async function triggerRequest(kind, id, btn) {
+    if (!_apiAvailable) { alert('The Val Ark API is not reachable from this page.'); return; }
+    if (_diskData && _diskData.available < 1024 * 1024 * 1024) {
+        // The librarian will still try to evict to fit, but warn on a truly full disk.
+        if (!confirm('Very little free space. The librarian will evict lower-priority content to make room. Continue?')) return;
+    }
+    if (btn) { btn.dataset.o = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Requesting…'; }
+    try {
+        const resp = await fetch('/api/request', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind, id }),
+        });
+        const result = await resp.json();
+        if (result.error) {
+            alert(result.error);
+            if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.o; }
+        } else if (btn) {
+            btn.innerHTML = 'Requested ✓';   // SSE panel now shows live progress
+        }
+    } catch (e) {
+        alert('Failed to start request: ' + e.message);
+        if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.o; }
+    }
+}
+function triggerRequestFromEl(btn) {
+    triggerRequest(btn.getAttribute('data-kind'), btn.getAttribute('data-id'), btn);
+}
+
+// Bring up an enabled + mirrored community service, then poll until it answers.
+async function startCommunityService(id, btn) {
+    if (btn) { btn.dataset.o = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Starting…'; }
+    try {
+        const resp = await fetch('/api/service/start', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id }),
+        });
+        const result = await resp.json();
+        if (result.error) {
+            alert(result.error);
+            if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.o; }
+            return;
+        }
+        if (_servicesStatus && _servicesStatus[id]) _servicesStatus[id].starting = true;
+        pollServiceUp(id, 90);   // forum/chat first-run builds take minutes
+    } catch (e) {
+        alert('Failed to start service: ' + e.message);
+        if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.o; }
+    }
+}
+function pollServiceUp(id, tries) {
+    fetch('/api/status/services').then(r => r.json()).then(s => {
+        if (s && Object.keys(s).length) { _servicesStatus = s; scheduleRender(); }
+        if (s && s[id] && s[id].running) return;
+        if (tries > 0) setTimeout(() => pollServiceUp(id, tries - 1), 2000);
+    }).catch(() => { if (tries > 0) setTimeout(() => pollServiceUp(id, tries - 1), 2000); });
+}
+function refreshServices() {
+    fetch('/api/status/services').then(r => r.ok ? r.json() : null)
+        .then(s => { if (s && Object.keys(s).length) { _servicesStatus = s; scheduleRender(); } })
+        .catch(() => {});
+}
+
+// --- Catalog browse: not-yet-downloaded resources you can one-click request ----
+const _catalogData = { content: null, models: null };
+function renderCatalogSection(kind, title, blurb) {
+    return `<div class="detail-section catalog-section" style="margin-top:2.5rem">
+        <h2 style="font-size:1.2em">${esc(title)}</h2>
+        <p class="section-desc">${blurb}</p>
+        <input type="text" class="catalog-search" id="catalog-${kind}-search"
+            placeholder="Search the ${esc(kind === 'content' ? 'library catalog' : 'model catalog')}…"
+            oninput="filterCatalog('${kind}', this.value)" aria-label="Search catalog">
+        <div id="catalog-${kind}" class="cards-grid catalog-grid" data-catalog="${kind}">
+            <div class="catalog-loading">Loading the live catalog…</div>
+        </div>
+        <div id="catalog-${kind}-more" class="catalog-more"></div>
+    </div>`;
+}
+function loadCatalog(kind) {
+    const mount = document.getElementById('catalog-' + kind);
+    if (!mount) return;
+    if (_catalogData[kind]) { renderCatalogItems(kind, _catalogData[kind], ''); return; }
+    if (!_apiAvailable) { mount.innerHTML = '<div class="catalog-loading">Catalog needs the Val Ark server (open this page from the Ark).</div>'; return; }
+    fetch('/api/catalog/' + kind).then(r => r.json()).then(d => {
+        if ((!d.items || !d.items.length) && d.computing) {
+            mount.innerHTML = '<div class="catalog-loading">Building the catalog from the live index… this takes a moment.</div>';
+            setTimeout(() => { _catalogData[kind] = null; loadCatalog(kind); }, 4000);
+            return;
+        }
+        _catalogData[kind] = d.items || [];
+        renderCatalogItems(kind, _catalogData[kind], '');
+    }).catch(() => { mount.innerHTML = '<div class="catalog-loading">Catalog unavailable (offline?).</div>'; });
+}
+function catalogCardHtml(kind, it) {
+    const rk = kind === 'models' ? 'model' : 'content';
+    return `<div class="card catalog-card" data-search="${esc((it.name + ' ' + it.id + ' ' + it.category).toLowerCase())}">
+        <h3 style="font-size:0.92em;word-break:break-word">${esc(it.name)}</h3>
+        <div class="card-meta">
+            <span class="tag">${esc(it.category)}</span>
+            <span>${formatBytes(it.bytes)}</span>
+        </div>
+        <button class="dl-action-btn" data-kind="${rk}" data-id="${esc(it.id)}" onclick="triggerRequestFromEl(this)">Download</button>
+    </div>`;
+}
+function renderCatalogItems(kind, items, term) {
+    const mount = document.getElementById('catalog-' + kind);
+    if (!mount) return;
+    term = (term || '').toLowerCase();
+    const filtered = term ? items.filter(it => (it.name + ' ' + it.id + ' ' + it.category).toLowerCase().includes(term)) : items;
+    const CAP = 120;
+    const shown = filtered.slice(0, CAP);
+    mount.innerHTML = shown.length ? shown.map(it => catalogCardHtml(kind, it)).join('')
+        : '<div class="catalog-loading">No matching items.</div>';
+    const more = document.getElementById('catalog-' + kind + '-more');
+    if (more) {
+        more.innerHTML = filtered.length > CAP
+            ? `<span>Showing ${CAP} of ${filtered.length.toLocaleString()} — refine your search to narrow it down.</span>`
+            : (filtered.length ? `<span>${filtered.length.toLocaleString()} item${filtered.length > 1 ? 's' : ''} available</span>` : '');
+    }
+}
+function filterCatalog(kind, term) { renderCatalogItems(kind, _catalogData[kind] || [], term); }
+
+// Community hub — the discoverable home for the offline LAN comms services.
+function renderCommunity() {
+    const svc = _servicesStatus || {};
+    let html = '<div class="container" id="main-content">';
+    html += renderBreadcrumb([{ label: 'Community' }]);
+    html += '<h1>Community &amp; Comms</h1>';
+    html += '<p class="section-desc">Talk to everyone on the network — no internet, no accounts, no federation. Chat, mail, message boards and file sharing all run right here on Val Ark and stay on your LAN.</p>';
+    html += '<div class="cards-grid">';
+    const services = TOOLS.filter(t => t.category === 'community');
+    for (const t of services) {
+        const s = svc[t.id] || {};
+        let badge, action;
+        if (s.running) {
+            badge = '<span class="svc-badge svc-on">● Online</span>';
+            action = `<a href="#/app/${t.id}" class="dl-action-btn">Open ${esc(COMMUNITY_NAV_LABELS[t.id] || t.name)} →</a>`;
+        } else if (s.starting) {
+            badge = '<span class="svc-badge svc-starting">● Starting…</span>';
+            action = '<button class="dl-action-btn" disabled><span class="spinner"></span> Starting…</button>';
+        } else if (s.startable) {
+            badge = '<span class="svc-badge svc-off">○ Offline</span>';
+            action = `<button class="dl-action-btn" onclick="startCommunityService('${t.id}',this)">Start service</button>`;
+        } else if (_apiAvailable && s.mirrored === false) {
+            badge = '<span class="svc-badge svc-off">○ Not mirrored</span>';
+            action = `<span class="svc-hint">Mirror it: <code>scripts/tools/${t.id}.sh</code></span>`;
+        } else if (_apiAvailable && s.enabled === false) {
+            badge = '<span class="svc-badge svc-off">○ Offline</span>';
+            action = `<span class="svc-hint">Enable in <code>.env</code>: add <code>${t.id}</code> to <code>VALARK_SERVICES</code></span>`;
+        } else {
+            badge = '<span class="svc-badge svc-off">○ Offline</span>';
+            action = `<a href="#/app/${t.id}" class="dl-action-btn">Open →</a>`;
+        }
+        html += `<div class="card community-card">
+            <div class="card-icon" style="background:${t.iconBg}">${t.icon}</div>
+            <h3>${esc(t.name)} ${badge}</h3>
+            <div class="card-desc">${esc(t.desc)}</div>
+            <div class="community-action">${action}</div>
+            <a href="#/tools/${t.id}" class="community-about">About &amp; setup →</a>
+        </div>`;
+    }
+    html += '</div>';
+    html += `<div class="detail-section" style="margin-top:2rem"><h3>How the community layer works</h3>
+        <p>Each service runs LAN-bound on Val Ark and appears framed inside this site — the top nav stays put as a permanent way back. They make zero internet calls: no relays, no federation, no accounts anywhere else. Turn on the ones you want with <code>VALARK_SERVICES</code> in <code>.env</code>; the self-healing loop keeps them running and restarts any that stop.</p></div>`;
+    html += '</div>';
+    return html;
 }
 
 async function cancelDownload(id) {

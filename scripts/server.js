@@ -832,7 +832,7 @@ function sessionCookie(token, maxAgeSec, secure) {
 // logged-in admin), regardless of Use Mode. "Use" actions (downloads/requests/
 // service starts) are gated per Use Mode instead (Open = anyone on the LAN).
 const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser']);
-const AUTH_EXEMPT_POSTS = new Set(['/api/auth/login', '/api/auth/logout', '/api/setup/commission']);
+const AUTH_EXEMPT_POSTS = new Set(['/api/auth/login', '/api/auth/logout', '/api/auth/recover', '/api/setup/commission']);
 
 // Peer IP, normalized (node reports LAN/tailnet IPv4 peers as IPv4-mapped IPv6).
 function clientIp(req) {
@@ -956,6 +956,21 @@ function handleAPI(req, res, urlPath) {
                 if (st.commissioned) { st.hasClaim = false; st.needsClaim = false; }
                 return sendJSON(res, req, st);
             }
+            case '/api/setup/recovery-card': {
+                // The printable recovery card — box name/address + the one-time recovery
+                // code. The code is a SECRET, so this is admin-only (localhost or a signed
+                // session); un-authed peers can't read it.
+                if (!isAdmin(req)) return sendJSON(res, req, { error: 'Admin only.', needsAuth: true }, 401);
+                const s = commission.readSettings(STATE_DIR);
+                const host = (req.headers.host || '').split(':')[0] || 'valark.local';
+                const nm = (s.name || 'valark').toLowerCase().replace(/[^a-z0-9-]/g, '') || 'valark';
+                return sendJSON(res, req, {
+                    name: s.name || 'valark',
+                    address: `http://${nm}.local/`,
+                    addressAlt: `http://${host}/`,
+                    recovery: commission.ensureRecovery(STATE_DIR),
+                });
+            }
             case '/api/catalog/content':
                 return sendJSON(res, req, getCatalog('content'));
             case '/api/catalog/models':
@@ -1044,6 +1059,19 @@ function handleAPI(req, res, urlPath) {
                 }
                 case '/api/auth/logout':
                     return sendJSON(res, req, { ok: true }, 200, { 'Set-Cookie': sessionCookie('', 0, isSecureReq(req)) });
+                case '/api/auth/recover': {
+                    // Forgot-password: set a new admin passcode. localhost/console needs
+                    // no code; from the LAN you present the recovery code from the card.
+                    // Same cooldown as login (it's a code-guessing surface).
+                    if (!loginAllowed(req)) {
+                        return sendJSON(res, req, { error: 'Too many attempts — wait a few minutes, or reset from the box itself.' }, 429);
+                    }
+                    const rr = commission.recoverAdmin(STATE_DIR, body, { trusted: isLocalhost(req) });
+                    if (rr.error) { noteLoginFail(req); return sendJSON(res, req, rr, 401); }
+                    // Auto-sign-in the recovered admin so they're not immediately locked out.
+                    const tok = auth.issueSession(STATE_DIR, 12 * 3600 * 1000, clientIp(req));
+                    return sendJSON(res, req, { ok: true, recovery: rr.recovery }, 200, { 'Set-Cookie': sessionCookie(tok, 12 * 3600, isSecureReq(req)) });
+                }
                 case '/api/download/tools': {
                     const target = body.target || 'all';
                     if (!isAlphanumDash(target) || !VALID_TOOL_TARGETS.has(target)) {

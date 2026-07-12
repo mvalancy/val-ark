@@ -3591,7 +3591,12 @@ function renderSettings() {
     html += `<div id="storage" class="detail-section" style="margin-top:1.5rem"><h2>Storage</h2>${renderStorageBreakdown()}
         <p style="color:var(--text-muted);font-size:.9em">Val Ark keeps itself under its footprint cap and evicts the lowest-priority content when it needs room. Change the cap in <code>.env</code> (<code>VALARK_MAX_GB</code>) — a slider is coming to Advanced.</p></div>`;
     html += `<div id="about" class="detail-section" style="margin-top:1.5rem"><h2>About &amp; Rescue</h2>
-        <p>Val Ark — offline-first knowledge &amp; AI appliance. Forgot the admin passcode or need to start over? It’s always recoverable from the box itself:</p>
+        <p>Val Ark — offline-first knowledge &amp; AI appliance. Forgot the admin passcode or need to start over? It’s always recoverable.</p>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.6rem 0 1rem">
+            <button class="dl-action-btn" onclick="openRecoveryCard()">Show recovery card</button>
+            <button class="dl-action-btn" style="background:transparent;color:var(--text,#e8eaed);border-color:var(--border,#2a2d34)" onclick="recoverFlow()">Reset admin passcode</button>
+        </div>
+        <p>Or from the box itself:</p>
         <div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/valark reset --tier1   # forget admin, keep everything</div>
         <div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/valark setpassword     # set a new admin passcode</div>
         <p style="color:var(--text-muted);font-size:.9em">Resets never touch your Library or models — content is physically separate from settings.</p></div>`;
@@ -5999,10 +6004,16 @@ async function setupFinish() {
         const d = await r.json().catch(() => ({}));
         if (r.ok && d.ok) {
             _setupState = { commissioned: true };
+            // Show the recovery card now — the ONE moment the code is displayed. Print/save it.
+            const rec = d.recovery ? `<div class="setup-reccard"><div class="src-hd">🔑 Save your recovery card</div>
+                <p class="src-sub">This is how you get back in if you forget your passcode. Print it or write it down — you won't see this code again.</p>
+                <div class="src-code">${esc(d.recovery)}</div>
+                <button class="setup-btn ghost" style="margin-top:.6rem" onclick="showRecoveryCard({name:${JSON.stringify(_setupData.name || 'valark')},recovery:${JSON.stringify(d.recovery)},address:'http://'+${JSON.stringify((_setupData.name||'valark').toLowerCase())}+'.local/'})">Print recovery card</button></div>` : '';
             const root = document.getElementById('app-root');
-            if (root) root.innerHTML = `${_SETUP_CSS}<div class="setup-wrap"><div class="setup-card"><div class="setup-stepbody">
+            if (root) root.innerHTML = `${_SETUP_CSS}${_REC_CSS}<div class="setup-wrap"><div class="setup-card"><div class="setup-stepbody">
                 <div class="setup-done-ic">&#x2713;</div><h1>All set!</h1>
                 <p class="setup-lead">${esc(_setupData.name || 'Val Ark')} is ready. It'll start filling with content in the background and keeps working even offline.</p>
+                ${rec}
                 <div class="setup-nav"><span></span><a class="setup-btn" href="#/" onclick="setTimeout(function(){location.reload();},60)">Open Val Ark &rarr;</a></div>
             </div></div></div>`;
         } else {
@@ -6059,6 +6070,10 @@ const _SETUP_CSS = `<style>
 .setup-msg{min-height:1.2rem;margin-top:14px;font-size:.9rem}
 .setup-msg.bad{color:var(--danger,#e05a52)}.setup-msg.ok{color:var(--success,#4caf50)}
 .setup-done-ic{width:56px;height:56px;border-radius:50%;background:var(--success,#2e7d32);color:#fff;display:flex;align-items:center;justify-content:center;font-size:1.9rem;margin:0 auto 14px}
+.setup-reccard{margin:1rem 0;padding:1rem;border:2px dashed var(--accent,#e0603a);border-radius:12px;text-align:center}
+.src-hd{font-weight:700;margin-bottom:.3rem}
+.src-sub{color:var(--text-muted,#8a8f98);font-size:.84rem;margin:0 0 .6rem}
+.src-code{font-family:ui-monospace,monospace;font-size:1.3rem;letter-spacing:.12em;background:var(--bg,#0e0f12);border:1px solid var(--border,#2a2d34);border-radius:8px;padding:.5rem .8rem;display:inline-block}
 @media(max-width:560px){.setup-card{padding:26px 20px}}
 </style>`;
 
@@ -6081,9 +6096,10 @@ function signIn(afterMsg) {
         <p style="margin:0 0 1rem;color:var(--text-muted,#8a8f98);font-size:.9em">${afterMsg ? esc(afterMsg) : 'Enter the admin passcode to continue.'} On the box itself you don't need to.</p>
         <input id="signin-pass" type="password" placeholder="admin passcode" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:.6rem .8rem;border:1px solid var(--border,#2a2d34);border-radius:8px;background:var(--bg,#0e0f12);color:var(--text,#e8eaed);font-size:1rem">
         <div id="signin-msg" style="min-height:1.1rem;margin:.5rem 0;font-size:.86em;color:var(--danger,#e0553a)"></div>
-        <div style="display:flex;justify-content:flex-end;gap:.5rem">
-            <button class="dl-action-btn" style="background:transparent;color:var(--text,#e8eaed);border-color:var(--border,#2a2d34)" onclick="closeSignIn()">Cancel</button>
-            <button class="dl-action-btn" onclick="submitSignIn()">Sign in</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem">
+            <a href="javascript:void(0)" onclick="recoverFlow()" style="font-size:.85em;color:var(--text-muted,#8a8f98)">Forgot passcode?</a>
+            <span style="display:flex;gap:.5rem"><button class="dl-action-btn" style="background:transparent;color:var(--text,#e8eaed);border-color:var(--border,#2a2d34)" onclick="closeSignIn()">Cancel</button>
+            <button class="dl-action-btn" onclick="submitSignIn()">Sign in</button></span>
         </div>
     </div>`;
     document.body.appendChild(o);
@@ -6120,7 +6136,7 @@ function renderAccessWall() {
             <p class="setup-lead">Enter the ${mode === 'accounts' ? 'account' : 'access'} passcode to view the library. On the box itself you don't need to.</p>
             <input id="wall-pass" class="setup-input" type="password" placeholder="passcode" autocomplete="current-password">
             <div id="wall-msg" class="setup-msg"></div>
-            <div class="setup-nav"><span></span><button class="setup-btn" onclick="wallSignIn()">Sign in &rarr;</button></div>
+            <div class="setup-nav"><a href="javascript:void(0)" onclick="recoverFlow()" style="font-size:.85em;color:var(--text-muted,#8a8f98)">Forgot passcode?</a><button class="setup-btn" onclick="wallSignIn()">Sign in &rarr;</button></div>
         </div>
     </div></div>`;
     const inp = document.getElementById('wall-pass');
@@ -6144,6 +6160,81 @@ async function checkAccess() {
     const gated = (s.useMode === 'passworded' || s.useMode === 'accounts') && !s.authed && !s.trusted;
     if (gated) { renderAccessWall(); return false; }
     return true;
+}
+
+// ---- Recovery card + forgot-password ----------------------------------------
+const _REC_CSS = `<style>
+.rec-modal{width:100%;max-width:440px;background:var(--card-bg,var(--bg,#16181d));border:1px solid var(--border,#2a2d34);border-radius:14px;padding:24px}
+.rec-card{border:2px dashed var(--accent,#e0603a);border-radius:12px;padding:20px}
+.rec-card h2{margin:0 0 .3rem;font-size:1.2rem}
+.rec-sub{color:var(--text-muted,#8a8f98);font-size:.85rem;margin:0 0 1rem}
+.rec-row{display:flex;justify-content:space-between;gap:1rem;padding:.35rem 0;border-bottom:1px solid var(--border,#2a2d34)}
+.rec-row span{color:var(--text-muted,#8a8f98)}
+.rec-code{margin:1rem 0;text-align:center}
+.rec-code code{display:inline-block;margin-top:.3rem;font-size:1.4rem;letter-spacing:.12em;font-family:ui-monospace,monospace;background:var(--bg,#0e0f12);padding:.5rem .9rem;border-radius:8px;border:1px solid var(--border,#2a2d34)}
+.rec-steps{color:var(--text-muted,#8a8f98);font-size:.85rem;margin:.6rem 0 0}
+.rec-actions{display:flex;justify-content:flex-end;gap:.5rem;margin-top:1rem}
+@media print{body *{visibility:hidden}#rec-overlay,#rec-overlay *{visibility:visible}#rec-overlay{position:absolute;inset:0;background:#fff}.rec-actions{display:none}}
+</style>`;
+function recoveryCardHtml(d) {
+    return `<div class="rec-card" id="rec-card">
+        <h2>Val Ark — Recovery Card</h2>
+        <p class="rec-sub">Keep this somewhere safe — it's how you get back in if you forget your passcode.</p>
+        <div class="rec-row"><span>Open it at</span><strong>${esc(d.address || 'http://valark.local/')}</strong></div>
+        ${d.addressAlt ? `<div class="rec-row"><span>or</span><strong>${esc(d.addressAlt)}</strong></div>` : ''}
+        <div class="rec-row"><span>Box name</span><strong>${esc(d.name || 'valark')}</strong></div>
+        <div class="rec-code">Recovery code<br><code>${esc(d.recovery || '')}</code></div>
+        <p class="rec-steps">Forgot your passcode? Open the address above, choose <strong>Forgot passcode?</strong> and enter this code to set a new one. On the box's own screen you can reset with no code.</p>
+    </div>`;
+}
+function showRecoveryCard(d) {
+    if (document.getElementById('rec-overlay')) return;
+    const o = document.createElement('div'); o.id = 'rec-overlay';
+    o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px;overflow:auto';
+    o.innerHTML = `${_REC_CSS}<div class="rec-modal">${recoveryCardHtml(d)}
+        <div class="rec-actions"><button class="dl-action-btn" onclick="window.print()">Print</button>
+        <button class="dl-action-btn" style="background:transparent;color:var(--text,#e8eaed);border-color:var(--border,#2a2d34)" onclick="document.getElementById('rec-overlay').remove()">Close</button></div></div>`;
+    document.body.appendChild(o);
+}
+async function openRecoveryCard() {
+    try {
+        const r = await fetch('/api/setup/recovery-card');
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.recovery) showRecoveryCard(d);
+        else if (isNeedsAuth(r, d)) signIn('Sign in to view the recovery card.');
+        else alert(d.error || 'Could not load the recovery card.');
+    } catch (e) { alert('Could not load the recovery card.'); }
+}
+function recoverFlow() {
+    closeSignIn();
+    if (document.getElementById('recover-overlay')) return;
+    const inp = 'width:100%;box-sizing:border-box;padding:.55rem .8rem;border:1px solid var(--border,#2a2d34);border-radius:8px;background:var(--bg,#0e0f12);color:var(--text,#e8eaed)';
+    const o = document.createElement('div'); o.id = 'recover-overlay';
+    o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:1001;padding:16px';
+    o.innerHTML = `<div style="width:100%;max-width:380px;background:var(--card-bg,var(--bg,#16181d));border:1px solid var(--border,#2a2d34);border-radius:14px;padding:26px">
+        <h3 style="margin:0 0 .3rem">Reset your passcode</h3>
+        <p style="margin:0 0 1rem;color:var(--text-muted,#8a8f98);font-size:.9em">Enter the recovery code from your recovery card, then a new passcode. On the box itself you can leave the code blank.</p>
+        <input id="rec-code-in" placeholder="recovery code" autocomplete="off" spellcheck="false" style="${inp};margin-bottom:.5rem">
+        <input id="rec-new-pass" type="password" placeholder="new passcode (8+ characters)" autocomplete="new-password" style="${inp}">
+        <div id="rec-msg" style="min-height:1.1rem;margin:.5rem 0;font-size:.86em;color:var(--danger,#e0553a)"></div>
+        <div style="display:flex;justify-content:flex-end;gap:.5rem"><button class="dl-action-btn" style="background:transparent;color:var(--text,#e8eaed);border-color:var(--border,#2a2d34)" onclick="document.getElementById('recover-overlay').remove()">Cancel</button><button class="dl-action-btn" onclick="submitRecover()">Reset passcode</button></div>
+    </div>`;
+    document.body.appendChild(o);
+    const i = document.getElementById('rec-code-in'); if (i) { i.focus(); i.addEventListener('keydown', e => { if (e.key === 'Enter') submitRecover(); }); }
+}
+async function submitRecover() {
+    const code = (document.getElementById('rec-code-in') || {}).value || '';
+    const pass = (document.getElementById('rec-new-pass') || {}).value || '';
+    const msg = document.getElementById('rec-msg');
+    try {
+        const r = await fetch('/api/auth/recover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, password: pass }) });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) {
+            const o = document.getElementById('recover-overlay'); if (o) o.remove();
+            alert('Passcode reset. Your NEW recovery code is:\n\n' + (d.recovery || '(see Settings → About & Rescue)') + '\n\nUpdate your recovery card, then continue.');
+            location.reload();
+        } else if (msg) { msg.className = ''; msg.style.color = 'var(--danger,#e0553a)'; msg.textContent = d.error || ('Reset failed (HTTP ' + r.status + ')'); }
+    } catch (e) { if (msg) msg.textContent = (e && e.message) || 'request failed'; }
 }
 
 function renderProgressPanel() {

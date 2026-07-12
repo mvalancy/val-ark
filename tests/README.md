@@ -1,87 +1,107 @@
-# Tests
+# Val Ark — Test Library
 
-Two complementary test layers guard Val Ark:
+One command runs every suite and produces a single **self-contained, offline HTML
+report** you can host anywhere (no internet, no CDN — the same ethos as Val Ark):
 
-| Layer | Location | What it checks |
-|-------|----------|----------------|
-| **Bash validators** | `test-*.sh` | Host deps, script syntax, mirror URL reachability |
-| **Playwright suite** | `screenshots/` | Web UI, server API + SSE, install icons, binary verification (200+ tests) |
+```bash
+tests/run-all.sh
+# -> tests/results/report.html
+# host it: (cd tests/results && python3 -m http.server 8099) -> http://<host>:8099/report.html
+```
 
-## Test Coverage
+Every suite writes a small JSON file to `tests/results/` in one **common schema**,
+and `tests/report/generate.mjs` renders them into the dashboard. That's the whole
+contract — add a suite by emitting a matching JSON file.
+
+## Suites
+
+| Suite | What it checks | Where |
+|-------|----------------|-------|
+| **Bash validators** | host deps, model inventory, TLS/local-CA, tool scripts, upstream mirror URLs | `tests/test-*.sh` |
+| **Playwright** | web UI, server API + SSE, install icons, dynamic UI exercise (250+ parametrized) | `tests/screenshots/specs/*.spec.ts` |
+| **Community services e2e** | chat/mail/forum/paste status + `/app/<id>/` proxy frames, against a live Ark | `tests/services/run.sh` |
+| **Fresh-VM setup** | real setup + web-UI/API smoke on clean Ubuntu 22.04 / 24.04 / 26.04 | `tests/vm/{run,provision}.sh` |
 
 ```mermaid
 graph TD
-    A[tests/] --> V[Bash validators<br/>test-*.sh]
-    A --> P[Playwright suite<br/>screenshots/]
-
-    V --> V1[test-deps.sh<br/>required CLIs]
-    V --> V2[test-tools.sh<br/>download-tools.sh]
-    V --> V3[test-models.sh<br/>download-models.sh + start.sh]
-    V --> V4[test-urls.sh<br/>mirror reachability]
-
-    P --> B[web-ui.spec.ts]
-    P --> C[server-api.spec.ts]
-    P --> D[install-icons.spec.ts]
-
-    B --> B1[Navigation & Search]
-    B --> B2[Tool / Model details]
-    B --> B3[Content Library]
-    B --> B4[Platform selector]
-    B --> B5[Binary verification]
-    B --> B6[A11y / theme / mobile]
-
-    C --> C1[Status API + SSE]
-    C --> C2[Download input validation]
-    C --> C3[Security headers / traversal]
-
-    D --> D1[Icons & logos]
-    D --> D2[Install vs Download]
-    D --> D3[Download scripts ↔ server targets]
+    R[tests/run-all.sh] --> V[Bash validators]
+    R --> P[Playwright]
+    R --> S[Community services e2e]
+    R --> M[Fresh-VM setup matrix]
+    V --> J[(tests/results/*.json)]
+    P --> J
+    S --> J
+    M --> J
+    J --> H[report/generate.mjs -> report.html]
 ```
 
-## How to Run
+## Running
 
-**Bash validators** (fast, no Node required) — also wired into `./start.sh test`:
 ```bash
-./tests/run-all.sh
+# Everything the machine can do (Playwright always; services e2e if an Ark answers)
+tests/run-all.sh
+
+# Point the services e2e at a specific Ark (LAN or tailnet)
+VALARK_URL=http://nas-5sgf:3000 tests/run-all.sh
+
+# Also run the fresh-VM matrix (slow — boots real VMs via multipass + KVM)
+VALARK_RUN_VM=1 tests/run-all.sh
+VALARK_VM_VERSIONS="24.04" VALARK_RUN_VM=1 tests/run-all.sh   # one version
+
+# Skip the browser suite
+VALARK_NO_PLAYWRIGHT=1 tests/run-all.sh
 ```
 
-**Playwright suite:**
+Individual suites (each writes its own result file + runs standalone):
+
 ```bash
-export PATH="$HOME/.local/node/bin:$PATH"
-cd tests/screenshots && npx playwright test          # all specs
-cd tests/screenshots && npx playwright test --ui     # interactive
+cd tests/screenshots && npx playwright test            # browser suite
+VALARK_URL=http://127.0.0.1:3000 tests/services/run.sh
+VALARK_VM_VERSIONS="22.04 24.04 26.04" tests/vm/run.sh
+node tests/report/generate.mjs                          # (re)render report from results/
 ```
 
-The same suite drives screenshot capture via `./scripts/screenshots.sh web`.
+## Layout
 
-## What the Layers Cover
+```
+tests/
+  run-all.sh              # orchestrator -> runs suites + renders the report
+  test-*.sh               # bash validators
+  lib/results.sh          # shared: results_init / results_case / results_run / results_finish
+  services/run.sh         # community-services e2e (target = VALARK_URL)
+  vm/run.sh, provision.sh # fresh-Ubuntu setup matrix (multipass); provisioner runs inside the VM
+  report/generate.mjs     # results/*.json -> self-contained report.html
+  report/from-playwright.mjs   # Playwright JSON -> common schema
+  screenshots/specs/      # Playwright specs
+  results/                # generated (git-ignored): per-suite JSON + report.html
+```
 
-**Bash validators** confirm the host has `wget/curl/git/tar/bash`, that the
-download scripts parse and self-describe, and that a sampling of upstream mirror
-URLs is reachable (with retry/backoff so GitHub rate-limits don't flap a pass).
+## Common result schema
 
-**Playwright suite** exercises the live web UI and `server.js` API. The
-`web-ui.spec.ts` `TOOL_IDS` array is the source of truth for the **43** mirrored
-tools — every tool must have a card, detail page, icon/logo, and a matching
-`scripts/tools/<id>.sh`. `install-icons.spec.ts` cross-checks that each tool
-script exists, sources `_common.sh`, and is listed in `server.js`
-`VALID_TOOL_TARGETS`. `server-api.spec.ts` validates the status endpoints, the
-SSE download stream, input validation, path-traversal blocking, and security
-headers.
+```json
+{
+  "suite": "services-e2e",
+  "title": "Community services (e2e @ http://nas-5sgf:3000)",
+  "generated": "2026-07-12 03:58:23 UTC",
+  "summary": { "passed": 8, "failed": 0, "skipped": 1, "durationMs": 0 },
+  "cases": [ { "name": "forum: /app/forum/ frame reachable", "status": "passed", "durationMs": 0, "detail": "" } ]
+}
+```
 
-## Test Server
+`status` is one of `passed | failed | skipped`. Bash suites produce it via
+`tests/lib/results.sh`; Playwright via `tests/report/from-playwright.mjs`.
 
-`playwright.config.ts` starts `scripts/server.js` on port **3001** before the
-suite runs. With `reuseExistingServer: true`, an already-running server on that
-port is reused instead. (Production defaults to `VALARK_WEB_PORT`, 3000.)
+## Notes
 
-## File and Server Modes
-
-Web-UI tests pass in both `file://` mode (static HTML opened directly) and
-server mode (API-connected via the test server). This keeps the UI working
-whether shipped as a static page or served through the Node backend — important
-for the offline-first, online-optional design.
+- **Playwright source of truth:** `web-ui.spec.ts` `TOOL_IDS` lists every mirrored
+  tool — each must have a card, detail page, icon/logo, and a `scripts/tools/<id>.sh`.
+  `install-icons.spec.ts` cross-checks the scripts ↔ `server.js VALID_TOOL_TARGETS`.
+- **Test server:** `playwright.config.ts` starts `scripts/server.js` on port **3001**
+  (reused if already running). Production defaults to `VALARK_WEB_PORT` (3000).
+- **File + server modes:** web-UI tests pass both as a static `file://` page and
+  API-connected through the test server — the offline-first, online-optional design.
+- **Requirements:** `node` (bundled/mirrored is fine); Playwright deps
+  (`cd tests/screenshots && npm install`); and for the VM matrix, `multipass` + KVM.
 
 ---
 

@@ -131,6 +131,14 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   cookie → allowed, forged session → 401.
 - **The login cooldown is per-IP + non-permanent** (8 fails / 10 min → 429), never a hard lock —
   localhost/console always bypasses, so the owner is never locked out.
+- **Session hardening (from the adversarial review — the HMAC/gate core was sound, these are
+  defense-in-depth):** (1) sessions are **IP-bound** (`issueSession(dir, ttl, ip)` / `verifySession(…,
+  ip)`) so a cookie captured on the wire can't be replayed from another host; (2) the cookie gets
+  **`Secure` only over TLS** (`isSecureReq` — marking it Secure on the default plain HTTP would
+  silently drop it); (3) `pipeProxy` **strips `varksid`** before forwarding to sub-apps (NodeBB/
+  kiwix/…) so the admin token never reaches third-party backends; (4) a **global** login cap
+  (40/10min) on top of per-IP so NIC-alias IP rotation can't multiply guesses; (5) min passcode
+  length raised to **8**.
 
 ## Git / releases
 

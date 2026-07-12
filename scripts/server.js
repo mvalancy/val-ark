@@ -769,12 +769,25 @@ function sessionToken(req) {
 function isAdmin(req) {
     if (isLocalhost(req)) return true;
     if (!auth.status(STATE_DIR).adminSet) return false;     // no admin ⇒ no LAN admin
-    return auth.verifySession(sessionToken(req), STATE_DIR);
+    // Bind the session to the login IP: a cookie captured on the wire can't be
+    // replayed from another host.
+    return auth.verifySession(sessionToken(req), STATE_DIR, clientIp(req));
 }
-// Login cooldown (not a permanent lock): slow down passcode guessing per IP.
+// A cookie is safe to mark Secure only when this request actually arrived over TLS
+// (behind the local CA) — marking it Secure on plain HTTP would silently drop it.
+function isSecureReq(req) {
+    return !!(req.socket && req.socket.encrypted) || req.headers?.['x-forwarded-proto'] === 'https';
+}
+// Login cooldown (not a permanent lock): slow down passcode guessing. Per-IP AND a
+// global cap, so an attacker can't just rotate source IPs (NIC aliases) to multiply
+// their guess budget. localhost/console always bypasses (owner is never locked out).
 const _loginFails = new Map();
 const LOGIN_MAX = 8, LOGIN_WINDOW_MS = 10 * 60 * 1000;
+let _loginGlobal = { n: 0, first: 0 };
+const LOGIN_GLOBAL_MAX = 40;
 function loginAllowed(req) {
+    if (_loginGlobal.first && Date.now() - _loginGlobal.first > LOGIN_WINDOW_MS) _loginGlobal = { n: 0, first: 0 };
+    if (_loginGlobal.n >= LOGIN_GLOBAL_MAX) return false;   // global brute-force cap
     const rec = _loginFails.get(clientIp(req));
     if (!rec) return true;
     if (Date.now() - rec.first > LOGIN_WINDOW_MS) { _loginFails.delete(clientIp(req)); return true; }
@@ -784,10 +797,13 @@ function noteLoginFail(req) {
     const ip = clientIp(req); const rec = _loginFails.get(ip);
     if (!rec || Date.now() - rec.first > LOGIN_WINDOW_MS) _loginFails.set(ip, { n: 1, first: Date.now() });
     else rec.n++;
+    if (!_loginGlobal.first || Date.now() - _loginGlobal.first > LOGIN_WINDOW_MS) _loginGlobal = { n: 1, first: Date.now() };
+    else _loginGlobal.n++;
 }
-function sessionCookie(token, maxAgeSec) {
-    // HttpOnly so JS can't read it; SameSite=Lax to resist CSRF; Path=/ site-wide.
-    return `varksid=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSec}`;
+function sessionCookie(token, maxAgeSec, secure) {
+    // HttpOnly so JS can't read it; SameSite=Lax to resist CSRF; Path=/ site-wide;
+    // Secure ONLY when the request came over TLS (else the browser would drop it on HTTP).
+    return `varksid=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSec}${secure ? '; Secure' : ''}`;
 }
 // POSTs that CHANGE the box's config/accounts — always admin (localhost or a
 // logged-in admin), regardless of Use Mode. "Use" actions (downloads/requests/
@@ -997,14 +1013,14 @@ function handleAPI(req, res, urlPath) {
                         return sendJSON(res, req, { error: 'Too many attempts — wait a few minutes, or sign in from the box itself.' }, 429);
                     }
                     if (typeof body.password === 'string' && auth.verify(body.password, STATE_DIR)) {
-                        const token = auth.issueSession(STATE_DIR);
-                        return sendJSON(res, req, { ok: true }, 200, { 'Set-Cookie': sessionCookie(token, 12 * 3600) });
+                        const token = auth.issueSession(STATE_DIR, 12 * 3600 * 1000, clientIp(req));
+                        return sendJSON(res, req, { ok: true }, 200, { 'Set-Cookie': sessionCookie(token, 12 * 3600, isSecureReq(req)) });
                     }
                     noteLoginFail(req);
                     return sendJSON(res, req, { error: 'Incorrect passcode.' }, 401);
                 }
                 case '/api/auth/logout':
-                    return sendJSON(res, req, { ok: true }, 200, { 'Set-Cookie': sessionCookie('', 0) });
+                    return sendJSON(res, req, { ok: true }, 200, { 'Set-Cookie': sessionCookie('', 0, isSecureReq(req)) });
                 case '/api/download/tools': {
                     const target = body.target || 'all';
                     if (!isAlphanumDash(target) || !VALID_TOOL_TARGETS.has(target)) {
@@ -1276,9 +1292,16 @@ function pipeProxy(req, res, port, label, pathOverride) {
     // ECONNRESET → a spurious 503. The race surfaced intermittently only under
     // the added TLS latency of the HTTPS listener. A new socket each time is the
     // standard, robust behaviour for a small reverse proxy like this.
+    // Never leak the Val Ark admin session cookie to backend sub-apps (NodeBB, The
+    // Lounge, kiwix, …) — they don't need it and could log/exfiltrate the bearer token.
+    const fwdHeaders = { ...req.headers, host: `127.0.0.1:${port}` };
+    if (fwdHeaders.cookie) {
+        const kept = fwdHeaders.cookie.split(/;\s*/).filter((c) => c && !/^varksid=/.test(c)).join('; ');
+        if (kept) fwdHeaders.cookie = kept; else delete fwdHeaders.cookie;
+    }
     const proxyReq = http.request({
         host: '127.0.0.1', port, method: req.method, path: pathOverride || req.url,
-        headers: { ...req.headers, host: `127.0.0.1:${port}` },
+        headers: fwdHeaders,
     }, (proxyRes) => {
         const headers = { ...proxyRes.headers };
         delete headers['x-frame-options'];

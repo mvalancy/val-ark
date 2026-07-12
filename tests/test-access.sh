@@ -18,6 +18,21 @@ NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/
 SRV_PID=""
 T="$(mktemp -d)"; trap 'rm -rf "$T"; [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null' EXIT
 mkdir -p "$T/state" "$T/content/zim" "$T/models"
+# Session-crypto unit checks: IP-binding, tamper/expiry rejection, rotate = sign-out
+# everywhere, and the >=8-char passcode minimum.
+"$NODE" -e '
+const a=require(process.argv[1]); const d=process.argv[2]; require("fs").mkdirSync(d,{recursive:true});
+a.setPassword("unittest8","admin",d);
+const t=a.issueSession(d,60000,"10.0.0.5");
+let ok = a.verifySession(t,d,"10.0.0.5")===true
+      && a.verifySession(t,d,"10.0.0.9")===false                       // IP-bound
+      && a.verifySession(t.slice(0,-2)+"zz",d,"10.0.0.5")===false       // tampered
+      && a.verifySession(a.issueSession(d,-1,"10.0.0.5"),d,"10.0.0.5")===false; // expired
+a.rotateSessionSecret(d); ok = ok && a.verifySession(t,d,"10.0.0.5")===false;    // rotate invalidates
+let minok=false; try{ a.setPassword("short7x","admin",d); }catch(e){ minok=/8 characters/.test(e.message); }
+process.exit(ok && minok ? 0 : 1);
+' "$ROOT/scripts/lib/auth.js" "$T/unit" && pass || fail "session crypto: IP-bind/tamper/expiry/rotate + >=8 passcode"
+
 # Seed: an admin passcode + Passworded Use Mode.
 "$NODE" -e 'const a=require(process.argv[1]);const d=process.argv[2];a.setPassword("testpass","admin",d);a.setUseMode("passworded",d);' \
     "$ROOT/scripts/lib/auth.js" "$T/state"

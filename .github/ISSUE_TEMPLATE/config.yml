@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/mvalancy/val-ark/security/advisories/new
+    about: Please do NOT file security issues publicly — use private advisories.
+  - name: How this project works (contributing + governance)
+    url: https://github.com/mvalancy/val-ark/blob/main/docs/knowledge/README.md
+    about: Branch strategy, PR process, and the agent/trust model.

@@ -4,6 +4,21 @@ Val Ark is an online-optional, local-first mirror of dev/AI tools, AI models, an
 offline content (ZIM via Kiwix), with a zero-dependency web UI. It fills a disk of
 **any** size and keeps itself healthy 24/7.
 
+## How we work (read these — the shared brain lives in git)
+
+- **[`docs/knowledge/`](docs/knowledge/README.md)** — the git-tracked knowledge base that
+  compounds across sessions/machines/teammates. **Bake durable learnings back into it in the
+  same change** (a gotcha → [`gotchas.md`](docs/knowledge/gotchas.md); a significant call →
+  [`decisions.md`](docs/knowledge/decisions.md); a new rule → this file).
+- **[`docs/knowledge/workflow.md`](docs/knowledge/workflow.md)** — git strategy: `main`
+  (releasable, PR-only) ← `dev` (integration, green) ← `feat/fix/docs/chore/*` (one job each,
+  off `dev`, parallel via worktrees). **Never push to `main`.** Every non-trivial job = an
+  issue; branches/commits/PRs reference it; PRs need green `tests/run-all.sh`.
+- **[`docs/design/`](docs/design/README.md)** — the consumer-appliance architecture (scope-first).
+- **Secrets/host values NEVER go in git or memory.** Host names, local IPs, creds, and host
+  paths live ONLY in the git-ignored `.env` (keys/shape in the git-tracked
+  [`.env.example`](.env.example)). Refer to machines by role; use placeholders. The repo is PUBLIC.
+
 ## Project Context
 
 | Concern | Where | Notes |

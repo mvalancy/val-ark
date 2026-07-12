@@ -1371,6 +1371,35 @@ test.describe('Val Ark - Consumer Shell (Home status + Settings + Activity)', ()
     const fns = await page.evaluate(() => [typeof (window as any).checkAccess, typeof (window as any).wallSignIn]);
     expect(fns).toEqual(['function', 'function']);
   });
+
+  test('recovery card modal + forgot-password flow', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/settings`);
+    await page.waitForSelector('.settings-grid', { timeout: 5000 });
+    const fns = await page.evaluate(() => [typeof (window as any).showRecoveryCard, typeof (window as any).recoverFlow, typeof (window as any).submitRecover, typeof (window as any).openRecoveryCard]);
+    expect(fns).toEqual(['function', 'function', 'function', 'function']);
+    // the printable recovery card renders with the code
+    await page.evaluate(() => (window as any).showRecoveryCard({ name: 'homelab', recovery: 'ABCD-EFGH-JKLM', address: 'http://homelab.local/' }));
+    await expect(page.locator('#rec-card')).toBeVisible();
+    await expect(page.locator('.rec-code code')).toHaveText('ABCD-EFGH-JKLM');
+    await page.locator('#rec-overlay button:has-text("Close")').click();
+    await expect(page.locator('#rec-overlay')).toHaveCount(0);
+    // the forgot-password flow opens with a code + new-passcode field
+    await page.evaluate(() => (window as any).recoverFlow());
+    await expect(page.locator('#recover-overlay')).toBeVisible();
+    await expect(page.locator('#rec-code-in')).toBeVisible();
+    await expect(page.locator('#rec-new-pass')).toBeVisible();
+  });
+
+  test('Safe Mode recovery takeover renders', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/`);
+    await page.waitForSelector('.home-status', { timeout: 5000 });
+    const fns = await page.evaluate(() => [typeof (window as any).renderSafeMode, typeof (window as any).checkSafeMode]);
+    expect(fns).toEqual(['function', 'function']);
+    await page.evaluate(() => (window as any).renderSafeMode(['settings.json is corrupt']));
+    await expect(page.locator('.setup-card h1')).toContainText('needs attention');
+    await expect(page.getByText('settings.json is corrupt')).toBeVisible();
+    await expect(page.locator('.setup-btn:has-text("Reset")')).toBeVisible();
+  });
 });
 
 test.describe('Val Ark - First-boot Commissioning Wizard', () => {

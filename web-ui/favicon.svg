@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Val Ark">
+  <rect width="32" height="32" rx="7" fill="#0d1420"/>
+  <!-- "V" (Val) as an ark hull over a green waterline (Ark / offline vault) -->
+  <path d="M7 7.5 L16 22 L25 7.5" fill="none" stroke="#4da6ff" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M6.5 25.5 h19" fill="none" stroke="#4ade80" stroke-width="2.6" stroke-linecap="round"/>
+</svg>

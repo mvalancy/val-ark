@@ -9,6 +9,14 @@
 #   gated   no | yes  (yes = needs HF login/license; skipped unless token+accept)
 #   dest    subdir under MODELS_DIR
 #
+# --- Offline SETUP ASSISTANTS (small chat LLMs good at Linux/shell/setup help) ---
+# High value so they fill FIRST: a new offline user can ask the box itself for
+# shell commands and setup steps (run with llama.cpp, pair with the Linux ZIMs).
+895|qwen2.5-1.5b-instruct-gguf|assistant|bartowski/Qwen2.5-1.5B-Instruct-GGUF|Qwen2.5-1.5B-Instruct-Q4_K_M.gguf|gguf|no|986048768|assistant/qwen2.5-1.5b-instruct|Tiny offline Linux/shell setup assistant — runs on any box (~1GB)
+875|llama-3.2-3b-instruct-gguf|assistant|bartowski/Llama-3.2-3B-Instruct-GGUF|Llama-3.2-3B-Instruct-Q4_K_M.gguf|gguf|no|2019377696|assistant/llama-3.2-3b-instruct|More capable offline setup/shell assistant (~2GB)
+870|qwen2.5-3b-instruct-gguf|assistant|bartowski/Qwen2.5-3B-Instruct-GGUF|Qwen2.5-3B-Instruct-Q4_K_M.gguf|gguf|no|1929903264|assistant/qwen2.5-3b-instruct|Basic high-quality general/coding assistant (~2GB)
+860|qwen2.5-7b-instruct-gguf|assistant|bartowski/Qwen2.5-7B-Instruct-GGUF|Qwen2.5-7B-Instruct-Q4_K_M.gguf|gguf|no|4683074240|assistant/qwen2.5-7b-instruct|Stronger offline assistant — great at Linux/shell + coding (~4.7GB)
+
 # --- Text embeddings (RAG backbone; tiny, run on llama.cpp --embedding / onnxruntime) ---
 850|bge-small-en-v15-gguf|embed|CompendiumLabs/bge-small-en-v1.5-gguf|bge-small-en-v1.5-q8_0.gguf|gguf|no|37748736|embed/bge-small-en|Tiny fast English embedder, great default
 840|all-minilm-l6-v2-onnx|embed|Xenova/all-MiniLM-L6-v2|onnx/model_quantized.onnx|onnx|no|24117248|embed/all-minilm-l6-v2|Classic sentence-transformer, onnxruntime

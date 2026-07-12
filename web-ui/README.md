@@ -1,8 +1,8 @@
 # Web UI
 
-Single-page application contained entirely in one `index.html` file.
-No build step, no npm, no bundler -- just open the file in a browser.
-Navigation uses hash-based routing (`window.location.hash`) with a
+A no-build single-page app. Markup and logic live in `index.html`; styling
+is in a separate `styles.css`. No npm, no bundler -- open the file in a
+browser. Navigation uses hash-based routing (`window.location.hash`) with a
 `hashchange` listener that calls a central `router()` function.
 
 ## Page Structure
@@ -23,55 +23,80 @@ graph TD
     MODELS --> MODELS_DATA[(inline model data)]
     CONTENT --> CL_ARR[(CONTENT_LIBRARY array)]
 
-    HR -- "served by server.js" --> API["/api/status/* endpoints"]
-    API --> LIVE["Live install/disk status"]
-    HR -- "static file:// or HTTP" --> GRACEFUL["Graceful degradation (no API)"]
+    HR -- "static file:// (no API)" --> GRACEFUL["Graceful degradation"]
+    HR -- "served by server.js" --> SRV[server.js]
+    SRV --> STATUS["/api/status/* (live status)"]
+    SRV --> DL["/api/download/* (trigger jobs)"]
+    SRV --> SSE["/api/downloads/stream (SSE progress)"]
+    SRV --> KIWIX["kiwix-serve auto-launch (.zim)"]
 ```
 
-The app works fully offline as a static file (`file://` protocol). When
-served by `server.js`, it additionally fetches `/api/status/tools`,
-`/api/status/content`, `/api/status/disk`, and `/api/status/all` to show
-real-time installation and disk-usage information.
+The app works fully offline as a static file (`file://`). When served by
+[`scripts/server.js`](../scripts/server.js) (zero-dependency Node) it adds a
+JSON API and live data:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/api/status/{tools,models,content,kiwix,disk,all}` | Live install + disk status |
+| `/api/download/{tools,models,content,update,cancel}` | Trigger / cancel mirror jobs |
+| `/api/downloads/stream` | Server-Sent Events: live download progress |
+| `/api/health` | Server liveness |
+
+The server also auto-launches `kiwix-serve` for any complete `.zim` it finds
+in `content/zim`, so offline encyclopedias work without manual setup. Without
+the server, the UI degrades gracefully (no live status, static data only).
 
 ## Data Model
 
-**TOOLS array** -- each entry contains:
+**TOOLS array** -- one entry per tool (43 tools across 6 categories):
 `id`, `name`, `category`, `icon`, `iconBg`, `logo`, `desc`, `platforms`,
 `downloads` (source/releases/binaries), and `details` (overview, features).
+Per-platform status for the aarch64 aliases (Thor, GB10) and OpenWRT is
+derived at runtime by `deriveToolPlatforms()`, so each tool only declares its
+base `jetson`/`ubuntu`/`mac`/`windows` status.
 
-**TOOL_META object** -- keyed by tool id, provides:
-`license`, `licenseUrl`, `maker`, `website`.
+**TOOL_META object** -- keyed by tool id: `license`, `licenseUrl`, `maker`,
+`website`.
 
 **CONTENT_LIBRARY array** -- offline ZIM files for Kiwix, each with:
 `id`, `name`, `category`, `size`, `file`, `source`, `articles`, `details`.
 
-### Tool Categories
+### Tool Categories (`TOOL_CATEGORIES`)
 
 | ID | Label |
 |----|-------|
 | `ai-inference` | AI Inference |
 | `ai-platform` | AI Platform |
-| `creative` | Creative |
+| `creative` | Creative & Engineering |
 | `media` | Media |
 | `infrastructure` | Infrastructure |
 | `dev-tools` | Dev Tools |
+
+### Platforms (`PLATFORMS`)
+
+Selectable in the UI: `jetson` (Jetson Orin), `thor` (Jetson Thor), `gb10`
+(GB10 Grace-Blackwell), `ubuntu`, `mac`, `windows`, `openwrt`. All aarch64
+boards share the `linux-arm64` artifacts and differ only by GPU/CUDA profile;
+OpenWRT routers expose the content/sync/infra subset only.
 
 ## File Structure
 
 ```
 web-ui/
-  index.html      -- the entire application (HTML + CSS + JS)
-  logos/           -- SVG/PNG tool logos
-  screenshots/    -- tool screenshots
-  diagrams/       -- architecture diagrams
-  assets/         -- additional static assets
+  index.html     -- markup + application logic (HTML + JS)
+  styles.css     -- all styling (linked from index.html)
+  logos/         -- SVG/PNG tool logos
+  screenshots/   -- tool screenshots
+  samples/       -- sample prompts / text used by detail pages
+  README.md      -- this file
 ```
 
 ## Running
 
 1. **Static** -- open `index.html` directly in a browser (`file://`).
-2. **Via server** -- run `node server.js` from the project root; the UI
-   is served at `http://localhost:<port>` with live API status endpoints.
+2. **Via server** -- `node ../scripts/server.js [port]` (default `3000`), or
+   `./start.sh serve [port]` from the project root. The 24/7 loop and verify
+   scripts honor `VALARK_WEB_PORT` (set in `.env`) when launching the server.
 
 ---
 

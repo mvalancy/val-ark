@@ -38,18 +38,20 @@ verify_local() {
     echo "── local functional checks ──"
     local td; td=$(native_tools_dir)
 
-    # 1) native tool binaries answer --version/--help
-    local any_tool=0
-    for rel in ffmpeg/ffmpeg syncthing/syncthing btop/btop helix/hx kiwix/kiwix-serve \
-               llama-cpp/llama-cli vosk/.done dev-cli/rg dev-cli/jq; do
-        local bin="$td/${rel}"
-        if [ -x "$bin" ]; then
-            any_tool=1
-            if "$bin" --version >/dev/null 2>&1 || "$bin" --help >/dev/null 2>&1; then
-                chk "tool runs: ${rel##*/}"
-            else
-                bad "tool present but won't run: ${rel##*/} ($bin)"
-            fi
+    # 1) native tool binaries answer --version/--help. Binaries install at
+    # nested paths (btop/bin/btop, piper/piper/piper, llama-cpp/llama-bNNNN/...),
+    # so resolve each by NAME under its tool dir rather than a fixed path.
+    local any_tool=0 tool name bin
+    for pair in ffmpeg:ffmpeg syncthing:syncthing btop:btop helix:hx kiwix:kiwix-serve \
+                llama-cpp:llama-cli sqlite:sqlite3 redis:redis-server tmux:tmux dev-cli:rg dev-cli:jq; do
+        tool="${pair%%:*}"; name="${pair##*:}"
+        bin=$(find "$td/$tool" -name "$name" -type f \( -perm -u+x -o -perm -g+x -o -perm -o+x \) 2>/dev/null | head -1)
+        [ -n "$bin" ] || continue
+        any_tool=1
+        if "$bin" --version >/dev/null 2>&1 || "$bin" --help >/dev/null 2>&1 || "$bin" -V >/dev/null 2>&1; then
+            chk "tool runs: $name"
+        else
+            bad "tool present but won't run: $name ($bin)"
         fi
     done
     [ "$any_tool" = 0 ] && skip "no native tool binaries in $td yet"
@@ -70,22 +72,38 @@ verify_local() {
         [ -n "$zim" ] || skip "no ZIM downloaded yet to serve"
     fi
 
-    # 3) tiny LLM inference if a small gguf + llama-cli exist
-    local lc="$td/llama-cli"; [ -x "$lc" ] || lc="$td/llama-cpp/llama-cli"
-    local sg; sg=$(find "$MODELS_DIR/llm" "$MODELS_DIR/embed" -name '*.gguf' 2>/dev/null | sort -k1 | head -1)
+    # 3) tiny LLM inference if a small generative gguf + llama-cli exist.
+    # Resolve llama-cli at its nested build-tagged path (llama-cpp/llama-bNNNN/
+    # llama-cli) by NAME, same as the tool check above — a fixed path misses it.
+    # Newer llama-cli auto-enters conversation mode for instruct models and never
+    # exits on stdin EOF (it hangs until killed), so run it single-turn
+    # (-st -no-cnv) with stdin closed: it generates one turn and exits cleanly.
+    # Pick the smallest *generative* model under models/llm — embedding models
+    # under models/embed are BERT-arch and can't text-generate (false FAIL); the
+    # >10M filter also skips zero-byte/stub ggufs. Cold loads off NTFS are slow,
+    # hence the generous timeout; the fast inference path is the fleet GPU.
+    local lc; lc=$(find "$td/llama-cpp" -name 'llama-cli' -type f \( -perm -u+x -o -perm -g+x -o -perm -o+x \) 2>/dev/null | head -1)
+    [ -n "$lc" ] || lc="$td/llama-cli"
+    local sg; sg=$(find "$MODELS_DIR/llm" -name '*.gguf' -size +10M -printf '%s\t%p\n' 2>/dev/null | sort -n | head -1 | cut -f2)
     if [ -x "$lc" ] && [ -n "$sg" ]; then
-        if timeout 90 "$lc" -m "$sg" -p "hello" -n 8 --no-warmup >/dev/null 2>&1; then
+        if timeout 150 "$lc" -m "$sg" -p "hello" -n 8 -st -no-cnv --no-warmup </dev/null >/dev/null 2>&1; then
             chk "llama.cpp inference works ($(basename "$sg"))"
         else bad "llama.cpp inference failed on $(basename "$sg")"; fi
     else
-        skip "llama-cli or a small gguf not available for inference check"
+        skip "llama-cli or a small generative gguf not available for inference check"
     fi
 
-    # 4) web API health (only if already running — don't start it)
-    if curl -fsS --max-time 5 "http://127.0.0.1:3000/api/health" >/dev/null 2>&1; then
-        chk "web server /api/health responds"
+    # 4) web API health — validate it's ACTUALLY the Val Ark server (a bare 200
+    # could be a different app squatting the port), on the configured port.
+    # Val Ark's /api/health returns {"status":"ok","version":"1.0.0",...}. A
+    # different app squatting the port returns something else (no status:ok), so
+    # that field alone identifies us. (Retry — the server may be warming caches.)
+    local wport="${VALARK_WEB_PORT:-3000}" hb
+    hb=$(curl -fsS --retry 3 --retry-delay 1 --max-time 6 "http://127.0.0.1:${wport}/api/health" 2>/dev/null)
+    if echo "$hb" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+        chk "Val Ark web server responds (:$wport, $(echo "$hb" | grep -oE '"version":"[^"]*"'))"
     else
-        skip "web server not running on :3000"
+        skip "Val Ark web server not running/identified on :$wport"
     fi
 
     # 5) integrity of a sample of managed files (size)
@@ -116,7 +134,31 @@ verify_fleet() {
         if out=$("${SSH[@]}" "$host" "uname -m; df -h '$fdata' 2>/dev/null | tail -1" 2>/dev/null) && [ -n "$out" ]; then
             local arch; arch=$(echo "$out" | head -1)
             chk "fleet node reachable (arch=$arch)"
-            if echo "$out" | grep -q "$(basename "$fdata")"; then chk "fleet node sees shared content"
+            if echo "$out" | grep -q "$(basename "$fdata")"; then
+                chk "fleet node mounts shared mirror (uses our disk over the network)"
+                # Real GPU inference on the node, reading a model straight off the
+                # share. Newer llama.cpp builds turned llama-cli into a REPL that
+                # hangs on SSH stdin EOF, and some nodes ship only llama-server, so:
+                # prefer llama-completion, fall back to a *real* llama-cli with
+                # stdin closed; skip cleanly if neither single-shot binary exists.
+                local rcmd
+                rcmd=$(cat <<EOF
+g=\$(find "$fdata/models/llm" "$fdata/models/embed" -name '*.gguf' 2>/dev/null | sort | head -1)
+[ -n "\$g" ] || exit 0
+bin=""
+command -v llama-completion >/dev/null 2>&1 && bin=llama-completion
+[ -z "\$bin" ] && command -v llama-cli >/dev/null 2>&1 && [ -x "\$(readlink -f "\$(command -v llama-cli)")" ] && bin=llama-cli
+[ -n "\$bin" ] || exit 0
+timeout 120 \$bin -m "\$g" -p ping -n 8 -ngl 999 </dev/null 2>&1 | grep -iE 'offload|CUDA|tokens per second|llama_perf' | head -3
+EOF
+)
+                local inf; inf=$("${SSH[@]}" "$host" "$rcmd" 2>/dev/null)
+                if [ -n "$inf" ]; then
+                    if echo "$inf" | grep -qiE 'offload|CUDA'; then chk "fleet node GPU inference works (model served over NFS)"
+                    else chk "fleet node inference ran (CPU path)"; fi
+                else
+                    skip "fleet node: no llama-cli + reachable model for an inference check"
+                fi
             else skip "fleet node: shared content not mounted"; fi
         else
             skip "fleet node unreachable"

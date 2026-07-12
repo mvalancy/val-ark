@@ -28,8 +28,9 @@ the web server and legacy scripts work unchanged. Resolution + disk math live in
 The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
 
 1. **Diversity first** — one item (the *smallest*) from every category before
-   deepening any single one. Guarantees breadth across ~45 categories (22 ZIM
-   topics, 18 model modalities, OS/router/netboot installers).
+   deepening any single one. Guarantees breadth across ~40+ categories (22 ZIM
+   topics, 17 model modalities, and netboot / OS-install / router-firmware /
+   jetson-bsp installers).
 2. **Small valuable files** — then items by **value ÷ byte**, capped per category
    so a prolific category (devdocs, TED…) can't crowd out diversity.
 3. **Fill remaining space** — then the big flagships by intrinsic value (full
@@ -39,16 +40,18 @@ The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
    sole representative of a category) to make room.
 
 Everything scales from live `df` headroom (`avail − max(2%, 50GB)`); there are no
-hardcoded sizes. Same-content ZIM flavours (maxi/nopic/mini) collapse to the most
-complete one.
+hardcoded sizes. On a shared disk an optional footprint cap bounds Val Ark itself:
+`VALARK_MAX_GB` caps its total usage (budget = min(headroom, cap − used)) and
+`VALARK_MODEL_MAX_GB` skips any single model bigger than N GB. Same-content ZIM
+flavours (maxi/nopic/mini) collapse to the most complete one.
 
 ## Catalogs (sources of candidates)
 
 | Source | File | Notes |
 |--------|------|-------|
 | Kiwix ZIM library | live OPDS via `scripts/lib/kiwix_catalog.py` | **Always current** — ZIM dates never go stale. ~1700+ entries across 9 languages by default (`VALARK_ZIM_LANGS`). |
-| Models (diversity) | `data/models-extra.tsv` | Small high-value models across 18 modalities (embeddings, rerankers, tiny VLMs, OCR, depth, segmentation, detection, audio, time-series). |
-| OS / router / netboot | `data/installers.tsv` | Ubuntu/Debian/Fedora/Alpine/Arch/RPi ISOs, OpenWRT firmware, netboot.xyz, open NVIDIA L4T — for PXE / mesh commissioning. |
+| Models (diversity) | `data/models-extra.tsv` | Small high-value models across 17 modalities (embeddings, rerankers, tiny VLMs, OCR, depth, segmentation, detection, audio, time-series). |
+| OS / router / netboot | `data/installers.tsv` | Distro ISOs (Alpine/Debian/Ubuntu/…), OpenWRT firmware, netboot.xyz, Jetson BSP — for PXE / mesh commissioning. |
 
 The big LLM/STT/TTS/VLM/image catalog is still managed by `download-models.sh`.
 
@@ -58,15 +61,18 @@ The big LLM/STT/TTS/VLM/image catalog is still managed by `download-models.sh`.
 scripts/librarian.sh status        # disk + per-category coverage
 scripts/librarian.sh plan          # dry-run: the ordered plan + totals
 scripts/librarian.sh fill          # download the plan (resumable, never aborts)
-scripts/librarian.sh fill --time 1800 --max-bytes 50G   # bounded chunk
+scripts/librarian.sh fill --time 1800 --max-bytes 53687091200   # bounded chunk (secs / raw bytes)
 scripts/librarian.sh verify        # integrity-check managed files; requeue bad
-scripts/librarian.sh evict --need 100G   # free space, lowest value/byte first
+scripts/librarian.sh evict --need 107374182400   # free space (raw bytes), lowest value/byte first
 scripts/librarian.sh refresh       # re-pull the live ZIM catalog
+scripts/librarian.sh maintain      # refresh + verify + bounded top-up + report (loop core)
 ```
 
-Downloads are resumable (`curl -C -` / `hf`), retried, size-verified, atomically
-renamed, recorded in `state/manifest.tsv`, and a single `flock` ensures only one
-filler runs at a time. A `state/STOP` flag halts filling.
+Downloads prefer **aria2** (8 connections, ~3x faster on per-connection-throttled
+mirrors), falling back to single-stream `curl -C -` (and `hf` for repo pulls). All
+are resumable, retried, size-verified, atomically renamed, recorded in
+`state/manifest.tsv`, and a single `flock` ensures only one filler runs at a time.
+A `state/STOP` flag halts filling.
 
 ## The 24/7 loop
 
@@ -75,21 +81,32 @@ filler runs at a time. A `state/STOP` flag halts filling.
 1. ensure the data disk is **writable** (self-heals an NTFS volume Windows left
    read-only; preserves any NFS export),
 2. repair the repo↔disk symlink layout,
-3. **refresh the live catalog** → content links self-heal (no stale dates),
-4. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
+3. **ensure the web server is up** (`scripts/server.js`, which auto-launches
+   `kiwix-serve` for any complete ZIM),
+4. **ensure standard-port access** — when `VALARK_WEB_PUBLIC_PORT` is set (e.g.
+   80), keep an idempotent iptables NAT redirect public→web port in place
+   (LAN + VPN interfaces; loopback untouched),
+5. **keep enabled community services running** (`VALARK_SERVICES` in `.env` —
+   chat, mail, forum, paste),
+6. **refresh the live catalog** → content links self-heal (no stale dates),
+7. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
    are transient, not dead), web-ui assets, symlinks → `state/linkcheck.txt`,
-5. **integrity verify** → requeue corrupt/short downloads,
-6. **top-up fill** (bounded; skipped if a fill already runs),
-7. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
-   real ZIM, a tiny LLM infers, the web API answers, and each configured remote
-   mesh node (`VALARK_FLEET` in `.env`) is reachable and sees the shared content,
-8. health report (`state/health.json`) + a fleet coordination drop
-   (`state/coordination/`).
+8. **integrity verify** → requeue corrupt/short downloads,
+9. **top-up fill** (bounded; skipped if a fill already runs),
+10. **weekly tool refresh** — re-run the tool mirror so apps track their latest
+    upstream versions (`VALARK_TOOL_REFRESH_DAYS`, default 7; a failed pass
+    retries in a day),
+11. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
+    real ZIM, a tiny LLM infers, the web API answers, and each configured remote
+    mesh node (`VALARK_FLEET` in `.env`) is reachable and sees the shared content
+    (plus a Playwright UI smoke when installed),
+12. health report (`state/health.json`) + a fleet coordination drop
+    (`state/coordination/`).
 
 Install it as a durable, reboot-surviving job:
 
 ```bash
-scripts/loop.sh install 30     # run a cycle every 30 min (flock-guarded)
+scripts/loop.sh install 30     # every 30 min + @reboot resume (flock-guarded)
 scripts/loop.sh uninstall
 scripts/loop.sh run 1800       # or run in the foreground forever
 ```

@@ -22,10 +22,11 @@
     --pink: #f472b6;
     --cyan: #22d3ee;
     --badge-top: #2563eb;
-    --radius: 10px;
-    --radius-sm: 6px;
-    --shadow: 0 4px 24px rgba(0,0,0,0.3);
-    --mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', monospace;
+    /* Engineering-brutalist: sharp corners, flat surfaces (modeled on valpatel.com) */
+    --radius: 5px;
+    --radius-sm: 3px;
+    --shadow: 0 2px 10px rgba(0,0,0,0.28);
+    --mono: 'SF Mono', 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
 }
 
 /* Light Theme */
@@ -669,6 +670,99 @@ body {
     transition: opacity 0.2s, transform 0.2s;
 }
 .kiwix-banner-btn:hover { opacity: 0.95; transform: translateY(-1px); }
+
+/* Embedded sub-app frame (Kiwix library today; chat/mail/forums as added).
+   Lives below the fixed .top-nav, so the Val Ark header is always a way home. */
+.subapp {
+    margin: 1rem 0 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--bg-secondary);
+    box-shadow: var(--shadow, 0 1px 3px rgba(0,0,0,0.2));
+}
+.subapp-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+}
+.subapp-id { display: flex; align-items: center; gap: 8px; font-size: 0.9em; min-width: 0; }
+.subapp-id strong { color: var(--text-primary); white-space: nowrap; }
+.subapp-sub { color: var(--text-muted); font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* TLS / "trust this Ark" banner */
+.tls-banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    margin: 0 0 1.5rem; padding: 14px 18px;
+    border: 1px solid var(--accent, #4da6ff); border-radius: var(--radius, 10px);
+    background: var(--accent-dim, rgba(77,166,255,0.12));
+}
+.tls-banner-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.tls-banner-icon { font-size: 1.4em; flex: none; }
+.tls-banner-title { font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
+.tls-banner-desc { color: var(--text-secondary); font-size: 0.9em; line-height: 1.4; }
+.tls-banner-actions { display: flex; gap: 8px; flex: none; flex-wrap: wrap; }
+.tls-btn {
+    background: var(--bg-card); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: var(--radius-sm, 6px);
+    padding: 8px 14px; font-weight: 600; font-size: 0.88em; text-decoration: none; white-space: nowrap;
+    transition: all 0.15s;
+}
+.tls-btn:hover { border-color: var(--accent); background: var(--accent-dim); }
+.tls-btn-primary { background: var(--accent, #4da6ff); color: #fff; border-color: var(--accent, #4da6ff); }
+.tls-btn-primary:hover { filter: brightness(1.08); background: var(--accent, #4da6ff); }
+.tls-banner-ok { border-color: var(--green, #4ade80); background: rgba(74,222,128,0.10); }
+@media (max-width: 768px) { .tls-banner-actions { width: 100%; } .tls-btn { flex: 1 1 auto; text-align: center; } }
+
+.subapp-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green, #4ade80); box-shadow: 0 0 6px var(--green, #4ade80); flex: none; }
+.subapp-dot.down { background: var(--red, #f87171); box-shadow: 0 0 6px var(--red, #f87171); }
+.subapp-dot.unknown { background: var(--text-muted, #9aa3ad); box-shadow: none; }
+.subapp-actions { display: flex; gap: 6px; flex: none; }
+.subapp-btn {
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 5px 10px;
+    font-size: 0.8em;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: all 0.15s;
+}
+.subapp-btn:hover { color: var(--text-primary); background: var(--accent-dim); border-color: var(--accent); }
+.subapp-frame {
+    display: block;
+    width: 100%;
+    height: calc(100vh - 230px);
+    min-height: 460px;
+    border: 0;
+    background: #fff;
+}
+/* Fullscreen: fill the viewport BELOW the 60px fixed nav, so the Val Ark logo
+   (back to the ark) is never hidden. */
+.subapp.fullscreen {
+    position: fixed;
+    top: 60px; left: 0; right: 0; bottom: 0;
+    z-index: 90;
+    margin: 0;
+    border-radius: 0;
+    border: 0;
+    display: flex;
+    flex-direction: column;
+}
+.subapp.fullscreen .subapp-frame { height: auto; flex: 1 1 auto; min-height: 0; }
+body.subapp-fullscreen-open { overflow: hidden; }
+@media (max-width: 768px) {
+    .subapp-frame { height: calc(100vh - 200px); }
+    .subapp.fullscreen { top: 56px; }
+    .subapp-sub { display: none; }
+}
 
 /* Screenshot Gallery */
 .screenshot-gallery {
@@ -1556,3 +1650,117 @@ html[data-theme="light"] .theme-toggle .icon-moon { display: inline !important; 
         display: none;
     }
 }
+
+/* =========================================================================
+   Catalog browse + one-click request + community hub  (offline, theme-aware)
+   ========================================================================= */
+.catalog-section { margin-top: 2.5rem; }
+.catalog-search {
+    width: 100%;
+    max-width: 480px;
+    margin: 0.5rem 0 1rem;
+    padding: 10px 14px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 0.95em;
+}
+.catalog-search:focus { outline: none; border-color: var(--accent); }
+.catalog-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.catalog-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    cursor: default;
+}
+.catalog-card h3 { margin: 0; }
+.catalog-card .dl-action-btn { margin-top: auto; align-self: flex-start; }
+.catalog-loading { color: var(--text-muted); padding: 1rem 0; grid-column: 1 / -1; }
+.catalog-more { color: var(--text-muted); font-size: 0.85em; margin-top: 1rem; }
+
+/* Whole-category mirror button in the models list */
+.category-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.cat-mirror-btn { font-size: 0.8em; padding: 6px 12px; }
+
+/* Full-Wikipedia hero reuses the kiwix-banner look */
+.wiki-hero .kiwix-banner-btn { border: none; cursor: pointer; font: inherit; }
+
+/* Community service cards */
+.community-card { display: flex; flex-direction: column; cursor: default; }
+.community-action { margin-top: 12px; }
+.community-action .dl-action-btn { text-decoration: none; display: inline-block; }
+.community-about { font-size: 0.82em; color: var(--text-muted); margin-top: 10px; text-decoration: none; }
+.community-about:hover { color: var(--accent); }
+.svc-badge { font-size: 0.72em; font-weight: 600; padding: 2px 8px; border-radius: 999px; margin-left: 6px; vertical-align: middle; }
+.svc-on { color: var(--green); background: var(--green-dim); }
+.svc-starting { color: var(--accent); background: var(--accent-dim); }
+.svc-off { color: var(--text-muted); background: var(--bg-tertiary); }
+.svc-hint { font-size: 0.8em; color: var(--text-muted); }
+.svc-hint code { font-size: 0.9em; }
+
+/* =========================================================================
+   Aesthetic layer — engineering-brutalist, modeled on valpatel.com.
+   Restrained palette, sharp corners, monospace tech accents, flat cards,
+   generous whitespace. Fully offline: system + monospace stacks only, no CDN.
+   ========================================================================= */
+
+/* Monospace on the "engineering" surfaces: logo, labels, tags, buttons, stats.
+   This is the signature that reads as tooling/infra rather than a consumer app. */
+.nav-logo,
+.category-title,
+.hero .stats,
+.tag,
+.dl-action-btn,
+.btn,
+.svc-badge,
+.platform-badge,
+.top-badge,
+.breadcrumb,
+.card-meta .tag,
+.catalog-more,
+.nav-disk span {
+    font-family: var(--mono);
+}
+.nav-logo { font-weight: 700; letter-spacing: 0.01em; }
+.hero .stats { letter-spacing: 0.02em; }
+
+/* Tags / badges as terminal-style chips: small, upper, tracked. */
+.tag,
+.svc-badge,
+.platform-badge,
+.top-badge {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.7em;
+    font-weight: 600;
+}
+
+/* Tighter, more assertive headings — an engineering statement, not marketing. */
+h1, h2, h3 { letter-spacing: -0.015em; }
+.hero h1 { font-weight: 800; letter-spacing: -0.03em; }
+
+/* Flat cards: thin border, no drop shadow, no lift. Hover shifts the border to
+   the accent and lightens the fill — restrained, precise, not bouncy. */
+.card {
+    box-shadow: none;
+    border: 1px solid var(--border);
+    transition: border-color .14s ease, background-color .14s ease;
+}
+.card:hover {
+    transform: none;
+    box-shadow: none;
+    border-color: var(--accent);
+    background: var(--bg-card-hover);
+}
+
+/* CTAs: sharp, monospace, confident. */
+.dl-action-btn,
+.btn {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+/* A touch more breathing room between sections (valpatel's generous rhythm). */
+.category-section { margin-top: 2.6rem; }
+.section-desc { max-width: 68ch; }

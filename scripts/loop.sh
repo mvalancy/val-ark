@@ -92,12 +92,167 @@ EOF
     fi
 }
 
+# Keep the Val Ark web UI server (which auto-launches Kiwix) running AND fresh.
+# server.js launches kiwix-serve only once at startup, so it neither recovers if
+# kiwix dies nor picks up newly-downloaded ZIMs — the loop handles both here.
+# Resolve a Node binary in cron-safe order: the portable install that setup.sh
+# bootstraps (and start.sh uses), any nvm install, then PATH. Cron's PATH has
+# none of these, so never rely on `command -v` alone.
+_va_node() {
+    local n
+    for n in "$HOME/.local/node/bin/node" \
+             "$HOME/.nvm/versions/node/v20.20.2/bin/node" \
+             "$(command -v node 2>/dev/null)"; do
+        [ -n "$n" ] && [ -x "$n" ] && { echo "$n"; return 0; }
+    done
+    n=$(ls -1d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V | tail -1)
+    [ -n "$n" ] && [ -x "$n" ] && echo "$n"
+}
+_va_start_web() {
+    local port="$1" node; node="$(_va_node)"
+    [ -n "$node" ] || { log "${RED}node not found${NC}; cannot start web server"; return 1; }
+    setsid nohup "$node" "${_DIR}/server.js" "$port" >"${LOG_DIR}/server.out" 2>&1 </dev/null & disown
+}
+ensure_web_server() {
+    local port="${VALARK_WEB_PORT:-3000}"
+    if curl -fsS --max-time 4 "http://127.0.0.1:${port}/api/health" 2>/dev/null | grep -q '"status".*"ok"'; then
+        # Web up — is kiwix running and serving roughly all complete ZIMs?
+        local ks krun kfiles zc
+        ks=$(curl -fsS --max-time 5 "http://127.0.0.1:${port}/api/status/kiwix" 2>/dev/null)
+        krun=$(echo "$ks" | grep -oE '"running":(true|false)' | grep -oE 'true|false')
+        kfiles=$(echo "$ks" | grep -oE '"files":[0-9]+' | grep -oE '[0-9]+'); kfiles=${kfiles:-0}
+        # Count only SERVABLE ZIMs (server.js skips <1MB) so the gap reflects
+        # genuinely-new complete content, not the always-skipped tiny ones.
+        zc=$(find "$ZIM_DIR" -maxdepth 1 -name '*.zim' -size +1M 2>/dev/null | wc -l)
+        if { [ "$krun" = "false" ] && [ "$zc" -gt 0 ]; } || [ $(( zc - kfiles )) -ge 20 ]; then
+            log "${YELLOW}kiwix stale/down${NC} (serving $kfiles of $zc ZIMs) — restarting server to refresh"
+            fuser -k "${port}/tcp" 2>/dev/null; fuser -k 8888/tcp 2>/dev/null
+            sleep 2   # let the old process actually release the port
+            _va_start_web "$port" && log "${GREEN}restarted${NC} web server on :$port"
+        else
+            log "web up on :$port (kiwix ${krun:-?}, $kfiles ZIMs)"
+        fi
+        return 0
+    fi
+    if ss -tln 2>/dev/null | grep -q ":${port} "; then
+        log "${YELLOW}:$port held by another app${NC} — set VALARK_WEB_PORT in .env to a free port"; return 1
+    fi
+    _va_start_web "$port" && log "${GREEN}started Val Ark web server${NC} on :$port"
+}
+
+# Standard-port access: when VALARK_WEB_PUBLIC_PORT is set (e.g. 80), keep an
+# idempotent iptables NAT redirect public->web port in place. PREROUTING covers
+# every real interface (LAN + tailscale/VPN) while leaving loopback alone —
+# appliances often pin their own UI to 127.0.0.1:80 — and needs no privileged
+# bind or setcap on node. Re-asserted every cycle, so it survives reboots and
+# firewall reloads. Best-effort: logs and moves on where iptables/sudo are absent.
+ensure_public_port() {
+    local pub="${VALARK_WEB_PUBLIC_PORT:-}" web="${VALARK_WEB_PORT:-3000}"
+    [ -n "$pub" ] && [ "$pub" != "$web" ] || return 0
+    # sbin isn't on PATH in cron/ssh shells on Debian-family systems
+    local PATH="/usr/sbin:/sbin:$PATH"
+    if ! command -v iptables >/dev/null 2>&1; then
+        log "${YELLOW}iptables not found${NC} — cannot map :${pub} -> :${web}"; return 0
+    fi
+    local SUDO=""
+    [ "$(id -u)" = "0" ] || SUDO="sudo -n"
+    local ipt ensured="" failed=""
+    for ipt in iptables ip6tables; do
+        command -v "$ipt" >/dev/null 2>&1 || continue
+        if $SUDO "$ipt" -t nat -C PREROUTING -p tcp --dport "$pub" -j REDIRECT --to-ports "$web" 2>/dev/null \
+           || $SUDO "$ipt" -t nat -A PREROUTING -p tcp --dport "$pub" -j REDIRECT --to-ports "$web" 2>/dev/null; then
+            ensured="${ensured}${ipt} "
+        else
+            failed="${failed}${ipt} "
+        fi
+    done
+    [ -n "$ensured" ] && log "public port ${GREEN}:${pub} -> :${web}${NC} (${ensured% })"
+    [ -n "$failed" ] && log "${YELLOW}could not ensure :${pub} redirect via ${failed% }${NC} (needs passwordless sudo or root)"
+    return 0
+}
+
+# Keep enabled community services (VALARK_SERVICES in .env, e.g. "chat mail forum
+# paste") running. `<id>.sh start` is idempotent (a no-op when already up), so this
+# both launches them and respawns any that died. Best-effort and non-fatal.
+ensure_services() {
+    local svcs="${VALARK_SERVICES:-}"
+    [ -n "$svcs" ] || { log "no community services enabled (set VALARK_SERVICES in .env)"; return 0; }
+    local id sh
+    for id in $svcs; do
+        sh="${_DIR}/services/${id}.sh"
+        if [ -x "$sh" ] || [ -f "$sh" ]; then
+            if timeout 120 bash "$sh" start >/dev/null 2>&1; then
+                log "service ${GREEN}up${NC}: ${id}"
+            else
+                log "${YELLOW}service ${id} not started${NC} (mirror/build it: scripts/tools/${id}.sh)"
+            fi
+        else
+            log "${YELLOW}unknown service '${id}'${NC} (no scripts/services/${id}.sh)"
+        fi
+    done
+}
+
+# Periodic tool refresh — keep the mirrored apps at their LATEST upstream
+# versions. Tool scripts resolve versions live (github_latest_tag etc.) and
+# skip anything already current, so an up-to-date pass is cheap; when upstream
+# shipped a release, only the changed artifacts download. Weekly by default
+# (VALARK_TOOL_REFRESH_DAYS, 0 = disabled); a failed/partial pass retries in a
+# day (downloads are idempotent + resumable, so retries just fill gaps).
+tool_refresh() {
+    local days="${VALARK_TOOL_REFRESH_DAYS:-7}"
+    [ "$days" = "0" ] && { log "tool refresh disabled"; return 0; }
+    local marker="${STATE_DIR}/tool-refresh.next" now due
+    now=$(date +%s); due=$(cat "$marker" 2>/dev/null || echo 0)
+    if [ "$now" -lt "$due" ]; then
+        log "tool refresh not due yet ($(date -d "@$due" '+%F %H:%M' 2>/dev/null || echo soon))"
+        return 0
+    fi
+    log "refreshing tool mirror to latest upstream versions (bounded $(( ${VALARK_TOOL_REFRESH_TIMEOUT:-7200} / 60 ))min)"
+    if FORCE_COLOR=0 timeout "${VALARK_TOOL_REFRESH_TIMEOUT:-7200}" \
+        bash "${_DIR}/download-tools.sh" all >> "${LOG_DIR}/tool-refresh.log" 2>&1; then
+        echo $(( now + days * 86400 )) > "$marker"
+        log "${GREEN}tool refresh complete${NC} (next in ${days}d)"
+    else
+        echo $(( now + 86400 )) > "$marker"
+        log "${YELLOW}tool refresh incomplete — retrying in 1d (see tool-refresh.log)${NC}"
+    fi
+}
+
+# Dynamic UI smoke — exercise the web UI's controls and the "back to the ark"
+# header against the LIVE server (so the embedded library frame is covered too).
+# Best-effort: skipped cleanly if Playwright deps aren't installed.
+ui_smoke() {
+    local port="${VALARK_WEB_PORT:-3000}"
+    local pw="${PROJECT_ROOT}/tests/screenshots/node_modules/.bin/playwright"
+    [ -x "$pw" ] || { log "ui smoke skipped (playwright not installed: cd tests/screenshots && npm install)"; return 0; }
+    local node nodedir; node="$(_va_node)"; [ -n "$node" ] || { log "ui smoke skipped (node not found)"; return 0; }
+    nodedir="$(dirname "$node")"
+    local out
+    out=$(cd "${PROJECT_ROOT}/tests/screenshots" && \
+        PATH="${nodedir}:$PATH" VALARK_TEST_URL="http://127.0.0.1:${port}" \
+        timeout 180 "$pw" test specs/ui-exercise.spec.ts -g "back-to-ark|offline library|storage breakdown" --reporter=line 2>&1 | tail -4)
+    if echo "$out" | grep -qE '[0-9]+ passed' && ! echo "$out" | grep -qE '[0-9]+ failed'; then
+        log "${GREEN}ui smoke OK${NC}: $(echo "$out" | grep -oE '[0-9]+ passed' | head -1)"
+    else
+        log "${YELLOW}ui smoke issues${NC}: $(echo "$out" | tr '\n' ' ' | tail -c 220)"
+    fi
+}
+
 loop_once() {
     step "cycle start"
     step "1. ensure data disk writable"
     if valark_ensure_writable; then log "${GREEN}writable${NC}: $DATA_ROOT"; else log "${RED}NOT writable${NC}: $DATA_ROOT (manual remount may be needed)"; fi
 
     step "2. repair layout"; valark_ensure_layout && log "layout ok"
+
+    step "2b. ensure web server + kiwix running"; ensure_web_server
+
+    step "2c. ensure standard-port access (VALARK_WEB_PUBLIC_PORT)"; ensure_public_port
+
+    step "2d. ensure enabled community services running"; ensure_services
+
+    step "2e. self-mirror (offline: serve our own code for LAN bootstrap)"
+    FORCE_COLOR=0 bash "${_DIR}/mirror-self.sh" 2>&1 | tail -1 | sed 's/^/    /'
 
     step "3. refresh live catalog (heals stale content links)"
     bash "$LIBRARIAN" refresh >/dev/null 2>&1 && log "catalog refreshed" || log "${YELLOW}catalog refresh failed (cache retained)${NC}"
@@ -106,10 +261,17 @@ loop_once() {
 
     step "5. integrity verify"; bash "$LIBRARIAN" verify 2>&1 | tail -1 | sed 's/^/    /'
 
+    step "5b. re-fill pinned requests (user-requested items win before generic fill)"
+    FORCE_COLOR=0 bash "$LIBRARIAN" pins --refill 2>&1 | tail -1 | sed 's/^/    /'
+
     step "6. top-up fill (<=${FILL_SECONDS}s; skipped if a fill is already running)"
     FORCE_COLOR=0 bash "$LIBRARIAN" fill --time "$FILL_SECONDS" 2>&1 | tail -1 | sed 's/^/    /'
 
+    step "6b. tool refresh (weekly; keeps mirrored apps at latest upstream)"; tool_refresh
+
     step "7. functional verification"; FORCE_COLOR="${FORCE_COLOR:-1}" bash "$VERIFY" all 2>&1 | sed 's/^/    /'
+
+    step "7b. UI smoke (dynamic controls + back-to-ark nav)"; ui_smoke
 
     step "8. report + coordination"; bash "$LIBRARIAN" maintain >/dev/null 2>&1; coordination
     log "${GREEN}cycle complete${NC} | fillable $(valark_human "$(valark_fillable_bytes)") | health: ${STATE_DIR}/health.json"
@@ -120,9 +282,15 @@ CRON_TAG="val-ark-loop"
 cron_install() {
     local every="${1:-30}"   # minutes
     mkdir -p "$LOG_DIR" 2>/dev/null
-    local line="*/${every} * * * * cd ${PROJECT_ROOT} && /usr/bin/flock -n ${STATE_DIR}/loop.lock bash ${_DIR}/loop.sh once >> ${LOG_DIR}/loop_cron.log 2>&1 # ${CRON_TAG}"
-    (crontab -l 2>/dev/null | grep -v "${CRON_TAG}"; echo "$line") | crontab -
-    log "installed cron: every ${every} min (tag ${CRON_TAG})"
+    # No outer flock here: loop.sh 'once' self-guards via run_locked (fd 8 on
+    # loop.lock). An outer flock on the same file would dead-lock the inner one.
+    local line="*/${every} * * * * cd ${PROJECT_ROOT} && bash ${_DIR}/loop.sh once >> ${LOG_DIR}/loop_cron.log 2>&1 # ${CRON_TAG}"
+    # @reboot: bring the Ark back immediately after a reboot instead of waiting up
+    # to ${every} min for the next periodic tick. The sleep gives the data disk
+    # (FUSE/NTFS via fstab) time to mount before the cycle's writability check.
+    local reboot_line="@reboot sleep 90 && cd ${PROJECT_ROOT} && bash ${_DIR}/loop.sh once >> ${LOG_DIR}/loop_cron.log 2>&1 # ${CRON_TAG}"
+    (crontab -l 2>/dev/null | grep -v "${CRON_TAG}"; echo "$reboot_line"; echo "$line") | crontab -
+    log "installed cron: @reboot + every ${every} min (tag ${CRON_TAG})"
     crontab -l 2>/dev/null | grep "${CRON_TAG}"
 }
 cron_uninstall() {

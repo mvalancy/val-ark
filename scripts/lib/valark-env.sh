@@ -109,13 +109,31 @@ INSTALLERS_DIR="${VALARK_INSTALLERS_DIR:-$VALARK_HOME/installers}"
 STATE_DIR="${VALARK_STATE_DIR:-$VALARK_HOME/state}"
 LOG_DIR="${VALARK_LOG_DIR:-$STATE_DIR/logs}"
 
+# SeaweedFS blob store. Defaults under VALARK_HOME, but is intentionally its own
+# knob so it can be pinned to a SEPARATE disk (e.g. a second NVMe) to spread I/O
+# and use all available capacity. Override VALARK_SEAWEED_DIR in .env to relocate.
+SEAWEED_DIR="${VALARK_SEAWEED_DIR:-$VALARK_HOME/seaweedfs}"
+SEAWEED_MASTER_PORT="${VALARK_SEAWEED_MASTER_PORT:-9333}"
+SEAWEED_VOLUME_PORT="${VALARK_SEAWEED_VOLUME_PORT:-8085}"
+SEAWEED_FILER_PORT="${VALARK_SEAWEED_FILER_PORT:-8889}"
+SEAWEED_S3_PORT="${VALARK_SEAWEED_S3_PORT:-8333}"
+
 # Reserve: never fill the disk past this. max(RESERVE_PCT% , RESERVE_MIN_GB).
 VALARK_RESERVE_PCT="${VALARK_RESERVE_PCT:-2}"
 VALARK_RESERVE_MIN_GB="${VALARK_RESERVE_MIN_GB:-50}"
 
+# Footprint cap: the MAX total size Val Ark's own data may occupy (tools + models
+# + content + ...). Unlike the reserve (which is about the disk), this bounds Val
+# Ark itself, so on a disk it shares with other data (e.g. NAS user shares) it
+# can't "take over". Unset = unbounded. VALARK_MODEL_MAX_GB additionally skips any
+# single model bigger than N GB, keeping the fill to apps + small models.
+VALARK_MAX_GB="${VALARK_MAX_GB:-}"
+VALARK_MODEL_MAX_GB="${VALARK_MODEL_MAX_GB:-}"
+
 export PROJECT_ROOT DATA_ROOT VALARK_HOME MODELS_DIR TOOLS_DIR CONTENT_DIR ZIM_DIR \
        SOURCES_DIR ASSETS_DIR INSTALLERS_DIR STATE_DIR LOG_DIR \
-       VALARK_RESERVE_PCT VALARK_RESERVE_MIN_GB
+       SEAWEED_DIR SEAWEED_MASTER_PORT SEAWEED_VOLUME_PORT SEAWEED_FILER_PORT SEAWEED_S3_PORT \
+       VALARK_RESERVE_PCT VALARK_RESERVE_MIN_GB VALARK_MAX_GB VALARK_MODEL_MAX_GB
 
 # --- Disk math (bytes) ---------------------------------------------------------
 # NOTE: print the raw df field (already an integer string). Do NOT use awk
@@ -138,6 +156,36 @@ valark_fillable_bytes() {
     f=$(( avail - reserve ))
     [ "$f" -lt 0 ] && f=0
     echo "$f"
+}
+
+# --- Footprint cap (bound Val Ark's OWN data, so it can't take over a shared disk)
+# Bytes currently occupied by Val Ark's own data trees (models + tools + content
+# + sources + assets + installers). Follows symlinks to the real dirs.
+valark_data_used_bytes() {
+    local total=0 d sz
+    for d in "$MODELS_DIR" "$TOOLS_DIR" "$CONTENT_DIR" "$SOURCES_DIR" "$ASSETS_DIR" "$INSTALLERS_DIR"; do
+        [ -d "$d" ] || continue
+        sz=$(du -sbL "$d" 2>/dev/null | cut -f1); total=$(( total + ${sz:-0} ))
+    done
+    echo "$total"
+}
+# Per-model size ceiling in bytes (0 = no cap).
+valark_model_max_bytes() {
+    if [ -n "$VALARK_MODEL_MAX_GB" ]; then echo $(( VALARK_MODEL_MAX_GB * 1073741824 )); else echo 0; fi
+}
+# How many more bytes Val Ark may still fill: the smaller of (disk headroom) and
+# (footprint cap minus current usage). With no cap set, this is just fillable.
+valark_budget_bytes() {
+    local fill cap used maxb
+    fill=$(valark_fillable_bytes)
+    if [ -n "$VALARK_MAX_GB" ]; then
+        maxb=$(( VALARK_MAX_GB * 1073741824 ))
+        used=$(valark_data_used_bytes)
+        cap=$(( maxb - used )); [ "$cap" -lt 0 ] && cap=0
+        if [ "$cap" -lt "$fill" ]; then echo "$cap"; else echo "$fill"; fi
+    else
+        echo "$fill"
+    fi
 }
 valark_human() { numfmt --to=iec --suffix=B "${1:-0}" 2>/dev/null || echo "${1:-0}B"; }
 
@@ -204,7 +252,12 @@ valark_url_ok() {
 # mount that reverted after a reboot. Best-effort remount to rw (needs paswordless
 # sudo). Preserves any NFS export. Safe no-op when already writable.
 valark_ensure_writable() {
-    local probe="${DATA_ROOT}/.valark_w_$$"
+    # Probe the Val Ark tree when it exists — the data root itself may be a
+    # root-owned mount (NAS appliances pre-create user-owned subvolumes beneath
+    # it), which is fine: Val Ark only ever writes inside its own tree.
+    local dir="$DATA_ROOT"
+    [ -d "$VALARK_HOME" ] && dir="$VALARK_HOME"
+    local probe="${dir}/.valark_w_$$"
     if ( : > "$probe" ) 2>/dev/null; then rm -f "$probe" 2>/dev/null; return 0; fi
     command -v findmnt >/dev/null 2>&1 || return 1
     local src fstype

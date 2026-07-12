@@ -23,6 +23,16 @@ LOG_DIR="${LOG_DIR:-${TOOLS_DIR}/.logs}"
 MAX_RETRIES=5
 RETRY_DELAY=15
 
+# Fresh CA bundle: some appliances (e.g. the UT2/RK3588 NAS) ship a stale system
+# CA store that fails TLS to newer download hosts (download.kde.org, curl.se, ...).
+# If Val Ark has fetched a current bundle (setup.sh does this), point curl at it so
+# every download here trusts modern certs. curl honours $CURL_CA_BUNDLE natively.
+if [ -z "${CURL_CA_BUNDLE:-}" ]; then
+    for _va_ca in "${STATE_DIR:-}/cacert.pem" "${ASSETS_DIR:-}/cacert.pem"; do
+        if [ -n "$_va_ca" ] && [ -s "$_va_ca" ]; then export CURL_CA_BUNDLE="$_va_ca"; break; fi
+    done
+fi
+
 # Optional GitHub token for higher API rate limits
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 
@@ -51,11 +61,23 @@ log() {
     local msg="[$(date '+%H:%M:%S')] $*"
     echo -e "$msg"
     [ -n "$LOG_FILE" ] && echo -e "$msg" >> "$LOG_FILE" 2>/dev/null
+    return 0   # a script whose last line is log_success must not exit 1 when LOG_FILE is unset
 }
 log_success() { log "${GREEN}OK${NC}: $*"; }
 log_error()   { log "${RED}ERROR${NC}: $*"; }
 log_info()    { log "${BLUE}INFO${NC}: $*"; }
 log_warn()    { log "${YELLOW}WARN${NC}: $*"; }
+
+# Human-readable elapsed time since an epoch start (used by orchestrators).
+elapsed_since() {
+    local start="${1:-0}" now diff h m s
+    now=$(date +%s); diff=$(( now - start ))
+    [ "$diff" -lt 0 ] && diff=0
+    h=$(( diff / 3600 )); m=$(( (diff % 3600) / 60 )); s=$(( diff % 60 ))
+    if [ "$h" -gt 0 ]; then echo "${h}h ${m}m ${s}s"
+    elif [ "$m" -gt 0 ]; then echo "${m}m ${s}s"
+    else echo "${s}s"; fi
+}
 
 ensure_dir() {
     if [ -f "$1" ]; then
@@ -126,44 +148,133 @@ download_file() {
 
     ensure_dir "$(dirname "$dest_path")"
 
+    # Expected size from the server (best-effort; empty when it won't say, e.g.
+    # chunked responses or offline). Used to detect partials at the final name
+    # left by older versions of this function, and to verify completions.
+    local expected=""
+    if command -v curl >/dev/null 2>&1; then
+        expected=$(curl -fsIL --connect-timeout 20 "$url" 2>/dev/null | tr -d '\r' \
+                   | awk 'tolower($1)=="content-length:"{n=$2} END{print n}')
+    fi
+
     if [ -f "$dest_path" ] && [ -s "$dest_path" ]; then
-        log_info "Already exists: ${label} - skipping"
-        DOWNLOAD_SKIPPED=$((DOWNLOAD_SKIPPED + 1))
-        return 0
+        local have
+        have=$(stat -c%s "$dest_path" 2>/dev/null || echo 0)
+        if [ -z "$expected" ] || [ "$have" = "$expected" ]; then
+            log_info "Already exists: ${label} - skipping"
+            DOWNLOAD_SKIPPED=$((DOWNLOAD_SKIPPED + 1))
+            return 0
+        fi
+        log_warn "Existing ${label} is ${have}B but upstream says ${expected}B - re-downloading"
+        rm -f "$dest_path" 2>/dev/null
     fi
 
     [ -f "$dest_path" ] && [ ! -s "$dest_path" ] && rm -f "$dest_path" 2>/dev/null
 
+    # Download to a .part temp and rename into place only when complete (and
+    # size-verified when possible), so an interrupted run can never leave a
+    # partial that later looks like the real artifact. The .part resumes across
+    # retries and runs. Stall detection (<1KB/s for 2min) instead of a hard
+    # --max-time, which killed legitimate multi-GB downloads on slow links.
+    local part="${dest_path}.part"
     while [ $attempt -le $MAX_RETRIES ]; do
         log_info "Downloading ${label} (attempt ${attempt}/${MAX_RETRIES})"
 
+        local status=1
         if command -v curl >/dev/null 2>&1; then
-            curl -fL --progress-bar --connect-timeout 30 --max-time 600 \
-                -o "$dest_path" "$url" 2>&1
+            curl -fL --progress-bar --connect-timeout 30 \
+                --speed-limit 1024 --speed-time 120 \
+                -C - -o "$part" "$url" 2>&1
+            status=$?
+            # 33: server can't resume this URL — restart the transfer fresh
+            [ $status -eq 33 ] && rm -f "$part" 2>/dev/null
         elif command -v wget >/dev/null 2>&1; then
-            wget --progress=dot:mega --timeout=60 --tries=1 \
-                "$url" -O "$dest_path" 2>&1
+            wget --progress=dot:mega --timeout=60 --tries=1 -c \
+                "$url" -O "$part" 2>&1
+            status=$?
         fi
-        local status=$?
 
-        if [ $status -eq 0 ] && [ -f "$dest_path" ] && [ -s "$dest_path" ]; then
-            local size=$(du -h "$dest_path" 2>/dev/null | cut -f1)
-            log_success "Downloaded: ${label} (${size})"
-            DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
-            return 0
-        else
-            attempt=$((attempt + 1))
-            if [ $attempt -le $MAX_RETRIES ]; then
-                local delay=$((RETRY_DELAY * attempt))
-                log_info "Retrying in ${delay}s..."
-                sleep $delay
+        if [ $status -eq 0 ] && [ -f "$part" ] && [ -s "$part" ]; then
+            local got
+            got=$(stat -c%s "$part" 2>/dev/null || echo 0)
+            if [ -n "$expected" ] && [ "$got" != "$expected" ]; then
+                log_warn "${label}: got ${got}B, expected ${expected}B - retrying"
+                rm -f "$part" 2>/dev/null
+            else
+                mv -f "$part" "$dest_path"
+                local size=$(du -h "$dest_path" 2>/dev/null | cut -f1)
+                log_success "Downloaded: ${label} (${size})"
+                DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
+                return 0
             fi
+        fi
+        attempt=$((attempt + 1))
+        if [ $attempt -le $MAX_RETRIES ]; then
+            local delay=$((RETRY_DELAY * attempt))
+            log_info "Retrying in ${delay}s..."
+            sleep $delay
         fi
     done
 
     log_error "FAILED: ${label}"
     DOWNLOAD_FAILED=$((DOWNLOAD_FAILED + 1))
     return 1
+}
+
+# --- Version gating (shared convention — use these, don't hand-roll) ----------
+# A tool's platform dir records its mirrored version in <dir>/.version. Before
+# downloading, gate the dir on the version you are about to mirror; after ALL
+# of that platform's downloads succeeded, stamp it.
+#
+#   version_gate  DIR VERSION   # clears stale/mislabeled content so the
+#                                # download actually runs (keeps .dist history)
+#   version_stamp DIR VERSION   # record success
+#
+# version_gate treats a dir as CURRENT only when the marker matches AND real
+# content exists (a marker over an empty dir self-heals). A missing marker
+# with legacy content counts as stale — one re-mirror migrates it. Only files
+# under DIR are ever touched.
+# True when both strings look like versions AND the first is strictly newer.
+# Non-version-shaped strings (rolling build ids etc.) never compare "newer".
+_version_newer() {
+    case "$1" in v[0-9]*|[0-9]*) : ;; *) return 1 ;; esac
+    case "$2" in v[0-9]*|[0-9]*) : ;; *) return 1 ;; esac
+    [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]
+}
+version_gate() {
+    local dir="$1" ver="$2"
+    [ -n "$dir" ] && [ -n "$ver" ] || return 0
+    [ -d "$dir" ] || return 0
+    local have="" content=""
+    [ -f "${dir}/.version" ] && have=$(cat "${dir}/.version" 2>/dev/null)
+    content=$(find "$dir" -type f ! -name '.tmp_*' ! -name '*.part' \
+                   ! -name '.version' -not -path '*/.dist/*' -print -quit 2>/dev/null)
+    if [ "$have" = "$ver" ] && [ -n "$content" ]; then
+        return 0    # already current
+    fi
+    # Downgrade protection: when the mirrored version is NEWER than the one
+    # requested, keep it. This is what a pin fallback looks like when the live
+    # version lookup failed (rate limit / offline) — never trade a newer mirror
+    # for an older pin on a flaky network.
+    if [ -n "$content" ] && _version_newer "$have" "$ver"; then
+        log_info "$(basename "$dir"): keeping ${have} (newer than requested ${ver})"
+        return 0
+    fi
+    if [ -n "$content" ] || [ -f "${dir}/.version" ]; then
+        [ -n "$have" ] && log_info "$(basename "$dir"): ${have} -> ${ver} (clearing old artifacts)"
+        find "$dir" -mindepth 1 -maxdepth 1 ! -name '.dist' -exec rm -rf {} + 2>/dev/null
+    fi
+    return 0
+}
+version_stamp() {
+    [ -n "$1" ] && [ -n "$2" ] || return 0
+    mkdir -p "$1" 2>/dev/null
+    # Never downgrade the recorded version (see version_gate): if the dir kept
+    # its newer content, a skipped re-download must not relabel it older.
+    local have=""
+    [ -f "$1/.version" ] && have=$(cat "$1/.version" 2>/dev/null)
+    _version_newer "$have" "$2" && return 0
+    printf '%s\n' "$2" > "$1/.version"
 }
 
 # Download and extract an archive
@@ -176,12 +287,16 @@ download_and_extract() {
 
     ensure_dir "$dest_dir"
 
-    # Check if already extracted (has real files in dest_dir, not just .tmp_*)
+    # Check if already extracted — count only REAL content: exclude temp/partial
+    # files, the .version marker, and the .dist/ archive-history dir. Counting
+    # .dist would make a version-gated re-mirror skip its own re-extraction and
+    # strand a binary-less dir behind a fresh marker.
     local existing=0
     while IFS= read -r _; do
         existing=$((existing + 1))
         [ $existing -ge 2 ] && break
-    done < <(find "$dest_dir" -type f ! -name '.tmp_*' 2>/dev/null)
+    done < <(find "$dest_dir" -type f ! -name '.tmp_*' ! -name '*.part' \
+                  ! -name '.version' -not -path '*/.dist/*' 2>/dev/null)
     if [ "$existing" -ge 2 ]; then
         log_info "Already extracted: ${label} - skipping"
         DOWNLOAD_SKIPPED=$((DOWNLOAD_SKIPPED + 1))
@@ -348,7 +463,10 @@ write_install_hint() {
     local instructions="$3"
 
     ensure_dir "$dest_dir"
-    if [ ! -f "${dest_dir}/INSTALL.txt" ]; then
+    # Always (re)write when the text changed — hints are generated content, and
+    # skipping existing files left updated instructions (new PPA names, fixed
+    # URLs) stranded on every deployed mirror forever.
+    if [ ! -f "${dest_dir}/INSTALL.txt" ] || [ "$(cat "${dest_dir}/INSTALL.txt" 2>/dev/null)" != "$instructions" ]; then
         echo "$instructions" > "${dest_dir}/INSTALL.txt"
         log_info "Created install instructions for ${tool_name}"
     fi

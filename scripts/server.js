@@ -3,13 +3,72 @@
 // Serves web UI + provides status/control endpoints
 
 const http = require('http');
+const https = require('https');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { execSync, spawn } = require('child_process');
+const { execSync, execFile, execFileSync, spawn } = require('child_process');
 
-const PORT = parseInt(process.argv[2] || '3000', 10);
 const ROOT = path.resolve(__dirname, '..');
-const MODEL_ROOT = path.join(process.env.HOME || require('os').homedir(), 'models');
+
+// --- Config: process env, then .env file, then default ----------------------
+const DOTENV = (() => {
+    const out = {};
+    try {
+        for (const line of fs.readFileSync(path.join(ROOT, '.env'), 'utf8').split('\n')) {
+            if (/^\s*#/.test(line)) continue;
+            const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+            if (m) out[m[1]] = m[2].replace(/^["']|["']$/g, '');
+        }
+    } catch (_) { /* no .env */ }
+    return out;
+})();
+const cfg = (k, d) => (process.env[k] !== undefined ? process.env[k]
+                      : (DOTENV[k] !== undefined ? DOTENV[k] : d));
+
+// Listen ports: primary from argv[2] / VALARK_WEB_PORT (default 3000), plus any
+// VALARK_WEB_EXTRA_PORTS (comma-separated, e.g. "80" for standard HTTP) and any
+// extra numeric CLI args. Privileged ports (<1024) need CAP_NET_BIND_SERVICE on
+// node (setcap) or root; if a port can't bind we warn and keep the others.
+const PORT = parseInt(process.argv[2] || cfg('VALARK_WEB_PORT', '3000'), 10);
+const EXTRA_PORTS = [
+    ...String(cfg('VALARK_WEB_EXTRA_PORTS', '')).split(','),
+    ...process.argv.slice(3),
+].map(s => parseInt(String(s).trim(), 10))
+ .filter(p => Number.isInteger(p) && p > 0 && p !== PORT);
+const ALL_PORTS = [PORT, ...new Set(EXTRA_PORTS)];
+
+// Resolve WHERE Val Ark stores data, mirroring scripts/lib/valark-env.sh, so the
+// web UI's disk stats reflect the DATA disk — not the OS/boot volume the repo
+// happens to sit on. Order: $VAL_ARK_DATA -> VAL_ARK_DATA= in .env -> follow a
+// data symlink onto the big disk -> repo root (single-disk/dev fallback).
+function resolveDataRoot() {
+    const cfgd = cfg('VAL_ARK_DATA');
+    if (cfgd) return cfgd;
+    for (const name of ['tools', 'models', 'content']) {
+        try {
+            const real = fs.realpathSync(path.join(ROOT, name));
+            if (real && real !== path.join(ROOT, name)) return path.dirname(real);
+        } catch (_) { /* symlink absent — try next */ }
+    }
+    return ROOT;
+}
+const DATA_ROOT = resolveDataRoot();
+// Models resolve like valark-env.sh: the VALARK_MODELS_DIR override first, then
+// the repo 'models' symlink (valark_ensure_layout keeps it pointing at the real
+// dir under every configuration), then <DATA_ROOT>/models, then the legacy
+// single-disk ~/models.
+const MODEL_ROOT = (() => {
+    const candidates = [cfg('VALARK_MODELS_DIR')];
+    try { candidates.push(fs.realpathSync(path.join(ROOT, 'models'))); } catch (_) {}
+    candidates.push(path.join(DATA_ROOT, 'models'),
+                    path.join(process.env.HOME || require('os').homedir(), 'models'));
+    for (const c of candidates) {
+        if (!c) continue;
+        try { if (fs.statSync(c).isDirectory()) return c; } catch (_) {}
+    }
+    return path.join(DATA_ROOT, 'models');
+})();
 
 // MIME types for static file serving
 const MIME = {
@@ -53,11 +112,23 @@ try {
     VALID_TOOL_TARGETS.add('sd');
     VALID_TOOL_TARGETS.add('onnx');
 } catch (e) {}
-const VALID_MODEL_TIERS = new Set(['all', 'tier1', 'tier2', 'tier3']);
+// Model download targets: priority tiers + per-category selectors that
+// download-models.sh accepts (main models are downloaded by category, not per-file).
+const VALID_MODEL_TIERS = new Set(['all', 'tier1', 'tier2', 'tier3',
+    'llm', 'tts', 'stt', 'vision', 'image', 'nvidia', 'extra', 'bitnet']);
 const VALID_CONTENT_TARGETS = new Set(['all', 'wikipedia', 'serve']);
+// Per-item user requests routed through librarian.sh (content ZIM / model / tool).
+const VALID_REQUEST_KINDS = new Set(['content', 'model', 'tool']);
 
 function isAlphanumDash(str) {
     return typeof str === 'string' && /^[a-zA-Z0-9_-]+$/.test(str);
+}
+// Catalog ids carry a bucket prefix and dots (e.g. "zim:wikipedia_en_all_maxi_eng",
+// "model:bge-small"). Allow those chars but nothing shell-special (defence in depth;
+// ids are passed to spawn as an arg array, never through a shell).
+function isCatalogId(str) {
+    return typeof str === 'string' && str.length > 0 && str.length <= 256
+        && /^[a-zA-Z0-9_:.-]+$/.test(str);
 }
 
 // =============================================================================
@@ -191,8 +262,11 @@ function getDiskStatus() {
         return statusCache.disk.data;
     }
     try {
+        // Measure the DATA disk (where tools/models/content live), not the repo.
+        let target = ROOT;
+        try { if (fs.statSync(DATA_ROOT).isDirectory()) target = DATA_ROOT; } catch (_) {}
         const output = execSync('/usr/bin/df -B1 --output=size,used,avail .', {
-            cwd: ROOT, encoding: 'utf8', timeout: 5000,
+            cwd: target, encoding: 'utf8', timeout: 5000,
         });
         const lines = output.trim().split('\n');
         const parts = lines[1].trim().split(/\s+/);
@@ -356,6 +430,117 @@ function getModelsStatus() {
 
     statusCache.models = { data: models, timestamp: now };
     return models;
+}
+
+// Total bytes under a directory tree, ASYNC so a multi-hundred-GB walk never
+// blocks the single-threaded event loop (a synchronous du here would freeze the
+// whole web server for every client while it ran). `du -sb` is native/fast; no
+// shell. The repo trees (content/, tools/, …) are SYMLINKS onto the data disk
+// and du measures a symlink as ~0 bytes, so resolve to the real target first.
+function duAsync(dir) {
+    return new Promise((resolve) => {
+        let real;
+        try { if (!fs.existsSync(dir)) return resolve(0); real = fs.realpathSync(dir); }
+        catch { return resolve(0); }
+        execFile('du', ['-sb', real], { timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+            if (err) return resolve(0);
+            resolve(parseInt(String(stdout).trim().split(/\s+/)[0], 10) || 0);
+        });
+    });
+}
+
+// Live storage breakdown across every Val Ark tree — so the UI shows the ZIM
+// library (usually the biggest slice) instead of a hardcoded models-only guess.
+// Computed in the background and cached; requests get the cached value instantly
+// and never wait on (or block during) the walk.
+let _storageCache = { data: null, timestamp: 0 };
+let _storageComputing = null;
+const STORAGE_CACHE_TTL = 1800000; // 30 min — the tools tree (~45k files) is slow to du over FUSE; storage moves slowly, so re-walk rarely
+async function computeStorage() {
+    const defs = [
+        { key: 'zim',        label: 'Wikipedia & ZIM Content', color: '#4da6ff', dir: path.join(ROOT, 'content') },
+        { key: 'models',     label: 'AI Models',               color: '#a78bfa', dir: MODEL_ROOT },
+        { key: 'tools',      label: 'Software & Tools',        color: '#4ade80', dir: path.join(ROOT, 'tools') },
+        { key: 'installers', label: 'OS Installers',           color: '#fbbf24', dir: path.join(ROOT, 'installers') },
+        { key: 'sources',    label: 'Source Code',             color: '#f472b6', dir: path.join(ROOT, 'sources') },
+    ];
+    const categories = [];
+    for (const d of defs) {
+        const bytes = await duAsync(d.dir);     // one at a time: kind to the FUSE mount
+        if (bytes > 0) categories.push({ key: d.key, label: d.label, color: d.color, bytes });
+    }
+    const zimCount = readdirSafe(path.join(ROOT, 'content', 'zim')).filter(f => f.endsWith('.zim')).length;
+    const total = categories.reduce((s, c) => s + c.bytes, 0);
+    const data = { categories, total, zimCount, disk: getDiskStatus() };
+    _storageCache = { data, timestamp: Date.now() };
+    return data;
+}
+function getStorageStatus() {
+    const now = Date.now();
+    const fresh = _storageCache.data && (now - _storageCache.timestamp) < STORAGE_CACHE_TTL;
+    if (!fresh && !_storageComputing) {
+        _storageComputing = computeStorage().catch(() => null).finally(() => { _storageComputing = null; });
+    }
+    // Never block a request on the walk: serve cached data if we have it, else a
+    // lightweight "computing" placeholder (the UI shows its static estimate until
+    // real numbers land, then refines).
+    return _storageCache.data || { categories: [], total: 0, zimCount: 0, disk: getDiskStatus(), computing: true };
+}
+
+// Catalog of downloadable-but-absent resources (live Kiwix OPDS for content, the
+// curated data/models-extra.tsv for models). Computed in the BACKGROUND by shelling
+// to `librarian.sh catalog` so a browse request never blocks on the OPDS fetch; the
+// result is cached and the UI one-click-requests any item (POST /api/request).
+const _catalogCache = { content: { data: null, ts: 0 }, models: { data: null, ts: 0 } };
+const _catalogComputing = { content: null, models: null };
+const CATALOG_TTL = 3600000;               // 1h — OPDS moves slowly; re-walked in background
+const CATALOG_MAX_ITEMS = 4000;            // bound the JSON payload
+// Browse the English catalog by default (thousands of ZIMs per language would swamp
+// the UI); operators can widen with VALARK_CATALOG_LANGS.
+const CATALOG_LANGS = String(cfg('VALARK_CATALOG_LANGS', 'eng')).trim();
+
+function parseCatalogTSV(stdout) {
+    // planner --list-absent rows: id bucket cat value bytes source url dest extra phase
+    const items = [];
+    for (const line of String(stdout).split('\n')) {
+        if (!line) continue;
+        const p = line.split('\t');
+        if (p.length < 9) continue;
+        const bytes = parseInt(p[4], 10) || 0;
+        const name = path.basename(p[7] || '') || p[8] || p[0];
+        items.push({
+            id: p[0],
+            category: String(p[2] || '').replace(/^zim:|^model:/, '') || 'other',
+            value: parseInt(p[3], 10) || 0,
+            bytes,
+            name,
+        });
+        if (items.length >= CATALOG_MAX_ITEMS) break;
+    }
+    return items;
+}
+function computeCatalog(kind) {
+    const arg = kind === 'models' ? 'model' : 'content';
+    return new Promise((resolve) => {
+        execFile('/usr/bin/bash', [path.join(ROOT, 'scripts/librarian.sh'), 'catalog', arg], {
+            cwd: ROOT, timeout: 160000, maxBuffer: 48 * 1024 * 1024,
+            env: { ...process.env, FORCE_COLOR: '0', VALARK_ZIM_LANGS: CATALOG_LANGS },
+        }, (err, stdout) => {
+            const items = err ? (_catalogCache[kind].data || []) : parseCatalogTSV(stdout);
+            _catalogCache[kind] = { data: items, ts: Date.now() };
+            resolve(items);
+        });
+    });
+}
+function getCatalog(kind) {
+    if (kind !== 'content' && kind !== 'models') return { items: [], count: 0, computing: false };
+    const c = _catalogCache[kind];
+    const now = Date.now();
+    const fresh = c.data && (now - c.ts) < CATALOG_TTL;
+    if (!fresh && !_catalogComputing[kind]) {
+        _catalogComputing[kind] = computeCatalog(kind).finally(() => { _catalogComputing[kind] = null; });
+    }
+    return { items: c.data || [], count: (c.data || []).length, computing: !c.data };
 }
 
 // Shallow directory info: stat immediate children only, not recursive
@@ -533,6 +718,59 @@ function isLocalhost(req) {
     return false;
 }
 
+// Peer IP, normalized (node reports LAN/tailnet IPv4 peers as IPv4-mapped IPv6).
+function clientIp(req) {
+    let a = req.socket?.remoteAddress || '';
+    if (a.startsWith('::ffff:')) a = a.slice(7);
+    return a;
+}
+
+// Is the request from the LAN or the tailnet? Val Ark is a community appliance
+// reachable ONLY on the local network and the tailscale tailnet (never the public
+// internet — see docs/ARM64-NAS.md), so members can one-click downloads from those
+// peers. Every trigger is still guarded (allowlist targets, footprint-cap eviction,
+// single-flight fill lock, per-IP rate limit); public/unknown peers are refused.
+function isLanOrTailnet(req) {
+    if (isLocalhost(req)) return true;
+    const a = clientIp(req);
+    if (!a) return true;                       // unix socket
+    const m = a.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (m) {
+        const o = m.slice(1, 5).map(Number);
+        if (o.some(n => n > 255)) return false;
+        if (o[0] === 127) return true;                                 // loopback
+        if (o[0] === 10) return true;                                  // 10.0.0.0/8
+        if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true;     // 172.16.0.0/12
+        if (o[0] === 192 && o[1] === 168) return true;                 // 192.168.0.0/16
+        if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return true;    // 100.64.0.0/10 CGNAT (tailnet)
+        if (o[0] === 169 && o[1] === 254) return true;                 // link-local
+        return false;
+    }
+    const low = a.toLowerCase();
+    if (low === '::1') return true;
+    if (/^f[cd][0-9a-f]{2}:/.test(low)) return true;   // ULA fc00::/7 (tailnet fd7a:…⊂ this)
+    if (/^fe[89ab][0-9a-f]:/.test(low)) return true;   // link-local fe80::/10
+    return false;
+}
+
+// Per-IP token bucket for expensive POST triggers (download / request / service
+// start). Prevents a single LAN client from spamming multi-GB fetches or NodeBB
+// builds. Sliding 60s window; the map is pruned opportunistically.
+const rateBuckets = new Map();
+const RATE_MAX = 30;              // triggers per window per IP
+const RATE_WINDOW_MS = 60000;
+function rateLimitOk(req) {
+    const key = clientIp(req) || 'local';
+    const now = Date.now();
+    let b = rateBuckets.get(key);
+    if (!b || (now - b.start) >= RATE_WINDOW_MS) { b = { start: now, n: 0 }; rateBuckets.set(key, b); }
+    b.n++;
+    if (rateBuckets.size > 512) {
+        for (const [k, v] of rateBuckets) if ((now - v.start) >= RATE_WINDOW_MS) rateBuckets.delete(k);
+    }
+    return b.n <= RATE_MAX;
+}
+
 function handleAPI(req, res, urlPath) {
     const corsOrigin = getCORSOrigin(req);
 
@@ -547,8 +785,9 @@ function handleAPI(req, res, urlPath) {
         return res.end();
     }
 
-    // GET endpoints
-    if (req.method === 'GET') {
+    // GET endpoints (HEAD too — the UI probes /api/archive availability with HEAD
+    // before downloading; serveArchive answers HEAD with headers only).
+    if (req.method === 'GET' || req.method === 'HEAD') {
         switch (urlPath) {
             case '/api/health':
                 return sendJSON(res, req, {
@@ -567,6 +806,10 @@ function handleAPI(req, res, urlPath) {
                 return sendJSON(res, req, getModelsStatus());
             case '/api/status/kiwix':
                 return sendJSON(res, req, kiwixStatus);
+            case '/api/status/storage':
+                return sendJSON(res, req, getStorageStatus());
+            case '/api/status/services':
+                return getServicesStatus().then(d => sendJSON(res, req, d)).catch(() => sendJSON(res, req, {}));
             case '/api/status/all':
                 return sendJSON(res, req, {
                     disk: getDiskStatus(),
@@ -582,6 +825,10 @@ function handleAPI(req, res, urlPath) {
                 }
                 return sendJSON(res, req, active);
             }
+            case '/api/catalog/content':
+                return sendJSON(res, req, getCatalog('content'));
+            case '/api/catalog/models':
+                return sendJSON(res, req, getCatalog('models'));
             case '/api/downloads/stream':
                 // SSE connection limit
                 if (sseClients.size >= MAX_SSE_CONNECTIONS) {
@@ -608,14 +855,20 @@ function handleAPI(req, res, urlPath) {
         }
     }
 
-    // POST endpoints - restricted to localhost for security
+    // POST endpoints - trigger downloads / service starts. Allowed from the LAN and
+    // the tailnet (this appliance is not exposed to the public internet); each trigger
+    // is validated against an allowlist, disk/footprint-cap guarded, single-flight,
+    // and per-IP rate limited. Public/unknown peers are refused.
     if (req.method === 'POST') {
-        // Download/control endpoints are restricted to localhost only
-        // This prevents remote exploitation while allowing local browser access
-        if (!isLocalhost(req)) {
+        if (!isLanOrTailnet(req)) {
             return sendJSON(res, req, {
-                error: 'Download operations are only available from localhost for security.'
+                error: 'Downloads can be triggered only from the local network or tailnet.'
             }, 403);
+        }
+        if (!rateLimitOk(req)) {
+            return sendJSON(res, req, {
+                error: 'Too many requests — please slow down and try again in a minute.'
+            }, 429);
         }
 
         readBody(req).then((body) => {
@@ -664,6 +917,32 @@ function handleAPI(req, res, urlPath) {
                 case '/api/download/cancel':
                     result = cancelDownload(body.id);
                     break;
+                case '/api/request': {
+                    // One-click per-item request: pin + fetch a specific catalog item,
+                    // auto-evicting lowest-priority unpinned content to fit the cap.
+                    const kind = body.kind;
+                    const id = body.id;
+                    if (!VALID_REQUEST_KINDS.has(kind)) {
+                        result = { error: 'Invalid kind. Use: content, model, tool' };
+                    } else if (kind === 'tool') {
+                        if (!isAlphanumDash(id) || !VALID_TOOL_TARGETS.has(id)) {
+                            result = { error: 'Unknown tool: ' + String(id).slice(0, 40) };
+                        } else {
+                            result = startDownload('request',
+                                path.join(ROOT, 'scripts/librarian.sh'), ['request', 'tool', id]);
+                        }
+                    } else if (!isCatalogId(id)) {
+                        result = { error: 'Invalid item id' };
+                    } else {
+                        result = startDownload('request',
+                            path.join(ROOT, 'scripts/librarian.sh'), ['request', kind, id]);
+                    }
+                    break;
+                }
+                case '/api/service/start':
+                    // Bring up an enabled + mirrored community service (chat/mail/forum/paste).
+                    result = startService(body.id);
+                    break;
                 default:
                     return sendJSON(res, req, { error: 'Unknown endpoint' }, 404);
             }
@@ -683,7 +962,7 @@ function isPathSafe(resolved, baseDir) {
     return path.resolve(resolved).startsWith(base) || path.resolve(resolved) === path.resolve(baseDir);
 }
 
-function serveStatic(res, filePath) {
+function serveStatic(res, filePath, req) {
     fs.stat(filePath, (err, stat) => {
         if (err) return send404(res);
 
@@ -694,32 +973,121 @@ function serveStatic(res, filePath) {
 
         const ext = path.extname(filePath).toLowerCase();
         const mime = MIME[ext] || 'application/octet-stream';
-
-        res.writeHead(200, {
+        const baseHeaders = {
             'Content-Type': mime,
-            'Content-Length': stat.size,
+            'Accept-Ranges': 'bytes',
             'Cache-Control': (ext === '.html' || ext === '.css' || ext === '.js') ? 'no-cache' : 'max-age=3600',
             ...SECURITY_HEADERS,
-        });
+        };
+
+        // HTTP Range support — a mirror serves multi-GB artifacts (models, ZIMs,
+        // installers) and interrupted downloads must be resumable (curl -C -,
+        // wget -c, browser resume). Single-range only; malformed ranges fall
+        // through to a normal 200.
+        const m = req && req.headers && req.headers.range
+            && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+        if (m && (m[1] !== '' || m[2] !== '')) {
+            let start, end;
+            if (m[1] === '') {              // bytes=-N : final N bytes
+                start = Math.max(0, stat.size - parseInt(m[2], 10));
+                end = stat.size - 1;
+            } else {
+                start = parseInt(m[1], 10);
+                end = m[2] === '' ? stat.size - 1 : Math.min(parseInt(m[2], 10), stat.size - 1);
+            }
+            if (start >= stat.size || start > end) {
+                res.writeHead(416, { 'Content-Range': `bytes */${stat.size}`, ...SECURITY_HEADERS });
+                return res.end();
+            }
+            res.writeHead(206, {
+                ...baseHeaders,
+                'Content-Length': end - start + 1,
+                'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+            });
+            const stream = fs.createReadStream(filePath, { start, end });
+            stream.on('error', () => { try { res.destroy(); } catch (_) {} });
+            return stream.pipe(res);
+        }
+
+        res.writeHead(200, { ...baseHeaders, 'Content-Length': stat.size });
         fs.createReadStream(filePath).pipe(res);
+    });
+}
+
+// HTML-escape untrusted text (filenames from the data disk, paths) before it
+// goes into the autoindex / error pages — prevents stored XSS via attacker-named
+// files. encodeURI keeps href path slashes while encoding metacharacters.
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Serve a mirrored artifact under the data trees as a DOWNLOAD — this is how site
+// visitors pull app binaries per platform. A file streams as an attachment; a
+// directory streams as a gzipped tar (via system `tar`, zero-dep). Only paths
+// inside the allowed data dirs are served; traversal is rejected.
+const ARCHIVE_DIRS = ['tools', 'models', 'content', 'sources', 'assets', 'installers'];
+function serveArchive(res, req, relPath) {
+    let clean;
+    try { clean = decodeURIComponent(relPath); } catch (_) { clean = relPath; }
+    clean = path.normalize(clean).replace(/^([/\\]|\.\.[/\\]?)+/, '');
+    const top = clean.split(/[/\\]/)[0];
+    if (!ARCHIVE_DIRS.includes(top)) return send404(res);
+    const target = path.join(ROOT, clean);
+    if (!isPathSafe(target, path.join(ROOT, top))) return send404(res);
+
+    fs.stat(target, (err, stat) => {
+        if (err) return send404(res);
+        const base = path.basename(target);
+        // HEAD preflight (the UI probes availability before downloading) — answer the
+        // headers without spawning a tar / opening the file for every probe.
+        if (req && req.method === 'HEAD') {
+            res.writeHead(200, {
+                'Content-Type': stat.isDirectory() ? 'application/gzip' : 'application/octet-stream',
+                'Content-Disposition': `attachment; filename="${base}${stat.isDirectory() ? '.tar.gz' : ''}"`,
+                ...SECURITY_HEADERS,
+            });
+            return res.end();
+        }
+        if (stat.isDirectory()) {
+            res.writeHead(200, {
+                'Content-Type': 'application/gzip',
+                'Content-Disposition': `attachment; filename="${base}.tar.gz"`,
+                ...SECURITY_HEADERS,
+            });
+            const tar = spawn('tar', ['-czf', '-', '-C', path.dirname(target), base]);
+            tar.stdout.pipe(res);
+            tar.on('error', () => { try { res.destroy(); } catch (_) {} });
+            req.on('close', () => { try { tar.kill(); } catch (_) {} });
+        } else {
+            res.writeHead(200, {
+                'Content-Type': 'application/octet-stream',
+                'Content-Length': stat.size,
+                'Content-Disposition': `attachment; filename="${base}"`,
+                ...SECURITY_HEADERS,
+            });
+            const stream = fs.createReadStream(target);
+            stream.on('error', () => { try { res.destroy(); } catch (_) {} });
+            stream.pipe(res);
+        }
     });
 }
 
 function serveDirectory(res, dirPath) {
     const entries = readdirSafe(dirPath);
     const relativePath = dirPath.replace(ROOT, '').replace(/^\//, '');
+    const relSafe = escapeHtml(relativePath);
 
-    let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Index of /${relativePath}</title>
+    let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Index of /${relSafe}</title>
     <style>body{font-family:system-ui,sans-serif;max-width:900px;margin:40px auto;padding:0 20px;background:#0a0e14;color:#e8edf4}
     a{color:#4da6ff;text-decoration:none}a:hover{text-decoration:underline}
     table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px 12px;border-bottom:1px solid #2a3545}
     th{color:#94a3b8}.size{text-align:right;color:#64748b}.dir{color:#4ade80}</style></head>
-    <body><h1>Index of /${relativePath}</h1><table><tr><th>Name</th><th class="size">Size</th><th>Modified</th></tr>`;
+    <body><h1>Index of /${relSafe}</h1><table><tr><th>Name</th><th class="size">Size</th><th>Modified</th></tr>`;
 
     // Add parent directory link if not at root
     if (relativePath) {
         const parent = '/' + relativePath.split('/').slice(0, -1).join('/');
-        html += `<tr><td><a href="${parent || '/'}">..</a></td><td></td><td></td></tr>`;
+        html += `<tr><td><a href="${escapeHtml(encodeURI(parent || '/'))}">..</a></td><td></td><td></td></tr>`;
     }
 
     // List entries
@@ -732,7 +1100,7 @@ function serveDirectory(res, dirPath) {
             const isDir = stat.isDirectory();
             const sizeStr = isDir ? '-' : formatSize(stat.size);
             const dateStr = stat.mtime.toISOString().split('T')[0];
-            html += `<tr><td><a href="${href}" class="${isDir ? 'dir' : ''}">${name}${isDir ? '/' : ''}</a></td><td class="size">${sizeStr}</td><td>${dateStr}</td></tr>`;
+            html += `<tr><td><a href="${escapeHtml(encodeURI(href))}" class="${isDir ? 'dir' : ''}">${escapeHtml(name)}${isDir ? '/' : ''}</a></td><td class="size">${sizeStr}</td><td>${dateStr}</td></tr>`;
         } catch (e) {}
     }
 
@@ -753,10 +1121,233 @@ function formatSize(bytes) {
     return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
 }
 
+// Generic same-origin reverse proxy to an internal service on 127.0.0.1:<port>.
+// Same-origin means one port to remember and the fixed Val Ark nav stays on
+// screen as a "back to the ark" header; we strip embedding-blocker headers so
+// the service renders inside our in-page frame. No HTML rewriting — each service
+// already serves under its own base path (/kiwix/ or /app/<id>/).
+function pipeProxy(req, res, port, label, pathOverride) {
+    // Fresh upstream socket per request (agent:false) + drop hop-by-hop headers.
+    // Reusing the default agent's keep-alive sockets races against backends that
+    // close idle connections (e.g. NodeBB): a reused half-closed socket throws
+    // ECONNRESET → a spurious 503. The race surfaced intermittently only under
+    // the added TLS latency of the HTTPS listener. A new socket each time is the
+    // standard, robust behaviour for a small reverse proxy like this.
+    const proxyReq = http.request({
+        host: '127.0.0.1', port, method: req.method, path: pathOverride || req.url,
+        headers: { ...req.headers, host: `127.0.0.1:${port}` },
+    }, (proxyRes) => {
+        const headers = { ...proxyRes.headers };
+        delete headers['x-frame-options'];
+        delete headers['content-security-policy'];
+        res.writeHead(proxyRes.statusCode || 502, headers);
+        proxyRes.pipe(res);
+    });
+    proxyReq.setTimeout(30000, () => proxyReq.destroy(new Error('upstream timeout')));
+    proxyReq.on('error', () => {
+        if (res.headersSent) return res.end();
+        // Friendly page for a browser hitting a service that isn't up yet.
+        if ((req.headers.accept || '').includes('text/html')) {
+            res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
+            // target="_top" so the link escapes the embedding iframe back to the
+            // real Val Ark shell, instead of nesting the whole SPA inside the frame.
+            return res.end(`<!doctype html><meta charset="utf-8"><body style="font-family:system-ui,sans-serif;background:#0a0e14;color:#e8edf4;padding:40px"><h2>${label || 'This service'} isn't running yet</h2><p>Start it on the Val Ark host (e.g. <code>scripts/services/&lt;name&gt;.sh start</code>), then reload. <a style="color:#4da6ff" target="_top" href="/">&larr; Back to Val Ark</a></p></body>`);
+        }
+        res.writeHead(502, { 'Content-Type': 'text/plain', ...SECURITY_HEADERS });
+        res.end('Proxy error (service unreachable)');
+    });
+    req.pipe(proxyReq);
+}
+
+function proxyKiwix(req, res) {
+    if (!kiwixStatus.running) {
+        res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
+        return res.end('<!doctype html><meta charset="utf-8"><body style="font-family:system-ui,sans-serif;background:#0a0e14;color:#e8edf4;padding:40px"><h2>Offline library is starting…</h2><p>The Kiwix content server auto-starts once at least one <code>.zim</code> file is present. <a style="color:#4da6ff" target="_top" href="/#/content">&larr; Back to Val Ark</a></p></body>');
+    }
+    pipeProxy(req, res, KIWIX_PORT, 'Offline library');
+}
+
+// Community / sub-app services, each run LAN-bound by scripts/services/<id>.sh
+// and reverse-proxied here at /app/<id>/ so they live inside the Val Ark shell.
+// Ports must match those service scripts. `strip`: true when the upstream serves
+// its routes at ROOT and only PREFIXES generated links (MicroBin), so we remove
+// the /app/<id> prefix before forwarding; false when the upstream genuinely
+// serves under that base path (NodeBB `url`, etc.) and needs the prefix intact.
+const APP_SERVICES = {
+    chat:  { port: 9000, strip: true },    // The Lounge (web client mounts at root)
+    mail:  { port: 1323, strip: true },    // alps webmail
+    forum: { port: 4567, strip: false },   // NodeBB serves under its configured url base
+    paste: { port: 8085, strip: true },    // MicroBin serves at root; PUBLIC_PATH only prefixes links
+};
+function proxyAppService(req, res, id, name) {
+    const svc = APP_SERVICES[id];
+    if (!svc) return send404(res);
+    let targetPath = req.url;
+    if (svc.strip) {
+        targetPath = req.url.replace(new RegExp('^/app/' + id), '');
+        if (!targetPath.startsWith('/')) targetPath = '/' + targetPath;
+    }
+    pipeProxy(req, res, svc.port, name || id, targetPath);
+}
+
+// Liveness of each sub-app (so the UI offers "Launch" only when it's actually
+// up, and a "how to start" hint otherwise). Probed on demand, cached briefly.
+function probePort(port) {
+    return new Promise((resolve) => {
+        const net = require('net');
+        const s = net.connect(port, '127.0.0.1');
+        s.setTimeout(800);
+        const done = (up) => { try { s.destroy(); } catch {} resolve(up); };
+        s.on('connect', () => done(true));
+        s.on('error', () => done(false));
+        s.on('timeout', () => done(false));
+    });
+}
+// A service is ENABLED when the operator listed it in VALARK_SERVICES (.env), and
+// MIRRORED when its binary/source is present in the tools tree for any platform.
+// The Community section uses these to offer a one-click Start (only for services
+// the operator already opted into + mirrored — never build/mirror on demand).
+function serviceEnabled(id) {
+    return String(cfg('VALARK_SERVICES', '')).split(/\s+/).filter(Boolean).includes(id);
+}
+function serviceMirrored(id) {
+    for (const plat of ['linux-arm64', 'linux-x86_64', 'macos-arm64', 'windows-x64']) {
+        const d = path.join(ROOT, 'tools', plat, id);
+        try { if (fs.existsSync(d) && fs.readdirSync(d).length > 0) return true; } catch (_) {}
+    }
+    return false;
+}
+
+// In-flight service starts: forum/chat first-run builds take minutes, so a start is
+// spawned detached and tracked here to (a) dedupe repeat clicks and (b) show "starting…".
+const startingServices = new Map();
+function startService(id) {
+    if (!isAlphanumDash(id) || !APP_SERVICES[id]) return { error: 'Unknown service' };
+    if (!serviceEnabled(id)) {
+        return { error: `Service '${id}' is not enabled. Add it to VALARK_SERVICES in .env.` };
+    }
+    if (!serviceMirrored(id)) {
+        return { error: `Service '${id}' is not mirrored yet. Run: scripts/tools/${id}.sh` };
+    }
+    if (startingServices.has(id)) return { id, status: 'starting' };
+    const proc = spawn('/usr/bin/bash', [path.join(ROOT, 'scripts/services', id + '.sh'), 'start'], {
+        cwd: ROOT, detached: true, stdio: 'ignore',
+        env: { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || ''), FORCE_COLOR: '0' },
+    });
+    startingServices.set(id, Date.now());
+    proc.on('exit', () => { startingServices.delete(id); _svcCache.ts = 0; });
+    proc.on('error', () => { startingServices.delete(id); });
+    proc.unref();
+    _svcCache.ts = 0;   // force the next status probe to re-check
+    return { id, status: 'starting' };
+}
+
+let _svcCache = { data: null, ts: 0 };
+async function getServicesStatus() {
+    const now = Date.now();
+    if (_svcCache.data && (now - _svcCache.ts) < 5000) return _svcCache.data;
+    const ids = Object.keys(APP_SERVICES);
+    const ups = await Promise.all(ids.map((id) => probePort(APP_SERVICES[id].port)));
+    const data = {};
+    ids.forEach((id, i) => {
+        const running = ups[i];
+        const enabled = serviceEnabled(id);
+        const mirrored = serviceMirrored(id);
+        const starting = startingServices.has(id);
+        data[id] = {
+            port: APP_SERVICES[id].port, path: `/app/${id}/`, running,
+            enabled, mirrored, starting,
+            startable: enabled && mirrored && !running && !starting,
+        };
+    });
+    _svcCache = { data, ts: now };
+    return data;
+}
+
 // =============================================================================
+// TLS / local-CA: Val Ark runs its own offline certificate authority (see
+// scripts/lib/tls.sh) so the LAN can use HTTPS with no internet/public CA. The
+// CA private key lives OFF the world-readable data disk; we only ever read the
+// generated cert/key here. The CA *certificate* is offered at /ca.crt (over
+// plain HTTP too — you must be able to fetch the trust anchor before HTTPS is
+// trusted) so devices install it once.
+const TLS = {
+    enabled: false,
+    httpsPort: parseInt(process.env.VALARK_HTTPS_PORT || '8443', 10),
+    caRoute: '/ca.crt',
+    domain: process.env.VALARK_TLS_DOMAIN || 'valark.lan',
+    notAfter: null, fingerprint: null, sans: null, dir: null,
+};
+let _caBuf = null;
+function tlsDir() {
+    try { return execFileSync('bash', [path.join(__dirname, 'lib', 'tls.sh'), 'dir'], { encoding: 'utf8' }).trim(); }
+    catch (e) { return path.join(process.env.HOME || require('os').homedir(), '.config', 'val-ark', 'tls'); }
+}
+function loadTls() {
+    if (process.env.VALARK_DISABLE_TLS === '1') return null;
+    const dir = tlsDir();
+    const read = () => ({
+        key: fs.readFileSync(path.join(dir, 'server.key')),
+        cert: fs.readFileSync(path.join(dir, 'server.crt')),
+        ca: fs.readFileSync(path.join(dir, 'ca.crt')),
+        dir,
+    });
+    try { return read(); }
+    catch (e) {
+        // Certs not generated yet — create them once, then retry.
+        try { execFileSync('bash', [path.join(__dirname, 'lib', 'tls.sh'), 'ensure'], { stdio: 'ignore' }); return read(); }
+        catch (e2) { return null; }
+    }
+}
+// Serve the offline bootstrap script with this Ark's host:port baked in, so the
+// piped one-liner (`curl http://<ark>/bootstrap.sh | bash`) knows where to clone
+// from without the user typing the address. Falls back to the literal file if the
+// Host header is missing (the script then expects the host as an argument).
+function serveBootstrap(req, res) {
+    try {
+        let script = fs.readFileSync(path.join(ROOT, 'bootstrap.sh'), 'utf8');
+        const host = (req.headers && req.headers.host) ? String(req.headers.host) : '';
+        if (host && /^[a-zA-Z0-9.\-:\[\]]+$/.test(host)) {
+            const scheme = (req.socket && req.socket.encrypted) ? 'https' : 'http';
+            script = script.split('__VALARK_HOST__').join(`${scheme}://${host}`);
+        }
+        res.writeHead(200, {
+            'Content-Type': 'text/x-shellscript; charset=utf-8',
+            'Cache-Control': 'no-cache', ...SECURITY_HEADERS,
+        });
+        res.end(script);
+    } catch (e) {
+        res.writeHead(503, { 'Content-Type': 'text/plain', ...SECURITY_HEADERS });
+        res.end('# Val Ark bootstrap unavailable (bootstrap.sh missing on this host)\n');
+    }
+}
+
+function serveCaCert(res) {
+    try {
+        if (!_caBuf) _caBuf = fs.readFileSync(path.join(tlsDir(), 'ca.crt'));
+        res.writeHead(200, {
+            'Content-Type': 'application/x-x509-ca-cert',
+            'Content-Disposition': 'attachment; filename="valark-ca.crt"',
+            'Cache-Control': 'no-cache', ...SECURITY_HEADERS,
+        });
+        res.end(_caBuf);
+    } catch (e) {
+        res.writeHead(503, { 'Content-Type': 'text/plain', ...SECURITY_HEADERS });
+        res.end('Val Ark CA not generated yet — run scripts/lib/tls.sh ensure');
+    }
+}
+function serveTlsStatus(res) {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
+    res.end(JSON.stringify({
+        enabled: TLS.enabled, httpsPort: TLS.httpsPort, caDownload: TLS.caRoute,
+        domain: TLS.domain, notAfter: TLS.notAfter, fingerprintSha256: TLS.fingerprint,
+        sans: TLS.sans, forceHttps: process.env.VALARK_FORCE_HTTPS === '1',
+    }));
+}
+
 // Server
 // =============================================================================
-const server = http.createServer((req, res) => {
+function handleRequest(req, res) {
     // Block path traversal attempts early (before URL normalization resolves ..)
     if (req.url.includes('..') || req.url.includes('%2e%2e') || req.url.includes('%2E%2E')) {
         return send404(res);
@@ -765,9 +1356,55 @@ const server = http.createServer((req, res) => {
     const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
     let urlPath = decodeURIComponent(parsedUrl.pathname);
 
+    // The CA trust anchor must be fetchable over BOTH http and https (you can't
+    // require trusted HTTPS to download the cert that establishes that trust).
+    if (urlPath === '/ca.crt' || urlPath === '/valark-ca.crt') {
+        return serveCaCert(res);
+    }
+    // TLS status for the UI (also served over http so the "switch to HTTPS"
+    // banner can render before the user has trusted the CA).
+    if (urlPath === '/api/status/tls') {
+        return serveTlsStatus(res);
+    }
+
+    // Offline self-replication: hand out a bootstrap script with THIS host baked in
+    // so `curl http://<ark>/bootstrap.sh | bash` clones the whole system from the
+    // LAN — no internet. The source bundle/tarball are served from /sources/val-ark/.
+    if (urlPath === '/bootstrap.sh' || urlPath === '/bootstrap') {
+        return serveBootstrap(req, res);
+    }
+
+    // Optional: push LAN visitors to HTTPS (opt-in via VALARK_FORCE_HTTPS=1).
+    // Never redirect the CA download, the API, or loopback/health traffic.
+    if (process.env.VALARK_FORCE_HTTPS === '1' && TLS.enabled && !(req.socket && req.socket.encrypted)) {
+        const host = (req.headers.host || '').split(':')[0];
+        const loopback = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '';
+        if (!loopback && !urlPath.startsWith('/api/')) {
+            res.writeHead(301, { 'Location': `https://${host}:${TLS.httpsPort}${req.url}` });
+            return res.end();
+        }
+    }
+
     // API routes
     if (urlPath.startsWith('/api/')) {
         return handleAPI(req, res, urlPath);
+    }
+
+    // Reverse-proxy the embedded Kiwix server under one origin (/kiwix/*). This
+    // keeps offline content INSIDE the Val Ark shell: same port to remember, and
+    // the fixed top-nav stays on screen as a permanent "back to Val Ark" header
+    // instead of stranding readers on a separate :8888 with no way home. Kiwix
+    // runs with --urlRootLocation /kiwix, so its own links already point at
+    // /kiwix/* — we just pipe bytes through, no HTML rewriting.
+    if (urlPath === '/kiwix' || urlPath.startsWith('/kiwix/')) {
+        return proxyKiwix(req, res);
+    }
+
+    // Community sub-apps (chat/mail/forum/paste, …) reverse-proxied at /app/<id>/
+    // so they render inside the Val Ark shell with the same back-to-ark header.
+    const appMatch = urlPath.match(/^\/app\/([a-z0-9-]+)(?:\/|$)/);
+    if (appMatch) {
+        return proxyAppService(req, res, appMatch[1]);
     }
 
     // Static file serving with path traversal protection
@@ -775,7 +1412,7 @@ const server = http.createServer((req, res) => {
 
     // Route / to web-ui/index.html
     if (normalized === '/' || normalized === path.sep) {
-        return serveStatic(res, path.join(ROOT, 'web-ui', 'index.html'));
+        return serveStatic(res, path.join(ROOT, 'web-ui', 'index.html'), req);
     }
 
     // Serve from project root for known directories
@@ -785,27 +1422,47 @@ const server = http.createServer((req, res) => {
     if (projectDirs.includes(topLevel)) {
         const fullPath = path.join(ROOT, normalized);
         if (!isPathSafe(fullPath, ROOT)) return send404(res);
-        return serveStatic(res, fullPath);
+        return serveStatic(res, fullPath, req);
     }
 
     // Serve LICENSE from project root
     if (normalized === '/LICENSE' || normalized === path.sep + 'LICENSE') {
-        return serveStatic(res, path.join(ROOT, 'LICENSE'));
+        return serveStatic(res, path.join(ROOT, 'LICENSE'), req);
     }
 
     // Everything else from web-ui/
     const webPath = path.join(ROOT, 'web-ui', normalized);
     if (!isPathSafe(webPath, path.join(ROOT, 'web-ui'))) return send404(res);
 
-    serveStatic(res, webPath);
-});
+    serveStatic(res, webPath, req);
+}
+
+// Never let a single bad request take the whole mirror server down: catch any
+// synchronous handler error and return 500 instead of crashing the process.
+// Shared by the HTTP, extra-port, and HTTPS listeners.
+function guardedHandler(req, res) {
+    try {
+        handleRequest(req, res);
+    } catch (e) {
+        console.error(`[request error] ${req.method} ${req.url}: ${e && e.stack || e}`);
+        try {
+            if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('Internal Server Error');
+        } catch (_) { /* response already gone */ }
+    }
+}
+
+const server = http.createServer(guardedHandler);
+// Last-resort guard so an async surprise logs instead of killing a public server.
+process.on('uncaughtException', (e) => console.error(`[uncaughtException] ${e && e.stack || e}`));
 
 // =============================================================================
 // Kiwix Auto-Launch
 // =============================================================================
-const KIWIX_PORT = 8888;
+const KIWIX_PORT = parseInt(process.env.VALARK_KIWIX_PORT || '8888', 10); // internal; proxied at /kiwix/
+const KIWIX_ROOT = '/kiwix';   // URL prefix (kiwix-serve --urlRootLocation); proxied same-origin
 let kiwixProcess = null;
-let kiwixStatus = { running: false, port: KIWIX_PORT, url: '', files: 0 };
+let kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 };
 
 function findKiwixServe() {
     const arch = require('os').arch();
@@ -848,49 +1505,117 @@ function findZimFiles() {
     } catch { return []; }
 }
 
+// Single-shot "is something serving on the kiwix port?" probe.
+function probeKiwixUp(cb) {
+    const net = require('net');
+    const s = net.connect(KIWIX_PORT, '127.0.0.1');
+    let done = false;
+    const fin = (up) => { if (done) return; done = true; try { s.destroy(); } catch (e) {} cb(up); };
+    s.setTimeout(2000);
+    s.on('connect', () => fin(true));
+    s.on('error', () => fin(false));
+    s.on('timeout', () => fin(false));
+}
+
+function markKiwixUp(reason) {
+    const n = findZimFiles().length;
+    kiwixStatus = { running: true, port: KIWIX_PORT, url: `http://localhost:${KIWIX_PORT}${KIWIX_ROOT}/`, path: KIWIX_ROOT + '/', files: n };
+    console.log(`Kiwix serving on :${KIWIX_PORT} (${reason}, ${n} ZIM file(s)) — proxied at /kiwix/`);
+}
+
+// Eventually-consistent status. A big library (1000+ ZIMs over FUSE) can take
+// several minutes to index before kiwix-serve binds — sometimes longer than the
+// initial probe window — and a serving instance can later die. Re-probe on an
+// interval so kiwixStatus (and therefore the /kiwix/ proxy) self-corrects instead
+// of getting stuck "down" while kiwix is actually up (or vice-versa). This is the
+// backstop that prevents the orphaned-kiwix / stuck-status failure mode.
+function reconcileKiwix() {
+    if (process.env.VALARK_DISABLE_KIWIX) return;
+    probeKiwixUp((up) => {
+        if (up && !kiwixStatus.running) markKiwixUp('reconciled');
+        else if (!up && kiwixStatus.running) {
+            kiwixStatus.running = false;
+            console.log(`Kiwix not responding on :${KIWIX_PORT} — marked down (will re-adopt when back)`);
+        }
+    });
+}
+
 function startKiwix() {
-    const kiwixBin = findKiwixServe();
-    const zimFiles = findZimFiles();
+    // Opt-out (used by the test harness so an ephemeral instance doesn't fight
+    // the production kiwix for the port, and for content-less dev runs).
+    if (process.env.VALARK_DISABLE_KIWIX) { kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 }; return; }
+    // Adopt an already-healthy kiwix-serve (e.g. a survivor of a fast web-server
+    // restart) instead of spawning a duplicate that would just fail to bind :8888.
+    probeKiwixUp((up) => {
+        if (up) { markKiwixUp('adopted existing'); return; }
+        const kiwixBin = findKiwixServe();
+        const zimFiles = findZimFiles();
+        if (!kiwixBin || zimFiles.length === 0) { kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 }; return; }
+        serveWithRetry(kiwixBin, zimFiles, 0);
+    });
+}
 
-    if (!kiwixBin || zimFiles.length === 0) {
-        kiwixStatus = { running: false, port: KIWIX_PORT, url: '', files: 0 };
-        return;
-    }
-
-    try {
-        kiwixProcess = spawn(kiwixBin, ['--port', String(KIWIX_PORT), ...zimFiles], {
-            stdio: ['ignore', 'ignore', 'pipe'],
-            detached: false,
+// kiwix-serve is all-or-nothing: a single corrupt ZIM makes it exit during
+// startup ("Unable to add the ZIM file 'X'"), taking the whole library down.
+// Parse the offending file from stderr, drop it, and retry — so one bad
+// download can't kill the library. A port probe marks it up once it binds
+// (kiwix-serve doesn't exit once serving); validating each ZIM up front with
+// kiwix-manage is far too slow over a network/FUSE mount, so we let kiwix-serve
+// itself report the bad ones.
+function serveWithRetry(kiwixBin, zimFiles, attempt) {
+    if (zimFiles.length === 0 || attempt > 25) { kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 }; return; }
+    // Bind kiwix to loopback only — it's an internal upstream reached solely via
+    // the same-origin /kiwix/ reverse proxy; never expose unauthenticated content
+    // directly on the LAN.
+    const proc = spawn(kiwixBin, ['--port', String(KIWIX_PORT), '--address', '127.0.0.1', '--urlRootLocation', KIWIX_ROOT, ...zimFiles], { stdio: ['ignore', 'ignore', 'pipe'] });
+    kiwixProcess = proc;
+    let stderrBuf = '', settled = false;
+    proc.stderr.on('data', (c) => { stderrBuf = (stderrBuf + c.toString()).slice(-2000); });
+    proc.on('error', (err) => {
+        if (settled) return; settled = true; kiwixProcess = null;
+        console.error(`Kiwix failed to start: ${err.message}`);
+        kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 };
+    });
+    proc.on('exit', (code) => {
+        if (settled) { kiwixStatus.running = false; kiwixProcess = null; return; } // was serving, then died
+        settled = true; kiwixProcess = null;
+        const m = stderrBuf.match(/Unable to add the ZIM file '([^']+)'/);
+        if (m) {
+            const bad = m[1];
+            // Quarantine the corrupt file (move it out of content/zim) so it
+            // self-heals: future starts skip it without a re-scan, and the
+            // librarian re-downloads it (the path is now absent).
+            try {
+                const qdir = path.join(path.dirname(bad), '.corrupt');
+                fs.mkdirSync(qdir, { recursive: true });
+                fs.renameSync(bad, path.join(qdir, path.basename(bad)));
+                console.error(`Quarantined corrupt ZIM: ${path.basename(bad)}`);
+            } catch (e) { console.error(`Could not move corrupt ZIM ${path.basename(bad)}: ${e.message}`); }
+            serveWithRetry(kiwixBin, zimFiles.filter((z) => z !== bad), attempt + 1);
+        } else {
+            console.error(`Kiwix exited with code ${code}${stderrBuf ? ': ' + stderrBuf.slice(-300).trim() : ''}`);
+            kiwixStatus = { running: false, port: KIWIX_PORT, url: '', path: KIWIX_ROOT + '/', files: 0 };
+        }
+    });
+    // Probe the port; once kiwix binds it's up (and stays up).
+    const net = require('net');
+    const probe = (tries) => {
+        if (settled) return;
+        const s = net.connect(KIWIX_PORT, '127.0.0.1');
+        s.setTimeout(2000);
+        const again = () => { s.destroy(); if (!settled && tries > 0) setTimeout(() => probe(tries - 1), 1000); };
+        s.on('connect', () => {
+            s.destroy();
+            if (settled) return; settled = true;
+            kiwixStatus = { running: true, port: KIWIX_PORT, url: `http://localhost:${KIWIX_PORT}${KIWIX_ROOT}/`, path: KIWIX_ROOT + '/', files: zimFiles.length };
+            console.log(`Kiwix serving ${zimFiles.length} ZIM file(s) at http://localhost:${KIWIX_PORT}${KIWIX_ROOT}/ (proxied at /kiwix/)`);
         });
-
-        // Capture stderr for error reporting
-        let stderrBuf = '';
-        kiwixProcess.stderr.on('data', (chunk) => { stderrBuf += chunk.toString().slice(-500); });
-
-        kiwixProcess.on('error', (err) => {
-            console.error(`Kiwix failed to start: ${err.message}`);
-            kiwixStatus.running = false;
-        });
-
-        kiwixProcess.on('exit', (code) => {
-            kiwixStatus.running = false;
-            kiwixProcess = null;
-            if (code !== 0 && code !== null) {
-                console.error(`Kiwix exited with code ${code}${stderrBuf ? ': ' + stderrBuf.trim() : ''}`);
-            }
-        });
-
-        kiwixStatus = {
-            running: true,
-            port: KIWIX_PORT,
-            url: `http://localhost:${KIWIX_PORT}`,
-            files: zimFiles.length,
-        };
-
-        console.log(`Kiwix serving ${zimFiles.length} ZIM file(s) at http://localhost:${KIWIX_PORT}`);
-    } catch (err) {
-        console.error(`Failed to start Kiwix: ${err.message}`);
-    }
+        s.on('error', again); s.on('timeout', again);
+    };
+    // Scale patience to library size — indexing 1000+ ZIMs over FUSE can take
+    // minutes before the port binds. The periodic reconciler is the ultimate
+    // backstop, but a generous initial probe avoids a multi-minute "down" blip.
+    setTimeout(() => probe(Math.max(180, zimFiles.length)), 1000);
 }
 
 // Cleanup on exit
@@ -898,13 +1623,112 @@ process.on('exit', () => { if (kiwixProcess) kiwixProcess.kill(); });
 process.on('SIGINT', () => { if (kiwixProcess) kiwixProcess.kill(); process.exit(0); });
 process.on('SIGTERM', () => { if (kiwixProcess) kiwixProcess.kill(); process.exit(0); });
 
-server.listen(PORT, () => {
-    console.log(`Val Ark server running at http://localhost:${PORT}`);
-    console.log(`Serving from: ${ROOT}`);
+// Bind address: defaults to all interfaces (Val Ark is a LAN hub by design), but
+// honor VALARK_BIND so a security-conscious operator can restrict it (e.g.
+// 127.0.0.1 for host-only access).
+const WEB_BIND = process.env.VALARK_BIND || '0.0.0.0';
+
+// HTTPS for the LAN: serve the SAME app over TLS on VALARK_HTTPS_PORT (default
+// 8443) using the local-CA leaf cert. HTTP on PORT stays up for back-compat,
+// health checks, and the /ca.crt trust-bootstrap. Failure here is non-fatal —
+// the Ark keeps serving HTTP and the UI shows TLS as unavailable.
+function startHttps() {
+    const t = loadTls();
+    if (!t) {
+        console.log('TLS: certs unavailable (run scripts/lib/tls.sh ensure) — serving HTTP only');
+        return;
+    }
+    try {
+        _caBuf = t.ca;
+        const httpsServer = https.createServer({ key: t.key, cert: t.cert }, guardedHandler);
+        httpsServer.on('error', (e) => console.error('HTTPS server error:', e.message));
+        httpsServer.listen(TLS.httpsPort, WEB_BIND, () => {
+            TLS.enabled = true;
+            TLS.dir = t.dir;
+            try {
+                const x = new crypto.X509Certificate(t.cert);
+                TLS.notAfter = x.validTo;
+                TLS.fingerprint = x.fingerprint256;
+                TLS.sans = x.subjectAltName || null;
+            } catch (e) { /* cert parse is best-effort */ }
+            console.log(`Val Ark HTTPS running at https://localhost:${TLS.httpsPort} (bind ${WEB_BIND})`);
+        });
+    } catch (e) {
+        console.error('TLS: could not start HTTPS —', e.message, '— serving HTTP only');
+    }
+}
+
+// Reachable URLs — advertise LAN addresses too, so the site is easy to find
+// (not just localhost) from other machines on the network.
+function reachableURLs(port) {
+    const os = require('os');
+    const urls = [`http://localhost:${port}`];
+    const ifaces = os.networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+        for (const ni of ifaces[name] || []) {
+            if (ni.family === 'IPv4' && !ni.internal) urls.push(`http://${ni.address}:${port}`);
+        }
+    }
+    return urls;
+}
+
+// Warm caches, start HTTPS + Kiwix + the reconciler once, on the first port
+// that binds (with extra ports, any successful bind counts).
+let started = false;
+function onFirstBind() {
+    if (started) return;
+    started = true;
+    startHttps();
     // Warm the cache on startup
     getToolsStatus();
     getContentStatus();
     getModelsStatus();
-    // Auto-start Kiwix content server
+    getStorageStatus();   // kicks off the (async, non-blocking) storage walk
+    // Auto-start Kiwix content server, then keep its status eventually-consistent
+    // (catches a late-binding library and a died instance — see reconcileKiwix).
     startKiwix();
-});
+    setInterval(reconcileKiwix, 30000);
+}
+
+let boundPorts = 0;
+function listenOn(port, attempt = 0) {
+    const srv = (port === PORT) ? server : http.createServer(guardedHandler);
+    srv.on('error', (e) => {
+        if (e.code === 'EACCES') {
+            console.warn(`[port ${port}] permission denied — ports <1024 need:  sudo setcap 'cap_net_bind_service=+ep' $(command -v node)   (skipping)`);
+        } else if (e.code === 'EADDRINUSE') {
+            // The predecessor process may still be releasing the port (the
+            // self-heal loop kills + relaunches in quick succession). Retry
+            // the primary port — skipping it would leave a listener-less
+            // zombie the loop's health check can never see past.
+            if (port === PORT && attempt < 15) {
+                setTimeout(() => listenOn(port, attempt + 1), 1000);
+                return;
+            }
+            console.warn(`[port ${port}] already in use — skipping`);
+        } else {
+            console.warn(`[port ${port}] ${e.message} — skipping`);
+        }
+    });
+    srv.listen(port, WEB_BIND, () => {
+        console.log(`Val Ark listening on :${port} (bind ${WEB_BIND})`);
+        for (const u of reachableURLs(port)) console.log(`    ${u}`);
+        boundPorts++;
+        onFirstBind();
+    });
+}
+
+console.log('==================================================');
+console.log(`Val Ark web server — serving from ${ROOT}`);
+console.log('==================================================');
+for (const p of ALL_PORTS) listenOn(p);
+
+// A web server with no listener is a zombie: it holds no port, serves nothing,
+// and the loop's health probe can't distinguish it from "down". Exit non-zero
+// instead so the next self-heal cycle starts a fresh process.
+setTimeout(() => {
+    if (boundPorts === 0) {
+        console.error('No port bound within 30s — exiting for the self-heal loop to restart');
+        process.exit(1);
+    }
+}, 30000).unref();

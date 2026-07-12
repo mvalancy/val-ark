@@ -14,9 +14,13 @@
 #   fill   [opts]          execute the plan, bounded (see opts)
 #   maintain               refresh catalog + verify + top-up + report (loop core)
 #   verify                 integrity-check managed files (size); requeue bad
-#   evict  --need BYTES    free space (lowest value/byte, protect diversity)
+#   evict  --need BYTES    free space (lowest value/byte, protect diversity+pins)
+#   catalog [kind]         list not-yet-downloaded items (content|model|installer)
+#   request KIND ID        pin + fetch ONE item now (auto-evicts to fit the cap)
+#   pin/unpin/pins         manage durable user requests (pins [--refill])
 #
 # fill/maintain opts: --max-bytes B  --max-items N  --time SECONDS  --budget B
+#   KIND = content | model | tool   (request / pin)
 ###############################################################################
 set -o pipefail
 
@@ -26,6 +30,7 @@ _LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 
 PLANNER="${_LIB}/planner.py"
 MANIFEST="${STATE_DIR}/manifest.tsv"
+PINS="${STATE_DIR}/pins.tsv"
 FAILED="${STATE_DIR}/failed.tsv"
 HEALTH="${STATE_DIR}/health.json"
 STOP_FLAG="${STATE_DIR}/STOP"
@@ -55,6 +60,47 @@ manifest_add() {
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$bucket" "$cat" "$dest" "$bytes" "$value" "$source" "$(date +%s)" >> "$MANIFEST"
 }
 
+# --- pin registry ----------------------------------------------------------
+# A pin marks an item the user explicitly requested. Pinned items are (1) never
+# evicted (planner --pins) and (2) re-filled by the loop if they go missing, so a
+# request is durable across reboots, disk swaps and interrupted downloads.
+# Schema (TAB):  kind  id  epoch  note      kind = content|model|tool
+pin_has()    { [ -f "$PINS" ] && cut -f2 "$PINS" 2>/dev/null | grep -qxF "$1"; }
+pin_add() {
+    ensure_state
+    pin_has "$2" && return 0
+    printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$(date +%s)" "${3:-}" >> "$PINS"
+}
+pin_remove() {
+    [ -f "$PINS" ] || return 0
+    awk -F'\t' -v id="$1" '$2!=id' "$PINS" > "${PINS}.tmp" 2>/dev/null && mv "${PINS}.tmp" "$PINS"
+}
+
+# Is a single resolved candidate (9-col fields) already fully on disk?
+# Mirrors planner.marker_present so `request`/`pins --refill` skip complete items.
+candidate_present() {
+    local source="$3" bytes="$5" dest="$8" url="$7" sz fn
+    case "$source" in
+        zim|url)
+            [ -f "$dest" ] || return 1
+            sz=$(stat -c%s "$dest" 2>/dev/null || echo 0)
+            if [ "$bytes" -gt 0 ]; then [ "$sz" -ge $(( bytes * 97 / 100 )) ]; else [ "$sz" -gt 0 ]; fi ;;
+        hf-file)
+            fn="${dest}/$(basename "$url")"; [ -f "$fn" ] || return 1
+            sz=$(stat -c%s "$fn" 2>/dev/null || echo 0)
+            if [ "$bytes" -gt 0 ]; then [ "$sz" -ge $(( bytes * 90 / 100 )) ]; else [ "$sz" -gt 0 ]; fi ;;
+        hf-repo)
+            [ -d "$dest" ] && [ -n "$(find "$dest" -type f 2>/dev/null | head -1)" ] ;;
+        *) return 1 ;;
+    esac
+}
+
+# A mirrored tool is present when any platform dir carries content.
+tool_present() {
+    [ -n "$(find "$TOOLS_DIR" -maxdepth 2 -type d -name "$1" 2>/dev/null \
+        -exec sh -c '[ -n "$(ls -A "$1" 2>/dev/null)" ] && echo "$1"' _ {} \; | head -1)" ]
+}
+
 # --- download one candidate (rugged; never aborts) -------------------------
 CURL_OPTS=(-fL --connect-timeout 30 --retry 5 --retry-delay 15 --retry-all-errors
            -A "val-ark-librarian/1.0" --progress-bar)
@@ -64,14 +110,35 @@ download_one() {
     case "$source" in
         zim|url)
             mkdir -p "$(dirname "$dest")" 2>/dev/null
-            local tmp="${dest}.part"
-            if curl "${CURL_OPTS[@]}" -C - -o "$tmp" "$url" 2>>"$LL_LOG"; then
-                local sz; sz=$(stat -c%s "$tmp" 2>/dev/null || echo 0)
-                if [ "$bytes" -gt 0 ] && [ "$sz" -lt $(( bytes * 90 / 100 )) ]; then
-                    warn "size short for $id ($sz < $bytes) - keeping .part for resume"; return 1
-                fi
-                mv -f "$tmp" "$dest" && manifest_add "$id" "$bucket" "$cat" "$dest" "$sz" "$value" "$source" && return 0
+            local tmp="${dest}.part" sz got=1 final=""
+            # Prefer aria2 (8-connection ~3x faster on per-connection-throttled
+            # mirrors like download.kiwix.org); fall back to single-stream curl
+            # if aria2 is absent or fails. Both resume an existing *.part.
+            if command -v aria2c >/dev/null 2>&1; then
+                aria2c -x8 -s8 -j1 --max-tries=5 --retry-wait=15 --continue=true \
+                    --auto-file-renaming=false --allow-overwrite=true --content-disposition=false \
+                    --console-log-level=warn --summary-interval=0 \
+                    -d "$(dirname "$dest")" -o "$(basename "$tmp")" "$url" >>"$LL_LOG" 2>&1 && got=0
             fi
+            # aria2 may land the bytes in EITHER the .part or the final name
+            # (it can honour the server filename) — pick whichever has the data.
+            if [ "$got" -eq 0 ]; then
+                if [ -f "$dest" ] && [ "$(stat -c%s "$dest" 2>/dev/null||echo 0)" -ge "$(stat -c%s "$tmp" 2>/dev/null||echo 0)" ]; then final="$dest"
+                elif [ -f "$tmp" ]; then final="$tmp"; fi
+            fi
+            if [ -z "$final" ]; then
+                curl "${CURL_OPTS[@]}" -C - -o "$tmp" "$url" 2>>"$LL_LOG" && [ -f "$tmp" ] && final="$tmp"
+            fi
+            if [ -n "$final" ]; then
+                sz=$(stat -c%s "$final" 2>/dev/null || echo 0)
+                if [ "$bytes" -gt 0 ] && [ "$sz" -lt $(( bytes * 90 / 100 )) ]; then
+                    warn "size short for $id ($sz < $bytes)"; rm -f "$tmp" "${tmp}.aria2" 2>/dev/null; return 1
+                fi
+                [ "$final" != "$dest" ] && mv -f "$final" "$dest"
+                rm -f "$tmp" "${dest}.aria2" "${tmp}.aria2" 2>/dev/null   # never leave stubs/control files
+                manifest_add "$id" "$bucket" "$cat" "$dest" "$sz" "$value" "$source" && return 0
+            fi
+            rm -f "$tmp" "${tmp}.aria2" 2>/dev/null   # clean the stub on definitive failure
             return 1 ;;
         hf-file)
             mkdir -p "$dest" 2>/dev/null
@@ -100,7 +167,8 @@ gen_candidates() { catalog_all_candidates; }
 
 build_plan() {
     local budget="$1"
-    gen_candidates | python3 "$PLANNER" --budget "$budget" 2> "${TMPDIR_VA}/plan.summary"
+    gen_candidates | python3 "$PLANNER" --budget "$budget" \
+        --model-max-bytes "$(valark_model_max_bytes)" 2> "${TMPDIR_VA}/plan.summary"
 }
 
 # --- commands --------------------------------------------------------------
@@ -112,6 +180,10 @@ cmd_status() {
     local managed=0; [ -f "$MANIFEST" ] && managed=$(wc -l < "$MANIFEST")
     echo "  managed items: $managed   (manifest: $MANIFEST)"
     echo "  fillable now : $(human "$(valark_fillable_bytes)")"
+    if [ -n "$VALARK_MAX_GB" ]; then
+        echo "  footprint cap: ${VALARK_MAX_GB}GB total (used $(human "$(valark_data_used_bytes)"), budget left $(human "$(valark_budget_bytes)"))"
+    fi
+    [ -n "$VALARK_MODEL_MAX_GB" ] && echo "  model cap    : skip any single model > ${VALARK_MODEL_MAX_GB}GB (apps + small models)"
     echo ""
     echo "  ZIM content: $(find "$ZIM_DIR" -maxdepth 1 -name '*.zim' 2>/dev/null | wc -l) files, $(du -sh "$ZIM_DIR" 2>/dev/null | cut -f1)"
     echo "  installers : $(find "$INSTALLERS_DIR" -type f 2>/dev/null | wc -l) files, $(du -sh "$INSTALLERS_DIR" 2>/dev/null | cut -f1)"
@@ -124,7 +196,7 @@ cmd_status() {
 }
 
 cmd_plan() {
-    local budget="${1:-$(valark_fillable_bytes)}"
+    local budget="${1:-$(valark_budget_bytes)}"
     ensure_state
     catalog_refresh_zim >/dev/null 2>&1 || warn "ZIM catalog refresh failed; using cache if any"
     build_plan "$budget" > "${TMPDIR_VA}/plan.tsv"
@@ -151,7 +223,7 @@ cmd_fill() {
     # on the same files. Non-blocking — if another fill holds it, this is a no-op.
     exec 9>"${STATE_DIR}/fill.lock"
     if ! flock -n 9; then warn "another fill is already running; skipping"; return 0; fi
-    [ -z "$budget" ] && budget="$(valark_fillable_bytes)"
+    [ -z "$budget" ] && budget="$(valark_budget_bytes)"
     catalog_refresh_zim >/dev/null 2>&1 || warn "ZIM catalog refresh failed; using cache"
     build_plan "$budget" > "${TMPDIR_VA}/plan.tsv"
     cat "${TMPDIR_VA}/plan.summary" >&2
@@ -203,11 +275,164 @@ cmd_verify() {
 cmd_evict() {
     local need=0; while [ $# -gt 0 ]; do case "$1" in --need) need="$2"; shift 2;; *) shift;; esac; done
     [ "$need" -gt 0 ] || { echo "usage: evict --need BYTES"; return 1; }
-    gen_candidates | python3 "$PLANNER" --budget 1 --evict-need "$need" --manifest "$MANIFEST" | \
+    # Pinned (user-requested) items are never proposed as victims.
+    gen_candidates | python3 "$PLANNER" --budget 1 --evict-need "$need" --manifest "$MANIFEST" --pins "$PINS" | \
     while IFS=$'\t' read -r id cat dest bytes value; do
         warn "evict $id ($cat, $(human "$bytes"), value $value) -> $dest"
         rm -f "$dest" 2>/dev/null && grep -v -F "$(printf '%s\t' "$id")" "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
     done
+}
+
+# --- catalog: list every not-yet-downloaded candidate (the web browse feed) --
+# Emits absent candidates as 10-col plan rows (id bucket cat value bytes source
+# url dest extra phase=0), most valuable-per-byte first. Optional kind filter
+# (content|model|installer) narrows the bucket. Used by server.js /api/catalog/*.
+cmd_catalog() {
+    local kind="${1:-all}"
+    ensure_state
+    catalog_refresh_zim >/dev/null 2>&1 || warn "ZIM catalog refresh failed; using cache if any" >&2
+    local bucket=""
+    case "$kind" in
+        content) bucket="content" ;;
+        model|models) bucket="models" ;;
+        installer|installers) bucket="installers" ;;
+        all|"") bucket="" ;;
+        *) err "unknown catalog kind: $kind (content|model|installer|all)" >&2; return 1 ;;
+    esac
+    if [ -n "$bucket" ]; then
+        gen_candidates | awk -F'\t' -v b="$bucket" '$2==b' | python3 "$PLANNER" --budget 1 --list-absent
+    else
+        gen_candidates | python3 "$PLANNER" --budget 1 --list-absent
+    fi
+}
+
+# --- resolve ONE candidate by id (content/model) from the live catalog -------
+# Prints the single best-matching 9-col candidate line, or returns 1. Matching:
+# exact id (with/without bucket prefix) or exact content name, else substring;
+# among ties the LARGEST (maxi over nopic/mini) wins — mirrors collapse_flavours.
+resolve_candidate() {
+    local kind="$1" want="$2" bucket pfx tok
+    case "$kind" in
+        content) bucket="content"; pfx="zim:" ;;
+        model)   bucket="models";  pfx="model:" ;;
+        *) return 1 ;;
+    esac
+    tok="${want#"$pfx"}"                     # bare token (prefix stripped) for substring match
+    [ "$bucket" = "content" ] && { catalog_refresh_zim >/dev/null 2>&1 || true; }
+    gen_candidates | awk -F'\t' -v b="$bucket" -v id="$want" -v pid="${pfx}${want}" -v tok="$tok" '
+        $2!=b { next }
+        {
+            exact = ($1==id || $1==pid || $9==id || $9==tok) ? 0 : -1;
+            if (exact==0) { print "0\t" $0; next }
+            if (index($1,tok) || index($9,tok)) print "1\t" $0;
+        }' | sort -t$'\t' -k1,1n -k6,6nr | head -1 | cut -f2-
+}
+
+# --- request ONE specific item (the headline user-triggered download) --------
+# Pins it (durable), makes room within the footprint cap by evicting the lowest-
+# value NON-pinned content, then fetches it. Honors the cap: never overfills.
+cmd_request() {
+    local kind="$1" id="$2"
+    [ -n "$kind" ] && [ -n "$id" ] || { err "usage: request <content|model|tool> <id>"; return 1; }
+    ensure_state
+    [ -f "$STOP_FLAG" ] && { warn "STOP flag present; not requesting"; return 0; }
+
+    case "$kind" in
+        tool)
+            pin_add tool "$id"
+            if tool_present "$id"; then ok "tool already mirrored: $id"; return 0; fi
+            log "request: mirroring tool ${CYAN}${id}${NC}"
+            if bash "${_LIB%/lib}/download-tools.sh" "$id"; then ok "tool mirrored: $id"; return 0
+            else err "tool mirror failed: $id"; return 1; fi ;;
+        content|model) : ;;
+        *) err "unknown request kind: $kind (content|model|tool)"; return 1 ;;
+    esac
+
+    local line; line="$(resolve_candidate "$kind" "$id")"
+    [ -n "$line" ] || { err "no catalog match for ${kind} '${id}'"; return 1; }
+    IFS=$'\t' read -r c_id c_bucket c_cat c_value c_bytes c_source c_url c_dest c_extra <<< "$line"
+
+    # Pin by the CANONICAL id so eviction-skip + refill match the manifest exactly.
+    pin_add "$kind" "$c_id"
+
+    if candidate_present "$c_id" "$c_bucket" "$c_source" "$c_value" "$c_bytes" "$c_source" "$c_url" "$c_dest" "$c_extra"; then
+        ok "already present: $c_id"; return 0
+    fi
+
+    # Serialize against the loop's fill so we never race on the same files/space.
+    # Wait briefly; if a long fill holds the lock, the item is already pinned, so the
+    # loop's pin-refill step will fetch it — report success (queued), not failure.
+    exec 9>"${STATE_DIR}/fill.lock"
+    if ! flock -w 8 9; then
+        ok "queued: ${c_id} is pinned; it will be fetched automatically on the next cycle"
+        return 0
+    fi
+
+    # Cap-aware room-making: need = item + 1GiB slack (same as cmd_fill's guard).
+    local need budget deficit
+    need=$(( c_bytes + 1073741824 ))
+    budget=$(valark_budget_bytes)
+    if [ "$c_bytes" -gt 0 ] && [ "$need" -gt "$budget" ]; then
+        deficit=$(( need - budget ))
+        log "request: ${id} needs $(human "$c_bytes"); freeing $(human "$deficit") by evicting lowest-value unpinned content"
+        cmd_evict --need "$deficit"
+        budget=$(valark_budget_bytes)
+        if [ "$need" -gt "$budget" ]; then
+            err "cannot free enough space for ${c_id} (need $(human "$need"), budget $(human "$budget")); remaining content is pinned or sole-of-category — unpin something or raise VALARK_MAX_GB"
+            return 1
+        fi
+    fi
+
+    log "request: fetching ${CYAN}${c_id}${NC} (${c_cat}, $(human "$c_bytes"))"
+    if download_one "$c_id" "$c_bucket" "$c_cat" "$c_value" "$c_bytes" "$c_source" "$c_url" "$c_dest" "$c_extra"; then
+        ok "requested item ready: $c_id"; return 0
+    fi
+    err "download failed: $c_id (pinned; the loop will retry)"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$c_id" "$c_bucket" "$c_cat" "$c_value" "$c_bytes" "$c_source" "$c_url" "$c_dest" "$c_extra" >> "$FAILED"
+    return 1
+}
+
+cmd_pin()   { [ -n "$1" ] && [ -n "$2" ] || { echo "usage: pin <content|model|tool> <id>"; return 1; }; pin_add "$1" "$2" && ok "pinned: $1 $2"; }
+cmd_unpin() { [ -n "$1" ] || { echo "usage: unpin <id>"; return 1; }; pin_remove "$1" && ok "unpinned: $1 (files kept; now evictable)"; }
+
+cmd_pins() {
+    ensure_state
+    [ -s "$PINS" ] || { echo "no pinned requests"; return 0; }
+    echo -e "${CYAN}Pinned requests (never evicted; re-filled if missing):${NC}"
+    local kind id epoch note present
+    while IFS=$'\t' read -r kind id epoch note; do
+        [ -n "$id" ] || continue
+        if [ "$kind" = "tool" ]; then
+            tool_present "${id#tool:}" && present="${GREEN}present${NC}" || present="${YELLOW}missing${NC}"
+        elif grep -qF "$(printf '%s\t' "$id")" "$MANIFEST" 2>/dev/null; then
+            local dest; dest=$(grep -F "$(printf '%s\t' "$id")" "$MANIFEST" 2>/dev/null | head -1 | cut -f4)
+            { [ -e "$dest" ]; } && present="${GREEN}present${NC}" || present="${YELLOW}missing${NC}"
+        else present="${YELLOW}missing${NC}"; fi
+        printf "  %-8s %-46s %b\n" "$kind" "$id" "$present"
+    done < "$PINS"
+}
+
+# Re-fetch any pinned item that is not currently on disk (loop self-healing).
+cmd_pins_refill() {
+    ensure_state
+    [ -s "$PINS" ] || { log "no pins to refill"; return 0; }
+    local kind id epoch note n=0
+    while IFS=$'\t' read -r kind id epoch note; do
+        [ -n "$id" ] || continue
+        [ -f "$STOP_FLAG" ] && { warn "STOP flag; halting refill"; break; }
+        if [ "$kind" = "tool" ]; then
+            tool_present "${id#tool:}" && continue
+            log "refill pinned tool: ${id}"; bash "${_LIB%/lib}/download-tools.sh" "${id#tool:}" >/dev/null 2>&1 && n=$(( n+1 )); continue
+        fi
+        # content/model: resolve fresh (urls rotate), skip if present, else fetch via request path.
+        local line; line="$(resolve_candidate "$kind" "$id")"
+        [ -n "$line" ] || { warn "refill: no catalog match for $id"; continue; }
+        IFS=$'\t' read -r c_id c_bucket c_cat c_value c_bytes c_source c_url c_dest c_extra <<< "$line"
+        candidate_present "$c_id" "$c_bucket" "$c_source" "$c_value" "$c_bytes" "$c_source" "$c_url" "$c_dest" "$c_extra" && continue
+        log "refill pinned: ${c_id}"
+        cmd_request "$kind" "$c_id" >/dev/null 2>&1 && n=$(( n+1 ))
+    done < "$PINS"
+    log "pins refill: ${n} re-fetched"
 }
 
 cmd_maintain() {
@@ -242,5 +467,10 @@ case "${1:-status}" in
     evict)    shift; cmd_evict "$@" ;;
     maintain) cmd_maintain ;;
     refresh)  catalog_refresh_zim --force && ok "catalog cached: $ZIM_CACHE ($(wc -l < "$ZIM_CACHE") entries)" ;;
-    *) echo "usage: librarian.sh {status|plan|fill|verify|evict|maintain|refresh}"; exit 1 ;;
+    catalog)  shift; cmd_catalog "${1:-all}" ;;
+    request)  shift; cmd_request "$1" "$2" ;;
+    pin)      shift; cmd_pin "$1" "$2" ;;
+    unpin)    shift; cmd_unpin "$1" ;;
+    pins)     shift; [ "$1" = "--refill" ] && cmd_pins_refill || cmd_pins ;;
+    *) echo "usage: librarian.sh {status|plan|fill|verify|evict|maintain|refresh|catalog|request|pin|unpin|pins}"; exit 1 ;;
 esac

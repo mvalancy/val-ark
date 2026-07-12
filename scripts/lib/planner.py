@@ -184,8 +184,28 @@ def plan(cands, budget, small_max):
     return selected, budget_left, len(present_cats), len(present_keys)
 
 
-def evict(cands, manifest_path, need):
-    """Pick lowest value/byte managed items (not sole category rep) to free `need`."""
+def load_pins(pins_path):
+    """Read the pin registry (kind<TAB>id<TAB>epoch<TAB>note) -> set of pinned ids.
+    Pinned items are user-requested and must NEVER be evicted or re-proposed as a
+    victim, even when they are the cheapest value/byte on disk."""
+    pinned = set()
+    if not pins_path or not os.path.isfile(pins_path):
+        return pinned
+    try:
+        with open(pins_path) as fh:
+            for line in fh:
+                p = line.rstrip("\n").split("\t")
+                if len(p) >= 2 and p[1]:
+                    pinned.add(p[1])
+    except OSError:
+        pass
+    return pinned
+
+
+def evict(cands, manifest_path, need, pinned=None):
+    """Pick lowest value/byte managed items (not sole category rep, never pinned)
+    to free `need`."""
+    pinned = pinned or set()
     # On-disk category representation count (from candidates present + manifest).
     rep = {}
     items = []
@@ -209,6 +229,8 @@ def evict(cands, manifest_path, need):
     for it in sorted(items, key=lambda x: (x["value"] / max(1, x["bytes"]), -x["bytes"])):
         if freed >= need:
             break
+        if it["id"] in pinned:
+            continue  # user-requested/pinned content is protected from eviction
         if rep.get(it["category"], 0) <= 1:
             continue  # protect sole representative of a category (diversity floor)
         victims.append(it)
@@ -217,18 +239,53 @@ def evict(cands, manifest_path, need):
     return victims
 
 
+def list_absent(cands):
+    """Emit every candidate that is NOT already fully on disk, most valuable-per-
+    byte first. Powers the web catalog of downloadable-but-absent resources. Same
+    9 columns as the input candidate stream (no trailing phase)."""
+    absent = [c for c in cands if not marker_present(c)]
+    absent.sort(key=lambda c: (-density(c), -c["value"], c["bytes"]))
+    return absent
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--budget", type=int, required=True, help="fillable bytes (avail - reserve)")
+    ap.add_argument("--budget", type=int, required=True, help="fillable bytes (avail - reserve, capped by footprint budget)")
     ap.add_argument("--small-max", type=int, default=SMALL_MAX_DEFAULT)
+    ap.add_argument("--model-max-bytes", type=int, default=0,
+                    help="drop individual model candidates larger than this (0=no cap) — keeps the fill to small models")
     ap.add_argument("--evict-need", type=int, default=0)
     ap.add_argument("--manifest", default="")
+    ap.add_argument("--pins", default="", help="pin registry path; pinned ids are never evicted")
+    ap.add_argument("--list-absent", action="store_true",
+                    help="emit every not-yet-downloaded candidate (the web catalog), then exit")
     args = ap.parse_args()
+
+    def _h(n):
+        for u in ("B", "KB", "MB", "GB", "TB"):
+            if n < 1024 or u == "TB":
+                return "%.1f%s" % (n, u)
+            n /= 1024.0
 
     cands = collapse_flavours(read_candidates(sys.stdin))
 
+    # Small-models policy: never propose an oversized model, no matter how
+    # valuable — otherwise phase 3 (flagship fill) would pull the huge ones.
+    if args.model_max_bytes > 0:
+        oversized = [c for c in cands if c["bucket"] == "models" and c["bytes"] > args.model_max_bytes]
+        if oversized:
+            cands = [c for c in cands if not (c["bucket"] == "models" and c["bytes"] > args.model_max_bytes)]
+            sys.stderr.write("planner: skipped %d model(s) larger than %s (small-models policy)\n"
+                             % (len(oversized), _h(args.model_max_bytes)))
+
+    if args.list_absent:
+        for c in list_absent(cands):
+            emit(c, 0, sys.stdout)
+        return 0
+
     if args.evict_need > 0:
-        for v in evict(cands, args.manifest, args.evict_need):
+        pinned = load_pins(args.pins)
+        for v in evict(cands, args.manifest, args.evict_need, pinned):
             sys.stdout.write("\t".join([v["id"], v["category"], v["dest"], str(v["bytes"]), str(v["value"])]) + "\n")
         return 0
 

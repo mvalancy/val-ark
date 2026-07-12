@@ -84,6 +84,12 @@ catalog_zim_candidates() {
         if (lname ~ /medicin|medical|wikem|health/) base += 90;
         if (lname ~ /_100_|_top_|essential/) base += 50;
         if (lname ~ /mathematic|physic|chemistr|comput|climate|biolog/) base += 30;
+        # Linux / shell / offline-SETUP help: an offline user must be able to get
+        # setup + command guidance from the box itself. Boost regardless of category
+        # (distro wikis land in the low-weight "other"; askubuntu/unix.stackexchange
+        # are the gold). This makes the small distro wikis + shell docs fill FIRST.
+        if (lname ~ /archlinux|alpinelinux|gentoo|debian|ubuntu|raspberr|_linux|linux_|unix\.stack|askubuntu|busybox|coreutils|systemd|_bash|_shell|command.?line|sysadmin|devops|freebsd|gnu_/) base += 140;
+        if (cat=="devdocs" && lname ~ /bash|linux|git|docker|nginx|systemd|sqlite|vim|python|node|curl|ssh|make|gcc|apt|dpkg/) base += 70;
         if (base>1000) base=1000;
         id="zim:" name (flavour!="" ? "_" flavour : "") "_" lang;
         nn=split(url,pp,"/"); fname=pp[nn]; dest=zdir "/" fname;

@@ -71,9 +71,18 @@ warn() { echo "[chat] WARN: $*" >&2; }
 
 # --- Node resolution (same scheme as loop.sh) ----------------------------------
 _chat_node() {
-    local n="$HOME/.nvm/versions/node/v20.20.2/bin/node"
-    [ -x "$n" ] || n="$(command -v node 2>/dev/null)"
-    echo "$n"
+    # Robust discovery: the Val Ark-MIRRORED node is usually the only one present on
+    # an offline box (no system node, no nvm). Check it first — the old code missed
+    # it, so The Lounge never built on mirrored-node hosts (Jetson/GB10/RK3588).
+    local n
+    for n in "${TOOLS_DIR}/${PLATFORM}/node/bin/node" \
+             "$HOME/.local/node/bin/node" \
+             "$HOME/.nvm/versions/node/v20.20.2/bin/node" \
+             "$(command -v node 2>/dev/null)"; do
+        [ -n "$n" ] && [ -x "$n" ] && { echo "$n"; return 0; }
+    done
+    n=$(ls -1d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V | tail -1)
+    [ -n "$n" ] && [ -x "$n" ] && echo "$n"
 }
 
 _is_running() {  # _is_running <pidfile>

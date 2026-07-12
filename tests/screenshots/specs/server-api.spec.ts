@@ -71,6 +71,22 @@ test.describe('Val Ark API Server', () => {
     expect(data.models).toBeDefined();
   });
 
+  test('GET /api/auth/status reports admin/access state without leaking secrets', async ({ request }) => {
+    const resp = await request.get(`${BASE_URL}/api/auth/status`);
+    expect(resp.ok()).toBeTruthy();
+    const d = await resp.json();
+    expect(typeof d.commissioned).toBe('boolean');
+    expect(typeof d.adminSet).toBe('boolean');
+    expect(['open', 'passworded', 'accounts']).toContain(d.useMode);
+    expect(typeof d.accounts).toBe('number');
+    // tests run from localhost → the box treats us as the trusted admin console.
+    expect(d.trusted).toBe(true);
+    // the passcode hash/salt must NEVER cross the API boundary.
+    const body = JSON.stringify(d);
+    expect(body).not.toContain('hash');
+    expect(body).not.toContain('salt');
+  });
+
   test('GET /api/status/downloads returns empty when idle', async ({ request }) => {
     const resp = await request.get(`${BASE_URL}/api/status/downloads`);
     expect(resp.ok()).toBeTruthy();

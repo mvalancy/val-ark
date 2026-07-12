@@ -70,6 +70,13 @@ const MODEL_ROOT = (() => {
     return path.join(DATA_ROOT, 'models');
 })();
 
+// Admin identity store. STATE_DIR mirrors valark-env.sh: config lives under
+// <VALARK_HOME>/state, physically separate from the content/model libraries.
+const auth = require('./lib/auth');
+const STATE_DIR = process.env.VALARK_STATE_DIR
+    || (process.env.VALARK_HOME ? path.join(process.env.VALARK_HOME, 'state')
+        : path.join(DATA_ROOT === ROOT ? ROOT : path.join(DATA_ROOT, 'val-ark'), 'state'));
+
 // MIME types for static file serving
 const MIME = {
     '.html': 'text/html',
@@ -825,6 +832,11 @@ function handleAPI(req, res, urlPath) {
                 }
                 return sendJSON(res, req, active);
             }
+            case '/api/auth/status':
+                // Read-only: is an admin set, which Use Mode, is this caller the
+                // trusted box/localhost. No gating is enforced yet (Open default);
+                // the commissioning wizard + access layer build on this.
+                return sendJSON(res, req, { ...auth.status(STATE_DIR), trusted: isLocalhost(req) });
             case '/api/catalog/content':
                 return sendJSON(res, req, getCatalog('content'));
             case '/api/catalog/models':

@@ -36,6 +36,19 @@ later). See [README](README.md).
 - **Deployment:** ship both a **Docker appliance image** *and* the bare‑metal bootstrap; both
   offline, both commissioned from the same wizard.
 
+## 2026‑07 — Access identity + recovery foundation (roadmap Phase 2, issue #10)
+- **Safety net lands first** (research's #1 lesson). Shipped the backend + CLI foundation, no UI
+  gating yet (Open stays default): `scripts/lib/auth.js` (scrypt‑hashed admin store, shared by
+  server + CLI), `scripts/valark` (`setpassword｜auth status｜auth list｜verify｜usemode｜reset
+  --tier1/--tier2`), and read‑only `GET /api/auth/status`.
+- **No usable default credential** — an un‑set admin means Open mode + "localhost/console is
+  admin," which is exactly what makes password‑less recovery safe. Passcode is scrypt‑hashed in a
+  0600 `<state>/auth.json`; the hash/salt never cross the API.
+- **Content‑safety invariant is structural + tested:** `STATE_DIR` is separate from
+  content/models, so `reset --tier1/--tier2` provably can't wipe the library
+  (`tests/test-auth.sh` sha256‑verifies sentinels survive). Content‑erase is deliberately NOT in
+  this CLI (it needs the typed‑confirmation UI flow).
+
 ## 2026‑07 — First `dev → main` release (v1.1.0) + community sign‑ups (PR #2/#3)
 - **Adopted the branch model in practice:** PR #1 (foundational) landed on `dev`; the
   community‑signups quick win (PR #2) landed on `dev`; then the first **`dev → main` release**

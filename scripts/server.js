@@ -789,7 +789,12 @@ function isReadGated(urlPath) {
         urlPath.startsWith('/api/archive/') || urlPath === '/api/downloads/stream') return true;
     if (urlPath === '/kiwix' || urlPath.startsWith('/kiwix/')) return true;
     if (/^\/app\//.test(urlPath)) return true;
-    return false;   // the static UI shell + assets are always served (wall renders in it)
+    // The raw data/content trees the static router serves straight from ROOT (the
+    // library, models, tool binaries, source bundles, assets, docs). These ARE the
+    // content the wall protects — /api/archive + /kiwix are just another door to the
+    // same bytes, so gating only those would leave the front door wide open.
+    if (/^\/(content|models|tools|sources|assets|installers|docs)(\/|$)/i.test(urlPath)) return true;
+    return false;   // the web-ui shell + its assets (index.html, styles.css, favicon, logos) stay open
 }
 function readAllowed(req) {
     const mode = auth.status(STATE_DIR).useMode;

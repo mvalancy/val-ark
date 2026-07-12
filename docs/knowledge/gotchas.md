@@ -128,6 +128,13 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   renders a full-page wall (`renderAccessWall`) before loading the app. Open mode is unchanged, so
   the existing (Open-default) tests don't regress; the wall is exercised via `VALARK_TEST_FORCE_REMOTE`
   in `test-access.sh` and a forced-state Playwright render.
+- **A read-wall must gate the raw STATIC data dirs, not just the API doors** (adversarial-review
+  finding, high). The static router serves `/content`, `/models`, `/tools`, `/sources`, `/assets`,
+  `/docs` straight from ROOT (symlinks to the data disk) — the **same library bytes** that `/kiwix/*`
+  and `/api/archive/*` gate. Gating only the `/api`/`/kiwix`/`/app` prefixes left the front door
+  open (`curl /content/zim/wikipedia.zim` un-authed). `isReadGated` now also matches
+  `^/(content|models|tools|sources|assets|installers|docs)(/|$)`. Lesson: gate by **what the bytes
+  are**, not just by URL prefix — a mirror has many doors to the same content.
 - **Sessions are stateless HMAC tokens** (`payload.hmac`, signed with a per-box secret in the auth
   store), so there's no session table. Cookie `varksid` is HttpOnly + SameSite=Lax. **"Sign out
   everywhere" = rotate the secret** (`auth.rotateSessionSecret`) — a per-client logout only drops

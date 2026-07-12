@@ -101,6 +101,13 @@ _is_running() {  # _is_running <pidfile>
     pid="$(cat "$pf" 2>/dev/null)"
     [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
+# The Lounge is "up" if its pidfile process is alive OR something is already
+# serving its port — so a stale/incorrect pidfile can never make start() spawn a
+# second instance that then fails to bind :${WEB_PORT}.
+_lounge_up() {
+    _is_running "$THELOUNGE_PID" && return 0
+    curl -fsS --max-time 3 "http://127.0.0.1:${WEB_PORT}/" >/dev/null 2>&1
+}
 
 ###############################################################################
 # Build (in-place, idempotent) -- only runs when a binary/build is missing.
@@ -191,13 +198,26 @@ _write_ngircd_conf() {
     # Bind to the LAN (or 127.0.0.1 if VALARK_BIND is set). NO uplinks defined.
     Listen = ${BIND}
     Ports = ${IRC_PORT}
-    MotdText = Welcome to the Val Ark offline IRC server. Be excellent to each other.
+    # Multi-line MOTD (each MotdText adds a line) — greet, and teach the basics so
+    # a first-timer isn't stuck in one empty room wondering what to do.
+    MotdText = Welcome aboard the Val Ark — offline community chat. Nothing here leaves the box.
+    MotdText = -----------------------------------------------------------------
+    MotdText = See all channels :  /list
+    MotdText = Join / create one:  /join #topic      (creates it if new; you become the op)
+    MotdText = Private (hidden)  :  /join #secret  then  /mode #secret +i     (invite-only)
+    MotdText =                      /invite nick #secret   to let someone in
+    MotdText = Set a topic       :  /topic #channel Your topic here
+    MotdText = Message a person  :  /msg nick hello
     PidFile = ${NGIRCD_PID}
 
 [Limits]
     MaxConnections = 0
     MaxConnectionsIP = 0
     MaxJoins = 0
+    # ngIRCd's default is 9 (classic IRC) — far too short, so ordinary names (and
+    # even The Lounge's own default nick) hit "nickname too long". 30 fits real
+    # names while staying within ngIRCd's compiled nick-length limit.
+    MaxNickLength = 30
 
 [Options]
     # No DNS / Ident lookups (offline box; keeps connects instant).
@@ -207,10 +227,28 @@ _write_ngircd_conf() {
     # Connections never relay outward: there are intentionally no [Server] sections.
     AllowRemoteOper = no
 
+# Starter channels so the server isn't one lonely room. They persist even when
+# empty and show up in /list; users /join any new #name to create their own.
+# Modes: t = topic settable by ops only, n = no messages from outside the channel.
 [Channel]
     Name = #valark
-    Topic = Val Ark community channel
+    Topic = Welcome aboard — start here. Type /list to see all channels, /join #name to make your own.
     Modes = tn
+
+[Channel]
+    Name = #general
+    Topic = General chat — everyone welcome
+    Modes = nt
+
+[Channel]
+    Name = #help
+    Topic = Questions about this Val Ark box and its apps
+    Modes = nt
+
+[Channel]
+    Name = #random
+    Topic = Off-topic — memes, music, whatever
+    Modes = nt
 EOF
 }
 
@@ -241,17 +279,18 @@ module.exports = {
     prefetch: false,          // offline box: never fetch link previews from the internet
     disableMediaPreview: true,
     lockNetwork: true,        // users cannot add arbitrary (internet) IRC networks
-    leaveMessage: "Val Ark offline IRC",
+    leaveMessage: "⚓ Sailing on — see you aboard the Val Ark",
     defaults: {
         name: "${NETWORK_NAME}",
         host: "127.0.0.1",    // local ngIRCd only
         port: ${IRC_PORT},
         tls: false,
         rejectUnauthorized: false,
-        nick: "valark-user",
+        nick: "sailor",
         username: "valark",
         realname: "Val Ark user",
-        join: "#valark"
+        // Land new arrivals in the welcome + general rooms so it never feels empty.
+        join: "#valark #general"
     },
     // Persistent history (the whole point of The Lounge): keep messages on disk.
     messageStorage: ["sqlite", "text"],
@@ -321,8 +360,8 @@ cmd_start() {
     fi
 
     # --- The Lounge (web UI) --------------------------------------------------
-    if _is_running "$THELOUNGE_PID"; then
-        log "The Lounge already running (pid $(cat "$THELOUNGE_PID"))."
+    if _lounge_up; then
+        log "The Lounge already running (127.0.0.1:${WEB_PORT})."
     else
         _build_thelounge || { warn "The Lounge not started (build needed)."; return 1; }
         _write_thelounge_conf
@@ -332,9 +371,12 @@ cmd_start() {
         [ -n "$node" ] || { err "node not found; cannot start The Lounge"; return 1; }
         nodedir="$(dirname "$node")"
         log "Starting The Lounge web UI on 127.0.0.1:${WEB_PORT} (proxy at /app/chat/)..."
+        # nohup (NOT setsid) so $! is The Lounge's real PID → a correct pidfile, so
+        # start stays idempotent and stop kills the right process. </dev/null + output
+        # redirected to a file already detach it from this shell / the SSH session.
         ( cd "$THELOUNGE_SRC" \
             && THELOUNGE_HOME="$THELOUNGE_HOME" PATH="${nodedir}:$PATH" \
-               setsid nohup "$node" index.js start >"${LOG_DIR_CHAT}/thelounge.out" 2>&1 </dev/null &
+               nohup "$node" index.js start >"${LOG_DIR_CHAT}/thelounge.out" 2>&1 </dev/null &
             echo $! > "$THELOUNGE_PID" )
         disown 2>/dev/null || true
     fi

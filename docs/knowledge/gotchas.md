@@ -224,6 +224,20 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   endpoint skip the actual `loop.sh` spawn (so CI/Playwright never runs the heavy loop) but it
   runs **after** the auth gate and only *prevents* the action — never grants access. Same
   fail-safe direction as `VALARK_TEST_FORCE_REMOTE=1` (which only removes the localhost bypass).
+- **Live metrics are two-sample deltas → the first read is null by design.** `/api/status/metrics`
+  computes CPU% and net rate from the *difference* between two `/proc/stat`/`/proc/net/dev`
+  snapshots. The server keeps only the previous sample (`_metricsPrev`) and does NOT sleep between
+  reads — the client's 15s Health poll spaces them. So the very first call after boot returns
+  `cpu.percent: null` / `rxRate: null` (no baseline yet), filled on the next poll. UI shows an
+  em-dash, never `NaN`/blank; tests assert the *second* read is a number. Also: guard the
+  cumulative-counter wrap/reset (`Δ < 0 → null`), and `mem.used = MemTotal − MemAvailable`
+  (NOT `− MemFree`, which excludes reclaimable cache and overstates used).
+- **Live gauges must not depend on Telegraf/InfluxDB.** The zero-dep server reads `/proc` + `os`
+  itself, so the Health System tiles work on a bare box in CI/VM with no services mirrored. Every
+  `/proc`//`sys` read is individually try/caught → the field degrades to `null` off-Linux
+  (macOS/Windows/CI get load+uptime+mem-fallback; net/temp/cpu% go null) and the handler NEVER
+  throws. Don't shell out per request — reuse the 10s-cached `getDiskStatus()` (its `df` can hang
+  on a stale NFS mount) and `fs.readFileSync('/proc/...')` for the rest.
 
 ## Git / releases
 

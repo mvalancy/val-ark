@@ -97,6 +97,9 @@ function _legacyActive() {
 // still boots — into a recovery-only state — rather than a dead port; content is never
 // touched. Recomputed live so fixing/resetting the config exits Safe Mode with no restart.
 let _smCache = { v: null, ts: 0 };
+// Prior CPU/net sample for the live-metrics two-sample deltas (see getHostMetrics).
+// The client's 15s Health poll spaces the samples — no sleep-between-reads on the server.
+let _metricsPrev = { stat: null, net: null, ts: 0 };
 function safeModeState() {
     const now = Date.now();
     if (_smCache.v && now - _smCache.ts < 3000) return _smCache.v;   // cache: it's on the read/POST hot path
@@ -967,6 +970,11 @@ function handleAPI(req, res, urlPath) {
                 // functional-verify per-check results (verify.json), the timestamped
                 // heal-events feed, and Safe-Mode state. Read-gated like all /api/status.
                 return sendJSON(res, req, getHealthDetail());
+            case '/api/status/metrics':
+                // Live host gauges for the Health page's System tiles — pure local reads
+                // (/proc + os + cached disk), no external service, never throws. Read-gated
+                // by the /api/status/ prefix (reveals host load), same class as .../disk.
+                return sendJSON(res, req, getHostMetrics());
             case '/api/auth/status':
                 // Read-only: is an admin set, which Use Mode, is this caller the
                 // trusted box/localhost (`trusted`) and are they an authenticated
@@ -1496,6 +1504,114 @@ function getHealthDetail() {
     } catch (_) {}
     const sm = safeModeState();
     return { verify, heal, events, safeMode: sm.safeMode, safeModeReasons: sm.reasons, repairRunning: repairInFlight() };
+}
+
+// ---- Live host metrics (Health page System tiles) ---------------------------
+// Pure local reads — /proc + the os module + the 10s-cached getDiskStatus() — so it's
+// instant, needs NO npm deps and NO external service (Telegraf/InfluxDB add history on
+// top later, they are not required here), and NEVER throws: every field degrades to null
+// off-Linux or when a source is missing. CPU% and net rate are two-sample deltas; the
+// client's 15s Health poll spaces the samples (first read → null, filled next poll).
+function _readProc(p) { try { return fs.readFileSync(p, 'utf8'); } catch (_) { return null; } }
+function _readMem() {
+    const os = require('os');
+    const mi = _readProc('/proc/meminfo');
+    if (mi) {
+        const g = (k) => { const m = mi.match(new RegExp('^' + k + ':\\s+(\\d+)\\s*kB', 'm')); return m ? parseInt(m[1], 10) * 1024 : null; };
+        const total = g('MemTotal'), avail = g('MemAvailable'), free = g('MemFree');
+        const swapTotal = g('SwapTotal'), swapFree = g('SwapFree');
+        // used = total - available (NOT total-free: free excludes reclaimable cache and
+        // would overstate "used"). Same reason we don't lean on os.freemem() below.
+        if (total && avail != null) {
+            const used = total - avail;
+            return { total, used, available: avail, free, percent: Math.round(used / total * 100),
+                     swapTotal, swapUsed: (swapTotal != null && swapFree != null) ? swapTotal - swapFree : null };
+        }
+    }
+    try {
+        const total = os.totalmem(), free = os.freemem();
+        if (total) { const used = total - free; return { total, used, available: free, free, percent: Math.round(used / total * 100), swapTotal: null, swapUsed: null }; }
+    } catch (_) {}
+    return null;
+}
+function _readTemp() {
+    try {
+        const base = '/sys/class/thermal';
+        let max = null;
+        for (const z of fs.readdirSync(base)) {
+            if (!/^thermal_zone\d+$/.test(z)) continue;
+            const raw = _readProc(path.join(base, z, 'temp'));
+            if (raw == null) continue;
+            const v = parseInt(raw.trim(), 10);
+            if (!isNaN(v)) { const c = v / 1000; if (max == null || c > max) max = c; }
+        }
+        return max != null ? Math.round(max * 10) / 10 : null;
+    } catch (_) { return null; }
+}
+function getHostMetrics() {
+    const os = require('os');
+    const now = Date.now();
+    const out = { ts: new Date().toISOString(), source: 'live' };
+
+    try { out.host = { hostname: os.hostname(), arch: os.arch(), platform: os.platform(), release: os.release(), uptime: Math.round(os.uptime()) }; }
+    catch (_) { out.host = null; }
+
+    // CPU%: two /proc/stat samples (idle = idle+iowait, total = sum of all fields).
+    let cpuPercent = null, statNow = null;
+    const stat = _readProc('/proc/stat');
+    if (stat) {
+        const line = stat.split('\n').find(l => /^cpu\s/.test(l));
+        if (line) {
+            const parts = line.trim().split(/\s+/).slice(1).map(Number);
+            const idle = (parts[3] || 0) + (parts[4] || 0);
+            const total = parts.reduce((a, b) => a + (b || 0), 0);
+            statNow = { idle, total };
+            if (_metricsPrev.stat) {
+                const dt = total - _metricsPrev.stat.total, di = idle - _metricsPrev.stat.idle;
+                if (dt > 0) cpuPercent = Math.max(0, Math.min(100, Math.round((1 - di / dt) * 100)));
+            }
+        }
+    }
+    let cores = null, model = null, loadavg = null;
+    try { const c = os.cpus() || []; cores = c.length || null; model = c[0] ? c[0].model : null; } catch (_) {}
+    try { const la = os.loadavg(); loadavg = (Array.isArray(la) && (la[0] || la[1] || la[2])) ? la.map(n => Math.round(n * 100) / 100) : null; } catch (_) {}
+    out.cpu = { cores, model, loadavg, percent: cpuPercent };
+
+    out.mem = _readMem();
+
+    try { const d = getDiskStatus(); out.disk = (d && d.total) ? { total: d.total, used: d.used, available: d.available, percent: Math.round(d.used / d.total * 100) } : null; }
+    catch (_) { out.disk = null; }
+
+    // Net: rx/tx summed across non-lo interfaces + rate over MEASURED elapsed. Guard the
+    // cumulative-counter wrap/reset (Δ<0 → null); first sample → null.
+    let netNow = null, rxRate = null, txRate = null;
+    const nd = _readProc('/proc/net/dev');
+    if (nd) {
+        let rx = 0, tx = 0, seen = false;
+        for (const l of nd.split('\n')) {
+            const m = l.match(/^\s*([^:]+):\s*(.*)$/);
+            if (!m || m[1].trim() === 'lo') continue;
+            const f = m[2].trim().split(/\s+/).map(Number);
+            if (f.length >= 9) { rx += f[0] || 0; tx += f[8] || 0; seen = true; }
+        }
+        if (seen) {
+            netNow = { rx, tx };
+            if (_metricsPrev.net && _metricsPrev.ts) {
+                const secs = (now - _metricsPrev.ts) / 1000;
+                if (secs > 0) {
+                    const drx = rx - _metricsPrev.net.rx, dtx = tx - _metricsPrev.net.tx;
+                    rxRate = drx >= 0 ? Math.round(drx / secs) : null;
+                    txRate = dtx >= 0 ? Math.round(dtx / secs) : null;
+                }
+            }
+        }
+    }
+    out.net = netNow ? { rxBytes: netNow.rx, txBytes: netNow.tx, rxRate, txRate } : null;
+
+    out.temp = _readTemp();
+
+    _metricsPrev = { stat: statNow, net: netNow, ts: now };
+    return out;
 }
 
 // "Run self-heal now": kick the maintenance loop's own fixers (loop.sh once) — repairs

@@ -66,9 +66,14 @@ below are the appliance around it.**
   runs the loop's own fixers (`loop.sh once`), plus per-service Restart and Safe-Mode Recover.
   Backed by `loop.sh` now actually writing `health.json` + `heal-events.jsonl`, `verify.sh`
   emitting per-check component results, and a read-gated `GET /api/status/health`.
-- **[NEXT — metrics stack]** Stand up **Telegraf + InfluxDB** as mirrored services (Grafana
-  optional/Advanced, Task #24) and feed live metrics into the strip; **offline notification
-  center** routing into the box's own mail/board/chat.
+- **[DONE — live metrics]** Live host gauges on the Health page (`GET /api/status/metrics`):
+  a **System tiles** strip (CPU%, memory, load, uptime, net rate, temperature) + a "System
+  load" component card, read straight from `/proc` + `os` by the zero-dep server — **works on
+  a bare box with no services**. History shown as a neutral "live-only" indicator.
+- **[NEXT — retention stack]** Stand up **Telegraf + InfluxDB** as mirrored services (Grafana
+  optional/Advanced, Task #24) for history/sparklines + fleet rollup, fed into the same strip
+  via a reviewed InfluxDB HTTP passthrough; **offline notification center** routing into the
+  box's own mail/board/chat.
 
 ## Phase 7 — Safety & moderation → [safety-moderation.md](safety-moderation.md)
 - On-device **moderation hook** (NSFW ONNX classifier on NPU/GPU + Llama-Guard text),

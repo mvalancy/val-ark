@@ -3590,6 +3590,16 @@ function renderSettings() {
     // Storage detail is the most-used control — surface the live breakdown inline.
     html += `<div id="storage" class="detail-section" style="margin-top:1.5rem"><h2>Storage</h2>${renderStorageBreakdown()}
         <p style="color:var(--text-muted);font-size:.9em">Val Ark keeps itself under its footprint cap and evicts the lowest-priority content when it needs room. Change the cap in <code>.env</code> (<code>VALARK_MAX_GB</code>) — a slider is coming to Advanced.</p></div>`;
+    // Downloads & Priorities: the plain-language focus picker → curation weights.
+    const curProfile = (_setupState && _setupState.profile) || '';
+    html += `${_SETUP_CSS}<div id="downloads" class="detail-section" style="margin-top:1.5rem"><h2>Downloads &amp; Priorities</h2>
+        <p>What should Val Ark fill up with first? Pick a focus — it re-weights everything the box downloads. Change it any time.</p>
+        <div class="setup-profiles">${_PROFILES.map(p => `
+            <button class="setup-profile${curProfile === p.id ? ' on' : ''}" data-profile="${p.id}" onclick="setDownloadProfile('${p.id}')">
+                <span class="setup-profile-ic" aria-hidden="true">${p.icon}</span>
+                <span class="setup-profile-tx"><strong>${esc(p.label)}</strong><span class="setup-profile-desc">${esc(p.desc)}</span></span>
+            </button>`).join('')}</div>
+        <p style="color:var(--text-muted);font-size:.9em">Watch it fill in <a href="#/activity">Activity</a>. Requesting a specific item from the Library / Models / Software pages jumps it to the front of the queue.</p></div>`;
     html += `<div id="about" class="detail-section" style="margin-top:1.5rem"><h2>About &amp; Rescue</h2>
         <p>Val Ark — offline-first knowledge &amp; AI appliance. Forgot the admin passcode or need to start over? It’s always recoverable.</p>
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.6rem 0 1rem">
@@ -3678,6 +3688,17 @@ async function loadDownloads() {
 }
 // Re-render the Activity queue when it's the current view (SSE-driven, rAF-debounced).
 function _activityLive() { if (getRoute() === '/activity') scheduleRender(); }
+
+// Change the download focus (Settings → Downloads & Priorities) → curation weights.
+async function setDownloadProfile(profile) {
+    try {
+        const r = await fetch('/api/setup/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile }) });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) { if (_setupState) _setupState.profile = profile; scheduleRender(); }
+        else if (isNeedsAuth(r, d)) signIn('Sign in to change download priorities.');
+        else alert(d.error || 'Could not update download priorities.');
+    } catch (e) { alert('Could not update download priorities.'); }
+}
 
 const _SHELL_CSS = `<style>
 .home-status{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.8rem 1rem;margin:0 0 1rem;border:1px solid var(--border,#2a2d34);border-radius:12px;background:var(--card-bg,var(--bg,#16181d))}

@@ -33,6 +33,16 @@ function writeSettings(obj, dir) {
 
 function isCommissioned(dir) { return !!readSettings(dir).commissionedAt; }
 
+// Change the download profile later (Settings → Downloads & Priorities). Drives the
+// librarian's per-bucket curation weights (see catalog.sh _valark_profile).
+function setProfile(dir, profile) {
+  if (!PROFILES.includes(profile)) return { error: 'Unknown profile.' };
+  const s = readSettings(dir);
+  s.profile = profile;
+  writeSettings(s, dir);
+  return { ok: true, profile };
+}
+
 // One-time migration for boxes set up BEFORE the wizard existed: record them as
 // commissioned so first-boot never hijacks a working Ark. Decided ONCE (at first
 // server start, from whether a library already exists) and made sticky — so content
@@ -194,7 +204,7 @@ function configHealth(dir) {
 }
 
 module.exports = { state, commission, isCommissioned, ensureClaim, readClaim, consumeClaim, readSettings, writeSettings, PROFILES,
-  ensureRecovery, readRecovery, regenerateRecovery, verifyRecovery, recoverAdmin, grandfather, configHealth };
+  ensureRecovery, readRecovery, regenerateRecovery, verifyRecovery, recoverAdmin, grandfather, configHealth, setProfile };
 
 // ---- CLI mode (invoked by scripts/valark) ------------------------------------
 if (require.main === module) {

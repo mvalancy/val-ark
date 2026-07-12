@@ -714,6 +714,39 @@ case "${1:-}" in
         echo -e "  ${GREEN}http://localhost:${_port}${NC}"
         exec "$_node" "${SCRIPTS}/server.js" "$_port"
         ;;
+    port80|port-80)
+        # Make this machine reachable at http://<its-ip>/  (no :3000 to remember).
+        # Best path: grant the node binary permission to bind :80 (one sudo, persists);
+        # fall back to an iptables 80->PORT redirect the self-healing loop maintains.
+        _node="$HOME/.local/node/bin/node"; [ -x "$_node" ] || _node="$(command -v node 2>/dev/null)"
+        _webport="$(sed -n 's/^VALARK_WEB_PORT=\(.*\)/\1/p' .env 2>/dev/null | tr -d '"')"; _webport="${_webport:-3000}"
+        _set_env() { touch .env; if grep -qE "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else printf '%s=%s\n' "$1" "$2" >> .env; fi; }
+        _done=0
+        if [ -n "$_node" ] && command -v setcap >/dev/null 2>&1; then
+            _rn="$(readlink -f "$_node")"
+            echo -e "  Granting ${BOLD}${_rn}${NC} permission to bind port 80 (sudo, once)..."
+            if sudo setcap 'cap_net_bind_service=+ep' "$_rn" 2>/dev/null; then
+                _extra="$(sed -n 's/^VALARK_WEB_EXTRA_PORTS=\(.*\)/\1/p' .env 2>/dev/null | tr -d '"')"
+                case ",$_extra," in *",80,"*) : ;; *) _extra="${_extra:+$_extra,}80" ;; esac
+                _set_env VALARK_WEB_EXTRA_PORTS "$_extra"
+                echo -e "  ${GREEN}Done.${NC} node can now bind :80. Restart the server (./start.sh serve, or the loop) and open ${BOLD}http://<this-ip>/${NC}"
+                _done=1
+            else
+                echo -e "  ${YELLOW}setcap needed sudo/root and it wasn't granted — trying the redirect instead.${NC}"
+            fi
+        fi
+        if [ "$_done" != 1 ]; then
+            _set_env VALARK_WEB_PUBLIC_PORT 80
+            echo -e "  Set ${BOLD}VALARK_WEB_PUBLIC_PORT=80${NC} — the loop maps :80 -> :${_webport} each cycle (needs passwordless sudo or root)."
+            PATH="/usr/sbin:/sbin:$PATH"
+            if command -v iptables >/dev/null 2>&1 && { sudo iptables -t nat -C PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports "$_webport" 2>/dev/null \
+                 || sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports "$_webport" 2>/dev/null; }; then
+                echo -e "  ${GREEN}Redirect applied now.${NC} Open ${BOLD}http://<this-ip>/${NC}"
+            else
+                echo -e "  ${YELLOW}Could not apply the redirect right now${NC} (need sudo/root); the loop retries each cycle once VALARK_WEB_PUBLIC_PORT=80 is set."
+            fi
+        fi
+        ;;
     help|--help|-h)
         show_help
         ;;

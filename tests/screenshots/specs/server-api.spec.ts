@@ -248,6 +248,45 @@ test.describe('Val Ark API Server', () => {
     expect(body).toContain('localhost:3001');
   });
 
+  test('every mirrored tool serves a valid per-platform download (sweep, no broken links)', async ({ request }) => {
+    // The app "Download" buttons hit /api/archive/tools/<platform>/<dir>, which
+    // tarballs the REAL mirrored dir. Sweep every mirrored (tool, platform) and
+    // assert each returns 200 — catches wrong/missing files the user reported.
+    test.setTimeout(180000);
+    const tools = await (await request.get(`${BASE_URL}/api/status/tools`)).json();
+    const bad: string[] = [];
+    let checked = 0;
+    for (const [entry, plats] of Object.entries<Record<string, any>>(tools)) {
+      for (const plat of Object.keys(plats)) {
+        if (plat === 'source') continue;            // source tarballs are a separate path
+        const url = `${BASE_URL}/api/archive/tools/${plat}/${entry}`;
+        const r = await request.head(url);
+        checked++;
+        if (r.status() !== 200) bad.push(`${plat}/${entry} -> HTTP ${r.status()}`);
+      }
+    }
+    // If nothing is mirrored yet the sweep is a no-op (fresh checkout) — don't fail.
+    if (checked === 0) test.skip(true, 'no tools mirrored on this host to sweep');
+    expect(bad, `broken tool download links:\n${bad.join('\n')}`).toEqual([]);
+  });
+
+  test('a mirrored tool download actually returns a non-empty gzip tarball', async ({ request }) => {
+    test.setTimeout(60000);
+    const tools = await (await request.get(`${BASE_URL}/api/status/tools`)).json();
+    const entry = Object.keys(tools)[0];
+    if (!entry) test.skip(true, 'no tools mirrored');
+    const plat = Object.keys(tools[entry]).find(p => p !== 'source');
+    if (!plat) test.skip(true, 'no platform dir for first tool');
+    const r = await request.get(`${BASE_URL}/api/archive/tools/${plat}/${entry}`);
+    expect(r.status()).toBe(200);
+    expect(r.headers()['content-disposition']).toContain('.tar.gz');
+    const body = await r.body();
+    expect(body.length).toBeGreaterThan(20);
+    // gzip magic bytes
+    expect(body[0]).toBe(0x1f);
+    expect(body[1]).toBe(0x8b);
+  });
+
   test('GET /favicon.svg is served', async ({ request }) => {
     const resp = await request.get(`${BASE_URL}/favicon.svg`);
     expect(resp.ok()).toBeTruthy();

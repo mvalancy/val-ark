@@ -3337,6 +3337,8 @@ function router() {
         html += renderHome();
     } else if (route === '/community') {
         html += renderCommunity();
+    } else if (route === '/https' || route === '/trust') {
+        html += renderHttpsGuide();
     } else if (route === '/tools') {
         html += renderToolsList();
     } else if (route === '/tools/ollama') {
@@ -3774,62 +3776,41 @@ function renderToolDetail(toolId) {
         html += '</div></div>';
     }
 
-    // Downloads
-    if (tool.downloads) {
-        const dl = tool.downloads;
+    // Downloads — a CLEAR per-platform offline download of the mirrored artifact,
+    // served straight from this Ark. /api/archive tarballs the REAL mirrored dir so
+    // the file always matches what's actually mirrored (no guessed paths / wrong files).
+    {
+        const dlName = tool.downloadTarget || tool.id;
+        const PLAT_DIR = { jetson: 'linux-arm64', thor: 'linux-arm64', gb10: 'linux-arm64', openwrt: 'linux-arm64', ubuntu: 'linux-x86_64', mac: 'macos-arm64', windows: 'windows-x64' };
+        const PLAT_LABEL = { jetson: 'Linux ARM64 · Jetson / Pi / RK3588', ubuntu: 'Linux x86_64', mac: 'macOS · Apple Silicon', windows: 'Windows x64' };
+        const order = ['ubuntu', 'jetson', 'mac', 'windows'];
+        const avail = order.filter(pk => tool.platforms && tool.platforms[pk] && tool.platforms[pk] !== 'none');
         html += '<div class="detail-section" id="download"><h2>Download</h2>';
-
-        // External links
-        if (dl.releases || dl.source) {
-            html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">';
-            if (dl.releases) html += `<a href="${dl.releases}" target="_blank" rel="noopener" class="download-btn" style="background:var(--green)">&#x2197; Official Releases</a>`;
-            if (dl.source) html += `<a href="${dl.source}" target="_blank" rel="noopener" class="download-btn" style="background:var(--bg-tertiary);border:1px solid var(--border)">&#x2197; Source Code</a>`;
-            html += '</div>';
-        }
-
-        // Platform picker for local server files
-        if (dl.binaries && Object.keys(dl.binaries).length > 0) {
-            html += '<h3 style="font-size:0.95em;margin-bottom:12px;color:var(--text-secondary)">Platform availability:</h3>';
+        if (avail.length) {
+            html += `<p class="section-desc" style="margin-bottom:14px">Get the mirrored copy straight from this Ark — works fully offline, no GitHub. Pick your platform (downloads a <code>.tar.gz</code> of the ready-to-run files):</p>`;
             html += '<div class="paths-grid">';
-            Object.entries(dl.binaries).forEach(([platId, path]) => {
-                if (!path) return;
-                const platLabel = PLATFORMS[platId] ? PLATFORMS[platId].fullLabel : platId;
-                const filename = path.split('/').pop();
-                const platType = tool.platforms[platId] || 'unknown';
-
-                // Get content type from TOOL_INFO if available
-                const toolStatus = INSTALLED_TOOLS[tool.id];
-                const toolInfo = TOOL_INFO[tool.id] || {};
-
-                // Determine what to show based on platform type
-                if (platType === 'prebuilt' || platType === 'portable' || platType === 'appimage') {
-                    // Show download link for prebuilt binaries
-                    html += `<div class="path-card">
-                        <h4>${platLabel}</h4>
-                        <a href="${path}" download class="download-btn" onclick="handleDownload(event,'${path}')">${filename}</a>
-                        <p style="margin-top:6px"><code style="font-size:0.78em">${path}</code></p>
-                    </div>`;
-                } else if (platType === 'build') {
-                    // Show source tarball download
-                    const tarballPath = path.replace(/\/$/, '') + '.tar.gz';
-                    html += `<div class="path-card">
-                        <h4>${platLabel}</h4>
-                        <span class="badge badge-source" style="display:inline-block;margin-bottom:8px">Build from Source</span>
-                        <p style="font-size:0.85em;color:var(--text-secondary);margin-bottom:8px">Source code tarball for offline build.</p>
-                        <a href="${tarballPath}" download class="download-btn" style="background:var(--yellow);color:#000" onclick="handleDownload(event,'${tarballPath}')">Download Source (.tar.gz)</a>
-                        <p style="margin-top:6px;font-size:0.8em;color:var(--text-muted)">Extract and build with CMake or make.</p>
-                    </div>`;
-                } else {
-                    // Default: show path but indicate status
-                    html += `<div class="path-card">
-                        <h4>${platLabel}</h4>
-                        <span class="badge badge-hint" style="display:inline-block;margin-bottom:8px">${platType}</span>
-                        <p style="margin-top:6px"><code style="font-size:0.78em">${path}</code></p>
-                    </div>`;
-                }
+            avail.forEach(pk => {
+                const dir = PLAT_DIR[pk];
+                const archive = `/api/archive/tools/${dir}/${dlName}`;
+                const build = tool.platforms[pk] === 'build';
+                html += `<div class="path-card">
+                    <h4>${PLAT_LABEL[pk] || pk}</h4>
+                    <a href="${archive}" class="download-btn dl-plat" data-plat="${dir}" onclick="handleDownload(event,'${archive}')">${build ? '&#x2193; Download source' : '&#x2193; Download'}</a>
+                    ${build ? '<p style="font-size:0.78em;color:var(--text-muted);margin-top:6px">Source tarball — build with CMake / make.</p>' : ''}
+                </div>`;
             });
             html += '</div>';
-            html += `<p style="font-size:0.8em;color:var(--text-muted);margin-top:12px">Run <code>./start.sh download tools</code> to mirror tools locally. Prebuilt binaries download directly; others require building from source.</p>`;
+            if (_apiAvailable && tool.downloadTarget) {
+                html += `<button class="dl-action-btn" style="margin-top:14px" onclick="this.disabled=true;this.innerHTML='<span class=\\'spinner\\'></span> Mirroring all platforms…';triggerDownload('tools','${tool.downloadTarget}')">Mirror all platforms to this Ark</button>`;
+                html += `<p style="font-size:0.8em;color:var(--text-muted);margin-top:8px">Not mirrored yet? "Mirror all platforms" pulls every platform's build onto this Ark, then the buttons above serve them offline.</p>`;
+            }
+        }
+        // Secondary: upstream (only as a fallback when online)
+        if (tool.downloads && (tool.downloads.releases || tool.downloads.source)) {
+            html += '<div style="margin-top:16px;display:flex;gap:14px;flex-wrap:wrap">';
+            if (tool.downloads.releases) html += `<a href="${tool.downloads.releases}" target="_blank" rel="noopener" class="attr-item" style="font-size:0.85em">&#x2197; Upstream releases (needs internet)</a>`;
+            if (tool.downloads.source) html += `<a href="${tool.downloads.source}" target="_blank" rel="noopener" class="attr-item" style="font-size:0.85em">&#x2197; Source</a>`;
+            html += '</div>';
         }
         html += '</div>';
     }
@@ -4576,10 +4557,29 @@ function renderQuickStart() {
         <div class="code-label">Downloads edge/mobile AI models (~15GB)</div>
     </div>`;
 
-    // Step 4: Browse Wikipedia
+    // Step 3b: serve + reach it at http://<ip>/
     html += `<div class="detail-section">
-        <h2>4. Browse Wikipedia Offline</h2>
-        <p style="margin-bottom:12px">Once the server is running, Wikipedia is available on any device connected to your network:</p>`;
+        <h2>4. Start it &amp; reach it at http://&lt;ip&gt;/</h2>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>./start.sh serve</div>
+        <div class="code-label">Starts the web UI on port ${arkOrigin.includes(':') ? arkOrigin.split(':').pop() : '3000'} — startup prints the LAN address to share.</div>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>./start.sh port80</div>
+        <div class="code-label">Optional: serve on the standard web port so others just type <code>http://&lt;this-ip&gt;/</code> (no <code>:3000</code>). One sudo; grants node permission to bind :80, or sets up an 80&rarr;3000 redirect.</div>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>./scripts/loop.sh install 30</div>
+        <div class="code-label">Keeps it running 24/7 and self-heals (restarts on reboot, tops up content).</div>
+    </div>`;
+
+    // Step: get help offline — the box helps you set itself up
+    html += `<div class="detail-section" style="border-color:var(--accent)">
+        <h2>Stuck &amp; offline? The Ark can help you</h2>
+        <p>Val Ark prioritizes <strong>Linux &amp; shell docs</strong> in the <a href="#/content" style="color:var(--accent)">Library</a> (archlinux, alpine, Ubuntu, askubuntu, unix.stackexchange, bash/git/docker) and ships a tiny <strong>setup assistant</strong> — a small chat model good at shell commands. Mirror the assistant + llama.cpp, then ask it your setup questions with no internet:</p>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>llama-cli -m models/assistant/qwen2.5-1.5b-instruct/*.gguf -p "How do I mount a disk and set VAL_ARK_DATA on Ubuntu?"</div>
+        <div class="code-label">Request the assistant model + Linux docs from the Models &amp; Library pages, or <code>./scripts/librarian.sh fill</code>.</div>
+    </div>`;
+
+    // Step 4: Browse the Library
+    html += `<div class="detail-section">
+        <h2>5. Browse the Library Offline</h2>
+        <p style="margin-bottom:12px">Once the server is running, the whole offline Library (Wikipedia + StackExchange + wikis + courses) is available on any device connected to your network:</p>`;
     if (_kiwixStatus && _kiwixStatus.running) {
         const kUrl = getKiwixUrl();
         html += `<p><a href="${kUrl}" target="_blank" style="color:var(--accent);font-weight:600;font-size:1.1em">${kUrl}</a></p>
@@ -4593,7 +4593,7 @@ function renderQuickStart() {
 
     // Step 5: Run your first model
     html += `<div class="detail-section">
-        <h2>5. Run Your First AI Model</h2>
+        <h2>6. Run Your First AI Model</h2>
         <p style="margin-bottom:12px">Start a local LLM chat server:</p>
         <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>./tools/linux-x86_64/llama-server -m ./models/llm/llama-3.2-1b/Llama-3.2-1B-Instruct-Q8_0.gguf -ngl 999 -c 2048 --port 8080</div>
         <div class="code-label">Starts an OpenAI-compatible API at http://localhost:8080</div>
@@ -4603,7 +4603,7 @@ function renderQuickStart() {
 
     // Step 6: Auto-update
     html += `<div class="detail-section">
-        <h2>6. Keep Updated (Optional)</h2>
+        <h2>7. Keep Updated (Optional)</h2>
         <div class="code-block" onclick="copyText(this)"><span class="copy-hint">click to copy</span>./start.sh cron install</div>
         <div class="code-label">Sets up weekly auto-update (Sundays at 3 AM)</div>
     </div>`;
@@ -5143,6 +5143,43 @@ const _activeDownloads = new Map();
 // Security notice: when the Ark has a local-CA cert and you're on plain HTTP,
 // offer the one-click CA download + a switch to HTTPS. Honest about scope: this
 // encrypts traffic on the network, it does NOT hide data from the operator.
+// Full "how to actually use the certificate" guide — the download alone is useless
+// without per-device trust steps. Reachable from the security banner and Getting Started.
+function renderHttpsGuide() {
+    const host = location.hostname || 'localhost';
+    const port = (_tlsStatus && _tlsStatus.httpsPort) || 8443;
+    const ca = (_tlsStatus && _tlsStatus.caDownload) || '/ca.crt';
+    const httpsUrl = `https://${host}:${port}/`;
+    const enabled = _tlsStatus && _tlsStatus.enabled;
+    let html = '<div class="container" id="main-content">';
+    html += renderBreadcrumb([{ label: 'Set up HTTPS' }]);
+    html += '<h1>Set up HTTPS — trust this Ark</h1>';
+    html += `<p class="section-desc">Val Ark runs its own local certificate authority, so traffic is encrypted on your network with no internet involved. Install its certificate <strong>once per device</strong>, then everything — chat, mail, forum, downloads — is served over HTTPS with a clean padlock. <strong>Scope:</strong> this encrypts traffic on the network; it does not hide data from the Ark's operator.</p>`;
+    if (!enabled) {
+        html += `<div class="detail-section"><h2>0. Turn HTTPS on (operator, once)</h2><p>HTTPS isn't enabled on this Ark yet. On the Ark host:</p><div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/lib/tls.sh ensure</div><div class="code-label">Generates the local CA + server cert, then the server serves HTTPS on :${port}.</div></div>`;
+    }
+    html += `<div class="detail-section"><h2>1. Download this Ark's certificate</h2><p><a class="dl-action-btn" href="${ca}" download>Download ca.crt</a> &nbsp;<span style="color:var(--text-muted);font-size:0.9em">(served over plain HTTP so you can grab it before trusting).</span></p></div>`;
+    const steps = [
+        ['Linux (system-wide)', 'sudo cp ca.crt /usr/local/share/ca-certificates/valark.crt && sudo update-ca-certificates', true],
+        ['macOS', 'sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ca.crt', true],
+        ['Windows (admin PowerShell)', 'Import-Certificate -FilePath ca.crt -CertStoreLocation Cert:\\LocalMachine\\Root', true],
+        ['Firefox (own store)', 'Settings → Privacy & Security → Certificates → View Certificates → Authorities → Import → pick ca.crt → check "Trust this CA to identify websites".', false],
+        ['Android', 'Settings → Security → Encryption & credentials → Install a certificate → CA certificate → pick ca.crt.', false],
+        ['iOS / iPadOS', 'Open ca.crt in Safari → Allow → Settings → Profile Downloaded → Install. Then Settings → General → About → Certificate Trust Settings → turn on full trust for Val Ark.', false],
+    ];
+    html += `<div class="detail-section"><h2>2. Trust it on your device</h2>`;
+    for (const [os, cmd, isCmd] of steps) {
+        html += `<h4 style="margin-top:14px">${esc(os)}</h4>`;
+        html += isCmd
+            ? `<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>${esc(cmd)}</div>`
+            : `<p style="color:var(--text-secondary);font-size:0.9em;margin-top:4px">${esc(cmd)}</p>`;
+    }
+    html += `<p style="color:var(--text-muted);font-size:0.85em;margin-top:12px">Chrome, Edge and Safari use the operating-system trust store (the Linux/macOS/Windows steps). Firefox keeps its own — import there too.</p></div>`;
+    html += `<div class="detail-section"><h2>3. Open the Ark over HTTPS</h2><p><a class="dl-action-btn" href="${httpsUrl}">${esc(httpsUrl)} &rarr;</a></p><p style="color:var(--text-muted);font-size:0.9em;margin-top:6px">Once the certificate is trusted the padlock is clean. Point your other devices at the same address after installing the cert on each.</p></div>`;
+    html += '</div>';
+    return html;
+}
+
 function renderSecurityNotice() {
     if (!_tlsStatus) return '';
     const onHttps = location.protocol === 'https:';
@@ -5159,7 +5196,7 @@ function renderSecurityNotice() {
                 </div>
             </div>
             <div class="tls-banner-actions">
-                <a class="tls-btn" href="${ca}" download>Download certificate</a>
+                <a class="tls-btn" href="#/https">How to trust it &#x2192;</a>
                 <a class="tls-btn tls-btn-primary" href="${httpsUrl}">Switch to HTTPS &#x2192;</a>
             </div>
         </div>`;
@@ -5167,7 +5204,7 @@ function renderSecurityNotice() {
     if (onHttps) {
         return `<div class="tls-banner tls-banner-ok">
             <span class="tls-banner-icon">&#x1F512;</span>
-            <div class="tls-banner-desc"><strong>Encrypted connection</strong> (Val Ark local CA). Traffic on your network is protected; data at rest is not hidden from the operator. <a href="${ca}" download>Get the certificate for your other devices</a>.</div>
+            <div class="tls-banner-desc"><strong>Encrypted connection</strong> (Val Ark local CA). Traffic on your network is protected; data at rest is not hidden from the operator. <a href="#/https">Trust it on your other devices &#x2192;</a></div>
         </div>`;
     }
     return '';
@@ -5577,7 +5614,19 @@ function renderCommunity() {
         </div>`;
     }
     html += '</div>';
-    html += `<div class="detail-section" style="margin-top:2rem"><h3>How the community layer works</h3>
+
+    // Accounts & access — each service has a different registration model; a user
+    // must be able to learn how to get in without leaving the UI.
+    html += `<div class="detail-section" style="margin-top:2rem"><h3>Accounts &amp; how to get in</h3>
+        <table class="detail-table">
+            <tr><td><strong>Message Boards</strong> (forum)</td><td>Self-service — open the forum and click <strong>Register</strong> to make an account.</td></tr>
+            <tr><td><strong>Chat</strong> (IRC)</td><td>Login required (private, LAN-only). The host creates your account, then you log in at Chat:<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/services/chat.sh adduser &lt;name&gt;</div></td></tr>
+            <tr><td><strong>Mail</strong></td><td>The host creates mailboxes (no self-signup — keeps mail on the LAN):<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/services/mail.sh creds create you@valark.lan &amp;&amp; scripts/services/mail.sh acct create you@valark.lan</div>Then sign in to webmail, or point any mail app at this host (IMAP + submission).</td></tr>
+            <tr><td><strong>Files &amp; Pastebin</strong></td><td>Shared login. The host shares the generated credentials from <code>&lt;data&gt;/credentials.txt</code> on the Ark.</td></tr>
+        </table>
+        <p style="margin-top:10px;color:var(--text-muted);font-size:0.88em">"The host" = whoever runs this Ark. Ask them (or run these on the box) to get access — everything stays on your LAN.</p></div>`;
+
+    html += `<div class="detail-section" style="margin-top:1.5rem"><h3>How the community layer works</h3>
         <p>Each service runs LAN-bound on Val Ark and appears framed inside this site — the top nav stays put as a permanent way back. They make zero internet calls: no relays, no federation, no accounts anywhere else. Turn on the ones you want with <code>VALARK_SERVICES</code> in <code>.env</code>; the self-healing loop keeps them running and restarts any that stop.</p></div>`;
     html += '</div>';
     return html;

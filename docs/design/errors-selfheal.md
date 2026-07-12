@@ -97,3 +97,24 @@ the existing repair logic exposed as a friendly page instead of a dead port
 - **Offline notification center** routing into the box's own channels.
 - **Safe Mode** boot path (shared with [recovery.md](recovery.md)) + the always-matching
   color/LED grammar.
+
+## As built (Health/Repairs UX — shipped; metrics stack next)
+
+- **Reports the loop already had — now actually written.** `verify.sh` serialises every
+  functional check into `verify.json` as `checks[]` (`{status, comp, label}`, `comp` ∈
+  library/apps/models/server/integrity/mesh) so the page can attribute faults per component.
+  `loop.sh` now **writes `health.json`** (a log line long promised it, but nothing wrote it):
+  the latest cycle's space/verify tallies + dead-link/missing-asset counts + this-cycle
+  repairs, plus an append-only, 200-line-capped **`heal-events.jsonl`** feed of genuine repairs
+  (a web-server restart, a service start). Both emitted from bash via tiny `_json_str`/`_hj_str`
+  escapers, written atomically (`.tmp` → `mv`).
+- **`GET /api/status/health`** (read-gated, like all `/api/status/*`) composes those two files
+  + the events tail + Safe-Mode state. The **web UI** (`#/health`, `computeComponents()`) turns
+  them — with the live disk/services/kiwix status the shell already has — into per-component
+  green/yellow/red cards, each naming a **likely cause** and, where the box can act, a repair.
+- **One-click Repair** = **`POST /api/maintenance/repair`** (admin-only; `ADMIN_ONLY_POSTS`):
+  a **fixed-argv** `bash loop.sh once` — the loop's own fixers — spawned detached, deduped +
+  rate-limited, **no request data reaches the command**. Per-service Restart reuses
+  `POST /api/service/start`; Safe-Mode uses the existing Recover flow.
+- Entry points: the Home status strip's "Health & repairs ›" link, Settings → Health, and the
+  Activity → Events pointer. **Next:** feed live Telegraf/InfluxDB metrics into the same strip.

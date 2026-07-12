@@ -59,12 +59,16 @@ below are the appliance around it.**
 - *Reuses:* the SSE stream, librarian priority fill, storage bar.
 
 ## Phase 6 — Monitoring & self-heal UX → [errors-selfheal.md](errors-selfheal.md)
-- Stand up **Telegraf + InfluxDB** (running services), Grafana optional/Advanced (Task #24).
-- **Health/Repairs strip** (pinned on Home) fed by loop/verify + metrics: healed-events feed,
-  actionable one-button cards, **strict green/yellow/red** grammar (+ LED match).
-- **Fault attribution** (internet vs box vs drive; benign transients as "recovering").
-- **One-click Repair** mapped to the loop's fixers; **offline notification center** routing
-  into the box's own mail/board/chat.
+- **[DONE — Health/Repairs UX]** `#/health` page + Home entry point, fed by the loop/verify
+  reports: **strict green/yellow/red** per-component grammar, **fault attribution** (drive vs
+  box vs internet vs config; dead upstream links framed as "recovering"), a **healed-events
+  feed**, and **one-click Repair** — a single fixed-argv `POST /api/maintenance/repair` that
+  runs the loop's own fixers (`loop.sh once`), plus per-service Restart and Safe-Mode Recover.
+  Backed by `loop.sh` now actually writing `health.json` + `heal-events.jsonl`, `verify.sh`
+  emitting per-check component results, and a read-gated `GET /api/status/health`.
+- **[NEXT — metrics stack]** Stand up **Telegraf + InfluxDB** as mirrored services (Grafana
+  optional/Advanced, Task #24) and feed live metrics into the strip; **offline notification
+  center** routing into the box's own mail/board/chat.
 
 ## Phase 7 — Safety & moderation → [safety-moderation.md](safety-moderation.md)
 - On-device **moderation hook** (NSFW ONNX classifier on NPU/GPU + Llama-Guard text),

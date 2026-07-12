@@ -847,7 +847,7 @@ function sessionCookie(token, maxAgeSec, secure) {
 // POSTs that CHANGE the box's config/accounts — always admin (localhost or a
 // logged-in admin), regardless of Use Mode. "Use" actions (downloads/requests/
 // service starts) are gated per Use Mode instead (Open = anyone on the LAN).
-const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser', '/api/setup/profile']);
+const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser', '/api/setup/profile', '/api/maintenance/repair']);
 const AUTH_EXEMPT_POSTS = new Set(['/api/auth/login', '/api/auth/logout', '/api/auth/recover', '/api/setup/commission']);
 
 // Peer IP, normalized (node reports LAN/tailnet IPv4 peers as IPv4-mapped IPv6).
@@ -961,6 +961,12 @@ function handleAPI(req, res, urlPath) {
                 }
                 return sendJSON(res, req, active);
             }
+            case '/api/status/health':
+                // Self-heal detail for the Health page: the loop's health.json snapshot
+                // (space, verify tallies, link/asset counts, this-cycle repairs), the
+                // functional-verify per-check results (verify.json), the timestamped
+                // heal-events feed, and Safe-Mode state. Read-gated like all /api/status.
+                return sendJSON(res, req, getHealthDetail());
             case '/api/auth/status':
                 // Read-only: is an admin set, which Use Mode, is this caller the
                 // trusted box/localhost (`trusted`) and are they an authenticated
@@ -1184,6 +1190,12 @@ function handleAPI(req, res, urlPath) {
                     // action (ADMIN_ONLY_POSTS): the access gate above already required
                     // localhost or a logged-in admin, so a remote admin can do it too.
                     result = addServiceUser(body.id, body.username, body.password);
+                    break;
+                case '/api/maintenance/repair':
+                    // One-click "Run self-heal now" (Health page). Admin-only
+                    // (ADMIN_ONLY_POSTS). Runs the loop's own fixers with a fixed argv —
+                    // takes NO request data, so there's no injection surface.
+                    result = triggerRepair();
                     break;
                 default:
                     return sendJSON(res, req, { error: 'Unknown endpoint' }, 404);
@@ -1465,6 +1477,53 @@ function serviceMirrored(id) {
         try { if (fs.existsSync(d) && fs.readdirSync(d).length > 0) return true; } catch (_) {}
     }
     return false;
+}
+
+// ---- Health page data + one-click self-heal ---------------------------------
+// Pure reads of <state> JSON reports (no library bytes). null until the loop has
+// written them (a box whose maintenance cycle hasn't finished a first pass).
+function readStateJson(name) {
+    try { return JSON.parse(fs.readFileSync(path.join(STATE_DIR, name), 'utf8')); } catch (_) { return null; }
+}
+function getHealthDetail() {
+    const verify = readStateJson('verify.json');
+    const heal = readStateJson('health.json');
+    let events = [];
+    try {
+        const raw = fs.readFileSync(path.join(STATE_DIR, 'heal-events.jsonl'), 'utf8').trim();
+        if (raw) events = raw.split('\n').slice(-25).map(l => { try { return JSON.parse(l); } catch (_) { return null; } })
+                             .filter(Boolean).reverse();
+    } catch (_) {}
+    const sm = safeModeState();
+    return { verify, heal, events, safeMode: sm.safeMode, safeModeReasons: sm.reasons, repairRunning: repairInFlight() };
+}
+
+// "Run self-heal now": kick the maintenance loop's own fixers (loop.sh once) — repairs
+// the symlink layout, ensures web/kiwix/community services are up, re-resolves stale
+// links, tops up, re-verifies. FIXED argv (no user input reaches the shell). loop.sh
+// self-guards with a flock, so a concurrent cron cycle just makes this exit cleanly; we
+// also dedupe rapid clicks in-process and rate-limit to one manual run per 30s.
+let _repairProc = null, _repairStartedAt = 0;
+function repairInFlight() { return !!_repairProc || (Date.now() - _repairStartedAt < 5000); }
+function triggerRepair() {
+    if (_repairProc) return { ok: true, started: false, running: true };
+    if (Date.now() - _repairStartedAt < 30000) return { ok: true, started: false, cooldown: true };
+    // Test hook: exercise the gate + dedupe contract without actually running the loop
+    // (heavy + network). Fail-safe like VALARK_TEST_FORCE_REMOTE — it only PREVENTS the
+    // action; the auth gate above still fully applies, so it can never grant access.
+    if (process.env.VALARK_TEST_NO_SPAWN === '1') { _repairStartedAt = Date.now(); return { ok: true, started: true, running: true, test: true }; }
+    let proc;
+    try {
+        proc = spawn('/usr/bin/bash', [path.join(ROOT, 'scripts/loop.sh'), 'once'], {
+            cwd: ROOT, detached: true, stdio: 'ignore',
+            env: { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || ''), FORCE_COLOR: '0' },
+        });
+    } catch (e) { return { error: 'Could not start self-heal: ' + e.message }; }
+    _repairProc = proc; _repairStartedAt = Date.now();
+    proc.on('exit', () => { _repairProc = null; });
+    proc.on('error', () => { _repairProc = null; });
+    proc.unref();
+    return { ok: true, started: true, running: true };
 }
 
 // In-flight service starts: forum/chat first-run builds take minutes, so a start is

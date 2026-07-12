@@ -3350,6 +3350,8 @@ function router() {
         html += renderSettings();
     } else if (route === '/activity') {
         html += renderActivity();
+    } else if (route === '/health') {
+        html += renderHealth();
     } else if (route === '/https' || route === '/trust') {
         html += renderHttpsGuide();
     } else if (route === '/tools') {
@@ -3396,9 +3398,11 @@ function router() {
     // browse panels and refresh community-service status for the Community hub.
     if (route !== _lastRoute) {
         _lastRoute = route;
+        stopHealthLive();
         if (route === '/content') loadCatalog('content');
         else if (route === '/models') loadCatalog('models');
         else if (route === '/community') refreshServices();
+        else if (route === '/health') startHealthLive();
     }
 
     // Check download link availability after render
@@ -3527,6 +3531,7 @@ function renderHomeStatus() {
         <span class="hs-glance" data-level="${h.level}">${glance}</span>
         <span class="hs-text">${esc(h.text)}</span>
         ${meta ? `<span class="hs-meta">${esc(meta)}</span>` : ''}
+        <a class="hs-more" href="#/health">Health &amp; repairs ›</a>
     </div>
     <div class="home-cards">
         <a class="home-card area" href="#/content"><span class="hc-ic" aria-hidden="true">📚</span><span class="hc-b"><span class="hc-t">Library</span><span class="hc-s">Wikipedia, wikis, books &amp; more</span></span></a>
@@ -3547,7 +3552,7 @@ const SETTINGS_SECTIONS = [
     { id: 'downloads', ic: '⬇',  name: 'Downloads & Priorities', purpose: 'Pick what matters; watch & control downloads', href: '#/activity', adv: false },
     { id: 'apps',      ic: '🧩', name: 'Apps & Services',       purpose: 'Turn features on/off; manage app accounts', href: '#/community', adv: false },
     { id: 'network',   ic: '🌐', name: 'Network & Access',      purpose: 'The box’s name/address; who can get in; HTTPS', href: '#/https', adv: false },
-    { id: 'health',    ic: '❤️', name: 'Health',                purpose: 'Is everything running? Any alerts?', href: '#/activity', adv: true },
+    { id: 'health',    ic: '❤️', name: 'Health',                purpose: 'Is everything running? Any alerts? One-click repairs', href: '#/health', adv: false },
     { id: 'activity',  ic: '📋', name: 'Activity',              purpose: 'What happened, and any problems', href: '#/activity', adv: true },
     { id: 'update',    ic: '⤴️', name: 'Update',                purpose: 'Get the latest, safely — with rollback', href: '#/settings#update', adv: true },
     { id: 'replicate', ic: '🧬', name: 'Backup & Replicate',    purpose: 'Copy Val Ark to another box (offline)', href: '/bootstrap.sh', adv: true },
@@ -3632,7 +3637,7 @@ function renderActivity() {
         html += '<p class="activity-empty" id="dlq">Nothing downloading right now — all quiet. Content you request appears here with live progress, and picks up where it left off after a power loss.</p>';
     }
     html += `<h2 style="margin-top:1.5rem">Events</h2>
-        <p class="activity-empty">The self-heal loop keeps services running and repairs itself in the background. A plain event feed with one-click repairs lands here next; raw logs live under <code>&lt;data&gt;/val-ark/state/logs</code>.</p>`;
+        <p class="activity-empty">The self-heal loop keeps services running and repairs itself in the background. See what it checked and fixed — with one-click repairs — on the <a href="#/health">Health &amp; Repairs</a> page. Raw logs live under <code>&lt;data&gt;/val-ark/state/logs</code>.</p>`;
     html += '</div>';
     return html;
 }
@@ -3689,6 +3694,233 @@ async function loadDownloads() {
 // Re-render the Activity queue when it's the current view (SSE-driven, rAF-debounced).
 function _activityLive() { if (getRoute() === '/activity') scheduleRender(); }
 
+// =============================================================================
+// HEALTH & REPAIRS  (Phase 6 — monitoring & self-heal UX)
+// =============================================================================
+// A plain-language "is everything OK?" page: strict green/yellow/red per component,
+// each yellow/red naming a likely cause (drive / this box / internet / config) and,
+// where the box can act, a one-click repair. Composes live status (disk/services/
+// kiwix) with the self-heal loop's reports via /api/status/health (_healthData):
+//   heal    = health.json snapshot (space, verify tallies, link counts, this-cycle repairs)
+//   verify  = verify.json functional checks (per-component pass/fail)
+//   events  = heal-events.jsonl feed (genuine repairs, newest first)
+let _healthData = null, _healthTimer = null, _healthPoll = null;
+
+function loadHealth() {
+    fetch('/api/status/health').then(r => r.ok ? r.json() : null).then(d => {
+        if (d) { _healthData = d; if (getRoute() === '/health') scheduleRender(); }
+    }).catch(() => {});
+}
+function startHealthLive() { stopHealthLive(); loadHealth(); _healthTimer = setInterval(loadHealth, 15000); }
+function stopHealthLive() { if (_healthTimer) { clearInterval(_healthTimer); _healthTimer = null; } if (_healthPoll) { clearTimeout(_healthPoll); _healthPoll = null; } }
+
+function _ago(iso) {
+    if (!iso) return '';
+    const t = Date.parse(iso); if (isNaN(t)) return '';
+    let s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    if (s < 60) return 'just now';
+    if (s < 3600) { const m = Math.floor(s / 60); return m + (m > 1 ? ' min ago' : ' min ago'); }
+    if (s < 86400) { const h = Math.floor(s / 3600); return h + (h > 1 ? ' hrs ago' : ' hr ago'); }
+    const d = Math.floor(s / 86400); return d + (d > 1 ? ' days ago' : ' day ago');
+}
+function _hasLibraryContent() {
+    if (_storageData && _storageData.zimCount > 0) return true;
+    try { return Object.values(CONTENT_STATUS).some(s => s === 'installed'); } catch (_) { return false; }
+}
+function _faultLabel(f) { return { drive: 'the disk', box: 'this box', internet: 'the internet', config: 'the configuration' }[f] || f; }
+function _evIcon(k) { return { restart: '↻', start: '▲', repair: '🔧', attention: '⚠' }[k] || '✓'; }
+
+// The component list. level: good|warn|bad. fault: null|'drive'|'box'|'internet'|'config'.
+// repair.act: 'selfheal' | 'recover' | 'storage' | 'service:<id>'.
+function computeComponents() {
+    const comps = [];
+    const heal = _healthData && _healthData.heal;
+    const verify = _healthData && _healthData.verify;
+    const safeMode = _healthData ? _healthData.safeMode : false;
+
+    // 1) Config & access — Safe Mode is the loudest possible fault.
+    if (safeMode) comps.push({ key: 'config', icon: '🛟', label: 'Configuration', level: 'bad', state: 'Safe Mode',
+        detail: 'The box booted into recovery because its settings are unreadable. Your content is safe. Recover to set a new passcode and clear it.',
+        fault: 'config', repair: { label: 'Recover', act: 'recover' } });
+
+    // 2) Storage.
+    let diskPct = null;
+    if (_diskData && _diskData.total) diskPct = _diskData.used / _diskData.total * 100;
+    else if (_storageData && _storageData.disk && _storageData.disk.total) diskPct = _storageData.disk.used / _storageData.disk.total * 100;
+    if (diskPct != null) {
+        const p = Math.round(diskPct);
+        if (diskPct >= 97) comps.push({ key: 'storage', icon: '💽', label: 'Storage', level: 'bad', state: p + '% full',
+            detail: 'The disk is almost full. Free some space so downloads and services keep working.', fault: 'drive', repair: { label: 'Manage storage', act: 'storage' } });
+        else if (diskPct >= 90) comps.push({ key: 'storage', icon: '💽', label: 'Storage', level: 'warn', state: p + '% full',
+            detail: 'Filling up. The librarian makes room by evicting the lowest-priority content automatically.', fault: 'drive', repair: { label: 'Manage storage', act: 'storage' } });
+        else comps.push({ key: 'storage', icon: '💽', label: 'Storage', level: 'good', state: p + '% full',
+            detail: (heal && heal.fillable ? heal.fillable + ' free to fill.' : 'Plenty of room.'), fault: null, repair: null });
+    }
+
+    // 3) Library (Kiwix).
+    if (_kiwixStatus && _kiwixStatus.running) comps.push({ key: 'library', icon: '📚', label: 'Library', level: 'good',
+        state: (_kiwixStatus.files ? _kiwixStatus.files + ' collections' : 'Serving'), detail: 'The offline library is being served and ready to read.', fault: null, repair: null });
+    else if (_hasLibraryContent()) comps.push({ key: 'library', icon: '📚', label: 'Library', level: 'warn', state: 'Restarting',
+        detail: 'Collections are on the disk but the library server isn’t answering. Self-heal restarts it automatically.', fault: 'box', repair: { label: 'Run self-heal', act: 'selfheal' } });
+    else comps.push({ key: 'library', icon: '📚', label: 'Library', level: 'good', state: 'No collections yet',
+        detail: 'Add Wikipedia and more from the Library — they’ll be served automatically.', fault: null, repair: null });
+
+    // 4) AI models — from the functional-verify checks.
+    if (verify && verify.checks) {
+        const m = verify.checks.filter(c => c.comp === 'models');
+        if (m.some(c => c.status === 'FAIL')) comps.push({ key: 'models', icon: '🤖', label: 'AI models', level: 'bad', state: 'Load failed',
+            detail: 'A local model failed its inference check. Self-heal re-verifies; if it persists the file may be re-downloading.', fault: 'box', repair: { label: 'Run self-heal', act: 'selfheal' } });
+        else if (m.some(c => c.status === 'PASS')) comps.push({ key: 'models', icon: '🤖', label: 'AI models', level: 'good', state: 'Ready',
+            detail: 'A local model answered an inference check — the AI helper works offline.', fault: null, repair: null });
+    }
+
+    // 5) Community apps.
+    if (_servicesStatus) {
+        const enabled = Object.keys(_servicesStatus).filter(id => _servicesStatus[id].enabled);
+        const down = enabled.filter(id => _servicesStatus[id].mirrored && !_servicesStatus[id].running && !_servicesStatus[id].starting);
+        const starting = enabled.filter(id => _servicesStatus[id].starting);
+        const online = enabled.filter(id => _servicesStatus[id].running);
+        if (enabled.length) {
+            if (down.length) comps.push({ key: 'community', icon: '💬', label: 'Community apps', level: 'warn', state: down.length + ' need a restart',
+                detail: 'Enabled but not running: ' + down.map(id => COMMUNITY_NAV_LABELS[id] || id).join(', ') + '.', fault: 'box',
+                repair: { label: 'Restart', act: 'service:' + down[0] }, extraServices: down });
+            else if (starting.length) comps.push({ key: 'community', icon: '💬', label: 'Community apps', level: 'warn', state: 'Starting…',
+                detail: starting.map(id => COMMUNITY_NAV_LABELS[id] || id).join(', ') + ' is starting up (first-run builds can take a few minutes).', fault: 'box', repair: null });
+            else comps.push({ key: 'community', icon: '💬', label: 'Community apps', level: 'good', state: online.length + ' online',
+                detail: 'Chat, mail, boards and files are up for your network.', fault: null, repair: null });
+        }
+    }
+
+    // 6) Upstream sources — a benign internet transient, framed as recovering (not a box fault).
+    if (heal && typeof heal.deadLinks === 'number' && heal.deadLinks > 0) comps.push({ key: 'internet', icon: '🌐', label: 'Upstream sources', level: 'warn',
+        state: heal.deadLinks + ' unreachable', detail: 'Some upstream download links didn’t answer at the last check. This is usually the internet, not your box — the loop re-resolves them from the live catalog automatically.', fault: 'internet', repair: null });
+
+    // 7) Self-heal loop freshness.
+    if (heal && heal.ts) {
+        const age = Date.now() - Date.parse(heal.ts);
+        if (isFinite(age) && age > 2 * 3600 * 1000) comps.push({ key: 'selfheal', icon: '🔧', label: 'Self-heal', level: 'warn', state: 'Last ran ' + _ago(heal.ts),
+            detail: 'The maintenance loop hasn’t run in a while. Run it now, or check the timer (loop.sh install).', fault: 'box', repair: { label: 'Run self-heal', act: 'selfheal' } });
+        else comps.push({ key: 'selfheal', icon: '🔧', label: 'Self-heal', level: 'good', state: 'Checked ' + _ago(heal.ts),
+            detail: 'The box checks and repairs itself every cycle.' + (verify ? ' ' + verify.pass + ' checks passing.' : ''), fault: null, repair: null });
+    } else comps.push({ key: 'selfheal', icon: '🔧', label: 'Self-heal', level: 'good', state: 'Waiting for first cycle',
+        detail: 'The maintenance loop hasn’t completed a cycle yet on this box. It runs on a timer and after every reboot.', fault: null, repair: null });
+
+    return comps;
+}
+function _healthOverall(comps) {
+    if (comps.some(c => c.level === 'bad')) return { level: 'attention', dot: 'warn', glance: 'Needs attention', text: 'Something needs you — see the highlighted item below.' };
+    if (comps.some(c => c.level === 'warn')) return { level: 'working', dot: 'busy', glance: 'Recovering', text: 'A few things are healing themselves — no action needed unless it sticks.' };
+    return { level: 'good', dot: 'ok', glance: 'All good', text: 'Everything’s running and repairing itself in the background.' };
+}
+function _repairBtn(c) {
+    const running = _healthData && _healthData.repairRunning;
+    const act = c.repair.act;
+    if (act === 'selfheal') return `<button class="hp-btn" onclick="runSelfHeal(this)" ${running ? 'disabled' : ''}>${esc(c.repair.label)}</button>`;
+    if (act === 'recover') return `<button class="hp-btn hp-btn-primary" onclick="recoverFlow()">${esc(c.repair.label)}</button>`;
+    if (act === 'storage') return `<a class="hp-btn" href="#/settings#storage">${esc(c.repair.label)}</a>`;
+    if (act && act.indexOf('service:') === 0) {
+        const ids = (c.extraServices && c.extraServices.length) ? c.extraServices : [act.slice(8)];
+        return ids.map(sid => `<button class="hp-btn" onclick="startCommunityService('${esc(sid)}', this)">Restart ${esc(COMMUNITY_NAV_LABELS[sid] || sid)}</button>`).join('');
+    }
+    return '';
+}
+
+function renderHealth() {
+    let html = `${_SHELL_CSS}${_HEALTH_CSS}<div class="container" id="main-content">`;
+    html += renderBreadcrumb([{ label: 'Settings', href: '#/settings' }, { label: 'Health' }]);
+    html += '<h1>Health &amp; Repairs</h1>';
+    if (!_healthData) { html += `<p class="hp-empty">Checking everything…</p></div>`; return html; }
+
+    const comps = computeComponents();
+    const ov = _healthOverall(comps);
+    const running = _healthData.repairRunning;
+
+    html += `<div class="hp-hero hp-h-${ov.level}">
+        <div class="hp-hero-l"><span class="hs-dot hs-${ov.dot}" aria-hidden="true"></span>
+            <div><div class="hp-glance" data-level="${ov.level}">${ov.glance}</div><div class="hp-htext">${esc(ov.text)}</div></div></div>
+        <button class="hp-fix-all" onclick="runSelfHeal(this)" ${running ? 'disabled' : ''} title="Run the self-heal cycle now">${running ? '<span class="spinner"></span> Repairing…' : '↻ Run self-heal'}</button>
+    </div>`;
+
+    html += '<div class="hp-grid" role="list">';
+    for (const c of comps) {
+        const lv = { good: 'ok', warn: 'warn', bad: 'bad' }[c.level];
+        html += `<div class="hp-card hp-l-${lv}" role="listitem">
+            <div class="hp-card-h"><span class="hp-ic" aria-hidden="true">${c.icon}</span><span class="hp-name">${esc(c.label)}</span><span class="hp-badge hp-b-${lv}">${esc(c.state)}</span></div>
+            <div class="hp-detail">${esc(c.detail)}</div>
+            ${c.fault ? `<div class="hp-fault">Likely cause: <b>${esc(_faultLabel(c.fault))}</b></div>` : ''}
+            ${c.repair ? `<div class="hp-actions">${_repairBtn(c)}</div>` : ''}
+        </div>`;
+    }
+    html += '</div>';
+
+    html += '<h2 class="hp-h2">Recent repairs</h2>';
+    const events = _healthData.events || [];
+    if (events.length) {
+        html += '<ul class="hp-feed">' + events.map(e =>
+            `<li class="hp-ev"><span class="hp-ev-ic" aria-hidden="true">${_evIcon(e.kind)}</span><span class="hp-ev-txt">${esc(e.detail || '')}</span><span class="hp-ev-ago">${esc(_ago(e.ts))}</span></li>`
+        ).join('') + '</ul>';
+    } else {
+        html += `<p class="hp-empty">No repairs needed yet — everything’s been healthy. When the loop fixes something (restarts an app, refreshes the library) it shows up here.</p>`;
+    }
+    html += `<p class="hp-note">The box checks and repairs itself every cycle and after each reboot. Raw logs live under <code>&lt;data&gt;/val-ark/state/logs</code>.</p>`;
+    html += '</div>';
+    return html;
+}
+
+async function runSelfHeal(btn) {
+    if (btn) { btn.dataset.o = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Repairing…'; }
+    try {
+        const resp = await fetch('/api/maintenance/repair', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        const d = await resp.json().catch(() => ({}));
+        if (isNeedsAuth(resp, d)) { if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.o; } signIn('Sign in to run a repair on this network.'); return; }
+        if (d.error) { alert(d.error); if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.o; } return; }
+        if (_healthData) _healthData.repairRunning = true;
+        scheduleRender();
+        // Poll while the cycle runs; the server's repairRunning flag flips back when loop.sh exits.
+        let n = 0;
+        const poll = () => { loadHealth(); _healthPoll = (++n < 40) ? setTimeout(poll, 5000) : null; if (!_healthPoll && _healthData) { _healthData.repairRunning = false; scheduleRender(); } };
+        if (_healthPoll) clearTimeout(_healthPoll);
+        _healthPoll = setTimeout(poll, 5000);
+    } catch (e) {
+        alert('Could not start self-heal: ' + e.message);
+        if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.o; }
+    }
+}
+
+const _HEALTH_CSS = `<style>
+.hp-hero{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;padding:1rem 1.2rem;margin:0 0 1.2rem;border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--card-bg,#16181d);border-left-width:4px}
+.hp-h-good{border-left-color:#2fbf71}.hp-h-working{border-left-color:#e6a817}.hp-h-attention{border-left-color:#e0553a}
+.hp-hero-l{display:flex;align-items:center;gap:.8rem}
+.hp-glance{font-weight:800;font-size:1.15rem}
+.hp-glance[data-level=good]{color:#2fbf71}.hp-glance[data-level=working]{color:#e6a817}.hp-glance[data-level=attention]{color:#e0553a}
+.hp-htext{color:var(--text-muted,#8a8f98);font-size:.92rem}
+.hp-fix-all{display:inline-flex;align-items:center;gap:.45rem;padding:.6rem 1rem;border-radius:10px;border:1px solid var(--border,#2a2d34);background:var(--accent,#e0603a);color:#fff;font-weight:700;cursor:pointer;font-size:.95rem}
+.hp-fix-all:disabled{opacity:.7;cursor:default}
+.hp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.85rem;margin:0 0 1.5rem}
+.hp-card{padding:1rem 1.1rem;border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--card-bg,#16181d);border-left-width:4px;border-left-color:#2fbf71}
+.hp-l-warn{border-left-color:#e6a817}.hp-l-bad{border-left-color:#e0553a}
+.hp-card-h{display:flex;align-items:center;gap:.55rem;margin-bottom:.4rem}
+.hp-ic{font-size:1.1rem}.hp-name{font-weight:700}
+.hp-badge{margin-left:auto;font-size:.78rem;font-weight:700;padding:.16rem .55rem;border-radius:999px;white-space:nowrap}
+.hp-b-ok{background:rgba(47,191,113,.15);color:#2fbf71}.hp-b-warn{background:rgba(230,168,23,.15);color:#e6a817}.hp-b-bad{background:rgba(224,85,58,.16);color:#e0553a}
+.hp-detail{color:var(--text-muted,#aab);font-size:.9rem;line-height:1.45}
+.hp-fault{margin-top:.5rem;font-size:.82rem;color:var(--text-muted,#8a8f98)}
+.hp-actions{margin-top:.7rem;display:flex;gap:.5rem;flex-wrap:wrap}
+.hp-btn{display:inline-flex;align-items:center;gap:.4rem;padding:.42rem .8rem;border-radius:9px;border:1px solid var(--border,#3a3d44);background:transparent;color:var(--text,#e8eaed);font-size:.85rem;font-weight:600;cursor:pointer;text-decoration:none}
+.hp-btn:hover{border-color:var(--accent,#e0603a)}
+.hp-btn-primary{background:var(--accent,#e0603a);color:#fff;border-color:var(--accent,#e0603a)}
+.hp-btn:disabled{opacity:.6;cursor:default}
+.hp-h2{font-size:1.05rem;margin:1.2rem 0 .6rem}
+.hp-feed{list-style:none;padding:0;margin:0;border:1px solid var(--border,#2a2d34);border-radius:12px;overflow:hidden}
+.hp-ev{display:flex;align-items:center;gap:.7rem;padding:.6rem .9rem;border-top:1px solid var(--border,#23262d)}
+.hp-ev:first-child{border-top:0}
+.hp-ev-ic{color:#2fbf71;font-weight:700}
+.hp-ev-txt{flex:1;font-size:.9rem}
+.hp-ev-ago{color:var(--text-muted,#8a8f98);font-size:.8rem;white-space:nowrap;font-variant-numeric:tabular-nums}
+.hp-empty,.hp-note{color:var(--text-muted,#8a8f98);font-size:.9rem;line-height:1.5}
+.hp-note{margin-top:1rem}
+</style>`;
+
 // Change the download focus (Settings → Downloads & Priorities) → curation weights.
 async function setDownloadProfile(profile) {
     try {
@@ -3706,6 +3938,9 @@ const _SHELL_CSS = `<style>
 .hs-ok{background:#2fbf71}.hs-busy{background:#e6a817}.hs-warn{background:#e0553a}
 .hs-glance{font-weight:700}.hs-text{color:var(--text-muted,#aab)}
 .hs-meta{margin-left:auto;color:var(--text-muted,#8a8f98);font-size:.9em;font-variant-numeric:tabular-nums}
+.hs-more{margin-left:auto;color:var(--accent,#e0603a);font-size:.86em;font-weight:600;text-decoration:none;white-space:nowrap}
+.hs-more:hover{text-decoration:underline}
+.home-status .hs-meta+.hs-more{margin-left:.8rem}
 .home-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:.8rem;margin:0 0 2rem}
 .home-card{display:flex;gap:.75rem;align-items:center;padding:1rem;border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--card-bg,var(--bg,#16181d));color:var(--text,#e8eaed);text-decoration:none}
 .home-card:hover{border-color:var(--accent,#e0603a)}

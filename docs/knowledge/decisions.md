@@ -36,6 +36,27 @@ later). See [README](README.md).
 - **Deployment:** ship both a **Docker appliance image** *and* the bare‑metal bootstrap; both
   offline, both commissioned from the same wizard.
 
+## 2026‑07 — Health & Repairs page (roadmap Phase 6, part 1 — self-heal UX)
+- Shipped the **Health/Repairs UX** first (metrics stack is a separate branch): a `#/health`
+  page with **strict green/yellow/red** per-component cards, **fault attribution** (drive / this
+  box / internet / config), a **healed-events feed**, and **one-click Repair**. Matches
+  [errors-selfheal.md](../design/errors-selfheal.md) to the letter.
+- **Data flows from reports the loop already should have produced.** `verify.sh` now serialises
+  each functional check into `verify.json` as `checks[]` (`{status, comp, label}`); `loop.sh`
+  now actually **writes `health.json`** (a long-standing log line promised a file nothing wrote)
+  + an append-only, capped **`heal-events.jsonl`** feed of genuine repairs. `GET
+  /api/status/health` (read-gated) composes them; the **UI computes the component list
+  client-side** (`computeComponents()`) from those + the live disk/services/kiwix status the
+  shell already fetches — no duplicated health logic on the server, minimal new server surface.
+- **One repair endpoint, not many.** `POST /api/maintenance/repair` (admin-only) runs the loop's
+  own fixers via a **fixed argv** (`loop.sh once`) — the honest "fix everything" button — so no
+  request data reaches a shell. Targeted fixes reuse what exists: per-service **Restart** →
+  `POST /api/service/start`; Safe-Mode → the existing **Recover** flow. Deduped + 30s rate-limit.
+- **Adversarial-reviewed** (new gated endpoint) before merge; `test-health.sh` + `health.spec.ts`
+  cover the report shapes, the composition endpoint, the read-gate, and the admin-gate (the last
+  via the fail-safe `VALARK_TEST_NO_SPAWN` hook so CI never runs the heavy loop).
+- **Next:** stand up Telegraf + InfluxDB as mirrored services and feed live metrics into the strip.
+
 ## 2026‑07 — Download queue as the monitoring surface (roadmap Phase 5, part 1)
 - Rebuilt the **Activity** view into a live download **queue**: rich per‑item cards (plain‑language
   label, animated progress bar + %, **ETA** from `startedAt`+progress, status pill, last line),

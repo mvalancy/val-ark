@@ -27,7 +27,7 @@ export default defineConfig({
     // VALARK_COMMISSIONED: the ephemeral test server has no content library, which
     // would otherwise trip the first-boot wizard takeover; declare it commissioned so
     // page tests exercise the normal app (the wizard has its own file:// + VM tests).
-    command: 'PATH="$HOME/.local/node/bin:$PATH" VALARK_DISABLE_KIWIX=1 VALARK_COMMISSIONED=1 VALARK_HTTPS_PORT=13443 node ../../scripts/server.js 3001',
+    command: 'PATH="$HOME/.local/node/bin:$PATH" VALARK_DISABLE_KIWIX=1 VALARK_COMMISSIONED=1 VALARK_TEST_NO_SPAWN=1 VALARK_HTTPS_PORT=13443 node ../../scripts/server.js 3001',
     port: 3001,
     timeout: 20000,
     reuseExistingServer: true,

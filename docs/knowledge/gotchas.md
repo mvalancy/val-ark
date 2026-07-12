@@ -188,6 +188,15 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   not just commission. Recovery from **localhost** (no code) repairs both `auth.json` (setPassword)
   and a corrupt `settings.json` (reset to a minimal commissioned state) so Safe Mode clears with no
   restart; content is never touched.
+- **Safe Mode must FAIL CLOSED (adversarial-review finding, medium).** Surfacing `safeMode` isn't
+  enough — a corrupt `auth.json` makes `auth.status().useMode` read as the swallowed default `'open'`,
+  which would DROP the read-wall + open every use-action. So `readAllowed` and the POST access gate
+  now treat `safeModeState().safeMode` as "requires admin" (localhost/session), independent of the
+  useMode read from the corrupt store. `safeModeState()` is cached ~3s (it's on the read/POST hot
+  path) and invalidated on recover.
+- **`loginAllowed` MUST bypass for localhost (review finding).** The doc said "the owner is never
+  locked out" but the global login cap applied to localhost too — a LAN peer could trip it and 429
+  the owner's own recovery. `loginAllowed` now `return true` for `isLocalhost(req)` first.
 
 ## Git / releases
 

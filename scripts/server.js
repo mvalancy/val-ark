@@ -93,6 +93,17 @@ function _legacyActive() {
     }
     return false;
 }
+// Safe Mode: the box's config (settings.json/auth.json) is present but corrupt. It
+// still boots — into a recovery-only state — rather than a dead port; content is never
+// touched. Recomputed live so fixing/resetting the config exits Safe Mode with no restart.
+let _smCache = { v: null, ts: 0 };
+function safeModeState() {
+    const now = Date.now();
+    if (_smCache.v && now - _smCache.ts < 3000) return _smCache.v;   // cache: it's on the read/POST hot path
+    let v; try { v = commission.configHealth(STATE_DIR); } catch (_) { v = { safeMode: false, reasons: [] }; }
+    _smCache = { v, ts: now };
+    return v;
+}
 function boxCommissioned() {
     // Explicit operator/CI override: a managed deployment (or the test harness) can
     // declare the box already set up so the first-boot wizard never takes over.
@@ -797,6 +808,10 @@ function isReadGated(urlPath) {
     return false;   // the web-ui shell + its assets (index.html, styles.css, favicon, logos) stay open
 }
 function readAllowed(req) {
+    // Safe Mode = recovery-only, fail CLOSED: a corrupt auth.json makes useMode read as
+    // the swallowed default 'open', which would otherwise DROP the read-wall. So gate all
+    // content reads to admin (localhost/console or a valid session) whenever config is broken.
+    if (safeModeState().safeMode) return isAdmin(req);
     const mode = auth.status(STATE_DIR).useMode;
     if (mode !== 'passworded' && mode !== 'accounts') return true;   // Open: reads are open
     return isAdmin(req);   // gated modes: localhost/console or a valid session
@@ -809,6 +824,7 @@ const LOGIN_MAX = 8, LOGIN_WINDOW_MS = 10 * 60 * 1000;
 let _loginGlobal = { n: 0, first: 0 };
 const LOGIN_GLOBAL_MAX = 40;
 function loginAllowed(req) {
+    if (isLocalhost(req)) return true;   // the owner on the box/console is NEVER locked out
     if (_loginGlobal.first && Date.now() - _loginGlobal.first > LOGIN_WINDOW_MS) _loginGlobal = { n: 0, first: 0 };
     if (_loginGlobal.n >= LOGIN_GLOBAL_MAX) return false;   // global brute-force cap
     const rec = _loginFails.get(clientIp(req));
@@ -905,13 +921,17 @@ function handleAPI(req, res, urlPath) {
     // before downloading; serveArchive answers HEAD with headers only).
     if (req.method === 'GET' || req.method === 'HEAD') {
         switch (urlPath) {
-            case '/api/health':
+            case '/api/health': {
+                const sm = safeModeState();
                 return sendJSON(res, req, {
-                    status: 'ok',
+                    status: sm.safeMode ? 'safe-mode' : 'ok',
+                    safeMode: sm.safeMode,
+                    safeModeReasons: sm.reasons,
                     uptime: process.uptime(),
                     version: '1.0.0',
                     timestamp: new Date().toISOString()
                 });
+            }
             case '/api/status/disk':
                 return sendJSON(res, req, getDiskStatus());
             case '/api/status/tools':
@@ -954,6 +974,8 @@ function handleAPI(req, res, urlPath) {
                 const st = commission.state(STATE_DIR, isLocalhost(req));
                 st.commissioned = boxCommissioned();
                 if (st.commissioned) { st.hasClaim = false; st.needsClaim = false; }
+                const sm = safeModeState();
+                st.safeMode = sm.safeMode; st.safeModeReasons = sm.reasons;
                 return sendJSON(res, req, st);
             }
             case '/api/setup/recovery-card': {
@@ -1021,7 +1043,9 @@ function handleAPI(req, res, urlPath) {
         // until it's commissioned — except commissioning itself. This closes the
         // grandfather-flip vector (a LAN peer can't seed the library to fake setup)
         // and matches the "fresh box → wizard" design.
-        if (!boxCommissioned() && urlPath !== '/api/setup/commission') {
+        if (!boxCommissioned() && !AUTH_EXEMPT_POSTS.has(urlPath)) {
+            // auth + recovery + commission must work even before/without commissioning
+            // (and in Safe Mode, where a corrupt config reads as un-commissioned).
             return sendJSON(res, req, {
                 error: 'Val Ark isn’t set up yet — finish the setup wizard first.'
             }, 409);
@@ -1032,7 +1056,9 @@ function handleAPI(req, res, urlPath) {
         // to log in). The box's own console/localhost is always admin.
         if (!AUTH_EXEMPT_POSTS.has(urlPath)) {
             const mode = auth.status(STATE_DIR).useMode;
-            const needsAuth = ADMIN_ONLY_POSTS.has(urlPath) || mode === 'passworded' || mode === 'accounts';
+            // Safe Mode is recovery-only → every mutating action needs admin (fail closed,
+            // since a corrupt auth.json makes useMode read as the swallowed 'open' default).
+            const needsAuth = safeModeState().safeMode || ADMIN_ONLY_POSTS.has(urlPath) || mode === 'passworded' || mode === 'accounts';
             if (needsAuth && !isAdmin(req)) {
                 return sendJSON(res, req, { error: 'Sign in required to do that on this network.', needsAuth: true }, 401);
             }
@@ -1068,6 +1094,7 @@ function handleAPI(req, res, urlPath) {
                     }
                     const rr = commission.recoverAdmin(STATE_DIR, body, { trusted: isLocalhost(req) });
                     if (rr.error) { noteLoginFail(req); return sendJSON(res, req, rr, 401); }
+                    _smCache.ts = 0;   // config just repaired → re-evaluate Safe Mode now
                     // Auto-sign-in the recovered admin so they're not immediately locked out.
                     const tok = auth.issueSession(STATE_DIR, 12 * 3600 * 1000, clientIp(req));
                     return sendJSON(res, req, { ok: true, recovery: rr.recovery }, 200, { 'Set-Cookie': sessionCookie(tok, 12 * 3600, isSecureReq(req)) });
@@ -1993,7 +2020,17 @@ console.log('==================================================');
 // (from another device on the LAN) can prove physical possession. On the box
 // itself / localhost you don't need it. The code is consumed once setup completes.
 try {
-    if (process.env.VALARK_COMMISSIONED !== '1' && !commission.isCommissioned(STATE_DIR)) {
+    const _sm = safeModeState();
+    if (_sm.safeMode) {
+        // Config present but CORRUPT → Safe Mode wins. Do NOT grandfather/ensureClaim
+        // (that would silently overwrite the broken config, masking it + losing the
+        // recovery code). The box boots into the recovery-only UI; content is untouched.
+        console.log('');
+        console.log(`  ⚠ Val Ark is in SAFE MODE — ${_sm.reasons.join('; ')}.`);
+        console.log('  Open the box and choose "Reset & recover", or run: scripts/valark setpassword');
+        console.log('  Your Library, models and content are safe.');
+        console.log('');
+    } else if (process.env.VALARK_COMMISSIONED !== '1' && !commission.isCommissioned(STATE_DIR)) {
         if (_legacyActive()) {
             // Existing install (already has a content/model library) → snapshot it as
             // commissioned ONCE. This both stops the wizard hijacking a working Ark and

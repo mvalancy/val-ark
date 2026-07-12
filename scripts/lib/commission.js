@@ -109,8 +109,13 @@ function recoverAdmin(dir, opts, ctx) {
   }
   const pw = String(opts.password || '');
   if (pw.length < 8) return { error: 'New passcode must be at least 8 characters.' };
-  auth.setPassword(pw, 'admin', dir);
-  const fresh = regenerateRecovery(dir);   // single-use: old code is now dead
+  auth.setPassword(pw, 'admin', dir);       // (re)writes a fresh auth.json — heals a corrupt one
+  // Heal a corrupt settings.json too (Safe Mode) so recovery actually clears it. A
+  // corrupt file can't be parsed to keep old values, so reset to a minimal commissioned
+  // state — content is untouched (it lives outside <state>).
+  try { JSON.parse(fs.readFileSync(settingsPath(dir), 'utf8')); }
+  catch (e) { if (e.code !== 'ENOENT') writeSettings({ name: 'valark', commissionedAt: new Date().toISOString(), via: 'safe-mode-repair' }, dir); }
+  const fresh = regenerateRecovery(dir);    // single-use: old code is now dead
   return { ok: true, recovery: fresh };
 }
 
@@ -172,8 +177,24 @@ function commission(dir, opts, ctx) {
   return { ok: true, commissioned: true, name, profile, useMode, adminSet: auth.status(dir).adminSet, recovery: s.recovery };
 }
 
+// Config health → Safe Mode. readSettings/readStore SWALLOW JSON errors and return
+// defaults, which would silently treat a box with a CORRUPT config as un-set. So check
+// explicitly: a MISSING file is fine (a fresh box), but a PRESENT-but-unparseable one
+// trips Safe Mode — the box still boots, but into a recovery-only state.
+function configHealth(dir) {
+  const reasons = [];
+  const files = [['settings.json', settingsPath(dir)], ['auth.json', path.join(stateDir(dir), 'auth.json')]];
+  for (const [name, p] of files) {
+    let raw;
+    try { raw = fs.readFileSync(p, 'utf8'); }
+    catch (e) { if (e.code === 'ENOENT') continue; reasons.push(name + ' is unreadable'); continue; }
+    try { JSON.parse(raw); } catch (_) { reasons.push(name + ' is corrupt'); }
+  }
+  return { safeMode: reasons.length > 0, reasons };
+}
+
 module.exports = { state, commission, isCommissioned, ensureClaim, readClaim, consumeClaim, readSettings, writeSettings, PROFILES,
-  ensureRecovery, readRecovery, regenerateRecovery, verifyRecovery, recoverAdmin, grandfather };
+  ensureRecovery, readRecovery, regenerateRecovery, verifyRecovery, recoverAdmin, grandfather, configHealth };
 
 // ---- CLI mode (invoked by scripts/valark) ------------------------------------
 if (require.main === module) {

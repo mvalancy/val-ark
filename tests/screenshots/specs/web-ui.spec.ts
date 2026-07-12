@@ -1389,6 +1389,17 @@ test.describe('Val Ark - Consumer Shell (Home status + Settings + Activity)', ()
     await expect(page.locator('#rec-code-in')).toBeVisible();
     await expect(page.locator('#rec-new-pass')).toBeVisible();
   });
+
+  test('Safe Mode recovery takeover renders', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/`);
+    await page.waitForSelector('.home-status', { timeout: 5000 });
+    const fns = await page.evaluate(() => [typeof (window as any).renderSafeMode, typeof (window as any).checkSafeMode]);
+    expect(fns).toEqual(['function', 'function']);
+    await page.evaluate(() => (window as any).renderSafeMode(['settings.json is corrupt']));
+    await expect(page.locator('.setup-card h1')).toContainText('needs attention');
+    await expect(page.getByText('settings.json is corrupt')).toBeVisible();
+    await expect(page.locator('.setup-btn:has-text("Reset")')).toBeVisible();
+  });
 });
 
 test.describe('Val Ark - First-boot Commissioning Wizard', () => {

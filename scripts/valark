@@ -1,0 +1,124 @@
+#!/bin/bash
+###############################################################################
+# Val Ark — admin & recovery CLI (Phase 2 safety net).
+#
+# The always-available, on-the-box path to set/verify the admin passcode and to
+# recover a box whose owner forgot everything — WITHOUT ever wiping content.
+#
+#   valark setpassword [passcode]     set the single admin passcode (prompts if omitted)
+#   valark auth status                is an admin set? which Use Mode?  (JSON)
+#   valark auth list                  list admin + accounts (names/roles only)
+#   valark verify [passcode]          check a passcode (exit 0 = ok); prompts if omitted
+#   valark usemode <open|passworded|accounts>   set who-can-use
+#   valark reset --tier1              forget the admin passcode + reset access to Open
+#                                     (keeps settings, pins, accounts, and ALL content)
+#   valark reset --tier2              config reset: also clear settings — content KEPT
+#
+# CONTENT-SAFETY INVARIANT: every reset here touches ONLY <state> (admin/settings).
+# It NEVER touches the content or model libraries (a different disk location), so a
+# panic reset can never trigger a multi-day re-download. Erasing content is a
+# separate, explicitly-typed-confirmation action (not offered by this CLI).
+###############################################################################
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Source the shared env FIRST (it predates `set -u` and reads its own guard var
+# unguarded), then turn on nounset for our own logic.
+# shellcheck source=lib/valark-env.sh
+[ -f "${SELF_DIR}/lib/valark-env.sh" ] && . "${SELF_DIR}/lib/valark-env.sh"
+set -u
+export VALARK_STATE_DIR="${STATE_DIR:?valark-env did not resolve STATE_DIR}"
+
+AUTH_JS="${SELF_DIR}/lib/auth.js"
+
+err() { echo "valark: $*" >&2; }
+
+# Resolve a usable node: portable install, system, then the mirrored runtime.
+_node() {
+    local c
+    for c in "$HOME/.local/node/bin/node" "$(command -v node 2>/dev/null)"; do
+        [ -n "$c" ] && [ -x "$c" ] && { echo "$c"; return 0; }
+    done
+    local plat
+    case "$(uname -s)/$(uname -m)" in
+        Linux/x86_64)  plat=linux-x86_64 ;;
+        Linux/aarch64) plat=linux-arm64 ;;
+        Darwin/arm64)  plat=macos-arm64 ;;
+        *)             plat=linux-x86_64 ;;
+    esac
+    c="${TOOLS_DIR:-}/${plat}/node/bin/node"
+    [ -x "$c" ] && { echo "$c"; return 0; }
+    return 1
+}
+
+_auth() {  # _auth <subcommand> [args...]   (passcode passed via VALARK_PW env)
+    local node; node="$(_node)" || { err "node not found (mirror it: scripts/tools/node.sh)"; return 127; }
+    "$node" "$AUTH_JS" "$@"
+}
+
+# Read a passcode into VALARK_PW: use $1 if given, else prompt (hidden).
+_read_pw() {
+    if [ -n "${1:-}" ]; then VALARK_PW="$1"; return 0; fi
+    if [ -t 0 ]; then
+        read -r -s -p "Admin passcode: " VALARK_PW; echo
+    else
+        err "no passcode given and no terminal to prompt"; return 1
+    fi
+}
+
+cmd_setpassword() {
+    _read_pw "${1:-}" || return 1
+    VALARK_PW="$VALARK_PW" _auth setpassword "${2:-admin}"
+}
+
+cmd_verify() {
+    _read_pw "${1:-}" || return 1
+    if VALARK_PW="$VALARK_PW" _auth verify; then echo "valark: passcode OK"; return 0
+    else echo "valark: passcode does NOT match" >&2; return 1; fi
+}
+
+# Guard: refuse to run a reset if the content/model libraries somehow resolve to
+# inside <state> — the invariant must hold before we remove anything.
+_assert_content_safe() {
+    case "${CONTENT_DIR:-}/" in "${STATE_DIR}/"*) err "refusing: content dir is inside state dir"; return 1;; esac
+    case "${MODELS_DIR:-}/"  in "${STATE_DIR}/"*) err "refusing: models dir is inside state dir";  return 1;; esac
+    return 0
+}
+
+cmd_reset() {
+    local tier="${1:-}"
+    _assert_content_safe || return 1
+    case "$tier" in
+        --tier1)
+            _auth reset-tier1
+            echo "valark: admin passcode cleared + Use Mode reset to Open. Content untouched."
+            echo "        Set a new passcode from this box:  valark setpassword"
+            ;;
+        --tier2)
+            _auth reset-tier1 >/dev/null 2>&1 || true
+            # Config reset: remove ONLY known config files under <state>. Never a
+            # recursive wipe (keeps services data + logs), never content/models.
+            local f removed=0
+            for f in auth.json settings.json; do
+                if [ -f "${STATE_DIR}/${f}" ]; then rm -f "${STATE_DIR}/${f}" && removed=$((removed+1)); fi
+            done
+            echo "valark: config reset (${removed} file(s) cleared). Settings + admin forgotten; content KEPT."
+            echo "        Re-run setup or:  valark setpassword"
+            ;;
+        *)
+            err "usage: valark reset --tier1 | --tier2"; return 2 ;;
+    esac
+}
+
+case "${1:-help}" in
+    setpassword) shift; cmd_setpassword "$@" ;;
+    verify)      shift; cmd_verify "$@" ;;
+    auth)        shift; case "${1:-status}" in
+                     status) _auth status ;;
+                     list)   _auth list ;;
+                     *)      err "usage: valark auth {status|list}"; exit 2 ;;
+                 esac ;;
+    usemode)     shift; _auth setmode "${1:-}" ;;
+    reset)       shift; cmd_reset "$@" ;;
+    help|-h|--help)
+        sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+    *)  err "unknown command: ${1}. Try: valark help"; exit 2 ;;
+esac

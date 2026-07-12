@@ -27,8 +27,13 @@ function esc(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+// Some hosts' `date` lacks %3N (busybox in a VM), which can corrupt a duration.
+// Treat anything negative or > 24h as unknown rather than print nonsense.
+function saneMs(ms) { return (typeof ms === 'number' && ms >= 0 && ms < 86400000) ? ms : 0; }
 function fmtDur(ms) {
   if (ms == null) return '';
+  ms = saneMs(ms);
+  if (ms === 0) return '';
   if (ms < 1000) return ms + 'ms';
   if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
   return Math.floor(ms / 60000) + 'm' + Math.round((ms % 60000) / 1000) + 's';
@@ -54,7 +59,7 @@ const totals = suites.reduce((t, s) => {
   t.passed += s.summary.passed || 0;
   t.failed += s.summary.failed || 0;
   t.skipped += s.summary.skipped || 0;
-  t.duration += s.summary.durationMs || 0;
+  t.duration += saneMs(s.summary.durationMs || 0);
   return t;
 }, { passed: 0, failed: 0, skipped: 0, duration: 0 });
 const totalCases = totals.passed + totals.failed + totals.skipped;
@@ -141,7 +146,8 @@ const html = `<!doctype html>
   .cases td{padding:8px 16px;border-top:1px solid var(--bd);vertical-align:top;font-size:.9em}
   .c-status{width:118px} .c-dur{width:70px;text-align:right;font-family:var(--mono);color:var(--dim);font-size:.85em}
   .c-name{font-family:var(--mono);font-size:.86em;word-break:break-word}
-  .c-detail{color:var(--bad);font-size:.92em;white-space:pre-wrap;margin-top:4px;padding:6px 8px;background:rgba(248,113,113,.08);border-radius:3px}
+  .c-detail{color:var(--mut);font-size:.92em;white-space:pre-wrap;margin-top:4px;padding:6px 8px;background:rgba(139,155,180,.08);border-radius:3px}
+  .case.failed .c-detail{color:var(--bad);background:rgba(248,113,113,.08)}
   .pill{font-family:var(--mono);font-size:.72em;font-weight:700;padding:2px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}
   .pill.ok{background:rgba(74,222,128,.14);color:var(--ok)} .pill.bad{background:rgba(248,113,113,.14);color:var(--bad)} .pill.skip{background:rgba(251,191,36,.14);color:var(--skip)}
   .empty{color:var(--dim);text-align:center;padding:14px}

@@ -53,13 +53,33 @@ catalog_refresh_zim() {
     [ -s "$ZIM_CACHE" ] && return 0 || return 1
 }
 
+# --- Owner PROFILE → per-bucket priority multiplier (Phase 5) ------------------
+# The commissioning wizard stores a profile in settings.json; VALARK_PROFILE overrides.
+# knowledge favours the Library, ai favours models, tools favours apps; balanced is
+# neutral. Applied as a per-bucket multiplier on each candidate's value, so the box
+# fills according to what the owner asked for (planner still sorts by value/bytes).
+_valark_profile() {
+    if [ -n "${VALARK_PROFILE:-}" ]; then echo "$VALARK_PROFILE"; return; fi
+    local sf="${STATE_DIR:-}/settings.json" p=""
+    [ -f "$sf" ] && p=$(grep -oE '"profile"[[:space:]]*:[[:space:]]*"[a-zA-Z]+"' "$sf" 2>/dev/null | head -1 | grep -oE '"[a-zA-Z]+"$' | tr -d '"')
+    echo "${p:-balanced}"
+}
+_valark_profile_weight() {   # $1 = content | models | tools
+    case "$(_valark_profile):${1}" in
+        knowledge:content) echo 1.6 ;; knowledge:models) echo 0.8 ;; knowledge:tools) echo 0.9 ;;
+        ai:content)        echo 0.9 ;; ai:models)        echo 1.6 ;; ai:tools)        echo 0.9 ;;
+        tools:content)     echo 0.9 ;; tools:models)     echo 0.9 ;; tools:tools)     echo 1.6 ;;
+        *)                 echo 1.0 ;;   # balanced / unknown
+    esac
+}
+
 # --- ZIM: emit normalized candidates with computed value ----------------------
 # Value heuristic: curated category weight + language bonus + density/article
 # signal + curated topic boosts. Ordering for "small-valuable-first" is done by
 # the planner using value/bytes, so value here is intrinsic importance.
 catalog_zim_candidates() {
     [ -s "$ZIM_CACHE" ] || return 0
-    awk -F'\t' -v zdir="$ZIM_DIR" '
+    awk -F'\t' -v zdir="$ZIM_DIR" -v pw="$(_valark_profile_weight content)" '
     BEGIN {
         # curated category weights
         w["wikipedia"]=900; w["libretexts"]=800; w["gutenberg"]=800; w["stack_exchange"]=820;
@@ -91,6 +111,7 @@ catalog_zim_candidates() {
         if (lname ~ /archlinux|alpinelinux|gentoo|debian|ubuntu|raspberr|_linux|linux_|unix\.stack|askubuntu|busybox|coreutils|systemd|_bash|_shell|command.?line|sysadmin|devops|freebsd|gnu_/) base += 140;
         if (cat=="devdocs" && lname ~ /bash|linux|git|docker|nginx|systemd|sqlite|vim|python|node|curl|ssh|make|gcc|apt|dpkg/) base += 70;
         if (base>1000) base=1000;
+        base = base * (pw+0 > 0 ? pw : 1);   # owner PROFILE bias (per-bucket)
         id="zim:" name (flavour!="" ? "_" flavour : "") "_" lang;
         nn=split(url,pp,"/"); fname=pp[nn]; dest=zdir "/" fname;
         # bytes printed as raw string (%s): mawk %d clamps >2^31, corrupting GB-scale sizes.
@@ -102,10 +123,10 @@ catalog_zim_candidates() {
 catalog_model_candidates() {
     local f="${DATA_DIR}/models-extra.tsv"
     [ -f "$f" ] || return 0
-    awk -F'|' -v models="$MODELS_DIR" '
+    awk -F'|' -v models="$MODELS_DIR" -v pw="$(_valark_profile_weight models)" '
     /^[[:space:]]*#/ {next} /^[[:space:]]*$/ {next}
     {
-        value=$1+0; id=$2; cat=$3; repo=$4; file=$5; fmt=$6; gated=$7; rawb=$8; dest=$9;
+        value=($1+0) * (pw+0 > 0 ? pw : 1); id=$2; cat=$3; repo=$4; file=$5; fmt=$6; gated=$7; rawb=$8; dest=$9;
         if (gated=="yes") next;                       # skip gated; recorded as hints elsewhere
         full=models "/" dest;
         if (fmt=="repo") {
@@ -121,10 +142,10 @@ catalog_model_candidates() {
 catalog_installer_candidates() {
     local f="${DATA_DIR}/installers.tsv"
     [ -f "$f" ] || return 0
-    awk -F'|' -v root="$INSTALLERS_DIR" '
+    awk -F'|' -v root="$INSTALLERS_DIR" -v pw="$(_valark_profile_weight tools)" '
     /^[[:space:]]*#/ {next} /^[[:space:]]*$/ {next}
     {
-        value=$1+0; id=$2; name=$3; cat=$4; arch=$5; url=$6; rawb=$7; sha=$8;
+        value=($1+0) * (pw+0 > 0 ? pw : 1); id=$2; name=$3; cat=$4; arch=$5; url=$6; rawb=$7; sha=$8;
         n=split(url,p,"/"); fname=p[n];
         dest=root "/" cat "/" fname;
         printf "inst:%s\tinstallers\tinst:%s\t%d\t%s\turl\t%s\t%s\t%s\n", id, cat, value, rawb, url, dest, sha;

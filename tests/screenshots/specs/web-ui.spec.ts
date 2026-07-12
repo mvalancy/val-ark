@@ -1330,6 +1330,15 @@ test.describe('Val Ark - Consumer Shell (Home status + Settings + Activity)', ()
     expect(expert).toBeGreaterThan(basic);
   });
 
+  test('Settings Downloads & Priorities offers a profile picker', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/settings`);
+    await page.waitForSelector('#downloads', { timeout: 5000 });
+    await expect(page.locator('#downloads')).toContainText('Downloads & Priorities');
+    await expect(page.locator('#downloads .setup-profile')).toHaveCount(4);
+    await expect(page.locator('#downloads .setup-profile[data-profile="knowledge"]')).toBeVisible();
+    expect(await page.evaluate(() => typeof (window as any).setDownloadProfile)).toBe('function');
+  });
+
   test('Activity view renders and reports quiet state', async ({ page }) => {
     await page.goto(`file://${WEB_UI}#/activity`);
     await page.waitForSelector('#main-content', { timeout: 5000 });

@@ -219,13 +219,26 @@ cmd_status() {
     return 1
 }
 
+# MicroBin has no per-user accounts — it's one shared instance behind HTTP Basic
+# auth. There is nothing to "sign up" for; the host shares this one access code.
+# Print it so the operator (or the UI's Accounts panel, localhost-only) can hand it out.
+cmd_creds() {
+    _ensure_credentials
+    echo "paste: shared access (no per-user signup — one gated instance)"
+    echo "  url:      ${PUBLIC_PATH}"
+    echo "  username: ${PASTE_AUTH_USER}"
+    echo "  password: ${PASTE_AUTH_PASSWORD}"
+    echo "  (admin password is in ${CRED_FILE})"
+}
+
 case "${1:-status}" in
     start)   cmd_start ;;
     stop)    cmd_stop ;;
     restart) cmd_stop; cmd_start ;;
     status)  cmd_status ;;
+    creds)   cmd_creds ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status}" >&2
+        echo "Usage: $0 {start|stop|restart|status|creds}" >&2
         exit 2
         ;;
 esac

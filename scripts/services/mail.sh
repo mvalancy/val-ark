@@ -329,8 +329,33 @@ EOF
     fi
 }
 
+# Create a full mailbox in one step: SASL login (password) + IMAP account. maddy has
+# no self-registration (offline, no public signup), so the host provisions logins;
+# the UI's Community "Accounts & sign-up" panel points here (localhost/admin only).
+cmd_adduser() {
+    local name="${1:-}" pass="${2:-}" addr
+    [ -n "$name" ] || { echo "usage: mail.sh adduser <name|user@domain> [password]"; return 1; }
+    case "$name" in *@*) addr="$name" ;; *) addr="${name}@${MAIL_DOMAIN}" ;; esac
+    ensure_layout; write_config
+    # 1) SASL credential (password DB). maddy reads the password from stdin when
+    #    stdin is not a TTY, so piping it keeps this non-interactive + script-safe.
+    if [ -n "$pass" ]; then
+        if ! printf '%s\n' "$pass" | maddy_cmd creds create "$addr"; then
+            err "could not create login '${addr}' (already exists?)"; return 1
+        fi
+    else
+        if ! maddy_cmd creds create "$addr"; then
+            err "could not create login '${addr}'"; return 1
+        fi
+    fi
+    # 2) IMAP mailbox (safe to skip if it already exists).
+    maddy_cmd imap-acct create "$addr" >/dev/null 2>&1 || true
+    log "mail account '${addr}' created — sign in at /app/mail/ (IMAP ${VALARK_BIND}:${IMAP_PORT})"
+}
+
 usage() {
-    echo "Usage: $0 {start|stop|status|creds ...|acct ...}"
+    echo "Usage: $0 {start|stop|status|adduser <name> [pass]|creds ...|acct ...}"
+    echo "  adduser <name> [pass]  -> create a full mailbox (login + IMAP account)"
     echo "  creds ...  -> maddy creds <args>     (manage logins)"
     echo "  acct  ...  -> maddy imap-acct <args> (manage mailboxes)"
 }
@@ -342,6 +367,7 @@ main() {
         stop)    cmd_stop ;;
         restart) cmd_stop; cmd_start ;;
         status)  cmd_status ;;
+        adduser) cmd_adduser "$@" ;;
         creds)   ensure_layout; write_config; maddy_cmd creds "$@" ;;
         acct)    ensure_layout; write_config; maddy_cmd imap-acct "$@" ;;
         *)       usage; exit 1 ;;

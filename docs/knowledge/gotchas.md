@@ -61,6 +61,21 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   and the box ends up with no Node. For a truly offline bootstrap, `setup.sh` fetches Node from
   the source Ark (`VALARK_HOST`) before nodejs.org.
 
+## Community services / accounts
+
+- **`set -u` + optional arg = "unbound variable":** service scripts run under `set -u`, so
+  `local user="$1" pass="$2"` **crashes** when `adduser` is called without a password. **Fix:**
+  default optional positionals — `local user="${1:-}" pass="${2:-}"`. Bit both `chat.sh` and
+  `mail.sh` `cmd_adduser`.
+- **Account model differs per service — don't force one signup UX.** IRC (chat) + maddy (mail)
+  have no safe self‑signup → the **host provisions** logins (`<svc>.sh adduser <name>`); NodeBB
+  (forum) has its **own Register page** (self‑service); MicroBin (paste) is **one shared gated
+  instance** (no per‑user accounts). The server encodes this as `COMMUNITY_ACCOUNTS[id].signup`
+  = `host｜self｜shared`, surfaced in `/api/status/services` and the UI signup panel.
+- **Minting a login is an admin action → `POST /api/service/adduser` is localhost‑only.** LAN
+  users self‑register on the forum or ask the host; only the operator on the box creates chat/mail
+  logins. The UI hides the create form off‑localhost (`isAdminHost()` mirrors the server gate).
+
 ## Benign, don't "fix"
 
 - **NodeBB `/app/forum/` 503s under rapid bursts** — a transient of `pipeProxy`, self‑recovers.

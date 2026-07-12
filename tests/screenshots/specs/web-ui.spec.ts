@@ -1321,6 +1321,34 @@ test.describe('Val Ark - Community Hub', () => {
     await expect(page.locator('a.nav-link:has-text("Community")')).toHaveClass(/active/);
   });
 
+  test('Community page shows the Accounts & sign-up guidance for every service', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/community`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.community-card', { timeout: 5000 });
+    const body = await page.locator('#main-content').innerText();
+    expect(body).toMatch(/Accounts\s*&\s*sign-up/i);
+    // forum self-registers; chat/mail host-provision via adduser; paste is shared.
+    expect(body).toMatch(/Register/i);
+    expect(body).toContain('chat.sh adduser');
+    expect(body).toContain('mail.sh adduser');
+    expect(body).toContain('paste.sh creds');
+  });
+
+  test('Community page offers the host an inline create-account form (localhost/admin)', async ({ page }) => {
+    // file:// has an empty hostname → treated as the Ark host → admin form renders.
+    await page.goto(`file://${WEB_UI}#/community`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.community-card', { timeout: 5000 });
+    await expect(page.locator('#signup-svc')).toHaveCount(1);
+    await expect(page.locator('#signup-user')).toHaveCount(1);
+    await expect(page.locator('button:has-text("Create account")')).toHaveCount(1);
+    // The service picker offers exactly the host-provisioned services.
+    const opts = await page.locator('#signup-svc option').allInnerTexts();
+    expect(opts.map(o => o.toLowerCase())).toEqual(['chat', 'mail']);
+    const fns = await page.evaluate(() => [typeof (window as any).createServiceAccount, typeof (window as any).isAdminHost]);
+    expect(fns).toEqual(['function', 'function']);
+  });
+
   test('#/library alias renders the Library section', async ({ page }) => {
     await page.goto(`file://${WEB_UI}#/library`);
     await page.waitForLoadState('domcontentloaded');

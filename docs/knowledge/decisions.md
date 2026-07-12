@@ -6,6 +6,18 @@ later). See [README](README.md).
 
 ---
 
+## 2026‑07 — Versioning re-baselined to honest pre‑1.0 (0.1.x)
+- **Context:** early releases had jumped to a 1.x line (v1.0.0–v1.5.0), which implies a real,
+  supported 1.0 user release we are nowhere near.
+- **Decision:** we are **pre‑1.0**. Deleted the premature v1.0.0–v1.5.0 tags + GitHub releases
+  (nobody depended on them) and re-baselined to **0.1.x**; the Phase 6 release (Health UX + live
+  metrics) is **0.1.7**. The app version now has a single source of truth — the repo‑root
+  `VERSION` file, read by `scripts/server.js` (`APP_VERSION`, served at `/api/health`).
+- **Rule going forward:** stay on **0.x** until there's a genuine, stable 1.0 user release; **bump
+  the `VERSION` file as part of each release** (the release-branch commit), so `/api/health` never
+  goes stale again. Don't reach for 1.0 by increment — it's a deliberate "this is ready for real
+  users" call.
+
 ## 2026‑07 — Reframe to a consumer appliance (scope‑first)
 - **Context:** Val Ark was a power‑user/CLI tool; the goal is a router‑app / health‑app
   experience for a non‑technical owner ("one big EASY button").

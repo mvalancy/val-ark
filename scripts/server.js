@@ -11,6 +11,10 @@ const { execSync, execFile, execFileSync, spawn } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 
+// Single source of truth for the app version — the repo-root VERSION file (bump it
+// once per release). Pre-1.0: honest 0.1.x numbering, not a premature 1.x.
+const APP_VERSION = (() => { try { return fs.readFileSync(path.join(ROOT, 'VERSION'), 'utf8').trim() || '0.1.7'; } catch (_) { return '0.1.7'; } })();
+
 // --- Config: process env, then .env file, then default ----------------------
 const DOTENV = (() => {
     const out = {};
@@ -931,7 +935,7 @@ function handleAPI(req, res, urlPath) {
                     safeMode: sm.safeMode,
                     safeModeReasons: sm.reasons,
                     uptime: process.uptime(),
-                    version: '1.0.0',
+                    version: APP_VERSION,
                     timestamp: new Date().toISOString()
                 });
             }

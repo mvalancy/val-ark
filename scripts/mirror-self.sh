@@ -80,6 +80,24 @@ fi
 # Copy the bootstrap script alongside so it can be fetched directly too.
 [ -f "${REPO_ROOT}/bootstrap.sh" ] && cp -f "${REPO_ROOT}/bootstrap.sh" "${DEST}/bootstrap.sh" 2>/dev/null
 
+# Mirror a Node runtime per platform we have one for, so a bootstrapped node can
+# run the web server with NO internet: setup.sh fetches node-<platform>.tar.gz
+# from the Ark before ever reaching nodejs.org. This is what makes the offline
+# self-replication actually offline (the code alone is useless without a runtime).
+for nd in "${TOOLS_DIR}"/*/node; do
+    [ -e "$nd/bin/node" ] || continue
+    plat="$(basename "$(dirname "$nd")")"          # linux-arm64 / linux-x86_64 / ...
+    out="${DEST}/node-${plat}.tar.gz"
+    # Skip if the tarball is already newer than the runtime (avoids re-taring 100MB+
+    # every loop cycle; can't run a cross-arch node to version-check it).
+    [ -f "$out" ] && [ "$out" -nt "$nd/bin/node" ] && continue
+    tmp="${out}.tmp.$$"
+    if tar -czhf "$tmp" -C "$nd" . 2>/dev/null; then      # -h: follow the tools symlink
+        mv -f "$tmp" "$out"
+        log "mirrored node runtime: ${plat} ($(du -h "$out" 2>/dev/null | cut -f1))"
+    else rm -f "$tmp"; fi
+done
+
 {
     echo "ref=$ref"
     echo "commit=$commit"

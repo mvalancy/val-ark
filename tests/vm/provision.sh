@@ -39,9 +39,10 @@ else
 fi
 cd "$DIR" || { step "cd into checkout" fail 0 "no $DIR"; exit 0; }
 
-# 2. Run setup (the real first-time step; non-interactive)
+# 2. Run setup (the real first-time step; headless via VALARK_YES so it completes
+#    unattended — installs deps + a Node runtime like a scripted/cloud-init user).
 s=$(date +%s%3N 2>/dev/null || echo 0)
-setup_out="$(yes '' 2>/dev/null | timeout 600 bash scripts/setup.sh 2>&1)"; setup_rc=$?
+setup_out="$(VALARK_YES=1 timeout 600 bash scripts/setup.sh </dev/null 2>&1)"; setup_rc=$?
 e=$(date +%s%3N 2>/dev/null || echo 0)
 if [ "$setup_rc" -eq 0 ]; then step "scripts/setup.sh" pass "$((e-s))"
 else step "scripts/setup.sh" fail "$((e-s))" "exit $setup_rc: $(printf '%s' "$setup_out" | grep -iE 'error|fail|not found' | tail -2 | tr '\n' ' ' | cut -c1-200)"; fi

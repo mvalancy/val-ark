@@ -169,6 +169,81 @@ test.describe('Val Ark API Server', () => {
     expect(resp.status()).toBe(404);
   });
 
+  test('GET /api/catalog/models returns a browseable catalog shape', async ({ request }) => {
+    const resp = await request.get(`${BASE_URL}/api/catalog/models`);
+    expect(resp.ok()).toBeTruthy();
+    const data = await resp.json();
+    expect(Array.isArray(data.items)).toBeTruthy();
+    expect(typeof data.computing).toBe('boolean');
+    // models catalog reads a local TSV (no network) so it should populate quickly
+    await expect.poll(async () => {
+      const r = await request.get(`${BASE_URL}/api/catalog/models`);
+      const d = await r.json();
+      return d.items.length;
+    }, { timeout: 15000, intervals: [500, 1000, 2000] }).toBeGreaterThan(0);
+    const one = (await (await request.get(`${BASE_URL}/api/catalog/models`)).json()).items[0];
+    expect(typeof one.id).toBe('string');
+    expect(one.bytes).toBeGreaterThan(0);
+  });
+
+  test('GET /api/catalog/content returns a catalog shape (may be computing)', async ({ request }) => {
+    const resp = await request.get(`${BASE_URL}/api/catalog/content`);
+    expect(resp.ok()).toBeTruthy();
+    const data = await resp.json();
+    expect(Array.isArray(data.items)).toBeTruthy();
+    expect(typeof data.computing).toBe('boolean');
+  });
+
+  test('POST /api/request rejects an invalid kind', async ({ request }) => {
+    const resp = await request.post(`${BASE_URL}/api/request`, { data: { kind: 'bogus', id: 'x' } });
+    expect(resp.status()).toBe(400);
+    const data = await resp.json();
+    expect(data.error).toContain('Invalid kind');
+  });
+
+  test('POST /api/request rejects a tool injection attempt', async ({ request }) => {
+    const resp = await request.post(`${BASE_URL}/api/request`, { data: { kind: 'tool', id: 'all; rm -rf /' } });
+    expect(resp.status()).toBe(400);
+    const data = await resp.json();
+    expect(data.error).toContain('Unknown tool');
+  });
+
+  test('POST /api/request rejects a malformed catalog id', async ({ request }) => {
+    const resp = await request.post(`${BASE_URL}/api/request`, { data: { kind: 'content', id: 'bad id with spaces' } });
+    expect(resp.status()).toBe(400);
+    const data = await resp.json();
+    expect(data.error).toContain('Invalid');
+  });
+
+  test('POST /api/service/start rejects an unknown service', async ({ request }) => {
+    const resp = await request.post(`${BASE_URL}/api/service/start`, { data: { id: 'nope' } });
+    expect(resp.status()).toBe(400);
+    const data = await resp.json();
+    expect(data.error).toContain('Unknown service');
+  });
+
+  test('GET /api/status/services reports enabled/mirrored/startable flags', async ({ request }) => {
+    const resp = await request.get(`${BASE_URL}/api/status/services`);
+    expect(resp.ok()).toBeTruthy();
+    const data = await resp.json();
+    const ids = Object.keys(data);
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) {
+      expect(typeof data[id].running).toBe('boolean');
+      expect(typeof data[id].enabled).toBe('boolean');
+      expect(typeof data[id].mirrored).toBe('boolean');
+      expect(typeof data[id].startable).toBe('boolean');
+    }
+  });
+
+  test('GET /favicon.svg is served', async ({ request }) => {
+    const resp = await request.get(`${BASE_URL}/favicon.svg`);
+    expect(resp.ok()).toBeTruthy();
+    expect(resp.headers()['content-type']).toContain('svg');
+    const body = await resp.text();
+    expect(body).toContain('<svg');
+  });
+
   test('GET /api/status/storage returns live category breakdown (incl. ZIMs)', async ({ request }) => {
     // The tools tree (~45k files) can take ~75s to size over FUSE; the walk runs
     // in the background so the route never blocks. Give the test room to wait.

@@ -744,17 +744,17 @@ const CONTENT_DATA: Record<string, { name: string; size: string; articles: strin
     name: 'Wikipedia Simple English',
     size: '3.1 GB',
     articles: '~240,000',
-    updated: '2025-11',
-    file: 'content/zim/wikipedia_en_simple_all_maxi_2025-11.zim',
+    updated: 'latest',
+    file: 'content/zim/wikipedia_en_simple_all_maxi.zim',
     source: 'https://en.wikipedia.org/wiki/Simple_English_Wikipedia',
     featureCount: 6
   },
   'wikipedia-full': {
     name: 'Wikipedia English (Full)',
-    size: '111 GB',
+    size: '~124 GB',
     articles: '~6,800,000',
-    updated: '2025-08',
-    file: 'content/zim/wikipedia_en_all_maxi_2025-08.zim',
+    updated: 'latest',
+    file: 'content/zim/wikipedia_en_all_maxi.zim',
     source: 'https://en.wikipedia.org',
     featureCount: 6
   }
@@ -767,7 +767,7 @@ test.describe('Val Ark - Content Library', () => {
   test('Content nav link exists and is visible', async ({ page }) => {
     await page.goto(`file://${WEB_UI}`);
     await page.waitForLoadState('domcontentloaded');
-    const contentLink = page.locator('a.nav-link:has-text("Wikipedia")');
+    const contentLink = page.locator('a.nav-link:has-text("Library")');
     await expect(contentLink).toBeVisible();
     await expect(contentLink).toHaveAttribute('href', '#/content');
   });
@@ -775,18 +775,18 @@ test.describe('Val Ark - Content Library', () => {
   test('Content nav link navigates to content page', async ({ page }) => {
     await page.goto(`file://${WEB_UI}`);
     await page.waitForLoadState('domcontentloaded');
-    const contentLink = page.locator('a.nav-link:has-text("Wikipedia")');
+    const contentLink = page.locator('a.nav-link:has-text("Library")');
     await contentLink.click();
     await page.waitForTimeout(300);
     expect(page.url()).toContain('#/content');
-    await expect(page.locator('h1')).toHaveText('Offline Content Library');
+    await expect(page.locator('h1')).toHaveText('Offline Library');
   });
 
   test('Content nav link has active class on content list page', async ({ page }) => {
     await page.goto(`file://${WEB_UI}#/content`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('.card', { timeout: 5000 });
-    const contentLink = page.locator('a.nav-link:has-text("Wikipedia")');
+    const contentLink = page.locator('a.nav-link:has-text("Library")');
     await expect(contentLink).toHaveClass(/active/);
   });
 
@@ -794,7 +794,7 @@ test.describe('Val Ark - Content Library', () => {
     await page.goto(`file://${WEB_UI}#/content/wikipedia-simple`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('h1', { timeout: 5000 });
-    const contentLink = page.locator('a.nav-link:has-text("Wikipedia")');
+    const contentLink = page.locator('a.nav-link:has-text("Library")');
     await expect(contentLink).toHaveClass(/active/);
   });
 
@@ -804,7 +804,7 @@ test.describe('Val Ark - Content Library', () => {
     await page.goto(`file://${WEB_UI}#/content`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('h1', { timeout: 5000 });
-    await expect(page.locator('h1')).toHaveText('Offline Content Library');
+    await expect(page.locator('h1')).toHaveText('Offline Library');
     const desc = page.locator('.section-desc');
     await expect(desc).toBeVisible();
     const descText = await desc.textContent();
@@ -940,7 +940,7 @@ test.describe('Val Ark - Content Library', () => {
       await expect(breadcrumb).toBeVisible();
       const contentLink = breadcrumb.locator('a[href="#/content"]');
       await expect(contentLink).toBeVisible();
-      await expect(contentLink).toHaveText('Content');
+      await expect(contentLink).toHaveText('Library');
     });
 
     test(`Detail "${contentId}" breadcrumb shows item name`, async ({ page }) => {
@@ -959,7 +959,7 @@ test.describe('Val Ark - Content Library', () => {
       await contentLink.click();
       await page.waitForTimeout(300);
       expect(page.url()).toContain('#/content');
-      await expect(page.locator('h1')).toHaveText('Offline Content Library');
+      await expect(page.locator('h1')).toHaveText('Offline Library');
     });
 
     test(`Detail "${contentId}" has detail table with Size row`, async ({ page }) => {
@@ -1237,9 +1237,9 @@ test.describe('Val Ark - Homepage Hero', () => {
     // Should have Start Guide button
     const startGuide = page.locator('.hero-actions a:has-text("Start Guide")');
     await expect(startGuide).toBeVisible();
-    // Should have Wikipedia button
-    const wikiButton = page.locator('.hero-actions a:has-text("Wikipedia")');
-    await expect(wikiButton).toBeVisible();
+    // Should have the Library button
+    const libButton = page.locator('.hero-actions a:has-text("Browse the Library")');
+    await expect(libButton).toBeVisible();
   });
 
   test('Hero action buttons navigate correctly', async ({ page }) => {
@@ -1275,6 +1275,49 @@ test.describe('Val Ark - Mobile Navigation', () => {
     // Nav links should now be visible
     const navLinks = page.locator('.nav-links');
     await expect(navLinks).toHaveClass(/mobile-open/);
+  });
+});
+
+test.describe('Val Ark - Community Hub', () => {
+  test('Community nav link exists and navigates', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    const link = page.locator('a.nav-link:has-text("Community")');
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute('href', '#/community');
+    await link.click();
+    await page.waitForTimeout(300);
+    expect(page.url()).toContain('#/community');
+    await expect(page.locator('h1')).toContainText('Community');
+  });
+
+  test('Community page lists the four LAN services', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/community`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.community-card', { timeout: 5000 });
+    // chat, mail, forum, paste
+    await expect(page.locator('.community-card')).toHaveCount(4);
+  });
+
+  test('Community tab is active on #/community', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/community`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.community-card', { timeout: 5000 });
+    await expect(page.locator('a.nav-link:has-text("Community")')).toHaveClass(/active/);
+  });
+
+  test('#/library alias renders the Library section', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/library`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('h1', { timeout: 5000 });
+    await expect(page.locator('h1')).toHaveText('Offline Library');
+  });
+
+  test('favicon link is present in head', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}`);
+    await page.waitForLoadState('domcontentloaded');
+    const icon = page.locator('link[rel="icon"]');
+    await expect(icon).toHaveAttribute('href', 'favicon.svg');
   });
 });
 

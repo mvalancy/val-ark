@@ -707,7 +707,7 @@ function getCORSOrigin(req) {
     return '';
 }
 
-function sendJSON(res, req, data, status = 200) {
+function sendJSON(res, req, data, status = 200, extraHeaders) {
     const body = JSON.stringify(data);
     const corsOrigin = getCORSOrigin(req);
     res.writeHead(status, {
@@ -715,6 +715,7 @@ function sendJSON(res, req, data, status = 200) {
         ...(corsOrigin ? { 'Access-Control-Allow-Origin': corsOrigin } : {}),
         'Content-Length': Buffer.byteLength(body),
         ...SECURITY_HEADERS,
+        ...(extraHeaders || {}),
     });
     res.end(body);
 }
@@ -742,6 +743,9 @@ function readBody(req) {
 
 // Check if request is from localhost (for restricting dangerous operations)
 function isLocalhost(req) {
+    // Test hook: simulate a remote (LAN) client so the access gate can be exercised.
+    // Fail-SAFE — it only REMOVES the localhost admin bypass, never grants access.
+    if (process.env.VALARK_TEST_FORCE_REMOTE === '1') return false;
     const addr = req.socket?.remoteAddress || '';
     // IPv4 localhost
     if (addr === '127.0.0.1' || addr === '::1') return true;
@@ -751,6 +755,61 @@ function isLocalhost(req) {
     if (!addr) return true;
     return false;
 }
+
+// ---- Admin sessions & the access gate ---------------------------------------
+// Read the signed session cookie set at login (see auth.js). No server-side table.
+function sessionToken(req) {
+    const raw = req.headers?.cookie || '';
+    const m = raw.match(/(?:^|;\s*)varksid=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+}
+// Is this request an authenticated admin? The box's own console/localhost is always
+// admin (physical possession = ownership — this is what makes recovery possible);
+// from the LAN you need a valid session (obtained by POSTing the admin passcode).
+function isAdmin(req) {
+    if (isLocalhost(req)) return true;
+    if (!auth.status(STATE_DIR).adminSet) return false;     // no admin ⇒ no LAN admin
+    // Bind the session to the login IP: a cookie captured on the wire can't be
+    // replayed from another host.
+    return auth.verifySession(sessionToken(req), STATE_DIR, clientIp(req));
+}
+// A cookie is safe to mark Secure only when this request actually arrived over TLS
+// (behind the local CA) — marking it Secure on plain HTTP would silently drop it.
+function isSecureReq(req) {
+    return !!(req.socket && req.socket.encrypted) || req.headers?.['x-forwarded-proto'] === 'https';
+}
+// Login cooldown (not a permanent lock): slow down passcode guessing. Per-IP AND a
+// global cap, so an attacker can't just rotate source IPs (NIC aliases) to multiply
+// their guess budget. localhost/console always bypasses (owner is never locked out).
+const _loginFails = new Map();
+const LOGIN_MAX = 8, LOGIN_WINDOW_MS = 10 * 60 * 1000;
+let _loginGlobal = { n: 0, first: 0 };
+const LOGIN_GLOBAL_MAX = 40;
+function loginAllowed(req) {
+    if (_loginGlobal.first && Date.now() - _loginGlobal.first > LOGIN_WINDOW_MS) _loginGlobal = { n: 0, first: 0 };
+    if (_loginGlobal.n >= LOGIN_GLOBAL_MAX) return false;   // global brute-force cap
+    const rec = _loginFails.get(clientIp(req));
+    if (!rec) return true;
+    if (Date.now() - rec.first > LOGIN_WINDOW_MS) { _loginFails.delete(clientIp(req)); return true; }
+    return rec.n < LOGIN_MAX;
+}
+function noteLoginFail(req) {
+    const ip = clientIp(req); const rec = _loginFails.get(ip);
+    if (!rec || Date.now() - rec.first > LOGIN_WINDOW_MS) _loginFails.set(ip, { n: 1, first: Date.now() });
+    else rec.n++;
+    if (!_loginGlobal.first || Date.now() - _loginGlobal.first > LOGIN_WINDOW_MS) _loginGlobal = { n: 1, first: Date.now() };
+    else _loginGlobal.n++;
+}
+function sessionCookie(token, maxAgeSec, secure) {
+    // HttpOnly so JS can't read it; SameSite=Lax to resist CSRF; Path=/ site-wide;
+    // Secure ONLY when the request came over TLS (else the browser would drop it on HTTP).
+    return `varksid=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSec}${secure ? '; Secure' : ''}`;
+}
+// POSTs that CHANGE the box's config/accounts — always admin (localhost or a
+// logged-in admin), regardless of Use Mode. "Use" actions (downloads/requests/
+// service starts) are gated per Use Mode instead (Open = anyone on the LAN).
+const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser']);
+const AUTH_EXEMPT_POSTS = new Set(['/api/auth/login', '/api/auth/logout', '/api/setup/commission']);
 
 // Peer IP, normalized (node reports LAN/tailnet IPv4 peers as IPv4-mapped IPv6).
 function clientIp(req) {
@@ -861,9 +920,9 @@ function handleAPI(req, res, urlPath) {
             }
             case '/api/auth/status':
                 // Read-only: is an admin set, which Use Mode, is this caller the
-                // trusted box/localhost. No gating is enforced yet (Open default);
-                // the commissioning wizard + access layer build on this.
-                return sendJSON(res, req, { ...auth.status(STATE_DIR), trusted: isLocalhost(req) });
+                // trusted box/localhost (`trusted`) and are they an authenticated
+                // admin right now (`authed` = localhost or a valid session).
+                return sendJSON(res, req, { ...auth.status(STATE_DIR), trusted: isLocalhost(req), authed: isAdmin(req) });
             case '/api/setup/state': {
                 // First-boot state for the wizard. Never leaks the claim token; only
                 // whether one is needed (LAN) or bypassed (this box/localhost).
@@ -929,10 +988,39 @@ function handleAPI(req, res, urlPath) {
                 error: 'Val Ark isn’t set up yet — finish the setup wizard first.'
             }, 409);
         }
+        // Access gate (per Use Mode). Config/account changes always need admin; "use"
+        // actions need admin only when the box is Passworded or Accounts. Open = anyone
+        // on the LAN may use. Login/logout/commission are exempt (you can't be authed
+        // to log in). The box's own console/localhost is always admin.
+        if (!AUTH_EXEMPT_POSTS.has(urlPath)) {
+            const mode = auth.status(STATE_DIR).useMode;
+            const needsAuth = ADMIN_ONLY_POSTS.has(urlPath) || mode === 'passworded' || mode === 'accounts';
+            if (needsAuth && !isAdmin(req)) {
+                return sendJSON(res, req, { error: 'Sign in required to do that on this network.', needsAuth: true }, 401);
+            }
+        }
 
         readBody(req).then((body) => {
             let result;
             switch (urlPath) {
+                case '/api/auth/login': {
+                    // Exchange the admin passcode for a signed session cookie. Cooldown
+                    // (not a lock) on repeated failures; localhost never needs this.
+                    if (!auth.status(STATE_DIR).adminSet) {
+                        return sendJSON(res, req, { error: 'No admin passcode is set yet — set one on the box first.' }, 400);
+                    }
+                    if (!loginAllowed(req)) {
+                        return sendJSON(res, req, { error: 'Too many attempts — wait a few minutes, or sign in from the box itself.' }, 429);
+                    }
+                    if (typeof body.password === 'string' && auth.verify(body.password, STATE_DIR)) {
+                        const token = auth.issueSession(STATE_DIR, 12 * 3600 * 1000, clientIp(req));
+                        return sendJSON(res, req, { ok: true }, 200, { 'Set-Cookie': sessionCookie(token, 12 * 3600, isSecureReq(req)) });
+                    }
+                    noteLoginFail(req);
+                    return sendJSON(res, req, { error: 'Incorrect passcode.' }, 401);
+                }
+                case '/api/auth/logout':
+                    return sendJSON(res, req, { ok: true }, 200, { 'Set-Cookie': sessionCookie('', 0, isSecureReq(req)) });
                 case '/api/download/tools': {
                     const target = body.target || 'all';
                     if (!isAlphanumDash(target) || !VALID_TOOL_TARGETS.has(target)) {
@@ -1009,14 +1097,10 @@ function handleAPI(req, res, urlPath) {
                     result = startService(body.id);
                     break;
                 case '/api/service/adduser':
-                    // Provision a login on a host-managed service (chat/mail). Minting a
-                    // login is an admin action, so it is localhost-only (the host operator);
-                    // LAN users self-register on the forum or use the shared paste instance.
-                    if (!isLocalhost(req)) {
-                        result = { error: 'Account creation is available only from the Ark host (localhost). LAN users: register on the forum, or ask your host for a chat/mail login.' };
-                    } else {
-                        result = addServiceUser(body.id, body.username, body.password);
-                    }
+                    // Provision a login on a host-managed service (chat/mail). An admin
+                    // action (ADMIN_ONLY_POSTS): the access gate above already required
+                    // localhost or a logged-in admin, so a remote admin can do it too.
+                    result = addServiceUser(body.id, body.username, body.password);
                     break;
                 default:
                     return sendJSON(res, req, { error: 'Unknown endpoint' }, 404);
@@ -1208,9 +1292,16 @@ function pipeProxy(req, res, port, label, pathOverride) {
     // ECONNRESET → a spurious 503. The race surfaced intermittently only under
     // the added TLS latency of the HTTPS listener. A new socket each time is the
     // standard, robust behaviour for a small reverse proxy like this.
+    // Never leak the Val Ark admin session cookie to backend sub-apps (NodeBB, The
+    // Lounge, kiwix, …) — they don't need it and could log/exfiltrate the bearer token.
+    const fwdHeaders = { ...req.headers, host: `127.0.0.1:${port}` };
+    if (fwdHeaders.cookie) {
+        const kept = fwdHeaders.cookie.split(/;\s*/).filter((c) => c && !/^varksid=/.test(c)).join('; ');
+        if (kept) fwdHeaders.cookie = kept; else delete fwdHeaders.cookie;
+    }
     const proxyReq = http.request({
         host: '127.0.0.1', port, method: req.method, path: pathOverride || req.url,
-        headers: { ...req.headers, host: `127.0.0.1:${port}` },
+        headers: fwdHeaders,
     }, (proxyRes) => {
         const headers = { ...proxyRes.headers };
         delete headers['x-frame-options'];

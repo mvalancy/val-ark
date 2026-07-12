@@ -111,7 +111,7 @@ function commission(dir, opts, ctx) {
 
   // Admin passcode is OPTIONAL (Jordan can skip; localhost still administers).
   if (opts.password != null && String(opts.password).length) {
-    if (String(opts.password).length < 4) return { error: 'Passcode must be at least 4 characters.' };
+    if (String(opts.password).length < 8) return { error: 'Passcode must be at least 8 characters.' };
     auth.setPassword(String(opts.password), 'admin', dir);
   }
   if (useMode !== 'open') auth.setUseMode(useMode, dir);

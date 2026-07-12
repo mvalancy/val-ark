@@ -3567,6 +3567,15 @@ function renderSettings() {
             <button class="seg-btn ${_settingsExpert ? 'on' : ''}" onclick="toggleSettingsMode(true)">Expert</button>
         </div></div>`;
     html += `<div class="home-status" role="status"><span class="hs-dot hs-${dot}" aria-hidden="true"></span><span class="hs-text">${esc(h.text)}</span></div>`;
+    // Sign-in state: the box/localhost is admin automatically; from the LAN you sign
+    // in with the admin passcode to make changes (and to use a Passworded box).
+    const authed = !!(_authState && _authState.authed);
+    const trusted = !!(_authState && _authState.trusted);
+    html += `<div class="settings-signin" id="settings-signin">
+        <span class="ss-state">${authed ? '✅ Signed in as admin' + (trusted ? ' — this box' : '') : '🔒 Not signed in — changes need the admin passcode'}</span>
+        <span class="ss-act">${authed && !trusted ? '<button class="seg-btn" onclick="signOut()">Sign out</button>'
+            : (!authed ? '<button class="seg-btn on" onclick="signIn()">Sign in</button>' : '')}</span>
+    </div>`;
     const shown = SETTINGS_SECTIONS.filter(s => _settingsExpert || !s.adv);
     html += '<div class="settings-grid">';
     for (const s of shown) {
@@ -3634,6 +3643,8 @@ const _SHELL_CSS = `<style>
 .seg{display:inline-flex;border:1px solid var(--border,#2a2d34);border-radius:9px;overflow:hidden}
 .seg-btn{padding:.4rem .9rem;background:transparent;color:var(--text,#e8eaed);border:0;cursor:pointer;font-size:.9rem}
 .seg-btn.on{background:var(--accent,#e0603a);color:#fff}
+.settings-signin{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:.6rem 0 1rem;padding:.7rem 1rem;border:1px solid var(--border,#2a2d34);border-radius:10px}
+.settings-signin .ss-act{margin-left:auto}
 .settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.7rem;margin:1rem 0}
 .settings-item{display:flex;gap:.75rem;align-items:center;padding:.9rem 1rem;border:1px solid var(--border,#2a2d34);border-radius:12px;background:var(--card-bg,var(--bg,#16181d));color:var(--text,#e8eaed);text-decoration:none}
 .settings-item:hover{border-color:var(--accent,#e0603a)}
@@ -5661,6 +5672,11 @@ async function startCommunityService(id, btn) {
             body: JSON.stringify({ id }),
         });
         const result = await resp.json();
+        if (isNeedsAuth(resp, result)) {
+            if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.o; }
+            signIn('Sign in to start a community service.');
+            return;
+        }
         if (result.error) {
             alert(result.error);
             if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.o; }
@@ -6046,6 +6062,52 @@ const _SETUP_CSS = `<style>
 @media(max-width:560px){.setup-card{padding:26px 20px}}
 </style>`;
 
+// ===================== Admin sign-in (Passworded/Accounts + admin actions) =====
+// The box's own screen/localhost is admin automatically; from the LAN you sign in
+// with the admin passcode to change settings or (in Passworded/Accounts mode) to use
+// the box. A signed cookie is set server-side; JS only knows authed true/false.
+let _authState = null; // {commissioned, adminSet, useMode, trusted, authed}
+function refreshAuthState() {
+    return fetch('/api/auth/status').then(r => r.ok ? r.json() : null)
+        .then(s => { if (s) _authState = s; return s; }).catch(() => null);
+}
+function signIn(afterMsg) {
+    if (document.getElementById('signin-overlay')) return;
+    const o = document.createElement('div');
+    o.id = 'signin-overlay';
+    o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:1000';
+    o.innerHTML = `<div style="width:100%;max-width:360px;background:var(--card-bg,var(--bg,#16181d));border:1px solid var(--border,#2a2d34);border-radius:14px;padding:26px">
+        <h3 style="margin:0 0 .3rem">Sign in</h3>
+        <p style="margin:0 0 1rem;color:var(--text-muted,#8a8f98);font-size:.9em">${afterMsg ? esc(afterMsg) : 'Enter the admin passcode to continue.'} On the box itself you don't need to.</p>
+        <input id="signin-pass" type="password" placeholder="admin passcode" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:.6rem .8rem;border:1px solid var(--border,#2a2d34);border-radius:8px;background:var(--bg,#0e0f12);color:var(--text,#e8eaed);font-size:1rem">
+        <div id="signin-msg" style="min-height:1.1rem;margin:.5rem 0;font-size:.86em;color:var(--danger,#e0553a)"></div>
+        <div style="display:flex;justify-content:flex-end;gap:.5rem">
+            <button class="dl-action-btn" style="background:transparent;color:var(--text,#e8eaed);border-color:var(--border,#2a2d34)" onclick="closeSignIn()">Cancel</button>
+            <button class="dl-action-btn" onclick="submitSignIn()">Sign in</button>
+        </div>
+    </div>`;
+    document.body.appendChild(o);
+    const inp = document.getElementById('signin-pass');
+    if (inp) { inp.focus(); inp.addEventListener('keydown', e => { if (e.key === 'Enter') submitSignIn(); }); }
+}
+function closeSignIn() { const o = document.getElementById('signin-overlay'); if (o) o.remove(); }
+async function submitSignIn() {
+    const pass = (document.getElementById('signin-pass') || {}).value || '';
+    const msg = document.getElementById('signin-msg');
+    try {
+        const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pass }) });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) { await refreshAuthState(); closeSignIn(); scheduleRender(); }
+        else if (msg) msg.textContent = d.error || ('Sign-in failed (HTTP ' + r.status + ')');
+    } catch (e) { if (msg) msg.textContent = (e && e.message) || 'Sign-in request failed'; }
+}
+async function signOut() {
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+    await refreshAuthState(); scheduleRender();
+}
+// Any gated action can call this on a 401 {needsAuth:true} to prompt + let the user retry.
+function isNeedsAuth(resp, data) { return resp && resp.status === 401 && data && data.needsAuth; }
+
 function renderProgressPanel() {
     let panel = document.getElementById('dl-panel');
     if (!panel) {
@@ -6089,6 +6151,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     // loading the rest of the app. (No-op on a static preview or once commissioned.)
     const ready = await checkSetup();
     if (!ready) return;
+    refreshAuthState();   // learn admin/authed state so Settings can offer sign-in
 
     // Show loading indicator
     const diskEl = document.getElementById('nav-disk');

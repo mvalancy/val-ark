@@ -36,6 +36,20 @@ later). See [README](README.md).
 - **Deployment:** ship both a **Docker appliance image** *and* the bare‑metal bootstrap; both
   offline, both commissioned from the same wizard.
 
+## 2026‑07 — Access-mode enforcement + admin sessions (roadmap Phase 2 depth)
+- The access layer now **enforces** (was "no gating yet"): stateless HMAC **admin sessions**
+  (`auth.issueSession/verifySession`, `varksid` HttpOnly cookie), `POST /api/auth/login｜logout`
+  with a per-IP login cooldown, `isAdmin(req)` = localhost OR valid session, and a POST **access
+  gate** — admin-only actions always need admin; use-actions need admin in Passworded/Accounts
+  mode; Open stays open. UI: a sign-in modal + Settings sign-in row; 401 `{needsAuth}` prompts it.
+- **`adduser` upgraded** from localhost-only to admin (localhost OR logged-in) — a remote admin can
+  now manage service accounts.
+- **Scoped:** the read-wall (gating GET views in Passworded/Accounts) and full Accounts-mode named
+  users are follow-ups; this ships the write/use + admin gate (the sensitive actions).
+- Security surface → ran a 3-lens adversarial-review Workflow before merge. Tests:
+  `tests/test-access.sh` (12, real-server gate via `VALARK_TEST_FORCE_REMOTE`) + auth session unit
+  tests + server-api login/logout + a web-ui sign-in spec. Full suite 8 validators + Playwright 321/1.
+
 ## 2026‑07 — Consumer shell: Home status + Settings + Activity (roadmap Phase 3, issue #12)
 - Delivered the shell's essence **additively** (no route regressions): a health‑app **Home
   status summary** (● All good / Working on it / Needs you + one sentence + big area/utility

@@ -62,7 +62,7 @@ function writeStore(obj, dir) {
 }
 
 function setPassword(pw, username, dir) {
-  if (!pw || String(pw).length < 4) throw new Error('passcode must be at least 4 characters');
+  if (!pw || String(pw).length < 8) throw new Error('passcode must be at least 8 characters');
   const s = readStore(dir);
   s.admin = {
     username: username || (s.admin && s.admin.username) || 'admin',
@@ -107,9 +107,50 @@ function resetTier1(dir) {
   return true;
 }
 
+// ---- Admin sessions (stateless, HMAC-signed) ---------------------------------
+// A LAN admin proves who they are once (POST /api/auth/login with the passcode) and
+// gets a signed session cookie. Tokens are self-contained (`payload.hmac`); the
+// server keeps no session table. "Sign out everywhere" = rotate the secret.
+function sessionSecret(dir) {
+  const s = readStore(dir);
+  if (!s.sessionSecret) { s.sessionSecret = crypto.randomBytes(32).toString('hex'); writeStore(s, dir); }
+  return s.sessionSecret;
+}
+function issueSession(dir, ttlMs, boundIp) {
+  const data = { v: 1, exp: Date.now() + (ttlMs || 12 * 3600 * 1000) };
+  if (boundIp) data.ip = String(boundIp);              // bind to the login IP (anti-replay)
+  const payload = Buffer.from(JSON.stringify(data)).toString('base64url');
+  const mac = crypto.createHmac('sha256', sessionSecret(dir)).update(payload).digest('hex');
+  return payload + '.' + mac;
+}
+// boundIp: the requesting client's IP. If the token was IP-bound at issue, it must
+// match — so a cookie captured on the wire can't be replayed from another host.
+function verifySession(token, dir, boundIp) {
+  if (typeof token !== 'string') return false;
+  const dot = token.indexOf('.');
+  if (dot < 1) return false;
+  const payload = token.slice(0, dot), mac = token.slice(dot + 1);
+  try {
+    const expected = crypto.createHmac('sha256', sessionSecret(dir)).update(payload).digest('hex');
+    const a = Buffer.from(mac), b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!(data && data.exp && data.exp > Date.now())) return false;
+    if (data.ip && data.ip !== String(boundIp || '')) return false;   // IP-bound mismatch
+    return true;
+  } catch (_) { return false; }
+}
+function rotateSessionSecret(dir) {
+  const s = readStore(dir);
+  s.sessionSecret = crypto.randomBytes(32).toString('hex');
+  writeStore(s, dir);
+  return true;
+}
+
 module.exports = {
   resolveStateDir, hashPassword, verifyHash, readStore, writeStore,
   setPassword, verify, status, listAdmins, setUseMode, resetTier1, storePath,
+  issueSession, verifySession, rotateSessionSecret,
 };
 
 // ---- CLI mode (invoked by scripts/valark) ------------------------------------

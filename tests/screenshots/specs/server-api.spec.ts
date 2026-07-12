@@ -96,10 +96,24 @@ test.describe('Val Ark API Server', () => {
     expect(typeof d.accounts).toBe('number');
     // tests run from localhost → the box treats us as the trusted admin console.
     expect(d.trusted).toBe(true);
-    // the passcode hash/salt must NEVER cross the API boundary.
+    expect(typeof d.authed).toBe('boolean');   // localhost ⇒ authed admin
+    // the passcode hash/salt/session-secret must NEVER cross the API boundary.
     const body = JSON.stringify(d);
     expect(body).not.toContain('hash');
     expect(body).not.toContain('salt');
+    expect(body.toLowerCase()).not.toContain('secret');
+  });
+
+  test('POST /api/auth/login + /logout respond with structured JSON, never a 5xx', async ({ request }) => {
+    // The test server may or may not have an admin set; either way the endpoints
+    // must answer cleanly (400 no-admin / 401 wrong / 200 ok) and never crash.
+    const login = await request.post(`${BASE_URL}/api/auth/login`, { data: { password: 'definitely-not-the-passcode' } });
+    expect(login.status()).toBeLessThan(500);
+    const ld = await login.json();
+    expect(ld.ok === true || typeof ld.error === 'string').toBeTruthy();
+    const logout = await request.post(`${BASE_URL}/api/auth/logout`);
+    expect(logout.ok()).toBeTruthy();
+    expect((await logout.json()).ok).toBe(true);
   });
 
   test('GET /api/status/downloads returns empty when idle', async ({ request }) => {

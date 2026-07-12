@@ -5509,6 +5509,40 @@ function pollServiceUp(id, tries) {
         if (tries > 0) setTimeout(() => pollServiceUp(id, tries - 1), 2000);
     }).catch(() => { if (tries > 0) setTimeout(() => pollServiceUp(id, tries - 1), 2000); });
 }
+// Only the Ark host itself (localhost) may mint chat/mail logins — mirrors the
+// server's localhost gate on /api/service/adduser. LAN visitors self-register on
+// the forum or ask the host, so we don't even show them the create form.
+function isAdminHost() {
+    return ['localhost', '127.0.0.1', '::1', ''].includes(location.hostname);
+}
+async function createServiceAccount(btn) {
+    const id = document.getElementById('signup-svc').value;
+    const username = (document.getElementById('signup-user').value || '').trim();
+    const password = document.getElementById('signup-pass').value || '';
+    const out = document.getElementById('signup-result');
+    const fail = (msg) => { out.style.color = 'var(--danger,#c0392b)'; out.textContent = '✗ ' + msg; };
+    if (!username) { fail('Enter a username.'); return; }
+    const orig = btn.textContent; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Creating…';
+    try {
+        const r = await fetch('/api/service/adduser', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(password ? { id, username, password } : { id, username }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) {
+            out.style.color = 'var(--success,#2e7d32)';
+            out.textContent = `✓ ${d.message || (id + ' account created')} — sign in at /app/${id}/`;
+            document.getElementById('signup-user').value = '';
+            document.getElementById('signup-pass').value = '';
+        } else {
+            fail(d.error || ('HTTP ' + r.status));
+        }
+    } catch (e) {
+        fail((e && e.message) || 'request failed');
+    } finally {
+        btn.disabled = false; btn.textContent = orig;
+    }
+}
 function refreshServices() {
     fetch('/api/status/services').then(r => r.ok ? r.json() : null)
         .then(s => { if (s && Object.keys(s).length) { _servicesStatus = s; scheduleRender(); } })
@@ -5615,16 +5649,35 @@ function renderCommunity() {
     }
     html += '</div>';
 
-    // Accounts & access — each service has a different registration model; a user
-    // must be able to learn how to get in without leaving the UI.
-    html += `<div class="detail-section" style="margin-top:2rem"><h3>Accounts &amp; how to get in</h3>
+    // Accounts & sign-up — each service has a different model (self-register vs
+    // host-provisioned vs shared). Show the right path for each, and — when you're on
+    // the Ark host itself (localhost) — an inline form to mint chat/mail logins.
+    const admin = isAdminHost();
+    const forumReg = (svc.forum && svc.forum.running) ? '/app/forum/register' : null;
+    const adminOr = admin ? 'Use the form below, or on the box:' : 'Ask your host, or on the box:';
+    html += `<div class="detail-section" style="margin-top:2rem"><h3>Accounts &amp; sign-up</h3>
         <table class="detail-table">
-            <tr><td><strong>Message Boards</strong> (forum)</td><td>Self-service — open the forum and click <strong>Register</strong> to make an account.</td></tr>
-            <tr><td><strong>Chat</strong> (IRC)</td><td>Login required (private, LAN-only). The host creates your account, then you log in at Chat:<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/services/chat.sh adduser &lt;name&gt;</div></td></tr>
-            <tr><td><strong>Mail</strong></td><td>The host creates mailboxes (no self-signup — keeps mail on the LAN):<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/services/mail.sh creds create you@valark.lan &amp;&amp; scripts/services/mail.sh acct create you@valark.lan</div>Then sign in to webmail, or point any mail app at this host (IMAP + submission).</td></tr>
-            <tr><td><strong>Files &amp; Pastebin</strong></td><td>Shared login. The host shares the generated credentials from <code>&lt;data&gt;/credentials.txt</code> on the Ark.</td></tr>
-        </table>
-        <p style="margin-top:10px;color:var(--text-muted);font-size:0.88em">"The host" = whoever runs this Ark. Ask them (or run these on the box) to get access — everything stays on your LAN.</p></div>`;
+            <tr><td><strong>Message Boards</strong> (forum)</td><td>Self-service — ${forumReg ? `<a href="${forumReg}">create your account &rarr;</a>` : 'open the forum and click <strong>Register</strong>'} to sign up.</td></tr>
+            <tr><td><strong>Chat</strong></td><td>Host-provisioned login (IRC has no self-signup). ${adminOr}<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/services/chat.sh adduser &lt;name&gt;</div></td></tr>
+            <tr><td><strong>Mail</strong></td><td>Host-provisioned mailbox — one step creates the login + IMAP account. ${adminOr}<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/services/mail.sh adduser &lt;name&gt;</div>Then sign in at Mail, or point any mail app at this host (IMAP + submission).</td></tr>
+            <tr><td><strong>Files &amp; Pastebin</strong></td><td>One shared, access-gated instance — no per-user signup. The host shares the access code:<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/services/paste.sh creds</div></td></tr>
+        </table>`;
+    if (admin) {
+        const inp = 'padding:.45rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--card-bg,var(--bg));color:var(--text);font-size:.95em';
+        html += `<div class="signup-admin" style="margin-top:1rem;padding:1rem;border:1px solid var(--border);border-radius:10px">
+            <h4 style="margin:0 0 .6rem">Create a login <span style="font-weight:normal;color:var(--text-muted);font-size:.85em">— you're on the Ark host</span></h4>
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+                <select id="signup-svc" style="${inp}"><option value="chat">Chat</option><option value="mail">Mail</option></select>
+                <input id="signup-user" style="${inp}" placeholder="username" autocomplete="off" spellcheck="false">
+                <input id="signup-pass" style="${inp}" type="password" placeholder="password (optional)" autocomplete="new-password">
+                <button class="dl-action-btn" onclick="createServiceAccount(this)">Create account</button>
+            </div>
+            <div id="signup-result" style="margin-top:.6rem;font-size:.9em"></div>
+        </div>`;
+    } else {
+        html += `<p style="margin-top:10px;color:var(--text-muted);font-size:0.88em">"The host" = whoever runs this Ark. Ask them (or run these on the box) to get a chat/mail login — everything stays on your LAN. <span style="opacity:.8">(Open this page on the Ark itself to create logins right here.)</span></p>`;
+    }
+    html += `</div>`;
 
     html += `<div class="detail-section" style="margin-top:1.5rem"><h3>How the community layer works</h3>
         <p>Each service runs LAN-bound on Val Ark and appears framed inside this site — the top nav stays put as a permanent way back. They make zero internet calls: no relays, no federation, no accounts anywhere else. Turn on the ones you want with <code>VALARK_SERVICES</code> in <code>.env</code>; the self-healing loop keeps them running and restarts any that stop.</p></div>`;

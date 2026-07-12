@@ -36,6 +36,26 @@ later). See [README](README.md).
 - **Deployment:** ship both a **Docker appliance image** *and* the bare‑metal bootstrap; both
   offline, both commissioned from the same wizard.
 
+## 2026‑07 — First `dev → main` release (v1.1.0) + community sign‑ups (PR #2/#3)
+- **Adopted the branch model in practice:** PR #1 (foundational) landed on `dev`; the
+  community‑signups quick win (PR #2) landed on `dev`; then the first **`dev → main` release**
+  (PR #3) shipped **v1.1.0**. Release cleared the high bar: CI green + full local Playwright
+  (310/1) + services e2e (11/0) + **fresh‑VM matrix 27/0 across Ubuntu 22.04/24.04/26.04**.
+- **CI is a real gate now.** A fresh CI checkout has *no mirror*, so host‑population tests
+  (on‑disk binaries, non‑empty status maps) **skip‑when‑empty**; CI validates code + endpoint
+  shape + upstream URL health, while populated‑system e2e runs locally + in the VM matrix. One
+  real strict‑mode locator bug was fixed (`#install-btn-<id>` vs `:has-text("Mirror")`).
+- **Community account model = per‑service tech, not one UX** ([[val-ark-forum-proxy-burst-quirk]]):
+  `COMMUNITY_ACCOUNTS[id].signup` ∈ `host｜self｜shared`. chat/mail = host‑provisioned
+  (`<svc>.sh adduser`, one‑step for mail); forum = NodeBB self‑register; paste = shared gated
+  instance. `POST /api/service/adduser` is **localhost‑only** (minting a login is admin).
+- **Release merge = rebase (main requires linear history).** Rebase‑merge re‑parents dev's
+  commits onto `main`, so after a release `main` and `dev` share *content* but diverge by *SHA*
+  (`git diff origin/main origin/dev` is empty; commit counts differ). This is benign: GitHub's
+  rebase‑merge skips already‑applied patches, so the next release applies only new commits. Tag
+  `main`'s tip directly (`git tag -a vX.Y.Z`) — `scripts/release.sh` wants a clean tree, which the
+  untracked local `.memsearch/` trips.
+
 ## 2026‑07 — Feature branch: discover/request + self‑replication + tests (PR #1)
 - Shipped + deployed to the ARM64 NAS test node + tested (337 tests): Library relabel; Community hub; one‑click
   LAN/tailnet **catalog + request** with **pin + cap‑aware auto‑evict**; **offline

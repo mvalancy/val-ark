@@ -222,10 +222,18 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Health / self-heal (Phase 6)
 
-- **`health.json` was promised but never written.** `loop.sh`'s final log line advertised
-  `health: <state>/health.json` for months, but no code wrote it (only `verify.json` existed,
-  and only as aggregate counts). If a doc/log references a state file, grep for the *writer*
-  before you build a reader on top of it. `write_health()` (step 8b) now emits it every cycle.
+- **The self-heal snapshot is `selfheal.json`, NOT `health.json` — the latter was already taken.**
+  Phase 6a's `write_health()` first wrote `state/health.json`, but `librarian.sh maintain` has
+  written its OWN `state/health.json` (disk/library stats: `data_root, avail_bytes, managed_items`)
+  for ages. Same filename, incompatible schemas → a standalone `librarian maintain` clobbered the
+  Health page's data (only a real box running both surfaced it; the isolated tests seeded the file
+  directly). Renamed the loop's report to `selfheal.json` (writer `loop.sh` step 8b, reader
+  `server.js getHealthDetail`); librarian keeps `health.json` (vestigial — nothing reads its fields).
+  **Lesson:** before naming a new state file, grep the repo for that filename — a sibling script may
+  already own it.
+- **`verify.sh` had only aggregate counts before Phase 6** — `write_health()`/`write_report()` now
+  emit the per-check + repair detail the Health page needs. If a doc/log references a state file,
+  grep for the *writer* before building a reader on top of it.
 - **Emitting JSON from bash — escape, and only trust program-controlled strings.** `verify.sh`
   `_json_str` / `loop.sh` `_hj_str` escape `\` + `"` and strip tab/newline/CR. That's safe
   *because* every interpolated value is our own (check labels, repair sentences, `date -u`,

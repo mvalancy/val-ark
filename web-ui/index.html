@@ -3701,7 +3701,7 @@ function _activityLive() { if (getRoute() === '/activity') scheduleRender(); }
 // each yellow/red naming a likely cause (drive / this box / internet / config) and,
 // where the box can act, a one-click repair. Composes live status (disk/services/
 // kiwix) with the self-heal loop's reports via /api/status/health (_healthData):
-//   heal    = health.json snapshot (space, verify tallies, link counts, this-cycle repairs)
+//   heal    = selfheal.json snapshot (space, verify tallies, link counts, this-cycle repairs)
 //   verify  = verify.json functional checks (per-component pass/fail)
 //   events  = heal-events.jsonl feed (genuine repairs, newest first)
 let _healthData = null, _healthTimer = null, _healthPoll = null, _metricsData = null;

@@ -95,7 +95,7 @@ later). See [README](README.md).
   [errors-selfheal.md](../design/errors-selfheal.md) to the letter.
 - **Data flows from reports the loop already should have produced.** `verify.sh` now serialises
   each functional check into `verify.json` as `checks[]` (`{status, comp, label}`); `loop.sh`
-  now actually **writes `health.json`** (a long-standing log line promised a file nothing wrote)
+  now actually **writes `selfheal.json`** (a long-standing log line promised a file nothing wrote)
   + an append-only, capped **`heal-events.jsonl`** feed of genuine repairs. `GET
   /api/status/health` (read-gated) composes them; the **UI computes the component list
   client-side** (`computeComponents()`) from those + the live disk/services/kiwix status the

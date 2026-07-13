@@ -21,8 +21,9 @@ test.describe('Val Ark Health & Repairs', () => {
     expect(await badges.count()).toBe(await cards.count());
     // The global one-click self-heal control is present.
     await expect(page.locator('.hp-fix-all')).toBeVisible();
-    // The healed-events section renders (feed or the friendly empty state).
-    await expect(page.locator('.hp-h2')).toContainText('Recent repairs');
+    // The healed-events section renders (feed or the friendly empty state). There are now
+    // multiple .hp-h2 sections (Safety, Recent repairs) — assert this one specifically.
+    await expect(page.locator('.hp-h2', { hasText: 'Recent repairs' })).toBeVisible();
   });
 
   test('one-click self-heal posts and reflects a running state', async ({ page }) => {
@@ -38,6 +39,23 @@ test.describe('Val Ark Health & Repairs', () => {
     // The button reflects the in-flight repair.
     await expect(page.locator('.hp-fix-all')).toBeDisabled();
   });
+
+  test('renders the Safety card (content moderation) with a toggle + review queue', async ({ page }) => {
+    await page.goto(BASE_URL + '/#/health', { waitUntil: 'load' });
+    // The Safety card lands once /api/status/moderation answers.
+    await page.waitForSelector('.hp-safety', { timeout: 10000 });
+    // Section heading + the effective-state chip (Screening / Holding / Off).
+    await expect(page.locator('.hp-h2', { hasText: 'Safety' })).toHaveCount(1);
+    await expect(page.locator('.hp-safety-eff')).toBeVisible();
+    // The on/off switch is present.
+    await expect(page.locator('.hp-safety .hp-switch input[type="checkbox"]')).toHaveCount(1);
+    // Playwright connects over localhost = admin, so the admin-only review queue renders
+    // (empty state on a box with nothing held). Non-admins would see neither.
+    await expect(page.locator('.hp-queue-h')).toContainText('Held for review');
+  });
+  // NOTE: no toggle/POST test here — the shared :3001 webServer writes to the box's real
+  // state dir, so a settings POST would persist a real change. The mutating path (toggle,
+  // sensitivity, review actions) is covered in isolation by tests/test-moderation-api.sh.
 
   test('Settings surfaces a link to the Health page', async ({ page }) => {
     await page.goto(BASE_URL + '/#/settings', { waitUntil: 'load' });

@@ -3705,6 +3705,19 @@ function _activityLive() { if (getRoute() === '/activity') scheduleRender(); }
 //   verify  = verify.json functional checks (per-component pass/fail)
 //   events  = heal-events.jsonl feed (genuine repairs, newest first)
 let _healthData = null, _healthTimer = null, _healthPoll = null, _metricsData = null, _metricsHistory = null;
+// Content-moderation Safety card: status is read-gated (everyone with access sees it);
+// the held-content queue is admin-only (null until an admin loads it → the queue section
+// just doesn't render for non-admins).
+let _modStatus = null, _modQueue = null;
+function loadModeration() {
+    fetch('/api/status/moderation').then(r => r.ok ? r.json() : null).then(d => {
+        if (d) { _modStatus = d; if (getRoute() === '/health') scheduleRender(); }
+    }).catch(() => {});
+    fetch('/api/moderation/queue').then(r => r.ok ? r.json() : null).then(d => {
+        _modQueue = (d && Array.isArray(d.pending)) ? d : null;   // 401 (non-admin) → stays null
+        if (getRoute() === '/health') scheduleRender();
+    }).catch(() => { _modQueue = null; });
+}
 
 function loadHealth() {
     fetch('/api/status/health').then(r => r.ok ? r.json() : null).then(d => {
@@ -3726,8 +3739,8 @@ function loadHistory() {
         if (getRoute() === '/health') scheduleRender();
     }).catch(() => { _metricsHistory = null; });
 }
-function startHealthLive() { stopHealthLive(); loadHealth(); loadMetrics(); loadHistory(); _healthTimer = setInterval(() => { loadHealth(); loadMetrics(); loadHistory(); }, 15000); }
-function stopHealthLive() { if (_healthTimer) { clearInterval(_healthTimer); _healthTimer = null; } if (_healthPoll) { clearTimeout(_healthPoll); _healthPoll = null; } _metricsData = null; _metricsHistory = null; }
+function startHealthLive() { stopHealthLive(); loadHealth(); loadMetrics(); loadHistory(); loadModeration(); _healthTimer = setInterval(() => { loadHealth(); loadMetrics(); loadHistory(); loadModeration(); }, 15000); }
+function stopHealthLive() { if (_healthTimer) { clearInterval(_healthTimer); _healthTimer = null; } if (_healthPoll) { clearTimeout(_healthPoll); _healthPoll = null; } _metricsData = null; _metricsHistory = null; _modStatus = null; _modQueue = null; }
 
 function _ago(iso) {
     if (!iso) return '';
@@ -3943,6 +3956,8 @@ function renderHealth() {
     }
     html += '</div>';
 
+    html += renderSafety();
+
     html += '<h2 class="hp-h2">Recent repairs</h2>';
     const events = _healthData.events || [];
     if (events.length) {
@@ -3955,6 +3970,93 @@ function renderHealth() {
     html += `<p class="hp-note">The box checks and repairs itself every cycle and after each reboot. Raw logs live under <code>&lt;data&gt;/val-ark/state/logs</code>.</p>`;
     html += '</div>';
     return html;
+}
+
+// The Safety card: on-device content moderation status + the held-content review queue.
+// Status is read-gated (shown to anyone with access); the queue + review actions are
+// admin-only (the queue is null for non-admins, so that block simply doesn't render).
+function renderSafety() {
+    const s = _modStatus;
+    if (!s) return '';   // not loaded yet — stay quiet rather than flash an empty card
+    const on = !!s.enabled;
+    const eff = s.effective || (on ? 'screening' : 'off');
+    const dot = !on ? 'idle' : (s.runnerReady ? 'ok' : 'warn');
+    const effLabel = { 'off': 'Off', 'screening': 'Screening', 'holding (no model installed)': 'Holding — no model yet' }[eff] || eff;
+    let html = `<h2 class="hp-h2">Safety</h2><div class="hp-safety">`;
+    html += `<div class="hp-safety-h">
+        <div class="hp-safety-l"><span class="hs-dot hs-${dot}" aria-hidden="true"></span>
+            <div><div class="hp-safety-t">Content moderation <span class="hp-safety-eff hp-eff-${dot}">${esc(effLabel)}</span></div>
+            <div class="hp-safety-d">${on
+                ? (s.runnerReady
+                    ? 'New community uploads are screened on the box with its own AI, offline. Anything flagged is held here for you to review.'
+                    : 'Screening is on, but no classifier model is installed yet — flagged-until-proven content is <b>held</b> (never auto-published) until a model finishes downloading.')
+                : 'Off — community uploads are not screened. Turn it on to catch explicit content automatically, offline.'}</div></div></div>
+        <label class="hp-switch" title="Turn on-device screening on or off">
+            <input type="checkbox" ${on ? 'checked' : ''} onchange="toggleModeration(this)"><span class="hp-switch-s"></span></label>
+    </div>`;
+    if (on) {
+        const sens = s.sensitivity || 'balanced';
+        html += `<div class="hp-safety-row"><span class="hp-safety-rl">Sensitivity</span>
+            <div class="hp-seg" role="group" aria-label="Screening sensitivity">
+            ${['lenient', 'balanced', 'strict'].map(v =>
+                `<button class="hp-seg-b ${v === sens ? 'on' : ''}" onclick="setModerationSensitivity('${v}')">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}
+            </div></div>`;
+        const cls = s.classifiers || {};
+        html += `<div class="hp-safety-row"><span class="hp-safety-rl">Classifiers</span>
+            <span class="hp-safety-rv">${cls.text ? '✓ text' : '○ text'} &nbsp; ${cls.image ? '✓ image' : '○ image'}</span></div>`;
+    }
+    // Review queue — admin-only (null for non-admins).
+    if (_modQueue) {
+        const items = _modQueue.pending || [];
+        html += `<div class="hp-queue"><div class="hp-queue-h">Held for review <span class="hp-queue-n">${_modQueue.count || 0}</span></div>`;
+        if (!items.length) {
+            html += `<p class="hp-empty" style="margin:.4rem 0 0">Nothing held right now. Flagged uploads will appear here for you to keep or delete.</p>`;
+        } else {
+            html += '<ul class="hp-qlist">' + items.map(it => `<li class="hp-qi">
+                <div class="hp-qi-m"><span class="hp-qi-badge hp-qb-${esc(it.decision)}">${esc(it.decision)}</span>
+                    <code class="hp-qi-p" title="${esc(it.path)}">${esc((it.path || '').split('/').pop() || it.id)}</code>
+                    <span class="hp-qi-r">${esc(it.reason || '')}</span></div>
+                <div class="hp-qi-a">
+                    <button class="hp-btn" onclick="reviewModItem('${esc(it.id)}','restore',this)" title="Approve — put it back where it was">Approve</button>
+                    <button class="hp-btn hp-btn-danger" onclick="reviewModItem('${esc(it.id)}','remove',this)" title="Delete the held file for good">Delete</button>
+                </div></li>`).join('') + '</ul>';
+        }
+        html += '</div>';
+    } else if (on) {
+        html += `<p class="hp-note" style="margin:.6rem 0 0">Sign in as an admin to review held content.</p>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+async function _modPost(url, body, btn) {
+    if (btn) { btn.dataset.o = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
+    try {
+        const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const d = await resp.json().catch(() => ({}));
+        if (isNeedsAuth(resp, d)) { if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.o; } signIn('Sign in to manage content safety on this network.'); return null; }
+        if (d.error) { alert(d.error); if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.o; } return null; }
+        return d;
+    } catch (e) {
+        alert('Could not apply that change: ' + e.message);
+        if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.o; }
+        return null;
+    }
+}
+async function toggleModeration(el) {
+    const want = !!el.checked;
+    const d = await _modPost('/api/setup/moderation', { enabled: want });
+    if (!d) { el.checked = !want; return; }   // failed/auth → revert the switch
+    loadModeration();
+}
+async function setModerationSensitivity(v) {
+    const d = await _modPost('/api/setup/moderation', { sensitivity: v });
+    if (d) loadModeration();
+}
+async function reviewModItem(id, action, btn) {
+    if (action === 'remove' && !confirm('Delete this held file permanently?')) return;
+    const d = await _modPost('/api/moderation/review', { id, action }, btn);
+    if (d) loadModeration();
 }
 
 async function runSelfHeal(btn) {
@@ -4019,6 +4121,39 @@ const _HEALTH_CSS = `<style>
 .hp-tile-l{color:var(--text-muted,#aab);font-size:.78rem;margin-top:.15rem;text-transform:uppercase;letter-spacing:.03em}
 .hp-tile-s{color:var(--text-muted,#8a8f98);font-size:.76rem;margin-top:.2rem;font-variant-numeric:tabular-nums}
 .hp-spark{display:block;width:100%;height:22px;margin-top:.35rem;color:var(--accent,#e0603a);opacity:.85;overflow:visible}
+/* Safety card (content moderation) */
+.hp-safety{border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--card-bg,#16181d);padding:1rem 1.2rem;margin:0 0 1.2rem}
+.hp-safety-h{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.hp-safety-l{display:flex;align-items:flex-start;gap:.7rem;flex:1;min-width:240px}
+.hp-safety-t{font-weight:700;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.hp-safety-eff{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:.1rem .45rem;border-radius:999px;background:rgba(127,127,127,.15)}
+.hp-eff-ok{color:#2fbf71;background:rgba(47,191,113,.14)}.hp-eff-warn{color:#e6a817;background:rgba(230,168,23,.14)}.hp-eff-idle{color:var(--text-muted,#8a8f98)}
+.hp-safety-d{color:var(--text-muted,#aab);font-size:.85rem;margin-top:.25rem;max-width:60ch}
+.hp-switch{position:relative;display:inline-block;width:44px;height:24px;flex:0 0 auto}
+.hp-switch input{opacity:0;width:0;height:0}
+.hp-switch-s{position:absolute;inset:0;cursor:pointer;background:rgba(127,127,127,.35);border-radius:999px;transition:.2s}
+.hp-switch-s::before{content:"";position:absolute;height:18px;width:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+.hp-switch input:checked+.hp-switch-s{background:#2fbf71}
+.hp-switch input:checked+.hp-switch-s::before{transform:translateX(20px)}
+.hp-switch input:focus-visible+.hp-switch-s{outline:2px solid var(--accent,#e0603a);outline-offset:2px}
+.hp-safety-row{display:flex;align-items:center;gap:.8rem;margin-top:.8rem;flex-wrap:wrap}
+.hp-safety-rl{color:var(--text-muted,#aab);font-size:.82rem;min-width:90px}
+.hp-safety-rv{font-variant-numeric:tabular-nums;font-size:.85rem}
+.hp-seg{display:inline-flex;border:1px solid var(--border,#2a2d34);border-radius:10px;overflow:hidden}
+.hp-seg-b{background:transparent;border:0;color:var(--text,#e7e9ee);padding:.35rem .7rem;font-size:.82rem;cursor:pointer}
+.hp-seg-b.on{background:var(--accent,#e0603a);color:#fff;font-weight:700}
+.hp-queue{margin-top:1rem;border-top:1px solid var(--border,#23262d);padding-top:.8rem}
+.hp-queue-h{font-weight:700;font-size:.9rem;display:flex;align-items:center;gap:.5rem}
+.hp-queue-n{font-size:.74rem;background:rgba(224,85,58,.16);color:#e0553a;border-radius:999px;padding:.05rem .5rem;font-variant-numeric:tabular-nums}
+.hp-qlist{list-style:none;margin:.6rem 0 0;padding:0;display:flex;flex-direction:column;gap:.5rem}
+.hp-qi{display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap;padding:.5rem .6rem;border:1px solid var(--border,#23262d);border-radius:10px;background:rgba(127,127,127,.04)}
+.hp-qi-m{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;min-width:0}
+.hp-qi-badge{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:.08rem .4rem;border-radius:6px}
+.hp-qb-block{background:rgba(224,85,58,.18);color:#e0553a}.hp-qb-hold{background:rgba(230,168,23,.18);color:#e6a817}
+.hp-qi-p{font-size:.82rem;max-width:32ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hp-qi-r{color:var(--text-muted,#8a8f98);font-size:.78rem}
+.hp-qi-a{display:flex;gap:.4rem;flex:0 0 auto}
+.hp-btn-danger{border-color:rgba(224,85,58,.4);color:#e0553a}
 </style>`;
 
 // Change the download focus (Settings → Downloads & Priorities) → curation weights.

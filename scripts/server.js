@@ -854,7 +854,7 @@ function sessionCookie(token, maxAgeSec, secure) {
 // POSTs that CHANGE the box's config/accounts — always admin (localhost or a
 // logged-in admin), regardless of Use Mode. "Use" actions (downloads/requests/
 // service starts) are gated per Use Mode instead (Open = anyone on the LAN).
-const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser', '/api/setup/profile', '/api/maintenance/repair', '/api/setup/moderation']);
+const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser', '/api/setup/profile', '/api/maintenance/repair', '/api/setup/moderation', '/api/moderation/review']);
 const AUTH_EXEMPT_POSTS = new Set(['/api/auth/login', '/api/auth/logout', '/api/auth/recover', '/api/setup/commission']);
 
 // Peer IP, normalized (node reports LAN/tailnet IPv4 peers as IPv4-mapped IPv6).
@@ -995,6 +995,12 @@ function handleAPI(req, res, urlPath) {
                 // Safety card: is on-device screening enabled, and is a classifier actually
                 // installed (else it holds everything). Read-gated by the /api/status/ prefix.
                 return sendJSON(res, req, getModerationStatus());
+            case '/api/moderation/queue':
+                // The held-content review feed for the admin Safety card. Reveals flagged
+                // content details, so it's ADMIN-ONLY (localhost/console or a signed session)
+                // regardless of Use Mode — not merely read-gated.
+                if (!isAdmin(req)) return sendJSON(res, req, { error: 'Admin only.', needsAuth: true }, 401);
+                return sendJSON(res, req, getModerationQueue());
             case '/api/auth/status':
                 // Read-only: is an admin set, which Use Mode, is this caller the
                 // trusted box/localhost (`trusted`) and are they an authenticated
@@ -1214,6 +1220,12 @@ function handleAPI(req, res, urlPath) {
                     // Change the download profile (Downloads & Priorities). Admin-only
                     // (ADMIN_ONLY_POSTS); drives the librarian's per-bucket curation weights.
                     result = commission.setProfile(STATE_DIR, body.profile);
+                    break;
+                case '/api/moderation/review':
+                    // Act on a held item (remove / restore / dismiss). Admin-only
+                    // (ADMIN_ONLY_POSTS). The id is a bare quarantine basename — confined to
+                    // the quarantine dir; restore never overwrites and only into an existing dir.
+                    result = reviewModerationItem(body);
                     break;
                 case '/api/setup/moderation':
                     // Toggle/tune on-device content screening (Safety card). Admin-only
@@ -1918,6 +1930,75 @@ function handleModerationCheck(req, res) {
         if (buf.length === 0) return sendJSON(res, req, { decision: 'hold', reason: 'empty content' }, 400);
         _runModeration(buf, kind, sens, (out) => sendJSON(res, req, out, 200));
     });
+}
+
+// ---- Review queue (Safety card) ----------------------------------------------------
+// The sweep appends each quarantined item to queue.jsonl; a review action (remove /
+// restore / dismiss) is recorded in reviewed.jsonl so the queue log stays append-only.
+// An item's ID is its quarantine BASENAME (unique, contains no separators) — it both
+// correlates the two logs AND confines the file operation to the quarantine dir.
+function _modQueueFiles() {
+    const base = path.join(STATE_DIR, 'moderation');
+    return { q: path.join(base, 'queue.jsonl'), r: path.join(base, 'reviewed.jsonl'), qdir: path.join(base, 'quarantine') };
+}
+function _readJsonl(file) {
+    const out = [];
+    let raw; try { raw = fs.readFileSync(file, 'utf8'); } catch (_) { return out; }
+    for (const line of raw.split('\n')) { if (!line.trim()) continue; try { out.push(JSON.parse(line)); } catch (_) {} }
+    return out;
+}
+function getModerationQueue() {
+    const { q, r } = _modQueueFiles();
+    const resolved = new Set(_readJsonl(r).map((o) => o.id).filter(Boolean));
+    const pending = [];
+    for (const o of _readJsonl(q)) {
+        const id = o.quarantine ? path.basename(String(o.quarantine)) : null;
+        if (!id || resolved.has(id)) continue;
+        pending.push({ id, path: o.path || '', decision: o.decision || 'hold', reason: o.reason || '', ts: o.ts || 0 });
+    }
+    pending.reverse();   // newest first
+    return { pending: pending.slice(0, 200), count: pending.length };
+}
+function reviewModerationItem(body) {
+    body = body || {};
+    const id = String(body.id || '');
+    const action = String(body.action || '');
+    // ID must be a bare basename — no separators / traversal. This is what confines the
+    // file op to the quarantine dir (the sweep only ever wrote basenames there).
+    if (!id || id !== path.basename(id) || id === '.' || id === '..' || /[/\\]/.test(id)) return { error: 'Invalid item id.' };
+    if (!['remove', 'restore', 'dismiss'].includes(action)) return { error: 'Invalid action.' };
+    const { r, qdir } = _modQueueFiles();
+    // Only act on an id that is actually a pending queue item (never an arbitrary name).
+    const item = getModerationQueue().pending.find((p) => p.id === id);
+    if (!item) return { error: 'Item not found in the review queue.' };
+    const qpath = path.join(qdir, id);
+    // Realpath-confine: the resolved file must sit directly inside the quarantine dir.
+    try {
+        const realQ = fs.realpathSync(qdir);
+        const realF = fs.realpathSync(qpath);
+        if (path.dirname(realF) !== realQ) return { error: 'Quarantine path error.' };
+    } catch (_) { /* file may already be gone — the ops below are best-effort */ }
+
+    if (action === 'remove') {
+        try { fs.unlinkSync(qpath); } catch (_) {}
+    } else if (action === 'restore') {
+        // Admin override (false positive): put the file back at its original store path.
+        // Restore only into an EXISTING parent, never overwriting a file there (EXCL);
+        // copy+unlink so it works even across filesystems (quarantine ≠ store mount).
+        const dest = String(item.path || '');
+        if (!dest || !path.isAbsolute(dest)) return { error: 'Original path unknown — cannot restore.' };
+        try {
+            if (!fs.existsSync(path.dirname(dest))) return { error: 'Original location no longer exists.' };
+            fs.copyFileSync(qpath, dest, fs.constants.COPYFILE_EXCL);   // throws if dest exists
+            fs.unlinkSync(qpath);
+        } catch (e) { return { error: 'Could not restore: ' + (e.code === 'EEXIST' ? 'a file already exists there.' : e.message) }; }
+    }
+    // dismiss: leave the quarantined file in place, just mark the item reviewed.
+    try {
+        fs.mkdirSync(path.dirname(r), { recursive: true });
+        fs.appendFileSync(r, JSON.stringify({ id, action, ts: Math.floor(Date.now() / 1000) }) + '\n');
+    } catch (_) {}
+    return { ok: true, id, action };
 }
 
 // Best-effort: when moderation is switched ON and no classifier is installed, pin+fetch

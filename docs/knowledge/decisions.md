@@ -49,6 +49,19 @@ later). See [README](README.md).
   classifier (`test-mod-sweep.sh`, 16/0), and fits the loop's "reconcile reality each cycle"
   model. It's reactive (content is briefly visible before the next cycle) — an acceptable first
   cut; a NodeBB/Redis screener and a pre-store paste intercept are documented follow-ups.
+- **CORRECTION (real-box investigation, 0.1.9 deploy):** the sweep must **NOT** target the
+  community services' internal stores at all — they are **DB-backed**. MicroBin keeps text pastes
+  in SQLite (`microbin.db` under `STATE_DIR/services/paste`); maddy keeps mail in an imapsql/bbolt
+  store (`STATE_DIR/services/mail/maddy/`). The files on disk are referenced *from* a database, so
+  the sweep's move-to-quarantine would **corrupt the store**, not screen it (and pastes/mail bodies
+  often aren't standalone files). The original default paths (`services/paste/data`,
+  `services/mail/messages`) were also just plain **wrong** (off by the real subdir), so the sweep
+  was a harmless no-op on the real box — but "correcting" them would have caused corruption. So the
+  sweep now screens **only** an explicit plain-file uploads area (`VAL_ARK_UPLOADS` /
+  `VALARK_MODERATION_DIRS`), never a service store. Real per-service enforcement (paste/mail/forum)
+  requires a **pre-store intercept or a service-native hook** — a deliberate follow-up, not a path
+  tweak. This is the fail-closed instinct applied to integrity: don't let the safety mechanism
+  itself break the thing it guards.
 
 ## 2026‑07 — Community chat is open (no-login) by default
 - **Context:** on the real box a visitor opening `/app/chat/` hit The Lounge's **private-mode login

@@ -341,6 +341,15 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   fd, not a re-resolved path. `remove` is safe (`unlinkSync` removes the entry itself — never follows the
   final symlink — and the id is a basename). Also: the item-exists check must scan the FULL pending set,
   not the 200-item display slice, or held items past the cap become un-actionable.
+- **Never point the quarantine sweep at a DB-backed store** (real-box investigation). The sweep
+  *moves* a flagged file to quarantine — fine for a plain uploads tree, **corrupting** for a store
+  whose files a database references. MicroBin (SQLite) and maddy (imapsql/bbolt) both are: their
+  on-disk files are DB-referenced (and text pastes / mail bodies often aren't standalone files at
+  all), so a move breaks the store. The sweep's default service paths were also just wrong, so it
+  no-op'd — but "fixing" them to the real paths would have started corrupting mail/paste. Sweep
+  **only** explicit plain-file dirs (`VAL_ARK_UPLOADS` / `VALARK_MODERATION_DIRS`); per-service
+  enforcement needs a pre-store intercept or a service-native hook, never a post-store move. The
+  fail-closed instinct applies to integrity too: don't let the safety mechanism break what it guards.
 
 ## Git / releases
 

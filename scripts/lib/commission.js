@@ -149,6 +149,38 @@ function state(dir, trusted) {
 
 const PROFILES = ['knowledge', 'ai', 'tools', 'balanced'];
 const USE_MODES = ['open', 'passworded', 'accounts'];
+const MOD_SENS = ['strict', 'balanced', 'lenient'];
+// Both actions MOVE a flagged file out of the store — they differ only in the review
+// label. There is deliberately no "leave it served while enabled" action (that would let
+// an admin defeat enforcement while the Safety card still reports screening as on).
+const MOD_ACTIONS = ['block', 'quarantine'];
+
+// On-device content moderation settings (Phase 7). FAIL-CLOSED: an absent OR corrupt
+// settings.json resolves to enabled=ON — readSettings() swallows JSON errors and returns
+// {}, so the default must be ON, never a silent off (same class as the Safe-Mode useMode
+// fix). Only an explicit `enabled:false` turns screening off.
+function getModeration(dir) {
+  const m = readSettings(dir).moderation;
+  const o = (m && typeof m === 'object') ? m : {};
+  return {
+    enabled: o.enabled === false ? false : true,           // default + fail-closed ON
+    sensitivity: MOD_SENS.includes(o.sensitivity) ? o.sensitivity : 'balanced',
+    surfaces: Array.isArray(o.surfaces) ? o.surfaces.filter(x => typeof x === 'string') : ['forum'],
+    action: MOD_ACTIONS.includes(o.action) ? o.action : 'block',
+  };
+}
+function setModeration(dir, opts) {
+  opts = opts || {};
+  const m = getModeration(dir);
+  if (typeof opts.enabled === 'boolean') m.enabled = opts.enabled;
+  if (MOD_SENS.includes(opts.sensitivity)) m.sensitivity = opts.sensitivity;
+  if (MOD_ACTIONS.includes(opts.action)) m.action = opts.action;
+  if (Array.isArray(opts.surfaces)) m.surfaces = opts.surfaces.filter(x => typeof x === 'string');
+  const s = readSettings(dir);
+  s.moderation = m;
+  writeSettings(s, dir);
+  return { ok: true, moderation: m };
+}
 
 // Complete first-boot setup. Fail-closed on the claim token unless the caller is the
 // trusted box/localhost. `ctx.trusted` comes from the server's isLocalhost(req).
@@ -204,7 +236,8 @@ function configHealth(dir) {
 }
 
 module.exports = { state, commission, isCommissioned, ensureClaim, readClaim, consumeClaim, readSettings, writeSettings, PROFILES,
-  ensureRecovery, readRecovery, regenerateRecovery, verifyRecovery, recoverAdmin, grandfather, configHealth, setProfile };
+  ensureRecovery, readRecovery, regenerateRecovery, verifyRecovery, recoverAdmin, grandfather, configHealth, setProfile,
+  getModeration, setModeration };
 
 // ---- CLI mode (invoked by scripts/valark) ------------------------------------
 if (require.main === module) {
@@ -214,6 +247,7 @@ if (require.main === module) {
     switch (cmd) {
       case 'claim':  emit({ claim: ensureClaim(), commissioned: isCommissioned() }); break;
       case 'status': emit(state(undefined, true)); break;
+      case 'moderation': emit(getModeration()); break;   // fail-closed settings for the loop sweep
       default: process.stderr.write('unknown commission command: ' + cmd + '\n'); process.exit(2);
     }
   } catch (e) { emit({ ok: false, error: e.message }); process.exit(1); }

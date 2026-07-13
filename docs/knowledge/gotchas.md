@@ -276,6 +276,72 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   throws. Don't shell out per request — reuse the 10s-cached `getDiskStatus()` (its `df` can hang
   on a stale NFS mount) and `fs.readFileSync('/proc/...')` for the rest.
 
+## Content moderation (Phase 7)
+
+- **A permissive WRAPPER can re-open a fail-closed CORE** (adversarial-review finding, **high**).
+  `moderation.sh` deliberately decides content type by **magic bytes**, never the client's hint —
+  but the first cut of `POST /api/moderation/check` accepted a `?kind=`/`?sensitivity=` query
+  param and passed them through. `?kind=text` on image bytes routed them to the **text** classifier
+  (which can't see the image) → image screening bypassed → allow; `?sensitivity=lenient` turned a
+  score-based *hold* into an *allow*, below the admin's policy floor. **Rule: the web layer must
+  never let a caller *weaken* a safety decision.** Type is always server-side magic bytes
+  (`kind='auto'`); sensitivity is always the admin-configured `cfg.sensitivity`. When wrapping any
+  fail-closed core, audit every caller-supplied field for "can this loosen the verdict?"
+- **`realpath`-confine against the intended BASE, not against the resolved dir itself** (adversarial
+  finding, medium). `realDir = realpathSync(scanDir); if (path.dirname(cand) !== realDir) hold` is a
+  **tautology** — `cand = join(realDir, …)` so it always equals `realDir`; the check never fires and
+  a symlinked `<state>/moderation/scan` (planted by a same-uid service or an NFS-mesh peer) silently
+  redirects the write outside quarantine. Confine against `join(realpathSync(STATE_DIR),
+  'moderation','scan')`, `lstat`-reject symlinked path components, and require the resolved dir to
+  **equal the expected path**. (`STATE_DIR` is legitimately a symlink into the data disk → realpath
+  it; the components under it must not be.)
+- **Screened bytes are content at rest — sweep them.** The `check` endpoint stages the body to a
+  0600 temp under `<state>/moderation/scan` and unlinks on the runner's return; a process killed
+  mid-check leaks it. `sweepModerationScan()` clears the dir on startup (`onFirstBind`), when nothing
+  is in-flight. Also: `req.destroy()` right after `sendJSON(413)` on an over-cap body can reset the
+  shared socket before the response flushes → destroy on the response's `finish` event instead.
+- **The check endpoint reads its OWN raw body, not `readBody`.** `readBody` caps at 64KB and
+  JSON-parses; here the body *is* the content (up to 25MiB, `VALARK_MODERATION_MAX_BYTES`). It's
+  intercepted **after** the full POST gate stack (`isLanOrTailnet`+`rateLimitOk`+`boxCommissioned`+
+  auth-per-Use-Mode) but **before** `readBody(req).then(...)` consumes the stream. Fail-closed
+  everywhere: over-cap→413 hold, empty→hold, unparseable/spawn-fail/timeout→hold; a *disabled*
+  engine returns `decision:'skip'` (explicitly **not** allow-by-policy — callers must not treat it
+  as approval). Readiness for the status card is probed **async + cached** (`moderation.sh ready`
+  runs `find` over the mirror — never `spawnSync` it on the hot path or it blocks the event loop).
+- **Never mark a file "screened" unless it's genuinely resolved** (adversarial-review finding,
+  **high**). The loop sweep (`mod-sweep.sh`) moves a flagged file to quarantine, then records it in
+  a dedupe marker so later sweeps skip it. The first cut wrote the marker **unconditionally** — but
+  `mv`'s failure was swallowed (`2>/dev/null`, no `set -e`), so when the loop user couldn't write
+  the store (service-owned dir → EACCES) or the copy hit ENOSPC, the flagged file stayed **served
+  AND** marked done → never retried, plus a false "quarantined" heal-event. Rule: only mark
+  screened on an `allow` **or** a move that actually **succeeded**; on failure leave it unrecorded
+  (retried next sweep) and raise a distinct hard-error (`rc 11` → `moderation-error` heal-event).
+- **An enabled screener must never leave a flagged file served.** An `action:'flag'` mode (copy to
+  quarantine, keep the original) was a third state — *enabled but non-enforcing* — while the Safety
+  card still said "screening." Dropped it: both remaining actions (`block`/`quarantine`) **move** the
+  file; only an explicit `enabled:false` is the sanctioned no-enforcement state.
+- **Dedupe markers: key on a HASH, not a raw `grep -F` of joined fields.** `grep -qF "path\tsize\tmtime"`
+  is an unanchored substring match — `mtime` matches as a right-unbounded prefix (200 hits 2001), and
+  a filename containing a tab/newline corrupts the marker → a file silently treated as already-screened
+  → **served**. Use `sha1(path\0size\0mtime)` and `grep -q "^<hash>"` (fixed-width hex, injection-proof).
+  Same reason `_json()` must escape `\n`/`\t`/`\r`, not just `\`/`"`, or an odd filename forges a
+  JSONL queue line. And `find` a symlinked store dir with **`-H`** (a `-P` default returns nothing for
+  a symlinked top dir → the whole store goes unscreened), while still not following symlinked entries.
+- **A write-back destination read from an in-`<state>` log is attacker-controlled** (adversarial-review
+  finding, **high**). The Safety card's review queue read `path` from `queue.jsonl` and a "restore"
+  action copied the quarantined file back there — with only `isAbsolute + parent-exists + COPYFILE_EXCL`
+  guards. But `queue.jsonl` lives in the same in-`<state>` tree the code elsewhere treats as
+  attacker-writable (same-uid service / NFS-mesh peer), so a poisoned entry + a planted quarantine file
+  turns an admin "Approve" click into an **arbitrary new-file write** (`/etc/cron.d/…` → RCE if root) —
+  a confused deputy. `COPYFILE_EXCL` only blocks *overwrite*; `existsSync(dirname)` only blocks *parent
+  fabrication*; neither **confines** the write to a store root. Plus a TOCTOU: `realpathSync(src)` then
+  `copyFileSync(src)` re-opens and follows a symlink swapped in after the check → exfiltrates any
+  readable file. **Decision: dropped restore** — review is remove/dismiss only. If ever re-added:
+  realpath the dest parent and require it under an allowlisted store root, and copy from an `O_NOFOLLOW`
+  fd, not a re-resolved path. `remove` is safe (`unlinkSync` removes the entry itself — never follows the
+  final symlink — and the id is a basename). Also: the item-exists check must scan the FULL pending set,
+  not the 200-item display slice, or held items past the cap become un-actionable.
+
 ## Git / releases
 
 - **Don't retarget a PR across a rebase-merge divergence.** After a rebase-merge release, `main`

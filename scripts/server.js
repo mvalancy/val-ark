@@ -7,7 +7,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { execSync, execFile, execFileSync, spawn } = require('child_process');
+const { execSync, execFile, execFileSync, spawn, spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -854,7 +854,7 @@ function sessionCookie(token, maxAgeSec, secure) {
 // POSTs that CHANGE the box's config/accounts — always admin (localhost or a
 // logged-in admin), regardless of Use Mode. "Use" actions (downloads/requests/
 // service starts) are gated per Use Mode instead (Open = anyone on the LAN).
-const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser', '/api/setup/profile', '/api/maintenance/repair']);
+const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser', '/api/setup/profile', '/api/maintenance/repair', '/api/setup/moderation', '/api/moderation/review']);
 const AUTH_EXEMPT_POSTS = new Set(['/api/auth/login', '/api/auth/logout', '/api/auth/recover', '/api/setup/commission']);
 
 // Peer IP, normalized (node reports LAN/tailnet IPv4 peers as IPv4-mapped IPv6).
@@ -991,6 +991,16 @@ function handleAPI(req, res, urlPath) {
                 try { win = new URL(req.url, 'http://localhost').searchParams.get('window'); } catch (_) {}
                 return sendJSON(res, req, getMetricsHistory(win));
             }
+            case '/api/status/moderation':
+                // Safety card: is on-device screening enabled, and is a classifier actually
+                // installed (else it holds everything). Read-gated by the /api/status/ prefix.
+                return sendJSON(res, req, getModerationStatus());
+            case '/api/moderation/queue':
+                // The held-content review feed for the admin Safety card. Reveals flagged
+                // content details, so it's ADMIN-ONLY (localhost/console or a signed session)
+                // regardless of Use Mode — not merely read-gated.
+                if (!isAdmin(req)) return sendJSON(res, req, { error: 'Admin only.', needsAuth: true }, 401);
+                return sendJSON(res, req, getModerationQueue());
             case '/api/auth/status':
                 // Read-only: is an admin set, which Use Mode, is this caller the
                 // trusted box/localhost (`trusted`) and are they an authenticated
@@ -1093,6 +1103,12 @@ function handleAPI(req, res, urlPath) {
                 return sendJSON(res, req, { error: 'Sign in required to do that on this network.', needsAuth: true }, 401);
             }
         }
+
+        // Moderation check consumes the RAW request body itself (content bytes, up to
+        // 25 MiB) — it must NOT go through readBody (which caps at 64KB and JSON-parses).
+        // The full gate stack above (LAN/tailnet, rate limit, commissioned, auth-per-Use-
+        // Mode) has already applied; a disabled engine is handled inside the handler.
+        if (urlPath === '/api/moderation/check') return handleModerationCheck(req, res);
 
         readBody(req).then((body) => {
             let result;
@@ -1204,6 +1220,23 @@ function handleAPI(req, res, urlPath) {
                     // Change the download profile (Downloads & Priorities). Admin-only
                     // (ADMIN_ONLY_POSTS); drives the librarian's per-bucket curation weights.
                     result = commission.setProfile(STATE_DIR, body.profile);
+                    break;
+                case '/api/moderation/review':
+                    // Act on a held item (remove / restore / dismiss). Admin-only
+                    // (ADMIN_ONLY_POSTS). The id is a bare quarantine basename — confined to
+                    // the quarantine dir; restore never overwrites and only into an existing dir.
+                    result = reviewModerationItem(body);
+                    break;
+                case '/api/setup/moderation':
+                    // Toggle/tune on-device content screening (Safety card). Admin-only
+                    // (ADMIN_ONLY_POSTS). Fail-closed defaults live in commission.getModeration;
+                    // when the admin turns it ON, kick off a best-effort model pin so a real
+                    // classifier lands (until then the core holds content rather than pass it).
+                    result = commission.setModeration(STATE_DIR, {
+                        enabled: body.enabled, sensitivity: body.sensitivity,
+                        action: body.action, surfaces: body.surfaces,
+                    });
+                    if (result && result.ok && result.moderation.enabled) ensureModerationModel();
                     break;
                 case '/api/service/start':
                     // Bring up an enabled + mirrored community service (chat/mail/forum/paste).
@@ -1709,6 +1742,285 @@ function getMetricsHistory(window) {
 // also dedupe rapid clicks in-process and rate-limit to one manual run per 30s.
 let _repairProc = null, _repairStartedAt = 0;
 function repairInFlight() { return !!_repairProc || (Date.now() - _repairStartedAt < 5000); }
+// ---- On-device content moderation (roadmap Phase 7) --------------------------
+// The web door to scripts/lib/moderation.sh: screen a piece of content with the box's
+// own AI, offline, FAIL-CLOSED. The decision core lives in the shell script (tested in
+// isolation); this only marshals bytes in and a verdict out. Every rule the script
+// enforces (magic-byte typing, size cap, hold-on-anything-unusable) is preserved here.
+const MOD_SCRIPT = path.join(__dirname, 'lib', 'moderation.sh');
+const MOD_CHECK_MAX = Number(process.env.VALARK_MODERATION_MAX_BYTES) || 25 * 1024 * 1024;  // matches moderation.sh MOD_MAX_BYTES
+const MOD_TIMEOUT_S = Number(process.env.VALARK_MODERATION_TIMEOUT) || 150;
+// Where screened bytes are staged. A dedicated 0700 dir under <state>; each scan file is
+// 0600, random-named, realpath-confined, and unlinked the instant the runner returns.
+const MOD_SCAN_DIR = path.join(STATE_DIR, 'moderation', 'scan');
+
+// Classifier-readiness probe result, CACHED. `moderation.sh ready` runs `find` over the
+// mirror, which can take seconds on a big disk — so it must NEVER block the single Node
+// event loop on the hot status path. We refresh it ASYNC and serve the cached value; the
+// only synchronous probe is a one-time cold warm (so the very first status is accurate).
+let _modReady = { ts: 0, ready: false, text: false, image: false, reason: 'unknown' };
+let _modReadyBusy = false;
+const MOD_READY_TTL = 30000;
+function _parseReady(raw) {
+    try {
+        const v = JSON.parse(String(raw || '').trim().split('\n').filter(Boolean).pop() || '{}');
+        if (v && typeof v === 'object') return { ready: !!v.ready, text: !!v.text, image: !!v.image, reason: v.reason || '' };
+    } catch (_) {}
+    return null;   // unparseable → caller keeps fail-closed default
+}
+function _refreshModReady() {
+    if (_modReadyBusy || Date.now() - _modReady.ts < MOD_READY_TTL) return;   // fresh enough / already probing
+    _modReadyBusy = true;
+    let out = '', child;
+    try {
+        child = spawn('/usr/bin/bash', [MOD_SCRIPT, 'ready'], {
+            stdio: ['ignore', 'pipe', 'ignore'],
+            env: { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || '') },
+        });
+    } catch (_) { _modReadyBusy = false; return; }
+    const killer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 8000);
+    child.stdout.on('data', (d) => { out += d; if (out.length > 8192) out = out.slice(-8192); });
+    child.on('error', () => { clearTimeout(killer); _modReadyBusy = false; });
+    child.on('close', () => {
+        clearTimeout(killer); _modReadyBusy = false;
+        const p = _parseReady(out) || { ready: false, text: false, image: false, reason: 'probe error' };
+        _modReady = { ts: Date.now(), ...p };
+    });
+}
+// Health card for the admin Safety panel + the loop. Read-only, cheap: never runs
+// inference. Serves the cached readiness (warmed synchronously once, then async).
+function getModerationStatus() {
+    if (_modReady.ts === 0) {
+        // Cold warm: one bounded synchronous probe so the first status is truthful.
+        try {
+            const r = spawnSync('/usr/bin/bash', [MOD_SCRIPT, 'ready'], {
+                timeout: 8000, encoding: 'utf8',
+                env: { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || '') },
+            });
+            const p = _parseReady(r.stdout);
+            _modReady = { ts: Date.now(), ...(p || { ready: false, text: false, image: false, reason: 'probe error' }) };
+        } catch (_) { _modReady = { ts: Date.now(), ready: false, text: false, image: false, reason: 'probe error' }; }
+    } else {
+        _refreshModReady();   // async, non-blocking
+    }
+    const cfg = commission.getModeration(STATE_DIR);
+    const runner = _modReady;
+    return {
+        enabled: cfg.enabled,
+        sensitivity: cfg.sensitivity,
+        surfaces: cfg.surfaces,
+        action: cfg.action,
+        runnerReady: !!runner.ready,
+        classifiers: { text: !!runner.text, image: !!runner.image },
+        // Honest effective state: ON without a model does NOT mean content flows — the
+        // core holds everything for review. Surface that so "on" is never misread as "safe".
+        effective: cfg.enabled ? (runner.ready ? 'screening' : 'holding (no model installed)') : 'off',
+    };
+}
+
+// Boot-time sweep of leaked scan temps (a process killed between staging and unlink
+// leaves screened content at rest). Only runs at startup, when nothing is in-flight, so
+// removing every entry is safe. Best-effort + quiet: a missing dir is the common case.
+function sweepModerationScan() {
+    let entries;
+    try { entries = fs.readdirSync(MOD_SCAN_DIR); } catch (_) { return; }   // no dir → nothing to sweep
+    let swept = 0;
+    for (const name of entries) {
+        try { fs.unlinkSync(path.join(MOD_SCAN_DIR, name)); swept++; } catch (_) {}
+    }
+    if (swept) console.log(`[moderation] swept ${swept} stale scan temp(s) at startup`);
+}
+
+// Reduce a runner's stdout+exit to a verdict object, FAIL-CLOSED. Anything we can't
+// parse into a real decision string → hold (never allow). The temp is always unlinked.
+function _runModeration(buf, kind, sens, cb) {
+    let tmp = null;
+    try {
+        // Confine the staged file against the INTENDED base, not against itself. STATE_DIR
+        // is legitimately a symlink into the data disk, so resolve it; but the `moderation`
+        // and `scan` components must NOT be symlinks (a co-resident same-uid process — or a
+        // fleet node over the NFS-exported state tree — could otherwise plant one to redirect
+        // our write, and up to 25 MiB of attacker bytes, outside quarantine). Reject a
+        // symlinked component, then require the resolved scan dir to equal the expected path.
+        const stateReal = fs.realpathSync(STATE_DIR);
+        const modDir = path.join(stateReal, 'moderation');
+        const scanDir = path.join(modDir, 'scan');
+        for (const d of [modDir, scanDir]) {
+            let st = null; try { st = fs.lstatSync(d); } catch (_) {}
+            if (st && st.isSymbolicLink()) return cb({ decision: 'hold', reason: 'quarantine path is a symlink' });
+        }
+        fs.mkdirSync(scanDir, { recursive: true, mode: 0o700 });
+        if (fs.realpathSync(scanDir) !== scanDir) return cb({ decision: 'hold', reason: 'quarantine path escaped <state>' });
+        const cand = path.join(scanDir, crypto.randomBytes(18).toString('hex') + '.bin');
+        fs.writeFileSync(cand, buf, { mode: 0o600, flag: 'wx' });   // wx: never follow/clobber an existing node
+        tmp = cand;
+    } catch (_) {
+        return cb({ decision: 'hold', reason: 'could not stage content' });
+    }
+    const done = (out) => { try { if (tmp) fs.unlinkSync(tmp); } catch (_) {} cb(out); };
+    const args = [MOD_SCRIPT, 'check', tmp];
+    if (kind && kind !== 'auto') args.push('--kind', kind);
+    if (sens) args.push('--sensitivity', sens);
+    let child, out = '', settled = false;
+    const settle = (o) => { if (settled) return; settled = true; done(o); };
+    try {
+        // ARGV array (never a shell string) — tmp is our own random path, but the argv
+        // form means even a hostile filename could never break out of an arg slot.
+        child = spawn('/usr/bin/bash', args, {
+            stdio: ['ignore', 'pipe', 'ignore'],
+            env: { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || '') },
+        });
+    } catch (_) { return settle({ decision: 'hold', reason: 'runner spawn failed' }); }
+    // Wall-clock backstop above the script's own timeout, so a wedged child can't pin
+    // the request open forever. On fire → SIGKILL → 'close' settles us to hold.
+    const killer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, (MOD_TIMEOUT_S + 20) * 1000);
+    child.stdout.on('data', (d) => { out += d; if (out.length > 65536) out = out.slice(-65536); });
+    child.on('error', () => { clearTimeout(killer); settle({ decision: 'hold', reason: 'runner error' }); });
+    child.on('close', () => {
+        clearTimeout(killer);
+        const line = out.trim().split('\n').filter(Boolean).pop() || '';
+        let v = null;
+        try { v = JSON.parse(line); } catch (_) {}
+        if (!v || typeof v.decision !== 'string' || !['allow', 'block', 'hold'].includes(v.decision)) {
+            return settle({ decision: 'hold', reason: 'unreadable classifier output' });
+        }
+        settle({ decision: v.decision, reason: v.reason || '', kind: v.kind || kind, score: (v.score == null ? null : v.score) });
+    });
+}
+
+// POST /api/moderation/check — screen the RAW request body (the bytes ARE the content).
+// Its OWN size-capped reader, NOT readBody (that caps at 64KB + JSON-parses). Always
+// answers with a {decision} the caller can act on. Gate stack (isLanOrTailnet + rateLimit
+// + commissioned + auth-per-UseMode) already ran.
+//
+// The caller does NOT get to weaken screening: the content TYPE is decided by magic bytes
+// inside moderation.sh (kind='auto'), never a client hint — a ?kind=text on image bytes
+// would otherwise route them to the text classifier (which can't see the image) and pass.
+// SENSITIVITY is the ADMIN's configured policy, never caller-tunable — a caller could
+// otherwise ask for 'lenient' and turn a score-based hold into an allow.
+function handleModerationCheck(req, res) {
+    const cfg = commission.getModeration(STATE_DIR);
+    // OFF = "no opinion", explicitly NOT allow-by-policy. Callers must not read a disabled
+    // engine as approval; they get decision:'skip' + enabled:false and decide for themselves.
+    if (!cfg.enabled) return sendJSON(res, req, { decision: 'skip', enabled: false, reason: 'moderation disabled' });
+
+    const kind = 'auto', sens = cfg.sensitivity;   // type = magic bytes; sensitivity = admin policy
+
+    const chunks = []; let size = 0, over = false, ended = false;
+    req.on('data', (c) => {
+        if (over || ended) return;
+        size += c.length;
+        if (size > MOD_CHECK_MAX) {   // fail-closed on overflow: hold (413), stop buffering
+            over = true;
+            // Let the 413 flush before tearing down the shared TCP socket — a synchronous
+            // req.destroy() here can truncate the response so the client sees ECONNRESET
+            // instead of the clean hold. Further 'data' is discarded (over-guard above), so
+            // memory stays bounded even if the client keeps uploading until we destroy.
+            res.on('finish', () => { try { req.destroy(); } catch (_) {} });
+            sendJSON(res, req, { decision: 'hold', reason: 'content exceeds size cap' }, 413);
+            return;
+        }
+        chunks.push(c);
+    });
+    req.on('error', () => { if (!over && !ended) { ended = true; if (!res.headersSent) sendJSON(res, req, { decision: 'hold', reason: 'read error' }, 200); } });
+    req.on('end', () => {
+        if (over || ended) return;
+        ended = true;
+        const buf = Buffer.concat(chunks);
+        if (buf.length === 0) return sendJSON(res, req, { decision: 'hold', reason: 'empty content' }, 400);
+        _runModeration(buf, kind, sens, (out) => sendJSON(res, req, out, 200));
+    });
+}
+
+// ---- Review queue (Safety card) ----------------------------------------------------
+// The sweep appends each quarantined item to queue.jsonl; a review action (remove /
+// restore / dismiss) is recorded in reviewed.jsonl so the queue log stays append-only.
+// An item's ID is its quarantine BASENAME (unique, contains no separators) — it both
+// correlates the two logs AND confines the file operation to the quarantine dir.
+function _modQueueFiles() {
+    const base = path.join(STATE_DIR, 'moderation');
+    return { q: path.join(base, 'queue.jsonl'), r: path.join(base, 'reviewed.jsonl'), qdir: path.join(base, 'quarantine') };
+}
+function _readJsonl(file) {
+    const out = [];
+    let raw; try { raw = fs.readFileSync(file, 'utf8'); } catch (_) { return out; }
+    for (const line of raw.split('\n')) { if (!line.trim()) continue; try { out.push(JSON.parse(line)); } catch (_) {} }
+    return out;
+}
+// The full pending set (queue.jsonl minus reviewed.jsonl), newest first. The existence
+// check MUST use this, not a display slice, or items past the cap become un-actionable.
+function _modPending() {
+    const { q, r } = _modQueueFiles();
+    const resolved = new Set(_readJsonl(r).map((o) => o.id).filter(Boolean));
+    const pending = [];
+    for (const o of _readJsonl(q)) {
+        const id = o.quarantine ? path.basename(String(o.quarantine)) : null;
+        if (!id || resolved.has(id)) continue;
+        pending.push({ id, path: o.path || '', decision: o.decision || 'hold', reason: o.reason || '', ts: o.ts || 0 });
+    }
+    pending.reverse();   // newest first
+    return pending;
+}
+function getModerationQueue() {
+    const pending = _modPending();
+    return { pending: pending.slice(0, 200), count: pending.length };
+}
+// Act on a held item. Deliberately only remove / dismiss — both provably safe. RESTORE
+// (writing a quarantined file back to a store path) is intentionally NOT here: its
+// destination comes from queue.jsonl, and under this project's own threat model (a
+// same-uid process or an NFS-mesh peer can append to that in-<state> log) an unconfined
+// write-back is an arbitrary-file-write / RCE vector. A store-root-confined + O_NOFOLLOW
+// restore is a documented follow-up; until then an admin releases a false positive on the
+// box itself. (See docs/knowledge/decisions.md, Phase 7.)
+function reviewModerationItem(body) {
+    body = body || {};
+    const id = String(body.id || '');
+    const action = String(body.action || '');
+    // ID must be a bare basename — no separators / traversal. This is what confines the
+    // file op to the quarantine dir (the sweep only ever wrote basenames there).
+    if (!id || id !== path.basename(id) || id === '.' || id === '..' || /[/\\]/.test(id)) return { error: 'Invalid item id.' };
+    if (!['remove', 'dismiss'].includes(action)) return { error: 'Invalid action.' };
+    const { r, qdir } = _modQueueFiles();
+    // Existence check against the FULL pending set (not the 200-item display slice).
+    if (!_modPending().some((p) => p.id === id)) return { error: 'Item not found in the review queue.' };
+
+    if (action === 'remove') {
+        // unlinkSync removes the quarantine entry ITSELF — it never follows a final
+        // symlink — and the basename-confined id keeps it inside the quarantine dir, so a
+        // bare delete cannot touch anything the symlink might point at.
+        try { fs.unlinkSync(path.join(qdir, id)); } catch (_) { /* already gone — fine */ }
+    }
+    // dismiss: leave the quarantined file in place, just mark the item reviewed.
+    try {
+        fs.mkdirSync(path.dirname(r), { recursive: true });
+        fs.appendFileSync(r, JSON.stringify({ id, action, ts: Math.floor(Date.now() / 1000) }) + '\n');
+    } catch (_) {}
+    return { ok: true, id, action };
+}
+
+// Best-effort: when moderation is switched ON and no classifier is installed, pin+fetch
+// the text safety model (Llama-Guard-3) via the librarian so real screening can begin.
+// Until it lands the core FAIL-CLOSED holds content rather than pass it. Detached +
+// idempotent (librarian `request` pins, skips already-present, auto-evicts to fit the
+// cap); never blocks the settings write, and self-throttles against toggle storms.
+let _modPinAt = 0;
+function ensureModerationModel() {
+    if (process.env.VALARK_TEST_NO_SPAWN === '1') return;   // tests exercise the gate, not the fetch
+    if (Date.now() - _modPinAt < 600000) return;            // at most one kick per 10 min
+    // Skip the pin if the cached probe already saw a classifier — no synchronous ready
+    // probe here (this runs inside a request handler; librarian `request` is itself
+    // idempotent — it pins, skips already-present items, and auto-evicts to fit the cap).
+    if (_modReady.ready && Date.now() - _modReady.ts < MOD_READY_TTL) return;
+    _modPinAt = Date.now();
+    try {
+        const p = spawn('/usr/bin/bash', [path.join(ROOT, 'scripts/librarian.sh'), 'request', 'model', 'llama-guard-3-8b-gguf'], {
+            cwd: ROOT, detached: true, stdio: 'ignore',
+            env: { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || ''), FORCE_COLOR: '0' },
+        });
+        p.unref();
+    } catch (_) {}
+}
+
 function triggerRepair() {
     if (_repairProc) return { ok: true, started: false, running: true };
     if (Date.now() - _repairStartedAt < 30000) return { ok: true, started: false, cooldown: true };
@@ -2248,6 +2560,10 @@ function onFirstBind() {
     if (started) return;
     started = true;
     startHttps();
+    // Sweep the moderation staging dir: scan temps are strictly ephemeral (unlinked the
+    // instant the runner returns), so anything present at boot leaked when a prior process
+    // was killed mid-check. Remove it — each file holds screened user content at rest.
+    sweepModerationScan();
     // Warm the cache on startup
     getToolsStatus();
     getContentStatus();

@@ -6,6 +6,50 @@ later). See [README](README.md).
 
 ---
 
+## 2026‑07 — Safety card ships without "restore"; review is remove/dismiss only (Phase 7, 4/n)
+
+- **Context:** the admin Safety card's review queue needs actions on held items. The natural
+  set is remove (delete) / restore (release a false positive back to its store) / dismiss
+  (acknowledge, keep quarantined). An adversarial review of the endpoints flagged that
+  **restore is the entire risky surface** (4 of 5 findings, incl. a HIGH): its destination is
+  `item.path` read from `queue.jsonl`, an append-only log living in the in-`<state>` tree that
+  this project's OWN threat model treats as attacker-writable (a same-uid service or an
+  NFS-mesh peer). An unconfined write-back is an arbitrary-file-write → RCE-if-root
+  confused-deputy (admin clicks "Approve" → server writes attacker bytes to e.g. `/etc/cron.d`),
+  plus a TOCTOU symlink-swap on the copy source that exfiltrates arbitrary readable files.
+- **Decision:** **drop restore** for 4/n. The queue supports only **remove** (`unlinkSync` the
+  quarantine entry — never follows a final symlink, basename-confined) and **dismiss** (append
+  `reviewed.jsonl`, keep the file). Both are provably safe. A false positive is released on the
+  box itself for now.
+- **Why not just harden it:** doing restore safely needs the destination realpath-confined to an
+  allowlist of the sweep's store roots (which the server would have to duplicate from
+  `mod-sweep.sh` — a drift hazard) **and** an `O_NOFOLLOW` fd-based copy. That's a real feature,
+  not a patch; better shipped deliberately later than rushed into a security-sensitive path. The
+  fail-closed instinct applies to our OWN write-backs too: if we can't confine it simply, don't
+  do it. Follow-up: store-root-confined + `O_NOFOLLOW` restore.
+
+## 2026‑07 — Moderation ENFORCEMENT is a post-store loop sweep (Phase 7, 3/n)
+
+- **Context:** the endpoints + settings (2/n) can screen content on request, but nothing on
+  the box actually ran community content through them — so the Safety card's "screening" claim
+  was hollow. Two ways to enforce: a **pre-store proxy intercept** (screen the POST body in
+  `pipeProxy` before NodeBB/MicroBin stores it) or a **post-store sweep** (the self-heal loop
+  screens already-stored files each cycle).
+- **Decision:** post-store **file sweep** (`scripts/lib/mod-sweep.sh`, wired as `loop.sh` step
+  7c). It walks configured community stores (paste files, mail, upload dirs — `VALARK_MODERATION_DIRS`
+  overrides), screens each new file with `moderation.sh check`, and on any non-`allow` verdict
+  **quarantines** the file (moves it out of the store) + appends a `state/moderation/queue.jsonl`
+  review entry. Idempotent via a `screened.tsv` (path+size+mtime) marker; bounded per run; the
+  admin's `action` (block/quarantine/flag) decides move-vs-copy. **Fail-closed:** an unparseable
+  verdict, a classifier error, or node-unavailable settings all resolve to hold→quarantine, never
+  "left served."
+- **Why the sweep, not the intercept:** the pre-store intercept must parse each app's POST format
+  (NodeBB CSRF/multipart, MicroBin forms) — fragile and app-coupled — and NodeBB's post store is
+  **Redis**, not files. The sweep is app-agnostic, offline-testable with fixtures + a stub
+  classifier (`test-mod-sweep.sh`, 16/0), and fits the loop's "reconcile reality each cycle"
+  model. It's reactive (content is briefly visible before the next cycle) — an acceptable first
+  cut; a NodeBB/Redis screener and a pre-store paste intercept are documented follow-ups.
+
 ## 2026‑07 — Community chat is open (no-login) by default
 - **Context:** on the real box a visitor opening `/app/chat/` hit The Lounge's **private-mode login
   wall with no way to create an account** (accounts were host-only, via `thelounge add`) — chat was
@@ -87,6 +131,29 @@ later). See [README](README.md).
   the Flux/URL, pin host to 127.0.0.1, `ECONNREFUSED → {influx:false}` at 200); `.env` token/URL
   keys (git-ignored / auto-minted to 0600 state, PUBLIC repo); `scripts/services/grafana.sh` at
   `/app/grafana/` under Advanced (branch 3); fleet aggregation + SSE metrics push (later).
+
+## 2026‑07 — On-device moderation: fail-closed decision core first (Phase 7)
+- A scout→3-design→judge **workflow** designed Phase 7 (screen user uploads with the box's own AI,
+  offline). Key inversion it surfaced: **the model + inference is NOT the risky part** — text
+  (llama-cli + the already-mirrored Llama-Guard-3-8B) and image (llama-mtmd-cli + moondream2/SmolVLM)
+  run today via the exact `verify.sh` single-turn invocation. The **risky part is wiring to a
+  surface**: pre-store multipart interception in the zero-dep proxy would replace pipeProxy's
+  streaming `req.pipe`, break Range/resumability, risk OOM, add a hand-rolled multipart parser, and
+  open a scan-vs-store TOCTOU. So that is **deferred**.
+- **Branch order:** ship the fail-closed **decision core in isolation first** (`scripts/lib/moderation.sh`
+  + `test-moderation.sh`), adversarial-review it, then wire surfaces. `moderation.sh check <file> --kind
+  --sensitivity` → one JSON line + exit code (0 allow / 1 block / 2 hold); a pure `decide(signal,
+  sensitivity)` unit; type by **magic bytes** (never the client extension/Content-Type; SVG screened as
+  a script-bearing document); `VALARK_MODERATION_CMD` stub hook for tests.
+- **FAIL-CLOSED is the invariant** (same class as the Safe-Mode `useMode` fix): absent binary/model,
+  timeout, nonzero, unparseable stdout, or a NaN/out-of-range/unknown signal → **hold**, never a silent
+  allow. The common bare-box/CI/VM case has no model → that IS the fail-closed path (needs no inference).
+- **Deferred (own branches, each reviewed):** the real enforcement surfaces — a NodeBB post-store
+  quarantine sweep (highest-risk: open self-registration, plain-file uploads, no proxy surgery) then a
+  pre-store paste multipart intercept; the server endpoints (`/api/moderation/{check,queue,review}`,
+  `/api/status/moderation`) + the admin Safety card + Sensitivity slider; and a dedicated NSFW **ONNX**
+  head (Xenova/nsfw_image_detection) which needs a mirrored onnxruntime CLI/wheels — the mirrored ORT is
+  library-only/CPU-only today. NPU (.rknn on RK3588/UT2) later.
 
 ## 2026‑07 — Metrics HISTORY is a zero-dep ring buffer (Phase 6b part 2)
 - A scout→3-design→judge **workflow** pitted InfluxDB-v2-Flux vs InfluxDB-v1-InfluxQL vs a

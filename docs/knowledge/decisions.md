@@ -88,6 +88,26 @@ later). See [README](README.md).
   keys (git-ignored / auto-minted to 0600 state, PUBLIC repo); `scripts/services/grafana.sh` at
   `/app/grafana/` under Advanced (branch 3); fleet aggregation + SSE metrics push (later).
 
+## 2026‑07 — Metrics HISTORY is a zero-dep ring buffer (Phase 6b part 2)
+- A scout→3-design→judge **workflow** pitted InfluxDB-v2-Flux vs InfluxDB-v1-InfluxQL vs a
+  **zero-dep on-disk ring-buffer challenger**. The ring won (9/10): the server already produces
+  every datapoint via `getHostMetrics()`, so it **samples itself** into a capped
+  `state/metrics-history.jsonl` (~24h) and serves it at read-gated `GET /api/status/metrics/history`
+  — sparklines under the shipped System tiles with **NO service, NO token, NO npm dep, NO outbound
+  call**. Decisively, the ring is the ONLY path where sparklines render on a bare box/CI/VM (the
+  InfluxDB path shows nothing until ~1GB of daemons + token onboarding run) — consistent with the
+  live-first call above.
+- **Fixed a real bug found in the design:** `getHostMetrics()` mutated a single module-global
+  `_metricsPrev` for its two-sample deltas — the live endpoint and a sampler would contend over one
+  baseline. Refactored to `getHostMetrics(prev = _metricsPrev)` returning the fresh counters as a
+  non-enumerable `_sample` (never serialized); the live endpoint and the sampler each keep their OWN
+  baseline. The always-on server is the SINGLE writer (like `heal-events.jsonl`); `loop.sh` never
+  touches this file. `?window` is allowlist-mapped to a fixed point cap (never a path/slice index).
+- **InfluxDB/Telegraf/Grafana are the deferred, opt-in Advanced/fleet upgrade** — grafted onto the
+  SAME endpoint later under an allowlisted `?source=influx`, for long retention + cross-node rollup
+  (the genuine InfluxDB payoff a single appliance may not need yet). That branch carries the
+  injection/SSRF-sensitive `queryInflux()` passthrough → its own adversarial review.
+
 ## 2026‑07 — Health & Repairs page (roadmap Phase 6, part 1 — self-heal UX)
 - Shipped the **Health/Repairs UX** first (metrics stack is a separate branch): a `#/health`
   page with **strict green/yellow/red** per-component cards, **fault attribution** (drive / this

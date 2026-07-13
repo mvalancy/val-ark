@@ -107,6 +107,29 @@ echo "$rp" | grep -q '"kind":"image"' && pass || fail "?kind=text must NOT overr
 echo "$(curl -s --max-time 20 -X POST --data-binary 'SCORE60 content' "$B/api/moderation/check?sensitivity=lenient")" | grep -q '"decision":"hold"' && pass || fail "?sensitivity=lenient must be ignored (0.60 stays hold under admin balanced)"
 echo "$(curl -s --max-time 20 -X POST --data-binary 'SCORE60 content' "$B/api/moderation/check?sensitivity=lenient")" | grep -q '"decision":"allow"' && fail "caller must NOT be able to loosen policy to allow" || pass
 
+# --- 8b. review QUEUE + review actions (the Safety card's held-content feed) -----------
+# Seed a quarantined item + its queue line (the sweep does this in production).
+mkdir -p "$T/state/moderation/quarantine"
+echo "held content bytes" > "$T/state/moderation/quarantine/1700000000_ab12_store_bad.txt"
+printf '{"ts":1700000000,"path":"%s","decision":"block","reason":"flagged unsafe","quarantine":"%s"}\n' \
+    "$T/store/bad.txt" "$T/state/moderation/quarantine/1700000000_ab12_store_bad.txt" > "$T/state/moderation/queue.jsonl"
+# queue is ADMIN-ONLY: refused without a session, returned with one
+[ "$(code "$B/api/moderation/queue")" = "401" ] && pass || fail "queue must be admin-only (401 without session)"
+qj=$(curl -s -b "$T/cj" --max-time 6 "$B/api/moderation/queue")
+echo "$qj" | grep -q '"id":"1700000000_ab12_store_bad.txt"' && pass || fail "admin queue must list the held item (got $qj)"
+echo "$qj" | grep -q '"decision":"block"' && pass || fail "queue item must carry its decision"
+# review is ADMIN-ONLY
+[ "$(jpost -d '{"id":"1700000000_ab12_store_bad.txt","action":"remove"}' "$B/api/moderation/review")" = "401" ] && pass || fail "review must be admin-only (401 without session)"
+# path-traversal id is rejected (no escape from the quarantine dir)
+echo "$(curl -s -b "$T/cj" -X POST -H 'Content-Type: application/json' -d '{"id":"../../../etc/passwd","action":"remove"}' "$B/api/moderation/review")" | grep -q '"error"' && pass || fail "traversal id must be rejected"
+[ -f /etc/passwd ] && pass || fail "sanity: /etc/passwd untouched"   # (never at risk; the id never reaches an fs op)
+# 'restore' is intentionally NOT a valid action (unconfined write-back was an RCE vector)
+echo "$(curl -s -b "$T/cj" -X POST -H 'Content-Type: application/json' -d '{"id":"1700000000_ab12_store_bad.txt","action":"restore"}' "$B/api/moderation/review")" | grep -q '"error"' && pass || fail "restore action must be rejected (dropped as unsafe)"
+# admin remove → ok, file deleted, queue now empty
+curl -s -b "$T/cj" -X POST -H 'Content-Type: application/json' -d '{"id":"1700000000_ab12_store_bad.txt","action":"remove"}' "$B/api/moderation/review" | grep -q '"ok":true' && pass || fail "admin remove must succeed"
+[ ! -f "$T/state/moderation/quarantine/1700000000_ab12_store_bad.txt" ] && pass || fail "remove must delete the quarantined file"
+curl -s -b "$T/cj" --max-time 6 "$B/api/moderation/queue" | grep -q '"count":0' && pass || fail "reviewed item must leave the pending queue (count 0)"
+
 # --- 9. adversarial-review MEDIUM fix: quarantine CONFINEMENT. A symlinked scan dir
 #        (planted by a same-uid process / NFS-mesh peer) must NOT redirect the write
 #        outside <state> — the staged bytes must never land in the symlink target.

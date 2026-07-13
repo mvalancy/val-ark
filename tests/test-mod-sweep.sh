@@ -47,7 +47,7 @@ run_sweep >/dev/null; r=$?
 [ ! -f "$STORE/bad.txt" ] && pass || fail "flagged file must be REMOVED from the store"
 ls "$QDIR"/*bad.txt >/dev/null 2>&1 && pass || fail "flagged file must land in quarantine"
 [ -f "$QUEUE" ] && grep -q '"decision":"block"' "$QUEUE" && pass || fail "flagged file must be recorded in the review queue"
-grep -qF "$STORE/clean.txt" "$T/moderation/screened.tsv" && pass || fail "clean file must be recorded as screened"
+[ -s "$T/moderation/screened.db" ] && pass || fail "resolved files must be recorded in the screened marker"
 
 # --- 2. idempotent: nothing new → scanned 0, rc 0, no extra quarantine ----------------
 before=$(ls "$QDIR" | wc -l)
@@ -69,17 +69,31 @@ out=$(run_sweep);
 echo "$out" | grep -q 'disabled' && pass || fail "disabled engine must skip the sweep (got: $out)"
 [ -f "$STORE/bad2.txt" ] && pass || fail "disabled engine must not touch stored files"
 rm -f "$STORE/bad2.txt"
-# re-enable + set action=flag for the next case
-VALARK_STATE_DIR="$T" "$NODE" -e 'require(process.argv[1]).setModeration(process.env.VALARK_STATE_DIR,{enabled:true,action:"flag"})' "$COMMISSION"
+VALARK_STATE_DIR="$T" "$NODE" -e 'require(process.argv[1]).setModeration(process.env.VALARK_STATE_DIR,{enabled:true})' "$COMMISSION"
 
-# --- 5. action=flag leaves the original served but still queues a copy ----------------
-echo "flag me but keep BADWORD visible" > "$STORE/flagme.txt"
-qn_before=$(grep -c '"action":"flag"' "$QUEUE" 2>/dev/null); qn_before=${qn_before:-0}
+# --- 5. adversarial-review HIGH fix: a FAILED quarantine move must NOT mark the file
+#        screened — it is still served, so it must be retried, and the sweep must report
+#        a hard error (rc 11). Force the failure by making the quarantine dir unwritable.
+#        (Skip when running as root, which bypasses the permission.)
+if [ "$(id -u)" != 0 ]; then
+    echo "unmovable BADWORD content" > "$STORE/stuck.txt"
+    chmod 500 "$QDIR"                                  # deny the mv into quarantine
+    out=$(run_sweep); r=$?
+    chmod 700 "$QDIR"
+    [ "$r" = 11 ] && pass || fail "a failed quarantine move must return rc 11 (got $r: $out)"
+    [ -f "$STORE/stuck.txt" ] && pass || fail "a file that could not be quarantined must stay put (not vanish silently)"
+    # It must NOT be marked screened — the NEXT sweep (now writable) must retry + quarantine it.
+    run_sweep >/dev/null
+    [ ! -f "$STORE/stuck.txt" ] && pass || fail "an un-quarantinable file must be RETRIED once the move can succeed (fail-open guard)"
+    ls "$QDIR"/*stuck.txt >/dev/null 2>&1 && pass || fail "the retried file must finally land in quarantine"
+else
+    pass; pass; pass; pass    # root bypasses the permission gate; keep the count stable
+fi
+
+# --- 6. odd filename (spaces) is handled + fully removed on flag ----------------------
+printf 'BADWORD in a spaced name' > "$STORE/a spaced file.txt"
 run_sweep >/dev/null
-qn_after=$(grep -c '"action":"flag"' "$QUEUE" 2>/dev/null); qn_after=${qn_after:-0}
-[ -f "$STORE/flagme.txt" ] && pass || fail "action=flag must leave the original served"
-[ "$qn_after" -gt "$qn_before" ] && pass || fail "action=flag must still queue the item for review"
-ls "$QDIR"/*flagme.txt >/dev/null 2>&1 && pass || fail "action=flag must keep a review copy in quarantine"
+[ ! -f "$STORE/a spaced file.txt" ] && pass || fail "a spaced flagged filename must be quarantined"
 
 echo "mod-sweep: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

@@ -1569,7 +1569,7 @@ function _readTemp() {
 // counters as a NON-enumerable out._sample (never serialized) so each caller — the
 // live endpoint and the history sampler — keeps its OWN baseline and they can't
 // contend over one shared global.
-function getHostMetrics(prev = _metricsPrev) {
+function getHostMetrics(prev = _metricsPrev, opts = {}) {
     const os = require('os');
     const now = Date.now();
     const out = { ts: new Date().toISOString(), source: 'live' };
@@ -1600,8 +1600,14 @@ function getHostMetrics(prev = _metricsPrev) {
 
     out.mem = _readMem();
 
-    try { const d = getDiskStatus(); out.disk = (d && d.total) ? { total: d.total, used: d.used, available: d.available, percent: Math.round(d.used / d.total * 100) } : null; }
-    catch (_) { out.disk = null; }
+    // opts.disk === false skips getDiskStatus() entirely — its execSync('df') can BLOCK
+    // the event loop up to 5s on a stale NFS mount. The self-sampler passes disk:false
+    // (its ring row has no disk field), so it stays truly /proc+os-only and never stalls.
+    if (opts.disk === false) { out.disk = null; }
+    else {
+        try { const d = getDiskStatus(); out.disk = (d && d.total) ? { total: d.total, used: d.used, available: d.available, percent: Math.round(d.used / d.total * 100) } : null; }
+        catch (_) { out.disk = null; }
+    }
 
     // Net: rx/tx summed across non-lo interfaces + rate over MEASURED elapsed. Guard the
     // cumulative-counter wrap/reset (Δ<0 → null); first sample → null.
@@ -1659,7 +1665,7 @@ function _loadMetricsRing() {
 // hang), append a compact row, cap in memory, atomically persist. Never throws.
 function sampleMetricsToRing() {
     try {
-        const m = getHostMetrics(_samplerPrev);
+        const m = getHostMetrics(_samplerPrev, { disk: false });   // disk:false → no blocking df
         _samplerPrev = m._sample || _samplerPrev;
         const cpu = m.cpu || {}, mem = m.mem || {}, net = m.net || {};
         _metricsRing.push({

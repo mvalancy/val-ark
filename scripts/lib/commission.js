@@ -244,6 +244,7 @@ if (require.main === module) {
     switch (cmd) {
       case 'claim':  emit({ claim: ensureClaim(), commissioned: isCommissioned() }); break;
       case 'status': emit(state(undefined, true)); break;
+      case 'moderation': emit(getModeration()); break;   // fail-closed settings for the loop sweep
       default: process.stderr.write('unknown commission command: ' + cmd + '\n'); process.exit(2);
     }
   } catch (e) { emit({ ok: false, error: e.message }); process.exit(1); }

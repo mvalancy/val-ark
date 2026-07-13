@@ -89,6 +89,13 @@ if [ -n "$NODE" ]; then
         else
             step "metrics: live host gauges (no InfluxDB needed)" fail 0 "no live metrics; got: $(printf '%s' "$metrics" | cut -c1-120)"
         fi
+        # History ring buffer: the server samples itself → sparklines with no daemon.
+        hist=$(curl -s --max-time 4 http://127.0.0.1:3000/api/status/metrics/history 2>/dev/null)
+        if printf '%s' "$hist" | grep -q '"source":"ring"'; then
+            step "metrics: history ring buffer (zero-dep, no daemon)" pass 0
+        else
+            step "metrics: history ring buffer (zero-dep, no daemon)" fail 0 "no ring history; got: $(printf '%s' "$hist" | cut -c1-120)"
+        fi
         # First-boot: a fresh box (empty content/model library) reports un-commissioned
         # so the web UI takes over with the setup wizard.
         setup_state=$(curl -s --max-time 4 http://127.0.0.1:3000/api/setup/state 2>/dev/null)

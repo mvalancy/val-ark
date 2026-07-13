@@ -13,68 +13,50 @@ download_sqlite() {
     local year="${PINNED_YEAR}"
     local source_url="https://www.sqlite.org/${year}/sqlite-amalgamation-${ver}.zip"
 
-    # linux-arm64: download source and compile
-    local dest="${TOOLS_DIR}/linux-arm64/sqlite"
-    ensure_dir "$dest"
-    local tmp_file="${dest}/.tmp_sqlite-amalgamation.zip"
-    download_file "$source_url" "$tmp_file" "sqlite source (linux-arm64)"
-    if [ -f "$tmp_file" ] && [ -s "$tmp_file" ]; then
-        log_info "Extracting sqlite source (linux-arm64)..."
+    # The amalgamation is C source compiled with `gcc`, which targets the BUILD
+    # HOST's arch. Compile ONLY for the platform matching this host; for the other
+    # Linux arch, keep source + a build hint and scrub any binary — else mirroring on
+    # an x86_64 host drops an x86 sqlite3 into linux-arm64/ ("Exec format error").
+    local host_plat
+    case "$(uname -m)" in
+        aarch64|arm64) host_plat="linux-arm64" ;;
+        x86_64|amd64)  host_plat="linux-x86_64" ;;
+        *)             host_plat="" ;;
+    esac
+
+    local plat dest tmp_file src_dir
+    for plat in linux-arm64 linux-x86_64; do
+        dest="${TOOLS_DIR}/${plat}/sqlite"
+        ensure_dir "$dest"
+        tmp_file="${dest}/.tmp_sqlite-amalgamation.zip"
+        download_file "$source_url" "$tmp_file" "sqlite source (${plat})"
+        [ -f "$tmp_file" ] && [ -s "$tmp_file" ] || continue
         unzip -o -q "$tmp_file" -d "$dest" 2>/dev/null
         rm -f "$tmp_file" 2>/dev/null
-        # Attempt to compile
-        local src_dir="${dest}/sqlite-amalgamation-${ver}"
-        if [ -d "$src_dir" ]; then
-            log_info "Compiling sqlite3 for linux-arm64..."
-            (cd "$src_dir" && gcc -o sqlite3 shell.c sqlite3.c -lpthread -ldl 2>/dev/null) && {
-                cp "${src_dir}/sqlite3" "${dest}/sqlite3"
-                chmod +x "${dest}/sqlite3"
-                log_success "Compiled sqlite3 for linux-arm64"
-            } || {
-                log_warn "Compilation failed (may need cross-compiler for arm64)"
-                cat > "${dest}/BUILD.txt" << 'BUILDEOF'
-SQLite3 Build Instructions (linux-arm64):
+        src_dir="${dest}/sqlite-amalgamation-${ver}"
+        [ -d "$src_dir" ] || continue
 
-1. Source is already extracted in sqlite-amalgamation-3480000/
-2. Compile with:
-   cd sqlite-amalgamation-3480000
-   gcc -o sqlite3 shell.c sqlite3.c -lpthread -ldl
-3. Copy the sqlite3 binary to this directory
-BUILDEOF
-            }
+        if [ "$plat" = "$host_plat" ]; then
+            log_info "Compiling sqlite3 for ${plat} (native build host)..."
+            if (cd "$src_dir" && gcc -o sqlite3 shell.c sqlite3.c -lpthread -ldl 2>/dev/null); then
+                cp "${src_dir}/sqlite3" "${dest}/sqlite3"; chmod +x "${dest}/sqlite3"
+                log_success "Compiled sqlite3 for ${plat}"
+            else
+                log_warn "sqlite compile failed for ${plat}"; rm -f "${dest}/sqlite3" 2>/dev/null
+            fi
+        else
+            # scrub any wrong-arch binary from an older mirror — both the copied one
+            # and the one left inside the source dir (verify.sh finds by name anywhere).
+            rm -f "${dest}/sqlite3" "${src_dir}/sqlite3" 2>/dev/null
+            write_install_hint "$dest" "sqlite" \
+"SQLite3 for ${plat}
+===================
+Cross-compiling from a $(uname -m) host would produce a wrong-arch binary. The
+amalgamation source is mirrored here; build it natively on the ${plat} box (one file):
+  cd sqlite-amalgamation-${ver} && gcc -o sqlite3 shell.c sqlite3.c -lpthread -ldl && cp sqlite3 ../
+Or use the system package: apt install sqlite3"
         fi
-    fi
-
-    # linux-x86_64: download source and compile
-    dest="${TOOLS_DIR}/linux-x86_64/sqlite"
-    ensure_dir "$dest"
-    tmp_file="${dest}/.tmp_sqlite-amalgamation.zip"
-    download_file "$source_url" "$tmp_file" "sqlite source (linux-x86_64)"
-    if [ -f "$tmp_file" ] && [ -s "$tmp_file" ]; then
-        log_info "Extracting sqlite source (linux-x86_64)..."
-        unzip -o -q "$tmp_file" -d "$dest" 2>/dev/null
-        rm -f "$tmp_file" 2>/dev/null
-        local src_dir="${dest}/sqlite-amalgamation-${ver}"
-        if [ -d "$src_dir" ]; then
-            log_info "Compiling sqlite3 for linux-x86_64..."
-            (cd "$src_dir" && gcc -o sqlite3 shell.c sqlite3.c -lpthread -ldl 2>/dev/null) && {
-                cp "${src_dir}/sqlite3" "${dest}/sqlite3"
-                chmod +x "${dest}/sqlite3"
-                log_success "Compiled sqlite3 for linux-x86_64"
-            } || {
-                log_warn "Compilation failed"
-                cat > "${dest}/BUILD.txt" << 'BUILDEOF'
-SQLite3 Build Instructions (linux-x86_64):
-
-1. Source is already extracted in sqlite-amalgamation-3480000/
-2. Compile with:
-   cd sqlite-amalgamation-3480000
-   gcc -o sqlite3 shell.c sqlite3.c -lpthread -ldl
-3. Copy the sqlite3 binary to this directory
-BUILDEOF
-            }
-        fi
-    fi
+    done
 
     # windows-x64: prebuilt tools
     dest="${TOOLS_DIR}/windows-x64/sqlite"

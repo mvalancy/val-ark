@@ -3701,10 +3701,10 @@ function _activityLive() { if (getRoute() === '/activity') scheduleRender(); }
 // each yellow/red naming a likely cause (drive / this box / internet / config) and,
 // where the box can act, a one-click repair. Composes live status (disk/services/
 // kiwix) with the self-heal loop's reports via /api/status/health (_healthData):
-//   heal    = health.json snapshot (space, verify tallies, link counts, this-cycle repairs)
+//   heal    = selfheal.json snapshot (space, verify tallies, link counts, this-cycle repairs)
 //   verify  = verify.json functional checks (per-component pass/fail)
 //   events  = heal-events.jsonl feed (genuine repairs, newest first)
-let _healthData = null, _healthTimer = null, _healthPoll = null, _metricsData = null;
+let _healthData = null, _healthTimer = null, _healthPoll = null, _metricsData = null, _metricsHistory = null;
 
 function loadHealth() {
     fetch('/api/status/health').then(r => r.ok ? r.json() : null).then(d => {
@@ -3718,8 +3718,16 @@ function loadMetrics() {
         if (d) { _metricsData = d; if (getRoute() === '/health') scheduleRender(); }
     }).catch(() => {});
 }
-function startHealthLive() { stopHealthLive(); loadHealth(); loadMetrics(); _healthTimer = setInterval(() => { loadHealth(); loadMetrics(); }, 15000); }
-function stopHealthLive() { if (_healthTimer) { clearInterval(_healthTimer); _healthTimer = null; } if (_healthPoll) { clearTimeout(_healthPoll); _healthPoll = null; } _metricsData = null; }
+// Metrics history for the tile sparklines (zero-dep server ring buffer). Empty on a
+// fresh box → sparklines simply don't render; the tiles are byte-identical without them.
+function loadHistory() {
+    fetch('/api/status/metrics/history').then(r => r.ok ? r.json() : null).then(d => {
+        _metricsHistory = (d && Array.isArray(d.series)) ? d : null;
+        if (getRoute() === '/health') scheduleRender();
+    }).catch(() => { _metricsHistory = null; });
+}
+function startHealthLive() { stopHealthLive(); loadHealth(); loadMetrics(); loadHistory(); _healthTimer = setInterval(() => { loadHealth(); loadMetrics(); loadHistory(); }, 15000); }
+function stopHealthLive() { if (_healthTimer) { clearInterval(_healthTimer); _healthTimer = null; } if (_healthPoll) { clearTimeout(_healthPoll); _healthPoll = null; } _metricsData = null; _metricsHistory = null; }
 
 function _ago(iso) {
     if (!iso) return '';
@@ -3865,23 +3873,41 @@ function _fmtRate(bps) {
     while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
     return (v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)) + ' ' + u[i];
 }
+// A tiny inline-SVG sparkline (currentColor, theme-safe). Returns '' with <2 finite
+// points, so a fresh box with no history renders tiles byte-identical to before.
+function _sparkline(points) {
+    const pts = (points || []).filter(v => typeof v === 'number' && isFinite(v));
+    if (pts.length < 2) return '';
+    const W = 90, Hh = 22, min = Math.min(...pts), max = Math.max(...pts), span = (max - min) || 1;
+    const coords = pts.map((v, i) => {
+        const x = Math.round((i / (pts.length - 1)) * W * 10) / 10;
+        const y = Math.round((Hh - ((v - min) / span) * Hh) * 10) / 10;
+        return x + ',' + y;
+    }).join(' ');
+    return `<svg class="hp-spark" viewBox="0 0 ${W} ${Hh}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${coords}" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;
+}
 // Friendly live gauges. Every tile is skipped when its source field is null, so a
 // non-Linux/CI server (no /proc) still shows what it can (load, uptime) and never blanks.
+// When the ring buffer has history, each tile also gets an inline sparkline (additive).
 function _renderSystemTiles() {
     const m = _metricsData;
     if (!m) return '';
-    const tile = (label, value, sub) => `<div class="hp-tile"><div class="hp-tile-v">${esc(String(value))}</div><div class="hp-tile-l">${esc(label)}</div>${sub ? `<div class="hp-tile-s">${esc(sub)}</div>` : ''}</div>`;
+    const tile = (label, value, sub, spark) => `<div class="hp-tile"><div class="hp-tile-v">${esc(String(value))}</div><div class="hp-tile-l">${esc(label)}</div>${sub ? `<div class="hp-tile-s">${esc(sub)}</div>` : ''}${spark || ''}</div>`;
     const cpu = m.cpu || {}, mem = m.mem || {}, net = m.net || {};
+    const hs = (_metricsHistory && _metricsHistory.series) ? _metricsHistory.series : [];
+    const col = (k) => hs.map(r => r[k]);
     const tiles = [];
     tiles.push(tile('Processor', cpu.percent != null ? cpu.percent + '%' : '—',
-        cpu.loadavg ? 'load ' + cpu.loadavg.join(' ') : (cpu.cores ? cpu.cores + ' cores' : '')));
-    if (mem.percent != null) tiles.push(tile('Memory', mem.percent + '%', mem.total ? formatBytes(mem.used) + ' / ' + formatBytes(mem.total) : ''));
-    if (cpu.loadavg) tiles.push(tile('Load (1m)', cpu.loadavg[0], cpu.cores ? 'of ' + cpu.cores + ' cores' : ''));
+        cpu.loadavg ? 'load ' + cpu.loadavg.join(' ') : (cpu.cores ? cpu.cores + ' cores' : ''), _sparkline(col('cpu'))));
+    if (mem.percent != null) tiles.push(tile('Memory', mem.percent + '%', mem.total ? formatBytes(mem.used) + ' / ' + formatBytes(mem.total) : '', _sparkline(col('mem'))));
+    if (cpu.loadavg) tiles.push(tile('Load (1m)', cpu.loadavg[0], cpu.cores ? 'of ' + cpu.cores + ' cores' : '', _sparkline(col('load'))));
     if (m.host && m.host.uptime != null) tiles.push(tile('Uptime', _fmtUptime(m.host.uptime), ''));
-    if (net && (net.rxRate != null || net.txRate != null)) tiles.push(tile('Network', '↓ ' + _fmtRate(net.rxRate), '↑ ' + _fmtRate(net.txRate)));
-    if (m.temp != null) tiles.push(tile('Temperature', m.temp + '°C', ''));
-    // Neutral: live gauges never depend on the retention stack; history is the upgrade.
-    const hist = `<span class="hp-hist" title="Live gauges work with no extra services. Telegraf + InfluxDB add history &amp; graphs (Advanced).">History: live-only</span>`;
+    if (net && (net.rxRate != null || net.txRate != null)) tiles.push(tile('Network', '↓ ' + _fmtRate(net.rxRate), '↑ ' + _fmtRate(net.txRate), _sparkline(col('rx'))));
+    if (m.temp != null) tiles.push(tile('Temperature', m.temp + '°C', '', _sparkline(col('temp'))));
+    // History indicator: "live-only" until the ring has samples, then "last N".
+    const hist = hs.length >= 2
+        ? `<span class="hp-hist" title="On-box history — the server samples itself. Telegraf + InfluxDB add long retention &amp; fleet graphs (Advanced).">History: last ${hs.length} samples</span>`
+        : `<span class="hp-hist" title="Live gauges work with no extra services. History fills in as the box runs; Telegraf + InfluxDB add long retention (Advanced).">History: live-only</span>`;
     return `<div class="hp-sys"><div class="hp-sys-h"><span class="hp-sys-t">System</span>${hist}</div><div class="hp-tiles">${tiles.join('')}</div></div>`;
 }
 
@@ -3992,6 +4018,7 @@ const _HEALTH_CSS = `<style>
 .hp-tile-v{font-weight:800;font-size:1.25rem;font-variant-numeric:tabular-nums;line-height:1.1}
 .hp-tile-l{color:var(--text-muted,#aab);font-size:.78rem;margin-top:.15rem;text-transform:uppercase;letter-spacing:.03em}
 .hp-tile-s{color:var(--text-muted,#8a8f98);font-size:.76rem;margin-top:.2rem;font-variant-numeric:tabular-nums}
+.hp-spark{display:block;width:100%;height:22px;margin-top:.35rem;color:var(--accent,#e0603a);opacity:.85;overflow:visible}
 </style>`;
 
 // Change the download focus (Settings → Downloads & Priorities) → curation weights.
@@ -6248,7 +6275,7 @@ function renderCommunity() {
     html += `<div class="detail-section" style="margin-top:2rem"><h3>Accounts &amp; sign-up</h3>
         <table class="detail-table">
             <tr><td><strong>Message Boards</strong> (forum)</td><td>Self-service — ${forumReg ? `<a href="${forumReg}">create your account &rarr;</a>` : 'open the forum and click <strong>Register</strong>'} to sign up.</td></tr>
-            <tr><td><strong>Chat</strong></td><td>Host-provisioned login (IRC has no self-signup). ${adminOr}<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/services/chat.sh adduser &lt;name&gt;</div></td></tr>
+            <tr><td><strong>Chat</strong></td><td>Open — just pick a nickname at Chat and join. No account needed. Type <code>/list</code> to see channels, <code>/join #name</code> to make one. (Operators can require per-user logins with <code>VALARK_CHAT_PUBLIC=0</code>.)</td></tr>
             <tr><td><strong>Mail</strong></td><td>Host-provisioned mailbox — one step creates the login + IMAP account. ${adminOr}<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/services/mail.sh adduser &lt;name&gt;</div>Then sign in at Mail, or point any mail app at this host (IMAP + submission).</td></tr>
             <tr><td><strong>Files &amp; Pastebin</strong></td><td>One shared, access-gated instance — no per-user signup. The host shares the access code:<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/services/paste.sh creds</div></td></tr>
         </table>`;

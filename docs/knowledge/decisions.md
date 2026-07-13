@@ -6,6 +6,35 @@ later). See [README](README.md).
 
 ---
 
+## 2026‑07 — Community chat is open (no-login) by default
+- **Context:** on the real box a visitor opening `/app/chat/` hit The Lounge's **private-mode login
+  wall with no way to create an account** (accounts were host-only, via `thelounge add`) — chat was
+  effectively unusable without shell access. Plus ngIRCd's default `MaxNickLength=9` rejected
+  ordinary names ("nickname too long"), and there was only one empty room.
+- **Decision:** default chat to **public / no-login** (`VALARK_CHAT_PUBLIC=1`) — pick a nickname and
+  join. Val Ark's reverse proxy + Use Mode already gate *who* reaches `/app/chat/`, so The Lounge
+  needn't re-auth. Operators wanting per-user logins + persistent history set `VALARK_CHAT_PUBLIC=0`.
+  Also: `MaxNickLength=30`, starter channels (`#valark #general #help #random`), a MOTD teaching
+  `/list` + `/join`, an ark-themed leave message, and an idempotent start (real pid + port fallback).
+- **Why:** the appliance principle is "it just works" — a trusted-LAN community box should let people
+  in with zero friction, not gate casual chat behind account provisioning. `COMMUNITY_ACCOUNTS.chat`
+  tracks the mode (`open`↔`host`) so the account panel and `adduser` stay correct either way.
+- **Proven on the deployed ARM64 box** (not just CI): a 20-char nick registers, `/list` shows the
+  channels, `/join` creates one, repeat `start` is a no-op. Real-box verification caught what the
+  green test suite didn't — the login wall, the nick limit, the write-once config.
+
+## 2026‑07 — Versioning re-baselined to honest pre‑1.0 (0.1.x)
+- **Context:** early releases had jumped to a 1.x line (v1.0.0–v1.5.0), which implies a real,
+  supported 1.0 user release we are nowhere near.
+- **Decision:** we are **pre‑1.0**. Deleted the premature v1.0.0–v1.5.0 tags + GitHub releases
+  (nobody depended on them) and re-baselined to **0.1.x**; the Phase 6 release (Health UX + live
+  metrics) is **0.1.7**. The app version now has a single source of truth — the repo‑root
+  `VERSION` file, read by `scripts/server.js` (`APP_VERSION`, served at `/api/health`).
+- **Rule going forward:** stay on **0.x** until there's a genuine, stable 1.0 user release; **bump
+  the `VERSION` file as part of each release** (the release-branch commit), so `/api/health` never
+  goes stale again. Don't reach for 1.0 by increment — it's a deliberate "this is ready for real
+  users" call.
+
 ## 2026‑07 — Reframe to a consumer appliance (scope‑first)
 - **Context:** Val Ark was a power‑user/CLI tool; the goal is a router‑app / health‑app
   experience for a non‑technical owner ("one big EASY button").
@@ -59,6 +88,26 @@ later). See [README](README.md).
   keys (git-ignored / auto-minted to 0600 state, PUBLIC repo); `scripts/services/grafana.sh` at
   `/app/grafana/` under Advanced (branch 3); fleet aggregation + SSE metrics push (later).
 
+## 2026‑07 — Metrics HISTORY is a zero-dep ring buffer (Phase 6b part 2)
+- A scout→3-design→judge **workflow** pitted InfluxDB-v2-Flux vs InfluxDB-v1-InfluxQL vs a
+  **zero-dep on-disk ring-buffer challenger**. The ring won (9/10): the server already produces
+  every datapoint via `getHostMetrics()`, so it **samples itself** into a capped
+  `state/metrics-history.jsonl` (~24h) and serves it at read-gated `GET /api/status/metrics/history`
+  — sparklines under the shipped System tiles with **NO service, NO token, NO npm dep, NO outbound
+  call**. Decisively, the ring is the ONLY path where sparklines render on a bare box/CI/VM (the
+  InfluxDB path shows nothing until ~1GB of daemons + token onboarding run) — consistent with the
+  live-first call above.
+- **Fixed a real bug found in the design:** `getHostMetrics()` mutated a single module-global
+  `_metricsPrev` for its two-sample deltas — the live endpoint and a sampler would contend over one
+  baseline. Refactored to `getHostMetrics(prev = _metricsPrev)` returning the fresh counters as a
+  non-enumerable `_sample` (never serialized); the live endpoint and the sampler each keep their OWN
+  baseline. The always-on server is the SINGLE writer (like `heal-events.jsonl`); `loop.sh` never
+  touches this file. `?window` is allowlist-mapped to a fixed point cap (never a path/slice index).
+- **InfluxDB/Telegraf/Grafana are the deferred, opt-in Advanced/fleet upgrade** — grafted onto the
+  SAME endpoint later under an allowlisted `?source=influx`, for long retention + cross-node rollup
+  (the genuine InfluxDB payoff a single appliance may not need yet). That branch carries the
+  injection/SSRF-sensitive `queryInflux()` passthrough → its own adversarial review.
+
 ## 2026‑07 — Health & Repairs page (roadmap Phase 6, part 1 — self-heal UX)
 - Shipped the **Health/Repairs UX** first (metrics stack is a separate branch): a `#/health`
   page with **strict green/yellow/red** per-component cards, **fault attribution** (drive / this
@@ -66,7 +115,7 @@ later). See [README](README.md).
   [errors-selfheal.md](../design/errors-selfheal.md) to the letter.
 - **Data flows from reports the loop already should have produced.** `verify.sh` now serialises
   each functional check into `verify.json` as `checks[]` (`{status, comp, label}`); `loop.sh`
-  now actually **writes `health.json`** (a long-standing log line promised a file nothing wrote)
+  now actually **writes `selfheal.json`** (a long-standing log line promised a file nothing wrote)
   + an append-only, capped **`heal-events.jsonl`** feed of genuine repairs. `GET
   /api/status/health` (read-gated) composes them; the **UI computes the component list
   client-side** (`computeComponents()`) from those + the live disk/services/kiwix status the

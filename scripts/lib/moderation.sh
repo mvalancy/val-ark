@@ -100,7 +100,23 @@ _mod_native_tools() {
 }
 _mod_find_bin() { find "$(_mod_native_tools)/llama-cpp" -name "$1" -type f -perm -u+x 2>/dev/null | head -1; }
 
-# --- run the text classifier (Llama-Guard) → echo "safe"/"unsafe"/"" ----------
+# Reduce a classifier's RAW output to a verdict, UNSAFE-WINS + fail-closed on ambiguity.
+# A small general VLM often answers in prose, and "safe" is a substring of "not safe"
+# (NSFW = "not safe for work") — so a naive first-token grep would downgrade an unsafe
+# verdict to allow. Instead: any unsafe/negated-safe/explicit signal → unsafe; a bare
+# 0..1 score passes through (future ONNX head); a clean whole-word "safe" → safe; any
+# other prose/empty → "" so the caller HOLDS. Erring toward unsafe/hold is the safe bias.
+_mod_parse_verdict() {
+    local low trimmed
+    low=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+    trimmed=$(printf '%s' "$low" | tr -d '[:space:]')
+    if printf '%s' "$trimmed" | grep -qE '^(0(\.[0-9]+)?|1(\.0+)?)$'; then echo "$trimmed"; return; fi
+    if printf '%s' "$low" | grep -qE 'unsafe|nsfw|not safe|not appropriate|inappropriate|explicit|nudity|nude|sexual|pornograph|porn'; then echo unsafe; return; fi
+    if printf '%s' "$low" | grep -qw 'safe'; then echo safe; return; fi
+    # ambiguous / empty → emit nothing → mod_decide holds
+}
+
+# --- run the text classifier (Llama-Guard) → echo RAW output (parsed by caller) ---
 _mod_run_text() {
     local f="$1" bin model out
     bin="$(_mod_find_bin llama-cli)"; [ -x "$bin" ] || return 3
@@ -111,10 +127,10 @@ _mod_run_text() {
     out=$(timeout "$MOD_TIMEOUT" "$bin" -m "$model" -p "Task: classify the following user content as safe or unsafe.
 Content: ${content}
 Answer only: safe or unsafe." -n 16 -st -no-cnv --no-warmup </dev/null 2>/dev/null) || return 4
-    printf '%s' "$out" | tr '[:upper:]' '[:lower:]' | grep -oE 'unsafe|safe' | head -1
+    printf '%s' "$out"
 }
 
-# --- run the image classifier (tiny VLM) → echo "safe"/"unsafe"/"" ------------
+# --- run the image classifier (tiny VLM) → echo RAW output (parsed by caller) ------
 _mod_run_image() {
     local f="$1" bin model mmproj out
     bin="$(_mod_find_bin llama-mtmd-cli)"; [ -x "$bin" ] || return 3
@@ -124,7 +140,7 @@ _mod_run_image() {
     out=$(timeout "$MOD_TIMEOUT" "$bin" -m "$model" --mmproj "$mmproj" --image "$f" \
         -p "Is this image sexual, nude, or explicit? Answer only: unsafe or safe." \
         -n 8 -st -no-cnv --no-warmup </dev/null 2>/dev/null) || return 4
-    printf '%s' "$out" | tr '[:upper:]' '[:lower:]' | grep -oE 'unsafe|safe' | head -1
+    printf '%s' "$out"
 }
 
 # --- the check subcommand -----------------------------------------------------
@@ -132,8 +148,8 @@ mod_check() {
     local file="" kind="auto" sens="balanced"
     while [ $# -gt 0 ]; do
         case "$1" in
-            --kind) kind="${2:-auto}"; shift 2 ;;
-            --sensitivity) sens="${2:-balanced}"; shift 2 ;;
+            --kind) [ $# -ge 2 ] || _mod_emit hold "missing --kind value" null unknown; kind="$2"; shift 2 ;;
+            --sensitivity) [ $# -ge 2 ] || _mod_emit hold "missing --sensitivity value" null unknown; sens="$2"; shift 2 ;;
             -) file="-"; shift ;;
             *) file="$1"; shift ;;
         esac
@@ -162,20 +178,24 @@ mod_check() {
     esac
     [ "$kind" = "image" ] || [ "$kind" = "text" ] || _mod_emit hold "unsniffable type" null unknown
 
-    # Test/stub hook: a fake runner that echoes a verdict/score on stdout.
-    local verdict rc
+    # Test/stub hook: a fake runner emits the classifier's RAW stdout (a verdict word,
+    # a sentence, or a score) — parsed identically to a real model below.
+    local raw rc
     if [ -n "${VALARK_MODERATION_CMD:-}" ]; then
-        verdict=$(timeout "$MOD_TIMEOUT" "$VALARK_MODERATION_CMD" "$kind" "$file" 2>/dev/null); rc=$?
+        raw=$(timeout "$MOD_TIMEOUT" "$VALARK_MODERATION_CMD" "$kind" "$file" 2>/dev/null); rc=$?
         [ "$rc" -eq 0 ] || _mod_emit hold "runner exit $rc" null "$kind"
     else
-        if [ "$kind" = "image" ]; then verdict=$(_mod_run_image "$file"); rc=$?
-        else verdict=$(_mod_run_text "$file"); rc=$?; fi
+        if [ "$kind" = "image" ]; then raw=$(_mod_run_image "$file"); rc=$?
+        else raw=$(_mod_run_text "$file"); rc=$?; fi
         # rc 3 = no binary/model (fail closed), rc 4 = timeout/error (fail closed)
         [ "$rc" -eq 3 ] && _mod_emit hold "no classifier available" null "$kind"
         [ "$rc" -ne 0 ] && _mod_emit hold "classifier error" null "$kind"
     fi
 
-    local decision; decision="$(mod_decide "$verdict" "$sens")"
+    # Reduce raw output to a verdict (UNSAFE-WINS, fail-closed on ambiguity), then decide.
+    local verdict decision
+    verdict="$(_mod_parse_verdict "$raw")"
+    decision="$(mod_decide "$verdict" "$sens")"
     case "$decision" in
         allow) _mod_emit allow "clean" null "$kind" ;;
         block) _mod_emit block "flagged ${verdict}" null "$kind" ;;

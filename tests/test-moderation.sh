@@ -78,6 +78,30 @@ chmod +x "$T"/stub_*
 r=$(VALARK_MODERATION_TIMEOUT=1 VALARK_MODERATION_CMD="$T/stub_hang" rc check "$T/txt" --kind text)
 [ "$r" = 2 ] && pass || fail "stub that hangs past timeout → hold (got $r)"
 
+# --- 4b. PROSE fail-open guard (adversarial-review finding): a VLM answering in a
+#        sentence must NOT downgrade an unsafe verdict to allow. "not safe for work"
+#        contains the substring "safe" but is UNSAFE — must block, never allow.
+cat > "$T/stub_prose_unsafe" <<'EOF'
+#!/bin/bash
+echo "This image is not safe for work."
+EOF
+cat > "$T/stub_prose_ambiguous" <<'EOF'
+#!/bin/bash
+echo "The picture shows a landscape at sunset with mountains."
+EOF
+chmod +x "$T"/stub_prose_*
+r=$(VALARK_MODERATION_CMD="$T/stub_prose_unsafe" rc check "$T/img" --kind image)
+[ "$r" = 1 ] && pass || fail "'not safe for work' prose must BLOCK, never allow (got exit $r)"
+[ "$(VALARK_MODERATION_CMD="$T/stub_prose_unsafe" rc check "$T/img" --kind image)" != 0 ] && pass || fail "unsafe prose must NEVER allow (exit 0)"
+r=$(VALARK_MODERATION_CMD="$T/stub_prose_ambiguous" rc check "$T/img" --kind image)
+[ "$r" = 2 ] && pass || fail "ambiguous prose (no safe/unsafe verdict) must HOLD (got exit $r)"
+
+# --- 4c. dangling flag as final arg must NOT hang, and must hold (adversarial finding)
+r=$(timeout 5 bash "$MOD" check "$T/txt" --kind >/dev/null 2>&1; echo $?)
+[ "$r" = 2 ] && pass || fail "dangling --kind must hold without hanging (got $r; 124=timeout/hang)"
+r=$(timeout 5 bash "$MOD" check "$T/txt" --sensitivity >/dev/null 2>&1; echo $?)
+[ "$r" = 2 ] && pass || fail "dangling --sensitivity must hold without hanging (got $r)"
+
 # --- 5. over-size cap → hold (never OOM/allow) --------------------------------
 head -c 1024 /dev/zero > "$T/big"
 r=$(VALARK_MODERATION_MAX_BYTES=100 VALARK_MODERATION_CMD="$T/stub_safe" rc check "$T/big" --kind text)

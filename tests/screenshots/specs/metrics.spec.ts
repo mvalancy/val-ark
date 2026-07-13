@@ -21,8 +21,9 @@ test.describe('Val Ark Health — live System metrics', () => {
     await expect(page.locator('.hp-tile', { hasText: 'Memory' })).toContainText('%');
     await expect(page.locator('.hp-tile', { hasText: 'Uptime' })).toBeVisible();
 
-    // Neutral history indicator — the retention stack is optional and not present here.
-    await expect(page.locator('.hp-hist')).toContainText('live-only');
+    // History indicator: "live-only" on a fresh box, or "last N" once the server's own
+    // ring buffer has self-filled (the long-running :3001 server may have samples).
+    await expect(page.locator('.hp-hist')).toContainText(/live-only|last \d+/);
 
     // Force a second sample so the CPU% delta populates, then assert a real percentage.
     await page.waitForTimeout(1200);
@@ -33,6 +34,14 @@ test.describe('Val Ark Health — live System metrics', () => {
     await expect(page.locator('.hp-tile', { hasText: 'Processor' })).toContainText('%');
 
     expect(responses.every(s => s === 200)).toBeTruthy();
+  });
+
+  test('metrics history endpoint is 200 {source:ring} with no daemon', async ({ request }) => {
+    const resp = await request.get(BASE_URL + '/api/status/metrics/history');
+    expect(resp.status()).toBe(200);              // never 500, no InfluxDB present
+    const d = await resp.json();
+    expect(d.source).toBe('ring');
+    expect(Array.isArray(d.series)).toBeTruthy();
   });
 
   test('adds a System load card that is healthy (never red) on an idle box', async ({ page }) => {

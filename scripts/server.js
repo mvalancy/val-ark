@@ -974,11 +974,23 @@ function handleAPI(req, res, urlPath) {
                 // functional-verify per-check results (verify.json), the timestamped
                 // heal-events feed, and Safe-Mode state. Read-gated like all /api/status.
                 return sendJSON(res, req, getHealthDetail());
-            case '/api/status/metrics':
+            case '/api/status/metrics': {
                 // Live host gauges for the Health page's System tiles — pure local reads
                 // (/proc + os + cached disk), no external service, never throws. Read-gated
                 // by the /api/status/ prefix (reveals host load), same class as .../disk.
-                return sendJSON(res, req, getHostMetrics());
+                const m = getHostMetrics();          // uses + updates the live baseline
+                _metricsPrev = m._sample || _metricsPrev;
+                return sendJSON(res, req, m);
+            }
+            case '/api/status/metrics/history': {
+                // Sparkline history from the zero-dep on-disk ring buffer (the server samples
+                // itself; no daemon/token/outbound call). In-memory read; ?window is
+                // allowlist-mapped to a fixed cap. Empty on a fresh box → 200 {series:[]},
+                // never 500. Read-gated by the /api/status/ prefix like the live endpoint.
+                let win = null;
+                try { win = new URL(req.url, 'http://localhost').searchParams.get('window'); } catch (_) {}
+                return sendJSON(res, req, getMetricsHistory(win));
+            }
             case '/api/auth/status':
                 // Read-only: is an admin set, which Use Mode, is this caller the
                 // trusted box/localhost (`trusted`) and are they an authenticated
@@ -1552,7 +1564,12 @@ function _readTemp() {
         return max != null ? Math.round(max * 10) / 10 : null;
     } catch (_) { return null; }
 }
-function getHostMetrics() {
+// prev = the caller's previous counter sample (defaults to the live endpoint's
+// _metricsPrev). Computes CPU%/net-rate deltas against `prev` and returns the fresh
+// counters as a NON-enumerable out._sample (never serialized) so each caller — the
+// live endpoint and the history sampler — keeps its OWN baseline and they can't
+// contend over one shared global.
+function getHostMetrics(prev = _metricsPrev) {
     const os = require('os');
     const now = Date.now();
     const out = { ts: new Date().toISOString(), source: 'live' };
@@ -1570,8 +1587,8 @@ function getHostMetrics() {
             const idle = (parts[3] || 0) + (parts[4] || 0);
             const total = parts.reduce((a, b) => a + (b || 0), 0);
             statNow = { idle, total };
-            if (_metricsPrev.stat) {
-                const dt = total - _metricsPrev.stat.total, di = idle - _metricsPrev.stat.idle;
+            if (prev.stat) {
+                const dt = total - prev.stat.total, di = idle - prev.stat.idle;
                 if (dt > 0) cpuPercent = Math.max(0, Math.min(100, Math.round((1 - di / dt) * 100)));
             }
         }
@@ -1600,10 +1617,10 @@ function getHostMetrics() {
         }
         if (seen) {
             netNow = { rx, tx };
-            if (_metricsPrev.net && _metricsPrev.ts) {
-                const secs = (now - _metricsPrev.ts) / 1000;
+            if (prev.net && prev.ts) {
+                const secs = (now - prev.ts) / 1000;
                 if (secs > 0) {
-                    const drx = rx - _metricsPrev.net.rx, dtx = tx - _metricsPrev.net.tx;
+                    const drx = rx - prev.net.rx, dtx = tx - prev.net.tx;
                     rxRate = drx >= 0 ? Math.round(drx / secs) : null;
                     txRate = dtx >= 0 ? Math.round(dtx / secs) : null;
                 }
@@ -1614,8 +1631,69 @@ function getHostMetrics() {
 
     out.temp = _readTemp();
 
-    _metricsPrev = { stat: statNow, net: netNow, ts: now };
+    Object.defineProperty(out, '_sample', { value: { stat: statNow, net: netNow, ts: now }, enumerable: false });
     return out;
+}
+
+// ---- Metrics history: a zero-dep on-disk ring buffer (default history layer) ----
+// The always-on server samples its OWN getHostMetrics() into a capped in-memory ring
+// (persisted to state/metrics-history.jsonl for cross-restart continuity) and serves it
+// at GET /api/status/metrics/history for the Health page's sparklines. No daemon, no
+// token, no npm dep, no outbound call — works on a bare box. InfluxDB/Telegraf are a
+// deferred, opt-in Advanced/fleet upgrade grafted onto the same endpoint later.
+const _METRICS_RING_CAP = 2880;                 // ~24h at the default 30s cadence
+const _METRICS_HISTORY_FILE = path.join(STATE_DIR, 'metrics-history.jsonl');
+let _metricsRing = [];
+let _samplerPrev = { stat: null, net: null, ts: 0 };   // the sampler's OWN baseline
+let _ringPersistedAt = 0;
+
+function _loadMetricsRing() {
+    try {
+        const raw = fs.readFileSync(_METRICS_HISTORY_FILE, 'utf8').trim();
+        if (raw) _metricsRing = raw.split('\n').slice(-_METRICS_RING_CAP)
+            .map(l => { try { return JSON.parse(l); } catch (_) { return null; } })
+            .filter(r => r && typeof r.t === 'number');
+    } catch (_) { /* absent on a fresh box — that's the normal case */ }
+}
+// Sample once: PROC/os-only (NO getDiskStatus/df — dodges the 10s disk cache + stale-NFS
+// hang), append a compact row, cap in memory, atomically persist. Never throws.
+function sampleMetricsToRing() {
+    try {
+        const m = getHostMetrics(_samplerPrev);
+        _samplerPrev = m._sample || _samplerPrev;
+        const cpu = m.cpu || {}, mem = m.mem || {}, net = m.net || {};
+        _metricsRing.push({
+            t: Date.now(),
+            cpu: (typeof cpu.percent === 'number') ? cpu.percent : null,
+            mem: (typeof mem.percent === 'number') ? mem.percent : null,
+            load: (cpu.loadavg && cpu.loadavg.length) ? cpu.loadavg[0] : null,
+            rx: (net && typeof net.rxRate === 'number') ? net.rxRate : null,
+            tx: (net && typeof net.txRate === 'number') ? net.txRate : null,
+            temp: (typeof m.temp === 'number') ? m.temp : null,
+        });
+        if (_metricsRing.length > _METRICS_RING_CAP) _metricsRing = _metricsRing.slice(-_METRICS_RING_CAP);
+        // Throttle disk writes to ~ every 5th sample; atomic tmp+rename.
+        const now = Date.now();
+        if (now - _ringPersistedAt >= 4 * Number(cfg('VALARK_METRICS_SAMPLE_MS', '30000'))) {
+            _ringPersistedAt = now;
+            const tmp = _METRICS_HISTORY_FILE + '.tmp';
+            fs.writeFileSync(tmp, _metricsRing.map(r => JSON.stringify(r)).join('\n') + '\n');
+            fs.renameSync(tmp, _METRICS_HISTORY_FILE);
+        }
+    } catch (_) { /* read-only/absent STATE_DIR → skip this tick, never crash the server */ }
+}
+// ?window → a fixed point cap (allowlist-mapped; the client string never indexes/slices
+// or reaches a path). Down-sample to at most ~150 points for a compact sparkline.
+const _METRICS_WINDOWS = { hour: 120, '6h': 720, day: _METRICS_RING_CAP };
+function getMetricsHistory(window) {
+    const cap = _METRICS_WINDOWS[window] || _METRICS_WINDOWS.hour;
+    let rows = _metricsRing.slice(-cap);
+    const MAX_POINTS = 150;
+    if (rows.length > MAX_POINTS) {
+        const step = Math.ceil(rows.length / MAX_POINTS);
+        rows = rows.filter((_, i) => i % step === 0);
+    }
+    return { source: 'ring', window: (_METRICS_WINDOWS[window] ? window : 'hour'), count: rows.length, series: rows };
 }
 
 // "Run self-heal now": kick the maintenance loop's own fixers (loop.sh once) — repairs
@@ -2173,6 +2251,12 @@ function onFirstBind() {
     // (catches a late-binding library and a died instance — see reconcileKiwix).
     startKiwix();
     setInterval(reconcileKiwix, 30000);
+    // Metrics-history ring buffer: the always-on server is the SINGLE writer. Load any
+    // prior samples, then self-sample on a cadence (never faster than the 10s disk cache).
+    _loadMetricsRing();
+    const _sampleMs = Math.max(10000, Number(cfg('VALARK_METRICS_SAMPLE_MS', '30000')) || 30000);
+    setInterval(sampleMetricsToRing, _sampleMs);
+    setTimeout(sampleMetricsToRing, 2000);   // seed a baseline shortly after boot
 }
 
 let boundPorts = 0;

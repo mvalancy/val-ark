@@ -1738,8 +1738,6 @@ function repairInFlight() { return !!_repairProc || (Date.now() - _repairStarted
 const MOD_SCRIPT = path.join(__dirname, 'lib', 'moderation.sh');
 const MOD_CHECK_MAX = Number(process.env.VALARK_MODERATION_MAX_BYTES) || 25 * 1024 * 1024;  // matches moderation.sh MOD_MAX_BYTES
 const MOD_TIMEOUT_S = Number(process.env.VALARK_MODERATION_TIMEOUT) || 150;
-const MOD_KINDS = new Set(['text', 'image', 'document', 'auto']);
-const MOD_SENS = new Set(['strict', 'balanced', 'lenient']);
 // Where screened bytes are staged. A dedicated 0700 dir under <state>; each scan file is
 // 0600, random-named, realpath-confined, and unlinked the instant the runner returns.
 const MOD_SCAN_DIR = path.join(STATE_DIR, 'moderation', 'scan');
@@ -1808,18 +1806,40 @@ function getModerationStatus() {
     };
 }
 
+// Boot-time sweep of leaked scan temps (a process killed between staging and unlink
+// leaves screened content at rest). Only runs at startup, when nothing is in-flight, so
+// removing every entry is safe. Best-effort + quiet: a missing dir is the common case.
+function sweepModerationScan() {
+    let entries;
+    try { entries = fs.readdirSync(MOD_SCAN_DIR); } catch (_) { return; }   // no dir → nothing to sweep
+    let swept = 0;
+    for (const name of entries) {
+        try { fs.unlinkSync(path.join(MOD_SCAN_DIR, name)); swept++; } catch (_) {}
+    }
+    if (swept) console.log(`[moderation] swept ${swept} stale scan temp(s) at startup`);
+}
+
 // Reduce a runner's stdout+exit to a verdict object, FAIL-CLOSED. Anything we can't
 // parse into a real decision string → hold (never allow). The temp is always unlinked.
 function _runModeration(buf, kind, sens, cb) {
     let tmp = null;
     try {
-        fs.mkdirSync(MOD_SCAN_DIR, { recursive: true, mode: 0o700 });
-        // Realpath-confine: resolve symlinks and require the staged file to sit DIRECTLY
-        // inside the resolved scan dir. Defeats a symlinked <state>/moderation/scan that
-        // could otherwise redirect the write, and the random 0600 name defeats collisions.
-        const realDir = fs.realpathSync(MOD_SCAN_DIR);
-        const cand = path.join(realDir, crypto.randomBytes(18).toString('hex') + '.bin');
-        if (path.dirname(path.resolve(cand)) !== realDir) return cb({ decision: 'hold', reason: 'quarantine path error' });
+        // Confine the staged file against the INTENDED base, not against itself. STATE_DIR
+        // is legitimately a symlink into the data disk, so resolve it; but the `moderation`
+        // and `scan` components must NOT be symlinks (a co-resident same-uid process — or a
+        // fleet node over the NFS-exported state tree — could otherwise plant one to redirect
+        // our write, and up to 25 MiB of attacker bytes, outside quarantine). Reject a
+        // symlinked component, then require the resolved scan dir to equal the expected path.
+        const stateReal = fs.realpathSync(STATE_DIR);
+        const modDir = path.join(stateReal, 'moderation');
+        const scanDir = path.join(modDir, 'scan');
+        for (const d of [modDir, scanDir]) {
+            let st = null; try { st = fs.lstatSync(d); } catch (_) {}
+            if (st && st.isSymbolicLink()) return cb({ decision: 'hold', reason: 'quarantine path is a symlink' });
+        }
+        fs.mkdirSync(scanDir, { recursive: true, mode: 0o700 });
+        if (fs.realpathSync(scanDir) !== scanDir) return cb({ decision: 'hold', reason: 'quarantine path escaped <state>' });
+        const cand = path.join(scanDir, crypto.randomBytes(18).toString('hex') + '.bin');
         fs.writeFileSync(cand, buf, { mode: 0o600, flag: 'wx' });   // wx: never follow/clobber an existing node
         tmp = cand;
     } catch (_) {
@@ -1856,31 +1876,36 @@ function _runModeration(buf, kind, sens, cb) {
     });
 }
 
-// POST /api/moderation/check — screen the RAW request body (the bytes ARE the content;
-// query ?kind / ?sensitivity tune it). Its OWN size-capped reader, NOT readBody (that
-// caps at 64KB + JSON-parses). Always answers with a {decision} the caller can act on.
-// Gate stack (isLanOrTailnet + rateLimit + commissioned + auth-per-UseMode) already ran.
+// POST /api/moderation/check — screen the RAW request body (the bytes ARE the content).
+// Its OWN size-capped reader, NOT readBody (that caps at 64KB + JSON-parses). Always
+// answers with a {decision} the caller can act on. Gate stack (isLanOrTailnet + rateLimit
+// + commissioned + auth-per-UseMode) already ran.
+//
+// The caller does NOT get to weaken screening: the content TYPE is decided by magic bytes
+// inside moderation.sh (kind='auto'), never a client hint — a ?kind=text on image bytes
+// would otherwise route them to the text classifier (which can't see the image) and pass.
+// SENSITIVITY is the ADMIN's configured policy, never caller-tunable — a caller could
+// otherwise ask for 'lenient' and turn a score-based hold into an allow.
 function handleModerationCheck(req, res) {
     const cfg = commission.getModeration(STATE_DIR);
     // OFF = "no opinion", explicitly NOT allow-by-policy. Callers must not read a disabled
     // engine as approval; they get decision:'skip' + enabled:false and decide for themselves.
     if (!cfg.enabled) return sendJSON(res, req, { decision: 'skip', enabled: false, reason: 'moderation disabled' });
 
-    let kind = 'auto', sens = cfg.sensitivity;
-    try {
-        const q = new URL(req.url, 'http://localhost').searchParams;
-        if (MOD_KINDS.has(q.get('kind'))) kind = q.get('kind');
-        if (MOD_SENS.has(q.get('sensitivity'))) sens = q.get('sensitivity');
-    } catch (_) {}
+    const kind = 'auto', sens = cfg.sensitivity;   // type = magic bytes; sensitivity = admin policy
 
     const chunks = []; let size = 0, over = false, ended = false;
     req.on('data', (c) => {
         if (over || ended) return;
         size += c.length;
-        if (size > MOD_CHECK_MAX) {   // fail-closed on overflow: hold, 413, drop the stream
+        if (size > MOD_CHECK_MAX) {   // fail-closed on overflow: hold (413), stop buffering
             over = true;
+            // Let the 413 flush before tearing down the shared TCP socket — a synchronous
+            // req.destroy() here can truncate the response so the client sees ECONNRESET
+            // instead of the clean hold. Further 'data' is discarded (over-guard above), so
+            // memory stays bounded even if the client keeps uploading until we destroy.
+            res.on('finish', () => { try { req.destroy(); } catch (_) {} });
             sendJSON(res, req, { decision: 'hold', reason: 'content exceeds size cap' }, 413);
-            req.destroy();
             return;
         }
         chunks.push(c);
@@ -2457,6 +2482,10 @@ function onFirstBind() {
     if (started) return;
     started = true;
     startHttps();
+    // Sweep the moderation staging dir: scan temps are strictly ephemeral (unlinked the
+    // instant the runner returns), so anything present at boot leaked when a prior process
+    // was killed mid-check. Remove it — each file holds screened user content at rest.
+    sweepModerationScan();
     // Warm the cache on startup
     getToolsStatus();
     getContentStatus();

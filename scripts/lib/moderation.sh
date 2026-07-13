@@ -203,12 +203,34 @@ mod_check() {
     esac
 }
 
+# --- readiness probe: can we actually classify? (NO inference run) ------------
+# Reports which classifier(s) resolve in the mirror so the status card can tell the
+# admin whether "enabled" means real screening or fail-closed holding. Pure presence
+# checks — never loads a model. Exit 0 if any classifier is ready, else 1.
+mod_ready() {
+    local textbin textmodel imgbin imgmodel imgmm text=false image=false
+    textbin="$(_mod_find_bin llama-cli)"
+    textmodel=$(find "${MODELS_DIR:-}/safety" -iname '*guard*.gguf' -size +10M 2>/dev/null | head -1)
+    imgbin="$(_mod_find_bin llama-mtmd-cli)"
+    imgmodel=$(find "${MODELS_DIR:-}/vlm" -iname '*.gguf' ! -iname '*mmproj*' -size +10M 2>/dev/null | head -1)
+    imgmm=$(find "${MODELS_DIR:-}/vlm" -iname '*mmproj*.gguf' 2>/dev/null | head -1)
+    [ -x "$textbin" ] && [ -n "$textmodel" ] && text=true
+    [ -x "$imgbin" ] && [ -n "$imgmodel" ] && [ -n "$imgmm" ] && image=true
+    local ready=false reason="no classifier model mirrored"
+    { [ "$text" = true ] || [ "$image" = true ]; } && { ready=true; reason=ok; }
+    # A test/dev stub is always ready (it stands in for both classifiers).
+    [ -n "${VALARK_MODERATION_CMD:-}" ] && { ready=true; text=true; reason=stub; }
+    printf '{"ready":%s,"text":%s,"image":%s,"reason":"%s"}\n' "$ready" "$text" "$image" "$reason"
+    [ "$ready" = true ]
+}
+
 # --- CLI dispatch (sourceable: only runs when executed directly) --------------
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     case "${1:-}" in
         check)   shift; mod_check "$@" ;;
         decide)  shift; mod_decide "$@" ;;   # for tests: decide <signal> <sensitivity>
         sniff)   shift; mod_sniff_kind "$@" ;;
+        ready)   shift; mod_ready "$@" ;;     # status probe: is a classifier installed?
         *) echo "usage: moderation.sh check <file|-> [--kind image|text|auto] [--sensitivity strict|balanced|lenient]" >&2; exit 2 ;;
     esac
 fi

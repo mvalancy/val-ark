@@ -276,6 +276,39 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   throws. Don't shell out per request — reuse the 10s-cached `getDiskStatus()` (its `df` can hang
   on a stale NFS mount) and `fs.readFileSync('/proc/...')` for the rest.
 
+## Content moderation (Phase 7)
+
+- **A permissive WRAPPER can re-open a fail-closed CORE** (adversarial-review finding, **high**).
+  `moderation.sh` deliberately decides content type by **magic bytes**, never the client's hint —
+  but the first cut of `POST /api/moderation/check` accepted a `?kind=`/`?sensitivity=` query
+  param and passed them through. `?kind=text` on image bytes routed them to the **text** classifier
+  (which can't see the image) → image screening bypassed → allow; `?sensitivity=lenient` turned a
+  score-based *hold* into an *allow*, below the admin's policy floor. **Rule: the web layer must
+  never let a caller *weaken* a safety decision.** Type is always server-side magic bytes
+  (`kind='auto'`); sensitivity is always the admin-configured `cfg.sensitivity`. When wrapping any
+  fail-closed core, audit every caller-supplied field for "can this loosen the verdict?"
+- **`realpath`-confine against the intended BASE, not against the resolved dir itself** (adversarial
+  finding, medium). `realDir = realpathSync(scanDir); if (path.dirname(cand) !== realDir) hold` is a
+  **tautology** — `cand = join(realDir, …)` so it always equals `realDir`; the check never fires and
+  a symlinked `<state>/moderation/scan` (planted by a same-uid service or an NFS-mesh peer) silently
+  redirects the write outside quarantine. Confine against `join(realpathSync(STATE_DIR),
+  'moderation','scan')`, `lstat`-reject symlinked path components, and require the resolved dir to
+  **equal the expected path**. (`STATE_DIR` is legitimately a symlink into the data disk → realpath
+  it; the components under it must not be.)
+- **Screened bytes are content at rest — sweep them.** The `check` endpoint stages the body to a
+  0600 temp under `<state>/moderation/scan` and unlinks on the runner's return; a process killed
+  mid-check leaks it. `sweepModerationScan()` clears the dir on startup (`onFirstBind`), when nothing
+  is in-flight. Also: `req.destroy()` right after `sendJSON(413)` on an over-cap body can reset the
+  shared socket before the response flushes → destroy on the response's `finish` event instead.
+- **The check endpoint reads its OWN raw body, not `readBody`.** `readBody` caps at 64KB and
+  JSON-parses; here the body *is* the content (up to 25MiB, `VALARK_MODERATION_MAX_BYTES`). It's
+  intercepted **after** the full POST gate stack (`isLanOrTailnet`+`rateLimitOk`+`boxCommissioned`+
+  auth-per-Use-Mode) but **before** `readBody(req).then(...)` consumes the stream. Fail-closed
+  everywhere: over-cap→413 hold, empty→hold, unparseable/spawn-fail/timeout→hold; a *disabled*
+  engine returns `decision:'skip'` (explicitly **not** allow-by-policy — callers must not treat it
+  as approval). Readiness for the status card is probed **async + cached** (`moderation.sh ready`
+  runs `find` over the mirror — never `spawnSync` it on the hot path or it blocks the event loop).
+
 ## Git / releases
 
 - **Don't retarget a PR across a rebase-merge divergence.** After a rebase-merge release, `main`

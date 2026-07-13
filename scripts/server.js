@@ -969,7 +969,7 @@ function handleAPI(req, res, urlPath) {
                 return sendJSON(res, req, active);
             }
             case '/api/status/health':
-                // Self-heal detail for the Health page: the loop's health.json snapshot
+                // Self-heal detail for the Health page: the loop's selfheal.json snapshot
                 // (space, verify tallies, link/asset counts, this-cycle repairs), the
                 // functional-verify per-check results (verify.json), the timestamped
                 // heal-events feed, and Safe-Mode state. Read-gated like all /api/status.
@@ -1499,7 +1499,7 @@ function readStateJson(name) {
 }
 function getHealthDetail() {
     const verify = readStateJson('verify.json');
-    const heal = readStateJson('health.json');
+    const heal = readStateJson('selfheal.json');   // loop.sh write_health (NOT librarian's health.json)
     let events = [];
     try {
         const raw = fs.readFileSync(path.join(STATE_DIR, 'heal-events.jsonl'), 'utf8').trim();

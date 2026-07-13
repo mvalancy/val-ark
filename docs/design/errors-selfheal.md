@@ -103,7 +103,7 @@ the existing repair logic exposed as a friendly page instead of a dead port
 - **Reports the loop already had — now actually written.** `verify.sh` serialises every
   functional check into `verify.json` as `checks[]` (`{status, comp, label}`, `comp` ∈
   library/apps/models/server/integrity/mesh) so the page can attribute faults per component.
-  `loop.sh` now **writes `health.json`** (a log line long promised it, but nothing wrote it):
+  `loop.sh` now **writes `selfheal.json`** (a log line long promised it, but nothing wrote it):
   the latest cycle's space/verify tallies + dead-link/missing-asset counts + this-cycle
   repairs, plus an append-only, 200-line-capped **`heal-events.jsonl`** feed of genuine repairs
   (a web-server restart, a service start). Both emitted from bash via tiny `_json_str`/`_hj_str`

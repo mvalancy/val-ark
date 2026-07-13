@@ -88,6 +88,29 @@ later). See [README](README.md).
   keys (git-ignored / auto-minted to 0600 state, PUBLIC repo); `scripts/services/grafana.sh` at
   `/app/grafana/` under Advanced (branch 3); fleet aggregation + SSE metrics push (later).
 
+## 2026‑07 — On-device moderation: fail-closed decision core first (Phase 7)
+- A scout→3-design→judge **workflow** designed Phase 7 (screen user uploads with the box's own AI,
+  offline). Key inversion it surfaced: **the model + inference is NOT the risky part** — text
+  (llama-cli + the already-mirrored Llama-Guard-3-8B) and image (llama-mtmd-cli + moondream2/SmolVLM)
+  run today via the exact `verify.sh` single-turn invocation. The **risky part is wiring to a
+  surface**: pre-store multipart interception in the zero-dep proxy would replace pipeProxy's
+  streaming `req.pipe`, break Range/resumability, risk OOM, add a hand-rolled multipart parser, and
+  open a scan-vs-store TOCTOU. So that is **deferred**.
+- **Branch order:** ship the fail-closed **decision core in isolation first** (`scripts/lib/moderation.sh`
+  + `test-moderation.sh`), adversarial-review it, then wire surfaces. `moderation.sh check <file> --kind
+  --sensitivity` → one JSON line + exit code (0 allow / 1 block / 2 hold); a pure `decide(signal,
+  sensitivity)` unit; type by **magic bytes** (never the client extension/Content-Type; SVG screened as
+  a script-bearing document); `VALARK_MODERATION_CMD` stub hook for tests.
+- **FAIL-CLOSED is the invariant** (same class as the Safe-Mode `useMode` fix): absent binary/model,
+  timeout, nonzero, unparseable stdout, or a NaN/out-of-range/unknown signal → **hold**, never a silent
+  allow. The common bare-box/CI/VM case has no model → that IS the fail-closed path (needs no inference).
+- **Deferred (own branches, each reviewed):** the real enforcement surfaces — a NodeBB post-store
+  quarantine sweep (highest-risk: open self-registration, plain-file uploads, no proxy surgery) then a
+  pre-store paste multipart intercept; the server endpoints (`/api/moderation/{check,queue,review}`,
+  `/api/status/moderation`) + the admin Safety card + Sensitivity slider; and a dedicated NSFW **ONNX**
+  head (Xenova/nsfw_image_detection) which needs a mirrored onnxruntime CLI/wheels — the mirrored ORT is
+  library-only/CPU-only today. NPU (.rknn on RK3588/UT2) later.
+
 ## 2026‑07 — Metrics HISTORY is a zero-dep ring buffer (Phase 6b part 2)
 - A scout→3-design→judge **workflow** pitted InfluxDB-v2-Flux vs InfluxDB-v1-InfluxQL vs a
   **zero-dep on-disk ring-buffer challenger**. The ring won (9/10): the server already produces

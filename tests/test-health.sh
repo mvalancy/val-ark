@@ -37,7 +37,7 @@ cat > "$T/wh.sh" <<'EOF'
 set -o pipefail
 export VAL_ARK_DATA="$VA"; export VALARK_STATE_DIR="$SD"
 . "$RT/scripts/lib/valark-env.sh"
-LINKREPORT="$STATE_DIR/linkcheck.txt"; HEALTH_JSON="$STATE_DIR/health.json"; HEAL_EVENTS_LOG="$STATE_DIR/heal-events.jsonl"
+LINKREPORT="$STATE_DIR/linkcheck.txt"; HEALTH_JSON="$STATE_DIR/selfheal.json"; HEAL_EVENTS_LOG="$STATE_DIR/heal-events.jsonl"
 HEAL_EVENTS=("restart|Refreshed the library server" "start|Started the web server")
 log(){ :; }
 _hj_str(){ local s="$1"; s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\t'/ }; s=${s//$'\n'/ }; s=${s//$'\r'/}; printf '"%s"' "$s"; }
@@ -53,7 +53,7 @@ VA="$ROOT" SD="$T/state" RT="$ROOT" bash "$T/wh.sh" >/dev/null 2>&1
           && h.verify && Array.isArray(h.repairs) && h.repairs.length===2
           && h.overall==="attention";   // a missing asset is an unresolved box fault
   process.exit(ok?0:1);
-' "$T/state/health.json" && pass || fail "write_health must emit a valid health.json (overall=attention on missing asset)"
+' "$T/state/selfheal.json" && pass || fail "write_health must emit a valid selfheal.json (overall=attention on missing asset)"
 if [ -f "$T/state/heal-events.jsonl" ]; then
     "$NODE" -e 'require("fs").readFileSync(process.argv[1],"utf8").trim().split("\n").forEach(l=>JSON.parse(l))' \
         "$T/state/heal-events.jsonl" && pass || fail "heal-events.jsonl must be valid JSONL"

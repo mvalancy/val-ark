@@ -16,9 +16,11 @@
 #   * Everything binds to ${VALARK_BIND} (default 0.0.0.0 = whole LAN; set
 #     VALARK_BIND=127.0.0.1 in .env to keep it host-only). It never reaches out.
 #   * The web client (The Lounge) listens ONLY on 127.0.0.1 — it is reachable
-#     from the LAN solely through the Val Ark reverse proxy, which can enforce
-#     its own access control. The Lounge itself requires per-user login; a
-#     first-run admin account is created automatically (see ADMIN setup below).
+#     from the LAN solely through the Val Ark reverse proxy, which enforces the
+#     box's access control (Use Mode). By default chat is PUBLIC/open: a visitor
+#     picks a nickname and joins — no login wall, no host-created account. Set
+#     VALARK_CHAT_PUBLIC=0 for per-user logins + persistent history (a first-run
+#     admin account is then created automatically; see ADMIN setup below).
 #
 # Data lives under the Val Ark data tree:
 #   ${STATE_DIR}/services/chat/{ngircd,thelounge,logs,run}
@@ -41,6 +43,14 @@ WEB_PORT="${VALARK_CHAT_WEB_PORT:-9000}"     # The Lounge web UI (localhost only
 # by default, so a LAN bind would accept unauthenticated connections).
 BIND="${VALARK_BIND:-127.0.0.1}"             # IRC bind address; honour VALARK_BIND
 NETWORK_NAME="${VALARK_CHAT_NETWORK:-Val Ark}"
+# Access mode. Default PUBLIC (open, no-login) chat: on a trusted-LAN community
+# appliance the point is that anyone who can reach the box can just pick a name and
+# talk — no host has to hand-create an account first (the old private-mode default
+# left visitors staring at a login wall with no way in). Val Ark's own reverse proxy
+# + Use Mode already gate WHO reaches /app/chat/, so The Lounge needn't re-auth.
+# Operators who want per-user logins + persistent history set VALARK_CHAT_PUBLIC=0.
+PUBLIC="${VALARK_CHAT_PUBLIC:-1}"
+case "$PUBLIC" in 1|true|yes|on|open) PUBLIC=1 ;; *) PUBLIC=0 ;; esac
 
 CHAT_HOME="${STATE_DIR}/services/chat"
 NGIRCD_HOME="${CHAT_HOME}/ngircd"
@@ -90,6 +100,13 @@ _is_running() {  # _is_running <pidfile>
     [ -f "$pf" ] || return 1
     pid="$(cat "$pf" 2>/dev/null)"
     [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+# The Lounge is "up" if its pidfile process is alive OR something is already
+# serving its port — so a stale/incorrect pidfile can never make start() spawn a
+# second instance that then fails to bind :${WEB_PORT}.
+_lounge_up() {
+    _is_running "$THELOUNGE_PID" && return 0
+    curl -fsS --max-time 3 "http://127.0.0.1:${WEB_PORT}/" >/dev/null 2>&1
 }
 
 ###############################################################################
@@ -181,13 +198,26 @@ _write_ngircd_conf() {
     # Bind to the LAN (or 127.0.0.1 if VALARK_BIND is set). NO uplinks defined.
     Listen = ${BIND}
     Ports = ${IRC_PORT}
-    MotdText = Welcome to the Val Ark offline IRC server. Be excellent to each other.
+    # Multi-line MOTD (each MotdText adds a line) — greet, and teach the basics so
+    # a first-timer isn't stuck in one empty room wondering what to do.
+    MotdText = Welcome aboard the Val Ark — offline community chat. Nothing here leaves the box.
+    MotdText = -----------------------------------------------------------------
+    MotdText = See all channels :  /list
+    MotdText = Join / create one:  /join #topic      (creates it if new; you become the op)
+    MotdText = Private (hidden)  :  /join #secret  then  /mode #secret +i     (invite-only)
+    MotdText =                      /invite nick #secret   to let someone in
+    MotdText = Set a topic       :  /topic #channel Your topic here
+    MotdText = Message a person  :  /msg nick hello
     PidFile = ${NGIRCD_PID}
 
 [Limits]
     MaxConnections = 0
     MaxConnectionsIP = 0
     MaxJoins = 0
+    # ngIRCd's default is 9 (classic IRC) — far too short, so ordinary names (and
+    # even The Lounge's own default nick) hit "nickname too long". 30 fits real
+    # names while staying within ngIRCd's compiled nick-length limit.
+    MaxNickLength = 30
 
 [Options]
     # No DNS / Ident lookups (offline box; keeps connects instant).
@@ -197,19 +227,42 @@ _write_ngircd_conf() {
     # Connections never relay outward: there are intentionally no [Server] sections.
     AllowRemoteOper = no
 
+# Starter channels so the server isn't one lonely room. They persist even when
+# empty and show up in /list; users /join any new #name to create their own.
+# Modes: t = topic settable by ops only, n = no messages from outside the channel.
 [Channel]
     Name = #valark
-    Topic = Val Ark community channel
+    Topic = Welcome aboard — start here. Type /list to see all channels, /join #name to make your own.
     Modes = tn
+
+[Channel]
+    Name = #general
+    Topic = General chat — everyone welcome
+    Modes = nt
+
+[Channel]
+    Name = #help
+    Topic = Questions about this Val Ark box and its apps
+    Modes = nt
+
+[Channel]
+    Name = #random
+    Topic = Off-topic — memes, music, whatever
+    Modes = nt
 EOF
 }
 
-# The Lounge: private mode (login required), bound to localhost for the proxy.
+# The Lounge config. Bound to localhost for the reverse proxy. Regenerated EVERY
+# start (backing up any prior file once) so the access mode actually applies on a
+# box that was configured under a different setting — the old write-once behaviour
+# meant a stale private-mode config could never switch to public, leaving LAN
+# visitors stuck at a login wall with no way to make an account.
 _write_thelounge_conf() {
     local cfg="${THELOUNGE_HOME}/config.js"
-    [ -f "$cfg" ] && return 0
     mkdir -p "$THELOUNGE_HOME"
-    log "Writing The Lounge config (private/login-required, localhost:${WEB_PORT}, reverse-proxy /app/chat/)..."
+    [ -f "$cfg" ] && cp -f "$cfg" "${cfg}.bak" 2>/dev/null || true
+    local public_val; [ "$PUBLIC" = 1 ] && public_val=true || public_val=false
+    log "Writing The Lounge config (public=${public_val}, localhost:${WEB_PORT}, reverse-proxy /app/chat/)..."
     cat > "$cfg" <<EOF
 "use strict";
 // Val Ark - The Lounge config. Generated by services/chat.sh.
@@ -219,21 +272,25 @@ module.exports = {
     port: ${WEB_PORT},
     bind: "127.0.0.1",
     reverseProxy: true,
-    public: false,            // private mode => every user must log in (auth required)
+    // public=true => open chat: a visitor just picks a nickname and joins (no
+    // account, no login wall). Val Ark's proxy + Use Mode already gate access.
+    // Set VALARK_CHAT_PUBLIC=0 for per-user logins + persistent history.
+    public: ${public_val},
     prefetch: false,          // offline box: never fetch link previews from the internet
     disableMediaPreview: true,
     lockNetwork: true,        // users cannot add arbitrary (internet) IRC networks
-    leaveMessage: "Val Ark offline IRC",
+    leaveMessage: "⚓ Sailing on — see you aboard the Val Ark",
     defaults: {
         name: "${NETWORK_NAME}",
         host: "127.0.0.1",    // local ngIRCd only
         port: ${IRC_PORT},
         tls: false,
         rejectUnauthorized: false,
-        nick: "valark-user",
+        nick: "sailor",
         username: "valark",
         realname: "Val Ark user",
-        join: "#valark"
+        // Land new arrivals in the welcome + general rooms so it never feels empty.
+        join: "#valark #general"
     },
     // Persistent history (the whole point of The Lounge): keep messages on disk.
     messageStorage: ["sqlite", "text"],
@@ -303,19 +360,23 @@ cmd_start() {
     fi
 
     # --- The Lounge (web UI) --------------------------------------------------
-    if _is_running "$THELOUNGE_PID"; then
-        log "The Lounge already running (pid $(cat "$THELOUNGE_PID"))."
+    if _lounge_up; then
+        log "The Lounge already running (127.0.0.1:${WEB_PORT})."
     else
         _build_thelounge || { warn "The Lounge not started (build needed)."; return 1; }
         _write_thelounge_conf
-        _ensure_admin
+        # Only private mode needs a pre-created login; public/open chat needs none.
+        [ "$PUBLIC" = 1 ] || _ensure_admin
         local node nodedir; node="$(_chat_node)"
         [ -n "$node" ] || { err "node not found; cannot start The Lounge"; return 1; }
         nodedir="$(dirname "$node")"
         log "Starting The Lounge web UI on 127.0.0.1:${WEB_PORT} (proxy at /app/chat/)..."
+        # nohup (NOT setsid) so $! is The Lounge's real PID → a correct pidfile, so
+        # start stays idempotent and stop kills the right process. </dev/null + output
+        # redirected to a file already detach it from this shell / the SSH session.
         ( cd "$THELOUNGE_SRC" \
             && THELOUNGE_HOME="$THELOUNGE_HOME" PATH="${nodedir}:$PATH" \
-               setsid nohup "$node" index.js start >"${LOG_DIR_CHAT}/thelounge.out" 2>&1 </dev/null &
+               nohup "$node" index.js start >"${LOG_DIR_CHAT}/thelounge.out" 2>&1 </dev/null &
             echo $! > "$THELOUNGE_PID" )
         disown 2>/dev/null || true
     fi
@@ -344,10 +405,12 @@ cmd_status() {
     local ng_state tl_state
     if _is_running "$NGIRCD_PID"; then ng_state="running (pid $(cat "$NGIRCD_PID"))"; else ng_state="stopped"; fi
     if _is_running "$THELOUNGE_PID"; then tl_state="running (pid $(cat "$THELOUNGE_PID"))"; else tl_state="stopped"; fi
+    local mode_desc; [ "$PUBLIC" = 1 ] && mode_desc="public (pick a nickname, no login)" || mode_desc="private (per-user login required)"
     cat <<EOF
 Val Ark IRC Chat
   ngIRCd (server)    : ${ng_state}   ${BIND}:${IRC_PORT}  (federation-free)
   The Lounge (web)   : ${tl_state}   127.0.0.1:${WEB_PORT}  (proxy: /app/chat/)
+  access mode        : ${mode_desc}
   data               : ${CHAT_HOME}
   source             : ${SRC_DIR}
 EOF

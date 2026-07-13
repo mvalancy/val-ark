@@ -49,7 +49,7 @@ Part of the [design hierarchy](README.md).
 - Footprint caps (`VALARK_MAX_GB`, `VALARK_MODEL_MAX_GB`), ports, services enabled (`VALARK_SERVICES`), curation weights (`catalog.sh`), tool-refresh cadence — all live in `.env` or source. None are editable from the UI.
 
 **Monitoring is logs + a self-heal loop, no dashboard.**
-- `loop.sh` repairs/verifies/fills every cycle and writes `state/health.json`; `verify.sh` checks apps. Metrics tooling (Telegraf/InfluxDB/Grafana) is *mirrored* but **not running**.
+- `loop.sh` repairs/verifies/fills every cycle and writes `state/selfheal.json`; `verify.sh` checks apps. Metrics tooling (Telegraf/InfluxDB/Grafana) is *mirrored* but **not running**.
 - The UI shows a disk/storage bar and live download progress, but no system health, no service uptime history, no alerts, no error surface.
 
 **Errors are surfaced as raw text / files.**

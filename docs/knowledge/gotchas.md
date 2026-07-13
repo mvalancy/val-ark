@@ -18,10 +18,17 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Cross‑architecture (arm64 boxes: Jetson-, Grace‑Blackwell-, Rockchip-class)
 
-- **A mirrored binary can be the WRONG arch but still have the `+x` bit** (e.g. an x86_64
-  `redis` in the arm64 tree → "Exec format error"). **Fix:** verify it actually runs
-  (`"$bin" --version`) before preferring it; fall back to a system/other binary
-  (`forum.sh find_redis_server`).
+- **Source-compiled tools cross-place a WRONG-arch binary — fix at the mirror, not just at
+  runtime.** `redis.sh`/`sqlite.sh` build from source with `make`/`gcc`, which target the
+  **build host's** arch. Mirrored on an x86_64 host, they dropped an **x86 binary into
+  `tools/linux-arm64/`** (`+x` set, so it looks fine) → "Exec format error" on every arm64 box,
+  which the Health page flags as "tool present but won't run". **Root-cause fix:** compile ONLY
+  for the platform matching `uname -m`; for the other arch keep source + a build-on-target hint
+  and **scrub any binary from both `bin/` and the source dir** (`verify.sh` finds by name
+  *anywhere* under the tool dir). Runtime fallback (`forum.sh find_redis_server`, verify's
+  `"$bin" --version` gate) is still the belt; `tests/test-tool-arch.sh` guards the class (ELF
+  arch of each runnable binary must match its platform dir). To get a working native binary on an
+  arm64 box, re-run the tool script **on that box** (or `apt install`).
 - **NodeBB (forum) is mirrored x86_64‑only; its native `sharp` module crashes on arm64.**
   **Fix:** `forum.sh ensure_native_deps` reinstalls native deps for the host `--os/--cpu`.
   Same class applies to any Node app with native modules.
@@ -67,14 +74,36 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   `local user="$1" pass="$2"` **crashes** when `adduser` is called without a password. **Fix:**
   default optional positionals — `local user="${1:-}" pass="${2:-}"`. Bit both `chat.sh` and
   `mail.sh` `cmd_adduser`.
-- **Account model differs per service — don't force one signup UX.** IRC (chat) + maddy (mail)
-  have no safe self‑signup → the **host provisions** logins (`<svc>.sh adduser <name>`); NodeBB
-  (forum) has its **own Register page** (self‑service); MicroBin (paste) is **one shared gated
-  instance** (no per‑user accounts). The server encodes this as `COMMUNITY_ACCOUNTS[id].signup`
-  = `host｜self｜shared`, surfaced in `/api/status/services` and the UI signup panel.
-- **Minting a login is an admin action → `POST /api/service/adduser` is localhost‑only.** LAN
-  users self‑register on the forum or ask the host; only the operator on the box creates chat/mail
-  logins. The UI hides the create form off‑localhost (`isAdminHost()` mirrors the server gate).
+- **Account model differs per service — don't force one signup UX.** chat is **open** by default
+  (public/no-login — pick a nickname and join); maddy (mail) has no safe self‑signup → the **host
+  provisions** logins (`mail.sh adduser <name>`); NodeBB (forum) has its **own Register page**
+  (self‑service); MicroBin (paste) is **one shared gated instance**. The server encodes this as
+  `COMMUNITY_ACCOUNTS[id].signup` = `open｜host｜self｜shared`, surfaced in `/api/status/services`
+  and the UI panel. **chat's model is dynamic** (`open` unless `VALARK_CHAT_PUBLIC=0`, then `host`)
+  — keep it in sync with the mode, or a private operator's `adduser` breaks. `open`/`self`/`shared`
+  short‑circuit `addServiceUser` **before** username/password validation, so validation tests must
+  target a **host** service (mail), not chat.
+- **The Lounge (chat) defaults to PUBLIC / no-login.** A trusted-LAN community box shouldn't make a
+  visitor hit a login wall with no way to make an account (the old private-mode default did exactly
+  that — the box was unusable without shell access). Val Ark's reverse proxy + Use Mode already gate
+  *who* reaches `/app/chat/`, so The Lounge needn't re-auth. `VALARK_CHAT_PUBLIC=0` restores per-user
+  logins + persistent history.
+- **A "write-once if exists" config can never change on a deployed box.** `chat.sh` used to write
+  The Lounge `config.js` only when absent, so flipping the access mode never took effect on a box
+  that already had one. Config writers that carry a *setting* must **regenerate every start** (back
+  up to `.bak`), like `_write_ngircd_conf` already did.
+- **ngIRCd `MaxNickLength` defaults to 9 (classic IRC).** Ordinary names — even The Lounge's own
+  default nick — get rejected "nickname too long". Set it in `[Limits]` (30 is safe, within the
+  compiled limit). Also pre-create a few `[Channel]` blocks + a multi-line MOTD teaching `/list`
+  and `/join`, so a first-timer isn't stuck in one empty room.
+- **The Lounge start must capture the REAL pid (nohup, not setsid).** `setsid` forks, so `$!` was
+  the dead parent → a wrong pidfile → the loop's per-cycle `start` spawned duplicate instances that
+  fought over `:9000`. Use `nohup ... & echo $!` for the true pid, plus a **port-based liveness
+  fallback** (`_lounge_up`) so a stale pidfile can never trigger a duplicate start.
+- **Minting a login is an admin action → `POST /api/service/adduser` is admin‑gated.** LAN
+  users self‑register on the forum, join chat with just a nickname, or ask the host; only the
+  operator (localhost/admin) provisions **mail** logins. The UI hides the create form off‑admin
+  (`isAdminHost()` mirrors the server gate).
 
 ## Auth / recovery (Phase 2)
 
@@ -200,10 +229,18 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Health / self-heal (Phase 6)
 
-- **`health.json` was promised but never written.** `loop.sh`'s final log line advertised
-  `health: <state>/health.json` for months, but no code wrote it (only `verify.json` existed,
-  and only as aggregate counts). If a doc/log references a state file, grep for the *writer*
-  before you build a reader on top of it. `write_health()` (step 8b) now emits it every cycle.
+- **The self-heal snapshot is `selfheal.json`, NOT `health.json` — the latter was already taken.**
+  Phase 6a's `write_health()` first wrote `state/health.json`, but `librarian.sh maintain` has
+  written its OWN `state/health.json` (disk/library stats: `data_root, avail_bytes, managed_items`)
+  for ages. Same filename, incompatible schemas → a standalone `librarian maintain` clobbered the
+  Health page's data (only a real box running both surfaced it; the isolated tests seeded the file
+  directly). Renamed the loop's report to `selfheal.json` (writer `loop.sh` step 8b, reader
+  `server.js getHealthDetail`); librarian keeps `health.json` (vestigial — nothing reads its fields).
+  **Lesson:** before naming a new state file, grep the repo for that filename — a sibling script may
+  already own it.
+- **`verify.sh` had only aggregate counts before Phase 6** — `write_health()`/`write_report()` now
+  emit the per-check + repair detail the Health page needs. If a doc/log references a state file,
+  grep for the *writer* before building a reader on top of it.
 - **Emitting JSON from bash — escape, and only trust program-controlled strings.** `verify.sh`
   `_json_str` / `loop.sh` `_hj_str` escape `\` + `"` and strip tab/newline/CR. That's safe
   *because* every interpolated value is our own (check labels, repair sentences, `date -u`,

@@ -39,7 +39,7 @@ step(){ log "${CYAN}== $* ==${NC}"; }
 # Self-heal telemetry: what THIS cycle actually repaired. The Health page reads
 # health.json (latest snapshot) + heal-events.jsonl (the timestamped feed of real
 # repairs). heal_event records a fix as it happens; write_health serialises both.
-HEALTH_JSON="${STATE_DIR}/health.json"
+HEALTH_JSON="${STATE_DIR}/selfheal.json"   # self-heal snapshot (distinct from librarian's health.json)
 HEAL_EVENTS_LOG="${STATE_DIR}/heal-events.jsonl"
 HEAL_EVENTS=()                       # "kind|detail" appended by the fixers this cycle
 heal_event(){ HEAL_EVENTS+=("$1|$2"); }
@@ -248,7 +248,7 @@ ui_smoke() {
 }
 
 # --- step 8b: write the self-heal snapshot the Health page reads --------------
-# health.json = latest cycle summary (space, verify tallies, link/asset counts,
+# selfheal.json = latest cycle summary (space, verify tallies, link/asset counts,
 # what was repaired this cycle). heal-events.jsonl = the append-only, capped feed
 # of genuine repairs (a "restart" or "start" this cycle), newest last.
 write_health() {
@@ -328,7 +328,7 @@ loop_once() {
 
     step "8. report + coordination"; bash "$LIBRARIAN" maintain >/dev/null 2>&1; coordination
     step "8b. self-heal snapshot (health.json + heal-events feed)"; write_health
-    log "${GREEN}cycle complete${NC} | fillable $(valark_human "$(valark_fillable_bytes)") | health: ${STATE_DIR}/health.json"
+    log "${GREEN}cycle complete${NC} | fillable $(valark_human "$(valark_fillable_bytes)") | self-heal: ${STATE_DIR}/selfheal.json"
 }
 
 # Cron management — durable 24/7 driver that survives reboots/sessions.

@@ -1499,9 +1499,10 @@ test.describe('Val Ark - Community Hub', () => {
     await page.waitForSelector('.community-card', { timeout: 5000 });
     const body = await page.locator('#main-content').innerText();
     expect(body).toMatch(/Accounts\s*&\s*sign-up/i);
-    // forum self-registers; chat/mail host-provision via adduser; paste is shared.
+    // forum self-registers; chat is open (pick a nickname); mail host-provisions via
+    // adduser; paste is shared.
     expect(body).toMatch(/Register/i);
-    expect(body).toContain('chat.sh adduser');
+    expect(body).toMatch(/nickname/i);            // chat is open — no account
     expect(body).toContain('mail.sh adduser');
     expect(body).toContain('paste.sh creds');
   });

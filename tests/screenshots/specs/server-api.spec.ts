@@ -287,11 +287,12 @@ test.describe('Val Ark API Server', () => {
       expect(typeof data[id].startable).toBe('boolean');
       // Every service advertises how a person gets a login (UI signup panel).
       expect(data[id].account, `${id} should carry an account model`).toBeTruthy();
-      expect(['host', 'self', 'shared']).toContain(data[id].account.signup);
+      expect(['host', 'self', 'shared', 'open']).toContain(data[id].account.signup);
     }
-    // forum self-registers; chat/mail are host-provisioned; paste is shared.
+    // forum self-registers; chat is open by default (pick a nickname, no account);
+    // mail is host-provisioned; paste is shared.
     expect(data.forum.account.signup).toBe('self');
-    expect(data.chat.account.signup).toBe('host');
+    expect(data.chat.account.signup).toBe('open');
     expect(data.mail.account.signup).toBe('host');
     expect(data.paste.account.signup).toBe('shared');
   });
@@ -320,25 +321,34 @@ test.describe('Val Ark API Server', () => {
     expect((await resp.json()).error).toContain('Unknown service');
   });
 
+  // Username/password validation is exercised on a HOST-provisioned service (mail):
+  // open/self/shared services short-circuit with a "no account here" message before
+  // validation, by design (chat is now open by default — pick a nickname, no account).
   test('POST /api/service/adduser: rejects an invalid username', async ({ request }) => {
-    const resp = await request.post(`${BASE_URL}/api/service/adduser`, { data: { id: 'chat', username: 'bad name!' } });
+    const resp = await request.post(`${BASE_URL}/api/service/adduser`, { data: { id: 'mail', username: 'bad name!' } });
     expect(resp.status()).toBe(400);
     expect((await resp.json()).error).toMatch(/username/i);
   });
 
   test('POST /api/service/adduser: rejects a password with control characters', async ({ request }) => {
-    const resp = await request.post(`${BASE_URL}/api/service/adduser`, { data: { id: 'chat', username: 'alice', password: 'a\nb' } });
+    const resp = await request.post(`${BASE_URL}/api/service/adduser`, { data: { id: 'mail', username: 'alice', password: 'a\nb' } });
     expect(resp.status()).toBe(400);
     expect((await resp.json()).error).toMatch(/password/i);
   });
 
-  test('POST /api/service/adduser: chat with a valid name returns structured JSON (never a 5xx)', async ({ request }) => {
-    // Without a built+running Lounge this returns {error:...}; with one, {ok:true}.
+  test('POST /api/service/adduser: mail with a valid name returns structured JSON (never a 5xx)', async ({ request }) => {
+    // Without a built+running mail stack this returns {error:...}; with one, {ok:true}.
     // Either way it must be well-formed JSON and never crash the server.
-    const resp = await request.post(`${BASE_URL}/api/service/adduser`, { data: { id: 'chat', username: 'e2e_probe_user' } });
+    const resp = await request.post(`${BASE_URL}/api/service/adduser`, { data: { id: 'mail', username: 'e2e_probe_user' } });
     expect(resp.status()).toBeLessThan(500);
     const data = await resp.json();
     expect(data.ok === true || typeof data.error === 'string').toBeTruthy();
+  });
+
+  test('POST /api/service/adduser: chat is open — points to just picking a nickname', async ({ request }) => {
+    const resp = await request.post(`${BASE_URL}/api/service/adduser`, { data: { id: 'chat', username: 'alice' } });
+    expect(resp.status()).toBe(400);
+    expect((await resp.json()).error).toMatch(/open|nickname|no account/i);
   });
 
   test('GET /bootstrap.sh serves an offline bootstrap with this host baked in', async ({ request }) => {

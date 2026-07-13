@@ -6,6 +6,28 @@ later). See [README](README.md).
 
 ---
 
+## 2026‑07 — Moderation ENFORCEMENT is a post-store loop sweep (Phase 7, 3/n)
+
+- **Context:** the endpoints + settings (2/n) can screen content on request, but nothing on
+  the box actually ran community content through them — so the Safety card's "screening" claim
+  was hollow. Two ways to enforce: a **pre-store proxy intercept** (screen the POST body in
+  `pipeProxy` before NodeBB/MicroBin stores it) or a **post-store sweep** (the self-heal loop
+  screens already-stored files each cycle).
+- **Decision:** post-store **file sweep** (`scripts/lib/mod-sweep.sh`, wired as `loop.sh` step
+  7c). It walks configured community stores (paste files, mail, upload dirs — `VALARK_MODERATION_DIRS`
+  overrides), screens each new file with `moderation.sh check`, and on any non-`allow` verdict
+  **quarantines** the file (moves it out of the store) + appends a `state/moderation/queue.jsonl`
+  review entry. Idempotent via a `screened.tsv` (path+size+mtime) marker; bounded per run; the
+  admin's `action` (block/quarantine/flag) decides move-vs-copy. **Fail-closed:** an unparseable
+  verdict, a classifier error, or node-unavailable settings all resolve to hold→quarantine, never
+  "left served."
+- **Why the sweep, not the intercept:** the pre-store intercept must parse each app's POST format
+  (NodeBB CSRF/multipart, MicroBin forms) — fragile and app-coupled — and NodeBB's post store is
+  **Redis**, not files. The sweep is app-agnostic, offline-testable with fixtures + a stub
+  classifier (`test-mod-sweep.sh`, 16/0), and fits the loop's "reconcile reality each cycle"
+  model. It's reactive (content is briefly visible before the next cycle) — an acceptable first
+  cut; a NodeBB/Redis screener and a pre-store paste intercept are documented follow-ups.
+
 ## 2026‑07 — Community chat is open (no-login) by default
 - **Context:** on the real box a visitor opening `/app/chat/` hit The Lounge's **private-mode login
   wall with no way to create an account** (accounts were host-only, via `thelounge add`) — chat was

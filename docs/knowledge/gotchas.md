@@ -308,6 +308,25 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   engine returns `decision:'skip'` (explicitly **not** allow-by-policy — callers must not treat it
   as approval). Readiness for the status card is probed **async + cached** (`moderation.sh ready`
   runs `find` over the mirror — never `spawnSync` it on the hot path or it blocks the event loop).
+- **Never mark a file "screened" unless it's genuinely resolved** (adversarial-review finding,
+  **high**). The loop sweep (`mod-sweep.sh`) moves a flagged file to quarantine, then records it in
+  a dedupe marker so later sweeps skip it. The first cut wrote the marker **unconditionally** — but
+  `mv`'s failure was swallowed (`2>/dev/null`, no `set -e`), so when the loop user couldn't write
+  the store (service-owned dir → EACCES) or the copy hit ENOSPC, the flagged file stayed **served
+  AND** marked done → never retried, plus a false "quarantined" heal-event. Rule: only mark
+  screened on an `allow` **or** a move that actually **succeeded**; on failure leave it unrecorded
+  (retried next sweep) and raise a distinct hard-error (`rc 11` → `moderation-error` heal-event).
+- **An enabled screener must never leave a flagged file served.** An `action:'flag'` mode (copy to
+  quarantine, keep the original) was a third state — *enabled but non-enforcing* — while the Safety
+  card still said "screening." Dropped it: both remaining actions (`block`/`quarantine`) **move** the
+  file; only an explicit `enabled:false` is the sanctioned no-enforcement state.
+- **Dedupe markers: key on a HASH, not a raw `grep -F` of joined fields.** `grep -qF "path\tsize\tmtime"`
+  is an unanchored substring match — `mtime` matches as a right-unbounded prefix (200 hits 2001), and
+  a filename containing a tab/newline corrupts the marker → a file silently treated as already-screened
+  → **served**. Use `sha1(path\0size\0mtime)` and `grep -q "^<hash>"` (fixed-width hex, injection-proof).
+  Same reason `_json()` must escape `\n`/`\t`/`\r`, not just `\`/`"`, or an odd filename forges a
+  JSONL queue line. And `find` a symlinked store dir with **`-H`** (a `-P` default returns nothing for
+  a symlinked top dir → the whole store goes unscreened), while still not following symlinked entries.
 
 ## Git / releases
 

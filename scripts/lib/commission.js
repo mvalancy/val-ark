@@ -150,7 +150,10 @@ function state(dir, trusted) {
 const PROFILES = ['knowledge', 'ai', 'tools', 'balanced'];
 const USE_MODES = ['open', 'passworded', 'accounts'];
 const MOD_SENS = ['strict', 'balanced', 'lenient'];
-const MOD_ACTIONS = ['block', 'quarantine', 'flag'];
+// Both actions MOVE a flagged file out of the store — they differ only in the review
+// label. There is deliberately no "leave it served while enabled" action (that would let
+// an admin defeat enforcement while the Safety card still reports screening as on).
+const MOD_ACTIONS = ['block', 'quarantine'];
 
 // On-device content moderation settings (Phase 7). FAIL-CLOSED: an absent OR corrupt
 // settings.json resolves to enabled=ON — readSettings() swallows JSON errors and returns
@@ -244,6 +247,7 @@ if (require.main === module) {
     switch (cmd) {
       case 'claim':  emit({ claim: ensureClaim(), commissioned: isCommissioned() }); break;
       case 'status': emit(state(undefined, true)); break;
+      case 'moderation': emit(getModeration()); break;   // fail-closed settings for the loop sweep
       default: process.stderr.write('unknown commission command: ' + cmd + '\n'); process.exit(2);
     }
   } catch (e) { emit({ ok: false, error: e.message }); process.exit(1); }

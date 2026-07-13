@@ -326,6 +326,19 @@ loop_once() {
 
     step "7b. UI smoke (dynamic controls + back-to-ark nav)"; ui_smoke
 
+    step "7c. content moderation sweep (screen community uploads; quarantine flagged)"
+    _ms_out=$(FORCE_COLOR=0 bash "${_DIR}/lib/mod-sweep.sh" sweep 2>&1); _ms_rc=$?
+    printf '%s\n' "$_ms_out" | tail -1 | sed 's/^/    /'
+    if [ "$_ms_rc" = 10 ]; then
+        _ms_n=$(printf '%s' "$_ms_out" | grep -oE 'quarantined [0-9]+' | grep -oE '[0-9]+$')
+        heal_event quarantine "Moderation quarantined ${_ms_n:-1} flagged upload(s) for review"
+    elif [ "$_ms_rc" = 11 ]; then
+        # A flagged file could NOT be moved out of the store (still served) — surface it as
+        # a genuine problem the admin must act on, not a silent enforcement gap.
+        _ms_e=$(printf '%s' "$_ms_out" | grep -oE 'errors [0-9]+' | grep -oE '[0-9]+$')
+        heal_event moderation-error "Moderation could not quarantine ${_ms_e:-1} flagged upload(s) — still served; check permissions"
+    fi
+
     step "8. report + coordination"; bash "$LIBRARIAN" maintain >/dev/null 2>&1; coordination
     step "8b. self-heal snapshot (health.json + heal-events feed)"; write_health
     log "${GREEN}cycle complete${NC} | fillable $(valark_human "$(valark_fillable_bytes)") | self-heal: ${STATE_DIR}/selfheal.json"

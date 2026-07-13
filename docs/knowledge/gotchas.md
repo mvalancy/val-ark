@@ -18,10 +18,17 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Cross‑architecture (arm64 boxes: Jetson-, Grace‑Blackwell-, Rockchip-class)
 
-- **A mirrored binary can be the WRONG arch but still have the `+x` bit** (e.g. an x86_64
-  `redis` in the arm64 tree → "Exec format error"). **Fix:** verify it actually runs
-  (`"$bin" --version`) before preferring it; fall back to a system/other binary
-  (`forum.sh find_redis_server`).
+- **Source-compiled tools cross-place a WRONG-arch binary — fix at the mirror, not just at
+  runtime.** `redis.sh`/`sqlite.sh` build from source with `make`/`gcc`, which target the
+  **build host's** arch. Mirrored on an x86_64 host, they dropped an **x86 binary into
+  `tools/linux-arm64/`** (`+x` set, so it looks fine) → "Exec format error" on every arm64 box,
+  which the Health page flags as "tool present but won't run". **Root-cause fix:** compile ONLY
+  for the platform matching `uname -m`; for the other arch keep source + a build-on-target hint
+  and **scrub any binary from both `bin/` and the source dir** (`verify.sh` finds by name
+  *anywhere* under the tool dir). Runtime fallback (`forum.sh find_redis_server`, verify's
+  `"$bin" --version` gate) is still the belt; `tests/test-tool-arch.sh` guards the class (ELF
+  arch of each runnable binary must match its platform dir). To get a working native binary on an
+  arm64 box, re-run the tool script **on that box** (or `apt install`).
 - **NodeBB (forum) is mirrored x86_64‑only; its native `sharp` module crashes on arm64.**
   **Fix:** `forum.sh ensure_native_deps` reinstalls native deps for the host `--os/--cpu`.
   Same class applies to any Node app with native modules.

@@ -12,50 +12,56 @@ download_redis() {
     local tag="${ver}"
     local source_url="https://github.com/redis/redis/archive/refs/tags/${tag}.tar.gz"
 
-    # linux-arm64: download source and compile
-    local dest="${TOOLS_DIR}/linux-arm64/redis"
-    ensure_dir "$dest"
-    download_and_extract "$source_url" "$dest" "redis source linux-arm64" 1
+    # Redis ships NO prebuilt Linux binaries — the only way to a binary is `make`,
+    # which builds for the BUILD HOST's architecture. So compile ONLY for the platform
+    # that matches this host; for the other Linux arch, mirror the source + a build hint
+    # and DELETE any binary. Otherwise mirroring on an x86_64 host drops an x86 binary
+    # into linux-arm64/redis/bin (and vice-versa) → "Exec format error" on the target,
+    # which the Health page flags as "tool present but won't run".
+    local host_plat
+    case "$(uname -m)" in
+        aarch64|arm64) host_plat="linux-arm64" ;;
+        x86_64|amd64)  host_plat="linux-x86_64" ;;
+        *)             host_plat="" ;;
+    esac
 
-    if [ -f "${dest}/Makefile" ]; then
-        log_info "Compiling redis for linux-arm64..."
-        if (cd "$dest" && make -j"$(nproc)" 2>/dev/null); then
-            log_success "Redis compiled for linux-arm64"
-            # Copy key binaries to a bin/ subdirectory for convenience
-            ensure_dir "${dest}/bin"
-            for bin in redis-server redis-cli redis-benchmark; do
-                if [ -f "${dest}/src/${bin}" ]; then
-                    cp "${dest}/src/${bin}" "${dest}/bin/"
-                    chmod +x "${dest}/bin/${bin}"
-                fi
-            done
-            log_info "Binaries placed in ${dest}/bin/"
+    local plat dest
+    for plat in linux-arm64 linux-x86_64; do
+        dest="${TOOLS_DIR}/${plat}/redis"
+        ensure_dir "$dest"
+        download_and_extract "$source_url" "$dest" "redis source ${plat}" 1
+
+        if [ "$plat" = "$host_plat" ] && [ -f "${dest}/Makefile" ]; then
+            log_info "Compiling redis for ${plat} (native build host)..."
+            if (cd "$dest" && make -j"$(nproc)" 2>/dev/null); then
+                ensure_dir "${dest}/bin"
+                for bin in redis-server redis-cli redis-benchmark; do
+                    if [ -f "${dest}/src/${bin}" ]; then
+                        cp "${dest}/src/${bin}" "${dest}/bin/"
+                        chmod +x "${dest}/bin/${bin}"
+                    fi
+                done
+                log_success "Redis compiled for ${plat} (binaries in ${dest}/bin/)"
+            else
+                log_warn "redis compile failed for ${plat}"
+            fi
         else
-            log_warn "Compilation failed for linux-arm64 (may need cross-compile tools)"
+            # Non-native arch: never leave a wrong-arch binary. Scrub any stale ones from
+            # an older (buggy) mirror — both bin/ and the ones make left in src/ (verify.sh
+            # finds by name anywhere under the tool dir); keep source + a build-on-target hint.
+            rm -rf "${dest}/bin" 2>/dev/null
+            rm -f "${dest}/src/redis-server" "${dest}/src/redis-cli" "${dest}/src/redis-benchmark" 2>/dev/null
+            write_install_hint "$dest" "redis" \
+"Redis for ${plat}
+=================
+Redis ships no prebuilt Linux binaries, and cross-compiling from a $(uname -m) host
+would produce a wrong-arch binary. The source is mirrored here; build it natively on
+the ${plat} box:
+  cd \"\$(dirname \"\$0\")\" && make -j\$(nproc) && cp src/redis-server src/redis-cli bin/
+Or use the system package: apt install redis-server  (the forum service auto-falls
+back to a system redis when no matching mirrored binary is present)."
         fi
-    fi
-
-    # linux-x86_64: download source and compile
-    dest="${TOOLS_DIR}/linux-x86_64/redis"
-    ensure_dir "$dest"
-    download_and_extract "$source_url" "$dest" "redis source linux-x86_64" 1
-
-    if [ -f "${dest}/Makefile" ]; then
-        log_info "Compiling redis for linux-x86_64..."
-        if (cd "$dest" && make -j"$(nproc)" 2>/dev/null); then
-            log_success "Redis compiled for linux-x86_64"
-            ensure_dir "${dest}/bin"
-            for bin in redis-server redis-cli redis-benchmark; do
-                if [ -f "${dest}/src/${bin}" ]; then
-                    cp "${dest}/src/${bin}" "${dest}/bin/"
-                    chmod +x "${dest}/bin/${bin}"
-                fi
-            done
-            log_info "Binaries placed in ${dest}/bin/"
-        else
-            log_warn "Compilation failed for linux-x86_64 (may need native build environment)"
-        fi
-    fi
+    done
 
     # macos-arm64
     write_install_hint "${TOOLS_DIR}/macos-arm64/redis" "redis" \

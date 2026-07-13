@@ -4010,14 +4010,14 @@ function renderSafety() {
         const items = _modQueue.pending || [];
         html += `<div class="hp-queue"><div class="hp-queue-h">Held for review <span class="hp-queue-n">${_modQueue.count || 0}</span></div>`;
         if (!items.length) {
-            html += `<p class="hp-empty" style="margin:.4rem 0 0">Nothing held right now. Flagged uploads will appear here for you to keep or delete.</p>`;
+            html += `<p class="hp-empty" style="margin:.4rem 0 0">Nothing held right now. Flagged uploads will appear here for you to review or delete.</p>`;
         } else {
             html += '<ul class="hp-qlist">' + items.map(it => `<li class="hp-qi">
                 <div class="hp-qi-m"><span class="hp-qi-badge hp-qb-${esc(it.decision)}">${esc(it.decision)}</span>
                     <code class="hp-qi-p" title="${esc(it.path)}">${esc((it.path || '').split('/').pop() || it.id)}</code>
                     <span class="hp-qi-r">${esc(it.reason || '')}</span></div>
                 <div class="hp-qi-a">
-                    <button class="hp-btn" onclick="reviewModItem('${esc(it.id)}','restore',this)" title="Approve — put it back where it was">Approve</button>
+                    <button class="hp-btn" onclick="reviewModItem('${esc(it.id)}','dismiss',this)" title="Acknowledge — keep it out of the community, stop showing it here">Dismiss</button>
                     <button class="hp-btn hp-btn-danger" onclick="reviewModItem('${esc(it.id)}','remove',this)" title="Delete the held file for good">Delete</button>
                 </div></li>`).join('') + '</ul>';
         }

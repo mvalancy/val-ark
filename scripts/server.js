@@ -1947,7 +1947,9 @@ function _readJsonl(file) {
     for (const line of raw.split('\n')) { if (!line.trim()) continue; try { out.push(JSON.parse(line)); } catch (_) {} }
     return out;
 }
-function getModerationQueue() {
+// The full pending set (queue.jsonl minus reviewed.jsonl), newest first. The existence
+// check MUST use this, not a display slice, or items past the cap become un-actionable.
+function _modPending() {
     const { q, r } = _modQueueFiles();
     const resolved = new Set(_readJsonl(r).map((o) => o.id).filter(Boolean));
     const pending = [];
@@ -1957,8 +1959,19 @@ function getModerationQueue() {
         pending.push({ id, path: o.path || '', decision: o.decision || 'hold', reason: o.reason || '', ts: o.ts || 0 });
     }
     pending.reverse();   // newest first
+    return pending;
+}
+function getModerationQueue() {
+    const pending = _modPending();
     return { pending: pending.slice(0, 200), count: pending.length };
 }
+// Act on a held item. Deliberately only remove / dismiss — both provably safe. RESTORE
+// (writing a quarantined file back to a store path) is intentionally NOT here: its
+// destination comes from queue.jsonl, and under this project's own threat model (a
+// same-uid process or an NFS-mesh peer can append to that in-<state> log) an unconfined
+// write-back is an arbitrary-file-write / RCE vector. A store-root-confined + O_NOFOLLOW
+// restore is a documented follow-up; until then an admin releases a false positive on the
+// box itself. (See docs/knowledge/decisions.md, Phase 7.)
 function reviewModerationItem(body) {
     body = body || {};
     const id = String(body.id || '');
@@ -1966,32 +1979,16 @@ function reviewModerationItem(body) {
     // ID must be a bare basename — no separators / traversal. This is what confines the
     // file op to the quarantine dir (the sweep only ever wrote basenames there).
     if (!id || id !== path.basename(id) || id === '.' || id === '..' || /[/\\]/.test(id)) return { error: 'Invalid item id.' };
-    if (!['remove', 'restore', 'dismiss'].includes(action)) return { error: 'Invalid action.' };
+    if (!['remove', 'dismiss'].includes(action)) return { error: 'Invalid action.' };
     const { r, qdir } = _modQueueFiles();
-    // Only act on an id that is actually a pending queue item (never an arbitrary name).
-    const item = getModerationQueue().pending.find((p) => p.id === id);
-    if (!item) return { error: 'Item not found in the review queue.' };
-    const qpath = path.join(qdir, id);
-    // Realpath-confine: the resolved file must sit directly inside the quarantine dir.
-    try {
-        const realQ = fs.realpathSync(qdir);
-        const realF = fs.realpathSync(qpath);
-        if (path.dirname(realF) !== realQ) return { error: 'Quarantine path error.' };
-    } catch (_) { /* file may already be gone — the ops below are best-effort */ }
+    // Existence check against the FULL pending set (not the 200-item display slice).
+    if (!_modPending().some((p) => p.id === id)) return { error: 'Item not found in the review queue.' };
 
     if (action === 'remove') {
-        try { fs.unlinkSync(qpath); } catch (_) {}
-    } else if (action === 'restore') {
-        // Admin override (false positive): put the file back at its original store path.
-        // Restore only into an EXISTING parent, never overwriting a file there (EXCL);
-        // copy+unlink so it works even across filesystems (quarantine ≠ store mount).
-        const dest = String(item.path || '');
-        if (!dest || !path.isAbsolute(dest)) return { error: 'Original path unknown — cannot restore.' };
-        try {
-            if (!fs.existsSync(path.dirname(dest))) return { error: 'Original location no longer exists.' };
-            fs.copyFileSync(qpath, dest, fs.constants.COPYFILE_EXCL);   // throws if dest exists
-            fs.unlinkSync(qpath);
-        } catch (e) { return { error: 'Could not restore: ' + (e.code === 'EEXIST' ? 'a file already exists there.' : e.message) }; }
+        // unlinkSync removes the quarantine entry ITSELF — it never follows a final
+        // symlink — and the basename-confined id keeps it inside the quarantine dir, so a
+        // bare delete cannot touch anything the symlink might point at.
+        try { fs.unlinkSync(path.join(qdir, id)); } catch (_) { /* already gone — fine */ }
     }
     // dismiss: leave the quarantined file in place, just mark the item reviewed.
     try {

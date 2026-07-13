@@ -6,6 +6,28 @@ later). See [README](README.md).
 
 ---
 
+## 2026‑07 — Safety card ships without "restore"; review is remove/dismiss only (Phase 7, 4/n)
+
+- **Context:** the admin Safety card's review queue needs actions on held items. The natural
+  set is remove (delete) / restore (release a false positive back to its store) / dismiss
+  (acknowledge, keep quarantined). An adversarial review of the endpoints flagged that
+  **restore is the entire risky surface** (4 of 5 findings, incl. a HIGH): its destination is
+  `item.path` read from `queue.jsonl`, an append-only log living in the in-`<state>` tree that
+  this project's OWN threat model treats as attacker-writable (a same-uid service or an
+  NFS-mesh peer). An unconfined write-back is an arbitrary-file-write → RCE-if-root
+  confused-deputy (admin clicks "Approve" → server writes attacker bytes to e.g. `/etc/cron.d`),
+  plus a TOCTOU symlink-swap on the copy source that exfiltrates arbitrary readable files.
+- **Decision:** **drop restore** for 4/n. The queue supports only **remove** (`unlinkSync` the
+  quarantine entry — never follows a final symlink, basename-confined) and **dismiss** (append
+  `reviewed.jsonl`, keep the file). Both are provably safe. A false positive is released on the
+  box itself for now.
+- **Why not just harden it:** doing restore safely needs the destination realpath-confined to an
+  allowlist of the sweep's store roots (which the server would have to duplicate from
+  `mod-sweep.sh` — a drift hazard) **and** an `O_NOFOLLOW` fd-based copy. That's a real feature,
+  not a patch; better shipped deliberately later than rushed into a security-sensitive path. The
+  fail-closed instinct applies to our OWN write-backs too: if we can't confine it simply, don't
+  do it. Follow-up: store-root-confined + `O_NOFOLLOW` restore.
+
 ## 2026‑07 — Moderation ENFORCEMENT is a post-store loop sweep (Phase 7, 3/n)
 
 - **Context:** the endpoints + settings (2/n) can screen content on request, but nothing on

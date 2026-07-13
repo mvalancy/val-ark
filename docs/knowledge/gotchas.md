@@ -327,6 +327,20 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   Same reason `_json()` must escape `\n`/`\t`/`\r`, not just `\`/`"`, or an odd filename forges a
   JSONL queue line. And `find` a symlinked store dir with **`-H`** (a `-P` default returns nothing for
   a symlinked top dir → the whole store goes unscreened), while still not following symlinked entries.
+- **A write-back destination read from an in-`<state>` log is attacker-controlled** (adversarial-review
+  finding, **high**). The Safety card's review queue read `path` from `queue.jsonl` and a "restore"
+  action copied the quarantined file back there — with only `isAbsolute + parent-exists + COPYFILE_EXCL`
+  guards. But `queue.jsonl` lives in the same in-`<state>` tree the code elsewhere treats as
+  attacker-writable (same-uid service / NFS-mesh peer), so a poisoned entry + a planted quarantine file
+  turns an admin "Approve" click into an **arbitrary new-file write** (`/etc/cron.d/…` → RCE if root) —
+  a confused deputy. `COPYFILE_EXCL` only blocks *overwrite*; `existsSync(dirname)` only blocks *parent
+  fabrication*; neither **confines** the write to a store root. Plus a TOCTOU: `realpathSync(src)` then
+  `copyFileSync(src)` re-opens and follows a symlink swapped in after the check → exfiltrates any
+  readable file. **Decision: dropped restore** — review is remove/dismiss only. If ever re-added:
+  realpath the dest parent and require it under an allowlisted store root, and copy from an `O_NOFOLLOW`
+  fd, not a re-resolved path. `remove` is safe (`unlinkSync` removes the entry itself — never follows the
+  final symlink — and the id is a basename). Also: the item-exists check must scan the FULL pending set,
+  not the 200-item display slice, or held items past the cap become un-actionable.
 
 ## Git / releases
 

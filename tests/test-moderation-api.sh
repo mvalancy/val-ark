@@ -123,6 +123,8 @@ echo "$qj" | grep -q '"decision":"block"' && pass || fail "queue item must carry
 # path-traversal id is rejected (no escape from the quarantine dir)
 echo "$(curl -s -b "$T/cj" -X POST -H 'Content-Type: application/json' -d '{"id":"../../../etc/passwd","action":"remove"}' "$B/api/moderation/review")" | grep -q '"error"' && pass || fail "traversal id must be rejected"
 [ -f /etc/passwd ] && pass || fail "sanity: /etc/passwd untouched"   # (never at risk; the id never reaches an fs op)
+# 'restore' is intentionally NOT a valid action (unconfined write-back was an RCE vector)
+echo "$(curl -s -b "$T/cj" -X POST -H 'Content-Type: application/json' -d '{"id":"1700000000_ab12_store_bad.txt","action":"restore"}' "$B/api/moderation/review")" | grep -q '"error"' && pass || fail "restore action must be rejected (dropped as unsafe)"
 # admin remove → ok, file deleted, queue now empty
 curl -s -b "$T/cj" -X POST -H 'Content-Type: application/json' -d '{"id":"1700000000_ab12_store_bad.txt","action":"remove"}' "$B/api/moderation/review" | grep -q '"ok":true' && pass || fail "admin remove must succeed"
 [ ! -f "$T/state/moderation/quarantine/1700000000_ab12_store_bad.txt" ] && pass || fail "remove must delete the quarantined file"

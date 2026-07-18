@@ -3319,7 +3319,18 @@ function getCommand(variant, family) {
 // =============================================================================
 function getRoute() {
     const hash = window.location.hash || '#/';
-    return hash.replace(/^#/, '') || '/';
+    // Links may carry an in-page anchor after a second '#' (e.g. '#/settings#storage').
+    // Route on the base path only; getAnchor() exposes the anchor for post-render scroll.
+    return hash.replace(/^#/, '').split('#')[0] || '/';
+}
+
+// The in-page anchor of an '#/route#anchor' link, or '' when there is none. The
+// browser treats everything after the FIRST '#' as the fragment, so these links
+// never natively scroll — router() must scrollIntoView after rendering.
+function getAnchor() {
+    const hash = window.location.hash || '';
+    const i = hash.indexOf('#', 1);
+    return i > 0 ? hash.slice(i + 1) : '';
 }
 
 function router() {
@@ -3383,7 +3394,9 @@ function router() {
 
     html += renderFooter();
     app.innerHTML = html;
-    window.scrollTo(0, 0);
+    // '#/route#anchor' links jump to their section after render; plain routes reset to top.
+    const anchorEl = getAnchor() && document.getElementById(getAnchor());
+    if (anchorEl) anchorEl.scrollIntoView(); else window.scrollTo(0, 0);
 
     // Rebind search if present
     const searchInput = document.getElementById('searchInput');
@@ -3605,6 +3618,13 @@ function renderSettings() {
                 <span class="setup-profile-tx"><strong>${esc(p.label)}</strong><span class="setup-profile-desc">${esc(p.desc)}</span></span>
             </button>`).join('')}</div>
         <p style="color:var(--text-muted);font-size:.9em">Watch it fill in <a href="#/activity">Activity</a>. Requesting a specific item from the Library / Models / Software pages jumps it to the front of the queue.</p></div>`;
+    // Update: the Expert tile's scroll target. One-click update with rollback is
+    // roadmap work — until it lands, this documents how updates actually happen.
+    html += `<div id="update" class="detail-section" style="margin-top:1.5rem"><h2>Update</h2>
+        <p>Mirrored tools refresh to the latest upstream automatically — the self-heal loop re-mirrors them weekly (<code>VALARK_TOOL_REFRESH_DAYS</code> in <code>.env</code>). To update Val Ark itself, from the box:</p>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>git pull                       # update Val Ark itself (run in the repo)</div>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/loop.sh once           # apply: repair, refresh &amp; verify now</div>
+        <p style="color:var(--text-muted);font-size:.9em">One-click update with rollback is coming; until then updates never touch your Library or models.</p></div>`;
     html += `<div id="about" class="detail-section" style="margin-top:1.5rem"><h2>About &amp; Rescue</h2>
         <p>Val Ark — offline-first knowledge &amp; AI appliance. Forgot the admin passcode or need to start over? It’s always recoverable.</p>
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.6rem 0 1rem">

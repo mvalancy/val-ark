@@ -110,11 +110,13 @@ download_one() {
     case "$source" in
         zim|url)
             mkdir -p "$(dirname "$dest")" 2>/dev/null
-            local tmp="${dest}.part" sz got=1 final=""
+            local tmp="${dest}.part" ctrl="${dest}.part.aria2" sz got=1 final="" have_aria2=0
             # Prefer aria2 (8-connection ~3x faster on per-connection-throttled
             # mirrors like download.kiwix.org); fall back to single-stream curl
-            # if aria2 is absent or fails. Both resume an existing *.part.
-            if command -v aria2c >/dev/null 2>&1; then
+            # if aria2 is absent or fails — but NEVER let curl resume an
+            # aria2-owned partial (see below).
+            command -v aria2c >/dev/null 2>&1 && have_aria2=1
+            if [ "$have_aria2" -eq 1 ]; then
                 aria2c -x8 -s8 -j1 --max-tries=5 --retry-wait=15 --continue=true \
                     --auto-file-renaming=false --allow-overwrite=true --content-disposition=false \
                     --console-log-level=warn --summary-interval=0 \
@@ -127,18 +129,41 @@ download_one() {
                 elif [ -f "$tmp" ]; then final="$tmp"; fi
             fi
             if [ -z "$final" ]; then
-                curl "${CURL_OPTS[@]}" -C - -o "$tmp" "$url" 2>>"$LL_LOG" && [ -f "$tmp" ] && final="$tmp"
+                # An aria2 .part is SEGMENTED (8 non-contiguous ranges, prealloc
+                # holes), not a linear prefix — `curl -C -` on it resumes from the
+                # byte-length and "completes" a hole-filled file that passes the
+                # size gate: silent corruption. The .aria2 control file is the
+                # reliable marker of an aria2-owned partial: while it exists only
+                # aria2 may touch the .part.
+                if [ -f "$ctrl" ]; then
+                    if [ "$have_aria2" -eq 1 ]; then
+                        warn "aria2 partial kept for $id (control file present); skipping curl fallback — aria2 resumes next cycle"
+                    else
+                        warn "aria2 partial for $id but aria2c is no longer installed; discarding it so curl restarts cleanly"
+                        rm -f "$tmp" "$ctrl" 2>/dev/null
+                        curl "${CURL_OPTS[@]}" -C - -o "$tmp" "$url" 2>>"$LL_LOG" && [ -f "$tmp" ] && final="$tmp"
+                    fi
+                else
+                    curl "${CURL_OPTS[@]}" -C - -o "$tmp" "$url" 2>>"$LL_LOG" && [ -f "$tmp" ] && final="$tmp"
+                fi
             fi
             if [ -n "$final" ]; then
                 sz=$(stat -c%s "$final" 2>/dev/null || echo 0)
                 if [ "$bytes" -gt 0 ] && [ "$sz" -lt $(( bytes * 90 / 100 )) ]; then
-                    warn "size short for $id ($sz < $bytes)"; rm -f "$tmp" "${tmp}.aria2" 2>/dev/null; return 1
+                    # The downloader claimed COMPLETION yet the size disagrees with
+                    # the catalog — a mismatched/truncated serve, not a partial.
+                    # Resuming it would wedge forever (or splice two file versions),
+                    # so clear it and retry fresh next cycle.
+                    warn "size short for $id ($sz < $bytes)"; rm -f "$tmp" "$ctrl" 2>/dev/null; return 1
                 fi
                 [ "$final" != "$dest" ] && mv -f "$final" "$dest"
-                rm -f "$tmp" "${dest}.aria2" "${tmp}.aria2" 2>/dev/null   # never leave stubs/control files
+                rm -f "$tmp" "${dest}.aria2" "$ctrl" 2>/dev/null   # never leave stubs/control files
                 manifest_add "$id" "$bucket" "$cat" "$dest" "$sz" "$value" "$source" && return 0
             fi
-            rm -f "$tmp" "${tmp}.aria2" 2>/dev/null   # clean the stub on definitive failure
+            # Transient failure: KEEP .part + .aria2 so the next cycle RESUMES
+            # instead of restarting a many-GB download from byte 0. Stale pairs
+            # are GC'd by cmd_verify after VALARK_PARTIAL_MAX_AGE_DAYS.
+            [ -f "$tmp" ] && log "download failed for $id; keeping $(human "$(stat -c%s "$tmp" 2>/dev/null || echo 0)") partial + resume state for next cycle"
             return 1 ;;
         hf-file)
             mkdir -p "$dest" 2>/dev/null
@@ -257,6 +282,17 @@ cmd_fill() {
 
 cmd_verify() {
     ensure_state
+    # GC stale partials: download failures deliberately KEEP .part/.aria2 so big
+    # downloads resume across cycles (download_one), so bound them here — a pair
+    # untouched for VALARK_PARTIAL_MAX_AGE_DAYS (dead URL, catalog rotation) is
+    # deleted rather than stranding gigabytes forever. Active retries refresh
+    # mtime every cycle, so anything this old is genuinely abandoned.
+    local gc_age="${VALARK_PARTIAL_MAX_AGE_DAYS:-14}" gc=0 f
+    while IFS= read -r f; do
+        rm -f "$f" 2>/dev/null && gc=$(( gc+1 ))
+    done < <(find "$ZIM_DIR" "$INSTALLERS_DIR" "$MODELS_DIR" \
+                  \( -name '*.part' -o -name '*.aria2' \) -type f -mtime "+${gc_age}" 2>/dev/null)
+    [ "$gc" -gt 0 ] && log "verify: GC'd $gc stale partial/control file(s) older than ${gc_age}d"
     [ -f "$MANIFEST" ] || { echo "no manifest"; return 0; }
     local bad=0 good=0
     while IFS=$'\t' read -r id bucket cat dest bytes value source epoch; do
@@ -458,6 +494,9 @@ cmd_maintain() {
 EOF
     ok "maintain: done (health -> $HEALTH)"
 }
+
+# When sourced (tests/tooling), expose the functions without dispatching a command.
+[ "${BASH_SOURCE[0]}" != "$0" ] && return 0
 
 case "${1:-status}" in
     status)   cmd_status ;;

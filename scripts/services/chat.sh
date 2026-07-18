@@ -354,7 +354,10 @@ cmd_start() {
         log "Starting ngIRCd on ${BIND}:${IRC_PORT} (federation-free)..."
         # -n = no fork (we background it ourselves and own the pidfile);
         # -f = config file. ngIRCd also writes PidFile from the config.
-        setsid nohup "$bin" -n -f "$NGIRCD_CONF" >"${LOG_DIR_CHAT}/ngircd.out" 2>&1 </dev/null &
+        # 8>&- : never inherit the loop's run_locked loop.lock fd (fd 8) into this
+        # detached daemon — a shared fd would hold the flock forever and deadlock
+        # every later self-heal cycle. See docs/knowledge/gotchas.md.
+        setsid nohup "$bin" -n -f "$NGIRCD_CONF" >"${LOG_DIR_CHAT}/ngircd.out" 2>&1 </dev/null 8>&- &
         echo $! > "$NGIRCD_PID"
         disown 2>/dev/null || true
     fi
@@ -374,9 +377,11 @@ cmd_start() {
         # nohup (NOT setsid) so $! is The Lounge's real PID → a correct pidfile, so
         # start stays idempotent and stop kills the right process. </dev/null + output
         # redirected to a file already detach it from this shell / the SSH session.
+        # 8>&- : don't leak the loop's run_locked loop.lock fd (fd 8) into the daemon
+        # (would hold the flock forever); it does not change $! (The Lounge's pid).
         ( cd "$THELOUNGE_SRC" \
             && THELOUNGE_HOME="$THELOUNGE_HOME" PATH="${nodedir}:$PATH" \
-               nohup "$node" index.js start >"${LOG_DIR_CHAT}/thelounge.out" 2>&1 </dev/null &
+               nohup "$node" index.js start >"${LOG_DIR_CHAT}/thelounge.out" 2>&1 </dev/null 8>&- &
             echo $! > "$THELOUNGE_PID" )
         disown 2>/dev/null || true
     fi

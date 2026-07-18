@@ -63,6 +63,32 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   *size‑short‑after‑"complete"* file is a catalog/serve mismatch — resuming it wedges retries or
   splices two file versions, so clear it. Kept partials are age‑GC'd in `verify`
   (`VALARK_PARTIAL_MAX_AGE_DAYS`, default 14) so dead URLs can't strand gigabytes.
+- **A *partial* Kiwix OPDS fetch must never overwrite a *more‑complete* cache** (#57). The live
+  catalog is fetched per‑language (`kiwix_catalog.py eng spa fra …`) and cached to
+  `state/catalog/zim.tsv`. The old code set `ok=True` if *any* language fetched, so one language
+  timing out / 429‑ing (or returning a truncated feed) still exited 0, and `catalog_refresh_zim`
+  atomically replaced the full multi‑language cache with the truncated subset — dropping whole
+  languages from the browse feed and breaking `request`/refill for them until the next full refresh.
+  A separate trigger: the web browse shelled `librarian.sh catalog` with `VALARK_ZIM_LANGS=eng`,
+  which made the *shared* cache re‑fetch English‑only. **Rule (fail‑closed):** `kiwix_catalog.py`
+  exit code is a **completeness** signal — 0 **only** if *every* requested language fetched;
+  `catalog_refresh_zim` swaps the cache **only** on a complete fetch (still atomic temp+rename),
+  keeps the existing cache on any partial/failure, and accepts a partial **only** to bootstrap a
+  box that has *no* cache yet. **And never let a browse narrow the shared cache:** the language set
+  is owned by the librarian's `VALARK_ZIM_LANGS`; the web UI filters *output* languages in
+  `scripts/lib/catalog-parse.js` (`parseCatalogTSV`, content ids end in `_<lang>`), so a browse can
+  never degrade the on‑disk catalog. Do **not** pass `VALARK_ZIM_LANGS` from `server.js`.
+- **Removing the browse's `VALARK_ZIM_LANGS=eng` un‑masked a hidden cost: `cmd_catalog` refreshes
+  the OPDS cache for *every* kind — gate it to CONTENT** (#57 follow‑up). `librarian.sh catalog`
+  unconditionally ran `catalog_refresh_zim` before emitting *any* bucket. The old English‑only
+  override made that a single fast fetch; once `server.js` stopped forcing it (correct — see above),
+  even a `catalog model` browse paid the full ~9‑language live fetch (up to 90 s/lang). On a
+  cache‑less host (fresh CI checkout) that blew past the `/api/catalog/models` 15 s poll → the
+  browse returned 0 items and the Playwright models test failed — while it *passed* locally, where a
+  fresh `zim.tsv` sits inside the 1‑day TTL so the refresh is skipped. Model/installer candidates
+  come from local TSVs, not the OPDS feed, so **refresh only when the CONTENT bucket is requested**
+  (`content` | `all`). Lesson: a "browse" endpoint must never synchronously pay a live multi‑fetch a
+  warm cache normally hides — reproduce cache‑miss timing the way CI (empty state) hits it.
 
 ## Storage / data root
 
@@ -70,6 +96,24 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   got pruned overnight). **Fix:** set `VAL_ARK_DATA` explicitly in `.env` on multi‑mount hosts.
 - **Default footprint cap can be tiny** — a box with 7 TB free had `VALARK_MAX_GB=500`, so almost
   nothing mirrored. Check the cap when "nothing downloads."
+- <a id="data-disk-mount-guard"></a>**A late/failed data-disk mount at `@reboot` would rebuild the
+  tree on the ROOT fs** — the writability probe (`valark_ensure_writable`) *passes* on an empty,
+  user-writable mountpoint, so `loop.sh`'s unconditional `mkdir` seeded `state/`+`content/` on the
+  boot volume, the librarian filled it toward the reserve, and once the real disk mounted it
+  shadowed that tree (stale pins/manifest) while a second cron tick opened a **different**
+  `loop.lock` inode → concurrent cycles. **Fix (#58):** a data-disk **identity guard** — at
+  commissioning `valark_data_stamp` writes a random id into an on-disk sentinel
+  (`$VALARK_HOME/.valark-data`) **and** a root-fs marker (`$PROJECT_ROOT/.valark-data-id`,
+  git-ignored); `valark_data_mounted` proceeds only when both exist and match, so an unmounted disk
+  (sentinel gone) or an autodetect fallback to the repo is **skipped**. `loop.sh`'s `data_disk_guard`
+  does a bounded retry-wait then skips with `exit 0` (the next cron tick converges) and drops a
+  root-fs breadcrumb (`.valark-mount-wait`) instead of `log()`-ing — `log()` mkdirs `LOG_DIR`, which
+  is on the missing disk. **Only for separate-disk boxes:** single-disk / dev mode
+  (`DATA_ROOT == PROJECT_ROOT`) is never marked, so `/data`-on-root layouts are never locked out.
+  **Deliberately switching a commissioned box back to single-disk mode?** Remove
+  `$PROJECT_ROOT/.valark-data-id`, or the guard will keep skipping (it still thinks a disk is
+  missing). Never use a "findmnt resolves to non-root fs" heuristic — it wrongly locks out valid
+  single-disk-server layouts where the data root lives on the root fs.
 
 ## Test / VM harness
 
@@ -301,6 +345,26 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   (macOS/Windows/CI get load+uptime+mem-fallback; net/temp/cpu% go null) and the handler NEVER
   throws. Don't shell out per request — reuse the 10s-cached `getDiskStatus()` (its `df` can hang
   on a stale NFS mount) and `fs.readFileSync('/proc/...')` for the rest.
+- **A `flock` fd leaks into every detached daemon you spawn while holding it — and the lock then
+  NEVER releases.** A flock is owned by the *open-file-description*, not the process; `fork` shares
+  the OFD, so a child that inherits the lock fd keeps the lock alive after the locker exits. `loop.sh`
+  `run_locked` holds `loop.lock` on **fd 8** for all of `loop_once`, which (re)starts long-lived,
+  DETACHED daemons (`_va_start_web`'s `setsid nohup node server.js … & disown`; every community
+  service's `setsid`/`nohup … &` in `services/*.sh`). None closed fd 8 → the web server (and each
+  service daemon) inherited the OFD holding the flock, so after the first cycle that started a daemon
+  the lock was held FOREVER by that daemon. Every later cycle's `flock -n 8` then failed ("another
+  loop cycle is running; skipping") and ALL maintenance silently stopped — a self-heal loop that
+  deadlocks on its own lock (issue #56 regression, caught in review). **Fix:** append `8>&-` to every
+  `setsid`/`nohup`/`&`-backgrounded daemon spawn reachable from a locked cycle so the child closes
+  the lock fd before exec. The robust central guard is one `8>&-` on `ensure_services`' `bash
+  "$sh" start` invocation (closes fd 8 for the whole service subtree — present + future daemons); the
+  web server closes it in `_va_start_web`; each `services/*.sh` spawn also closes it belt-and-suspenders.
+  `8>&-` on an already-closed fd is a harmless no-op (safe when the script runs standalone, no lock).
+  Bash can't set close-on-exec on a numbered fd portably, so explicit per-spawn `8>&-` is the
+  verifiable approach. Guard: `tests/test-loop-lock.sh` §6 drives the real `_va_start_web` with a fake
+  long-lived daemon and asserts a fresh `flock -n` acquires after the cycle. **Lesson:** any time you
+  `setsid`/`nohup`/`&` a long-lived process from inside a `flock`ed region, close the lock fd on the
+  spawn — the flock outlives the locker through the inherited fd.
 
 ## Content moderation (Phase 7)
 
@@ -391,6 +455,25 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   the text AFTER its last occurrence, so an echoing build degrades to hold, never to mass
   false-positives (and never to allow). Flag support differs per binary in the SAME build — test
   each binary's argv against the mirrored build, not just "llama.cpp".
+- **The sweep must enumerate symlinks, and quarantine the LINK — never read through it** (#52,
+  adversarial-review). `find -H "$d" -type f` skips every symlink found during traversal (with `-H`
+  they aren't followed → they fail `-type f`), so a store `innocent.txt → /outside/flagged` was
+  neither screened nor moved while the bytes stayed reachable through the store path (a file server
+  that follows symlinks re-serves them; a link back into `<state>/moderation/quarantine` re-exposes
+  quarantined content). *Reading the target* would be worse — the dedupe key is `stat`-derived, so an
+  attacker earns an `allow` on a benign target then `touch -r`-forges size+mtime after retargeting the
+  link (TOCTOU → permanent allow for arbitrary bytes). Rule: enumerate `\( -type f -o -type l \)`,
+  test `[ -L ]` **before** `[ -f ]` (which follows the link), and quarantine any symlink as a
+  fail-closed `hold` — `mv` moves the link itself, never the target, and one branch covers
+  link→file, link→dir (a whole out-of-store tree), and dangling links.
+- **`_json()` must escape EVERY C0 control byte, not just `\n`/`\r`/`\t`** (#52). A byte `0x01`-`0x1f`
+  is legal in a Unix filename but ILLEGAL raw inside a JSON string, so a filename like `evil␁name.txt`
+  wrote a `queue.jsonl` line that `server.js` `_readJsonl` (a `try{JSON.parse}catch{}`) silently
+  dropped — the quarantined file became an invisible, un-actionable orphan (never in `_modPending`,
+  `reviewModerationItem` returns "not found"). Fail-closed on quarantine still held, but review-queue
+  state consistency broke. Fix at the WRITER (not by making the reader lenient): after the short
+  escapes, replace each remaining `0x01`-`0x1f` byte with `\u00XX`. Forward-only — lines already
+  malformed at rest stay orphaned (no migration).
 
 ## Git / releases
 

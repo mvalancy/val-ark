@@ -141,6 +141,9 @@ ensure_redis() {
     mkdir -p "$REDIS_DATA"
     log "Starting Redis (${server}) on ${REDIS_HOST}:${REDIS_PORT}"
     # Bind localhost only; this Redis is an internal datastore, not a LAN service.
+    # 8>&- : never inherit the loop's run_locked loop.lock fd (fd 8) into this daemon —
+    # a shared fd holds the flock forever and deadlocks every later self-heal cycle.
+    # See docs/knowledge/gotchas.md.
     "$server" \
         --bind 127.0.0.1 \
         --port "$REDIS_PORT" \
@@ -148,7 +151,7 @@ ensure_redis() {
         --daemonize no \
         --save 60 1 \
         --appendonly yes \
-        >"$REDIS_LOG" 2>&1 &
+        >"$REDIS_LOG" 2>&1 8>&- &
     echo $! > "$REDIS_PID_FILE"
     # Wait for it to come up.
     local i
@@ -292,10 +295,13 @@ do_start() {
 
     log "Starting NodeBB on ${BIND}:${FORUM_PORT} (proxied at ${URL_ROOT}/)"
     # ./nodebb start forks a managed loader; we capture its pid for stop/status.
+    # 8>&- : the forked loader is detached and long-lived — never let it inherit the
+    # loop's run_locked loop.lock fd (fd 8), or the flock never releases and every
+    # later self-heal cycle deadlocks. See docs/knowledge/gotchas.md.
     nodebb_cmd env \
         NODE_ENV=production \
         nodebb_config="$CONFIG_FILE" \
-        ./nodebb start --config="$CONFIG_FILE" >"$LOG_FILE" 2>&1
+        ./nodebb start --config="$CONFIG_FILE" >"$LOG_FILE" 2>&1 8>&-
     # NodeBB's loader forks and binds the port a few seconds later (much slower on
     # low-power ARM boards — ~12s on an RK3588). Poll for readiness instead of a
     # fixed sleep, mirroring the pidfile once it appears. Any HTTP response (incl.

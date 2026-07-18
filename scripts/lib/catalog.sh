@@ -44,7 +44,23 @@ catalog_refresh_zim() {
         return 0   # cache fresh
     fi
     local tmp="${ZIM_CACHE}.tmp.$$"
-    if python3 "$KIWIX_PY" $ZIM_LANGS > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    local rc=0
+    python3 "$KIWIX_PY" $ZIM_LANGS > "$tmp" 2>/dev/null || rc=$?
+    # COMPLETENESS GATE (#57): kiwix_catalog.py exits 0 only when EVERY requested
+    # language fetched. A partial/failed fetch (one language 429s or times out, a
+    # non-200, a truncated feed) exits non-zero — accepting it would atomically
+    # replace the good multi-language cache with a truncated (e.g. English-less or
+    # English-only) subset, degrading the browse feed and request/refill until the
+    # next full refresh. So we replace the cache ONLY on a complete fetch.
+    if [ "$rc" -eq 0 ] && [ -s "$tmp" ]; then
+        mv -f "$tmp" "$ZIM_CACHE"      # atomic (same dir): temp + rename
+        return 0
+    fi
+    # Partial/failed fetch. First-boot bootstrap ONLY: if there is no cache at all
+    # yet, accept whatever we got so the box is not left with an empty catalog; the
+    # loop's periodic --force refresh heals it to the full set on a later cycle. If
+    # a cache already exists, keep it untouched — never trade completeness for churn.
+    if [ ! -s "$ZIM_CACHE" ] && [ -s "$tmp" ]; then
         mv -f "$tmp" "$ZIM_CACHE"
         return 0
     fi

@@ -229,7 +229,9 @@ start_maddy() {
     fi
     write_config
     log "Starting maddy (submission :${SMTP_SUBMISSION_PORT}, imap :${IMAP_PORT}, bind ${VALARK_BIND}) ..."
-    nohup "$MADDY_BIN" --config "$MADDY_CONF" run >"${LOG_DIR_MAIL}/maddy.log" 2>&1 &
+    # 8>&- : never inherit the loop's run_locked loop.lock fd (fd 8) — a detached
+    # daemon holding it would deadlock every later cycle. See docs/knowledge/gotchas.md.
+    nohup "$MADDY_BIN" --config "$MADDY_CONF" run >"${LOG_DIR_MAIL}/maddy.log" 2>&1 8>&- &
     echo $! > "$MADDY_PID"
     sleep 1
     if is_running "$MADDY_PID"; then
@@ -251,10 +253,11 @@ start_alps() {
     # It connects to the local maddy over plaintext IMAP/SMTP submission (the box
     # is offline/LAN-only, so '+insecure' loopback is fine — no cert needed).
     log "Starting alps webmail on 127.0.0.1:${ALPS_PORT} (proxied at /app/mail/) ..."
+    # 8>&- : never inherit the loop's run_locked loop.lock fd (fd 8) into this daemon.
     nohup "$ALPS_BIN" \
         -addr "127.0.0.1:${ALPS_PORT}" \
         "imap+insecure://127.0.0.1:${IMAP_PORT}" "smtp+insecure://127.0.0.1:${SMTP_SUBMISSION_PORT}" \
-        >"${LOG_DIR_MAIL}/alps.log" 2>&1 &
+        >"${LOG_DIR_MAIL}/alps.log" 2>&1 8>&- &
     echo $! > "$ALPS_PID"
     sleep 1
     if is_running "$ALPS_PID"; then

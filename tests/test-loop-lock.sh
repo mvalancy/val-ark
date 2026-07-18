@@ -93,5 +93,65 @@ echo "$disp" | grep -q 'exec 8>&-' && pass \
 echo "$disp" | awk '/run\)/,/done ;;/' | grep -q 'mkdir -p "\$STATE_DIR"' && pass \
     || fail "the run) arm must mkdir STATE_DIR before opening the lock fd"
 
+# --- 6. the cycle lock must NOT leak into detached daemons (issue #56 regression) ---
+# run_locked holds loop.lock on fd 8 for ALL of loop_once, which (re)starts the web
+# server (and community daemons) as DETACHED, long-lived processes. If any inherits
+# fd 8 it shares the open-file-description that holds the flock, so the lock is NEVER
+# released — every later cycle's `flock -n 8` then fails forever ("another loop cycle
+# is running; skipping"), silently starving ALL maintenance. Every daemon spawn
+# reachable from loop_once MUST close the lock fd (8>&-). Drive the REAL _va_start_web
+# with a fake long-lived "node", hold the lock exactly like run_locked does, then
+# assert a fresh non-blocking flock ACQUIRES it while the fake daemon is still alive.
+# (This FAILS against the pre-fix _va_start_web — daemon inherits fd 8 — and PASSES
+# once the spawn closes it.)
+FAKE="$T/fakebin"; mkdir -p "$FAKE"
+cat > "$FAKE/node" <<EOF
+#!/bin/bash
+echo \$\$ > "$T/daemon.pid"
+exec sleep 30
+EOF
+chmod +x "$FAKE/node"
+# kill the fake daemon (and any holder) on exit, then clean up the temp dir
+trap 'kill "$(cat "$T/daemon.pid" 2>/dev/null)" 2>/dev/null; [ -n "$HOLDER" ] && kill "$HOLDER" 2>/dev/null; rm -rf "$T"' EXIT
+
+WH="$T/webharness.sh"
+{
+    echo 'LOG_DIR="'"$T"'"; _DIR="'"$T"'"'
+    echo 'log(){ :; }'
+    echo '_va_node(){ echo "'"$FAKE/node"'"; }'   # resolve node -> our fake daemon
+    awk '/^_va_start_web\(\) \{/,/^\}/' "$LOOP"
+} > "$WH"
+grep -q 'setsid' "$WH" && pass || fail "web harness must contain the real _va_start_web"
+
+WLOCK="$STATE_DIR/loop2.lock"; rm -f "$T/daemon.pid"
+# Simulate one run_locked cycle: take loop.lock on fd 8, (re)start the web daemon,
+# then release OUR copy — exactly what the `run` loop's `exec 8>&-` does per iteration.
+(
+    . "$WH"
+    exec 8>"$WLOCK"
+    flock -n 8 || exit 7
+    _va_start_web 3900
+    exec 8>&-
+) 2>/dev/null
+# wait for the fake daemon so its (possibly inherited) fd 8 is live during the check
+for i in $(seq 1 100); do [ -f "$T/daemon.pid" ] && break; sleep 0.03; done
+DPID="$(cat "$T/daemon.pid" 2>/dev/null)"
+[ -n "$DPID" ] && kill -0 "$DPID" 2>/dev/null && pass \
+    || fail "the fake web daemon must be alive during the lock check (else the test proves nothing)"
+# THE assertion: with the run shell's copy closed, loop.lock must be FREE — i.e. the
+# detached daemon must NOT be holding it. FAILS on the buggy code (daemon inherited
+# fd 8 → flock never releases); PASSES once _va_start_web spawns with 8>&-.
+if flock -n "$WLOCK" -c 'true'; then pass; else \
+    fail "loop.lock LEAKED into the detached web daemon — a fresh flock -n must succeed after a cycle (daemon must be spawned with 8>&-)"; fi
+kill "$DPID" 2>/dev/null
+
+# --- 7. structural: cycle-reachable daemon spawns close the lock fd (8>&-) -----------
+# Belt-and-suspenders for the spawns section 6 can't all drive live: the web server
+# spawn AND the central service-launch guard must close fd 8.
+awk '/^_va_start_web\(\) \{/,/^\}/' "$LOOP" | grep -q '8>&-' && pass \
+    || fail "_va_start_web must close the lock fd (8>&-) on the web-server spawn"
+sed -n '/^ensure_services()/,/^}/p' "$LOOP" | grep -q '8>&-' && pass \
+    || fail "ensure_services must close the lock fd (8>&-) when it spawns a service script"
+
 echo "loop-lock: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

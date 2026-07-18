@@ -123,7 +123,12 @@ _va_node() {
 _va_start_web() {
     local port="$1" node; node="$(_va_node)"
     [ -n "$node" ] || { log "${RED}node not found${NC}; cannot start web server"; return 1; }
-    setsid nohup "$node" "${_DIR}/server.js" "$port" >"${LOG_DIR}/server.out" 2>&1 </dev/null & disown
+    # 8>&- : this daemon is spawned from inside a run_locked cycle, which holds
+    # loop.lock on fd 8. A detached child inherits that fd → it shares the
+    # open-file-description holding the flock, so the lock would NEVER release and
+    # every later cycle's `flock -n 8` would fail forever (a self-heal loop must
+    # never deadlock on its own lock). Close it here. See docs/knowledge/gotchas.md.
+    setsid nohup "$node" "${_DIR}/server.js" "$port" >"${LOG_DIR}/server.out" 2>&1 </dev/null 8>&- & disown
 }
 ensure_web_server() {
     local port="${VALARK_WEB_PORT:-3000}"
@@ -193,7 +198,12 @@ ensure_services() {
     for id in $svcs; do
         sh="${_DIR}/services/${id}.sh"
         if [ -x "$sh" ] || [ -f "$sh" ]; then
-            if timeout 120 bash "$sh" start >/dev/null 2>&1; then
+            # 8>&- : we run under the cycle lock (run_locked, fd 8) but the service
+            # scripts spawn long-lived detached daemons (ngIRCd/The Lounge/maddy/
+            # NodeBB/…). Close fd 8 for the whole service subtree so no daemon inherits
+            # loop.lock — a shared fd holds the lock forever and deadlocks every later
+            # cycle. Central guard, covers present + future daemons. See gotchas.md.
+            if timeout 120 bash "$sh" start >/dev/null 2>&1 8>&-; then
                 log "service ${GREEN}up${NC}: ${id}"
             else
                 log "${YELLOW}service ${id} not started${NC} (mirror/build it: scripts/tools/${id}.sh)"

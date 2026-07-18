@@ -327,6 +327,26 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   (macOS/Windows/CI get load+uptime+mem-fallback; net/temp/cpu% go null) and the handler NEVER
   throws. Don't shell out per request — reuse the 10s-cached `getDiskStatus()` (its `df` can hang
   on a stale NFS mount) and `fs.readFileSync('/proc/...')` for the rest.
+- **A `flock` fd leaks into every detached daemon you spawn while holding it — and the lock then
+  NEVER releases.** A flock is owned by the *open-file-description*, not the process; `fork` shares
+  the OFD, so a child that inherits the lock fd keeps the lock alive after the locker exits. `loop.sh`
+  `run_locked` holds `loop.lock` on **fd 8** for all of `loop_once`, which (re)starts long-lived,
+  DETACHED daemons (`_va_start_web`'s `setsid nohup node server.js … & disown`; every community
+  service's `setsid`/`nohup … &` in `services/*.sh`). None closed fd 8 → the web server (and each
+  service daemon) inherited the OFD holding the flock, so after the first cycle that started a daemon
+  the lock was held FOREVER by that daemon. Every later cycle's `flock -n 8` then failed ("another
+  loop cycle is running; skipping") and ALL maintenance silently stopped — a self-heal loop that
+  deadlocks on its own lock (issue #56 regression, caught in review). **Fix:** append `8>&-` to every
+  `setsid`/`nohup`/`&`-backgrounded daemon spawn reachable from a locked cycle so the child closes
+  the lock fd before exec. The robust central guard is one `8>&-` on `ensure_services`' `bash
+  "$sh" start` invocation (closes fd 8 for the whole service subtree — present + future daemons); the
+  web server closes it in `_va_start_web`; each `services/*.sh` spawn also closes it belt-and-suspenders.
+  `8>&-` on an already-closed fd is a harmless no-op (safe when the script runs standalone, no lock).
+  Bash can't set close-on-exec on a numbered fd portably, so explicit per-spawn `8>&-` is the
+  verifiable approach. Guard: `tests/test-loop-lock.sh` §6 drives the real `_va_start_web` with a fake
+  long-lived daemon and asserts a fresh `flock -n` acquires after the cycle. **Lesson:** any time you
+  `setsid`/`nohup`/`&` a long-lived process from inside a `flock`ed region, close the lock fd on the
+  spawn — the flock outlives the locker through the inherited fd.
 
 ## Content moderation (Phase 7)
 

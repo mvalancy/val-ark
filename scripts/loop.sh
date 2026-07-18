@@ -12,9 +12,12 @@
 #   7. functional verification    -> tools run, kiwix serves, fleet reachable
 #   8. health report + coordination drop
 #
-# Designed to be SAFE to run repeatedly and concurrently with a standalone fill
-# (the fill flock prevents double-downloading). Never aborts the cycle on a
-# single failure.
+# Every FULL cycle is serialised on loop.lock (fd 8): the installed cron `once`
+# ticks, the admin one-click repair (server.js spawns `loop.sh once`), and a
+# supervisory `loop.sh run` never overlap — two concurrent cycles would flap the
+# web server (ensure_web_server's fuser -k) and double-run tool_refresh onto the
+# same .part files. Only the librarian fill is separately safe to run alongside
+# (its own fill flock guards double-downloading). Never aborts on a single failure.
 #
 # Usage:
 #   loop.sh once          run a single maintenance cycle (cron / /loop)
@@ -120,7 +123,12 @@ _va_node() {
 _va_start_web() {
     local port="$1" node; node="$(_va_node)"
     [ -n "$node" ] || { log "${RED}node not found${NC}; cannot start web server"; return 1; }
-    setsid nohup "$node" "${_DIR}/server.js" "$port" >"${LOG_DIR}/server.out" 2>&1 </dev/null & disown
+    # 8>&- : this daemon is spawned from inside a run_locked cycle, which holds
+    # loop.lock on fd 8. A detached child inherits that fd → it shares the
+    # open-file-description holding the flock, so the lock would NEVER release and
+    # every later cycle's `flock -n 8` would fail forever (a self-heal loop must
+    # never deadlock on its own lock). Close it here. See docs/knowledge/gotchas.md.
+    setsid nohup "$node" "${_DIR}/server.js" "$port" >"${LOG_DIR}/server.out" 2>&1 </dev/null 8>&- & disown
 }
 ensure_web_server() {
     local port="${VALARK_WEB_PORT:-3000}"
@@ -190,7 +198,12 @@ ensure_services() {
     for id in $svcs; do
         sh="${_DIR}/services/${id}.sh"
         if [ -x "$sh" ] || [ -f "$sh" ]; then
-            if timeout 120 bash "$sh" start >/dev/null 2>&1; then
+            # 8>&- : we run under the cycle lock (run_locked, fd 8) but the service
+            # scripts spawn long-lived detached daemons (ngIRCd/The Lounge/maddy/
+            # NodeBB/…). Close fd 8 for the whole service subtree so no daemon inherits
+            # loop.lock — a shared fd holds the lock forever and deadlocks every later
+            # cycle. Central guard, covers present + future daemons. See gotchas.md.
+            if timeout 120 bash "$sh" start >/dev/null 2>&1 8>&-; then
                 log "service ${GREEN}up${NC}: ${id}"
             else
                 log "${YELLOW}service ${id} not started${NC} (mirror/build it: scripts/tools/${id}.sh)"
@@ -365,21 +378,37 @@ cron_uninstall() {
     log "removed ${CRON_TAG} cron entries"
 }
 
-# Single-cycle lock so overlapping cron ticks never stack.
+# Single-cycle lock (fd 8 on loop.lock), non-blocking, so overlapping cycles never
+# stack. Busy-mode is $1: "exit" (a cron/one-off `once` — end the process cleanly)
+# or "skip" (a forever `loop.sh run` iteration — RETURN non-zero so the while-loop
+# keeps going; a stuck cycle must never deadlock the driver). flock -n means whoever
+# already holds the lock wins and every other caller yields without waiting.
 run_locked() {
+    local on_busy="exit"
+    case "$1" in exit|skip) on_busy="$1"; shift ;; esac
     exec 8>"${STATE_DIR}/loop.lock"
-    if ! flock -n 8; then log "another loop cycle is running; skipping"; exit 0; fi
+    if ! flock -n 8; then
+        log "another loop cycle is running; skipping"
+        [ "$on_busy" = "skip" ] && return 1
+        exit 0
+    fi
     "$@"
 }
 
 case "${1:-once}" in
-    once) mkdir -p "$STATE_DIR" "$LOG_DIR" 2>/dev/null; run_locked loop_once ;;
+    once) mkdir -p "$STATE_DIR" "$LOG_DIR" 2>/dev/null; run_locked exit loop_once ;;
     run)
         interval="${2:-1800}"
+        mkdir -p "$STATE_DIR" "$LOG_DIR" 2>/dev/null
         log "loop: starting continuous run (interval ${interval}s). Touch ${STATE_DIR}/STOP to halt."
         while true; do
             [ -f "${STATE_DIR}/STOP" ] && { log "STOP flag present; exiting loop"; break; }
-            loop_once
+            # Take the SAME loop.lock as the cron `once` tick, non-blocking: if a cron
+            # tick (or a still-running prior iteration) holds it, skip THIS iteration
+            # rather than stack a second concurrent loop_once. run_locked returns here
+            # (never exits), so the forever loop survives contention.
+            run_locked skip loop_once || true
+            exec 8>&-   # release the lock so a cron `once` tick can work during our sleep
             log "sleeping ${interval}s"; sleep "$interval"
         done ;;
     install)   cron_install "${2:-30}" ;;

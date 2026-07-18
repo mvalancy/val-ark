@@ -45,10 +45,12 @@ _json(){
     printf '%s' "$s"
 }
 
-# Stable, injection-proof dedupe key: a hash of path+size+mtime. Fixed-width hex → no
-# substring/prefix false-matches (grep -qF on a raw tab-joined path could match mtime as
-# a prefix, or a path containing a tab/newline could corrupt the marker file).
-_key(){ printf '%s\0%s\0%s' "$1" "$2" "$3" | sha1sum 2>/dev/null | cut -d' ' -f1; }
+# Stable, injection-proof dedupe key: a hash of path+size+mtime+sensitivity. Fixed-width
+# hex → no substring/prefix false-matches (grep -qF on a raw tab-joined path could match
+# mtime as a prefix, or a path containing a tab/newline could corrupt the marker file).
+# Sensitivity is folded in so TIGHTENING policy (e.g. balanced→strict) re-screens files a
+# weaker policy previously ALLOWED, instead of leaving them stuck on a stale-policy verdict.
+_key(){ printf '%s\0%s\0%s\0%s' "$1" "$2" "$3" "$4" | sha1sum 2>/dev/null | cut -d' ' -f1; }
 already_screened(){ [ -f "$SCREENED" ] && grep -q "^$1" "$SCREENED"; }   # $1 = key (hex, regex-safe)
 mark_screened(){ printf '%s\t%s\n' "$1" "$2" >> "$SCREENED"; }           # $1 = key, $2 = decision
 
@@ -62,14 +64,25 @@ compact_marker(){
     fi
 }
 
-# Read the FAIL-CLOSED moderation settings (enabled). If node is unavailable, DEFAULT to
-# enabled (screen anyway — fail toward safety). 'block'/'quarantine' both MOVE the file;
-# there is no "leave it served while enabled" mode.
+# Read the FAIL-CLOSED moderation settings (enabled + sensitivity). If node is unavailable,
+# DEFAULT to enabled AND strict — screen anyway, at the tightest policy (fail toward safety).
+# 'block'/'quarantine' both MOVE the file; there is no "leave it served while enabled" mode.
+# Sensitivity MUST reach the classifier (moderation.sh check --sensitivity): the web endpoint
+# already honors cfg.sensitivity, so this enforcement sweep must too — otherwise it silently
+# applies a weaker policy than the admin configured (allow-vs-hold divergence on numeric-score
+# signals, e.g. a 0.3 risk score is allow at balanced but hold at strict).
 mod_settings() {
     local json=""
     [ -n "$NODE" ] && [ -f "$COMMISSION" ] && json=$("$NODE" "$COMMISSION" moderation 2>/dev/null)
     MOD_ENABLED=1
     case "$json" in *'"enabled":false'*) MOD_ENABLED=0 ;; esac
+    # Parallel fail-toward-safety default: unreadable node/commission output → strict.
+    MOD_SENS=strict
+    case "$json" in
+        *'"sensitivity":"strict"'*)   MOD_SENS=strict ;;
+        *'"sensitivity":"balanced"'*) MOD_SENS=balanced ;;
+        *'"sensitivity":"lenient"'*)  MOD_SENS=lenient ;;
+    esac
 }
 
 # Which dirs to screen. Explicit VALARK_MODERATION_DIRS (colon-separated) wins; otherwise
@@ -107,12 +120,13 @@ sweep() {
             case "$f" in "$MOD_STATE"/*) continue ;; esac       # never screen our own state tree
             sz=$(stat -c%s "$f" 2>/dev/null || echo 0)
             mt=$(stat -c%Y "$f" 2>/dev/null || echo 0)
-            key=$(_key "$f" "$sz" "$mt")
+            key=$(_key "$f" "$sz" "$mt" "$MOD_SENS")
             already_screened "$key" && continue
             [ "$scanned" -ge "$MAX_FILES" ] && break 2
             scanned=$((scanned + 1))
-            # Screen it (type decided by magic bytes INSIDE moderation.sh, never here).
-            out=$(bash "$MOD" check "$f" 2>/dev/null)
+            # Screen it at the ADMIN's configured sensitivity (type decided by magic bytes
+            # INSIDE moderation.sh, never here) — not a hardcoded 'balanced' default.
+            out=$(bash "$MOD" check "$f" --sensitivity "$MOD_SENS" 2>/dev/null)
             dec=$(printf '%s' "$out" | sed -n 's/.*"decision":"\([a-z]*\)".*/\1/p' | head -1)
             case "$dec" in allow|block|hold|skip) ;; *) dec=hold ;; esac   # unknown/empty → fail-closed hold
             if [ "$dec" = allow ]; then
@@ -144,6 +158,6 @@ sweep() {
 
 case "${1:-sweep}" in
     sweep)    sweep ;;
-    settings) mod_settings; echo "enabled=${MOD_ENABLED}" ;;
+    settings) mod_settings; echo "enabled=${MOD_ENABLED} sensitivity=${MOD_SENS}" ;;
     *) echo "usage: mod-sweep.sh [sweep|settings]" >&2; exit 2 ;;
 esac

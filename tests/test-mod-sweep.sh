@@ -23,11 +23,13 @@ T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 STORE="$T/store"; mkdir -p "$STORE"
 
 # Stub classifier: content with BADWORD → unsafe; JUNKVERDICT → unparseable prose
-# (must fail-closed to hold); else safe. args are "<kind> <file>".
+# (must fail-closed to hold); SCORE30 → a numeric 0.3 risk score (allow at balanced, hold
+# at strict — exercises the admin-sensitivity path); else safe. args are "<kind> <file>".
 cat > "$T/stub" <<'EOF'
 #!/bin/bash
 if grep -q BADWORD "$2" 2>/dev/null; then echo unsafe; exit 0; fi
 if grep -q JUNKVERDICT "$2" 2>/dev/null; then echo "the weather is pleasant today"; exit 0; fi
+if grep -q SCORE30 "$2" 2>/dev/null; then echo 0.3; exit 0; fi
 echo safe
 EOF
 chmod +x "$T/stub"
@@ -94,6 +96,34 @@ fi
 printf 'BADWORD in a spaced name' > "$STORE/a spaced file.txt"
 run_sweep >/dev/null
 [ ! -f "$STORE/a spaced file.txt" ] && pass || fail "a spaced flagged filename must be quarantined"
+
+# --- 7. #51: the sweep must screen at the ADMIN's configured sensitivity, not a hardcoded
+#        'balanced'. A 0.3 risk score is ALLOW under balanced but HOLD under strict; the
+#        loop's enforcement point must honor strict (parity with the web endpoint), and
+#        TIGHTENING the policy must re-screen a file a weaker policy previously allowed.
+set_sens() {   # $1 = strict|balanced|lenient
+    VALARK_STATE_DIR="$T" "$NODE" -e \
+        'require(process.argv[1]).setModeration(process.env.VALARK_STATE_DIR,{sensitivity:process.argv[2]})' \
+        "$COMMISSION" "$1" >/dev/null 2>&1
+}
+
+# 7a. balanced policy: score 0.3 → allow → the file stays served (recorded allow).
+set_sens balanced
+echo "borderline SCORE30 upload" > "$STORE/border.txt"
+run_sweep >/dev/null; r=$?
+[ -f "$STORE/border.txt" ] && pass || fail "score-0.3 file must be ALLOWED (left served) under balanced policy"
+
+# 7b. admin tightens to strict → the previously-allowed file must be RE-SCREENED (marker
+#     folds in sensitivity) and now HELD → quarantined, per admin intent.
+set_sens strict
+run_sweep >/dev/null; r=$?
+[ "$r" = 10 ] && pass || fail "tightening to strict must re-screen + quarantine the score-0.3 file (got rc $r)"
+[ ! -f "$STORE/border.txt" ] && pass || fail "score-0.3 file must be quarantined under strict policy (honor admin sensitivity)"
+ls "$QDIR"/*border.txt >/dev/null 2>&1 && pass || fail "the strict-quarantined score file must land in quarantine"
+grep border.txt "$QUEUE" | grep -q '"decision":"hold"' && pass || fail "score-0.3 under strict must be queued as hold"
+
+# restore default policy for any future case
+set_sens balanced
 
 echo "mod-sweep: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

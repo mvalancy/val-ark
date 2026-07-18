@@ -63,6 +63,21 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   *size‑short‑after‑"complete"* file is a catalog/serve mismatch — resuming it wedges retries or
   splices two file versions, so clear it. Kept partials are age‑GC'd in `verify`
   (`VALARK_PARTIAL_MAX_AGE_DAYS`, default 14) so dead URLs can't strand gigabytes.
+- **A *partial* Kiwix OPDS fetch must never overwrite a *more‑complete* cache** (#57). The live
+  catalog is fetched per‑language (`kiwix_catalog.py eng spa fra …`) and cached to
+  `state/catalog/zim.tsv`. The old code set `ok=True` if *any* language fetched, so one language
+  timing out / 429‑ing (or returning a truncated feed) still exited 0, and `catalog_refresh_zim`
+  atomically replaced the full multi‑language cache with the truncated subset — dropping whole
+  languages from the browse feed and breaking `request`/refill for them until the next full refresh.
+  A separate trigger: the web browse shelled `librarian.sh catalog` with `VALARK_ZIM_LANGS=eng`,
+  which made the *shared* cache re‑fetch English‑only. **Rule (fail‑closed):** `kiwix_catalog.py`
+  exit code is a **completeness** signal — 0 **only** if *every* requested language fetched;
+  `catalog_refresh_zim` swaps the cache **only** on a complete fetch (still atomic temp+rename),
+  keeps the existing cache on any partial/failure, and accepts a partial **only** to bootstrap a
+  box that has *no* cache yet. **And never let a browse narrow the shared cache:** the language set
+  is owned by the librarian's `VALARK_ZIM_LANGS`; the web UI filters *output* languages in
+  `scripts/lib/catalog-parse.js` (`parseCatalogTSV`, content ids end in `_<lang>`), so a browse can
+  never degrade the on‑disk catalog. Do **not** pass `VALARK_ZIM_LANGS` from `server.js`.
 
 ## Storage / data root
 

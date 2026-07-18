@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { execSync, execFile, execFileSync, spawn, spawnSync } = require('child_process');
+const { parseCatalogTSV } = require('./lib/catalog-parse');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -551,34 +552,23 @@ const CATALOG_MAX_ITEMS = 4000;            // bound the JSON payload
 // the UI); operators can widen with VALARK_CATALOG_LANGS.
 const CATALOG_LANGS = String(cfg('VALARK_CATALOG_LANGS', 'eng')).trim();
 
-function parseCatalogTSV(stdout) {
-    // planner --list-absent rows: id bucket cat value bytes source url dest extra phase
-    const items = [];
-    for (const line of String(stdout).split('\n')) {
-        if (!line) continue;
-        const p = line.split('\t');
-        if (p.length < 9) continue;
-        const bytes = parseInt(p[4], 10) || 0;
-        const name = path.basename(p[7] || '') || p[8] || p[0];
-        items.push({
-            id: p[0],
-            category: String(p[2] || '').replace(/^zim:|^model:/, '') || 'other',
-            value: parseInt(p[3], 10) || 0,
-            bytes,
-            name,
-        });
-        if (items.length >= CATALOG_MAX_ITEMS) break;
-    }
-    return items;
-}
 function computeCatalog(kind) {
     const arg = kind === 'models' ? 'model' : 'content';
     return new Promise((resolve) => {
+        // NOTE (#57): do NOT pass VALARK_ZIM_LANGS here. That would make the shared
+        // librarian cache re-fetch English-only and clobber the full multi-language
+        // catalog. We always refresh the full cache and narrow LANGUAGES on output
+        // (parseCatalogTSV langs) — a browse can never degrade the on-disk cache.
         execFile('/usr/bin/bash', [path.join(ROOT, 'scripts/librarian.sh'), 'catalog', arg], {
             cwd: ROOT, timeout: 160000, maxBuffer: 48 * 1024 * 1024,
-            env: { ...process.env, FORCE_COLOR: '0', VALARK_ZIM_LANGS: CATALOG_LANGS },
+            env: { ...process.env, FORCE_COLOR: '0' },
         }, (err, stdout) => {
-            const items = err ? (_catalogCache[kind].data || []) : parseCatalogTSV(stdout);
+            const items = err ? (_catalogCache[kind].data || [])
+                : parseCatalogTSV(stdout, {
+                    maxItems: CATALOG_MAX_ITEMS,
+                    // language filter is meaningful for ZIM content only
+                    langs: kind === 'content' ? CATALOG_LANGS : '',
+                });
             _catalogCache[kind] = { data: items, ts: Date.now() };
             resolve(items);
         });

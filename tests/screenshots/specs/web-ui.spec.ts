@@ -1330,6 +1330,35 @@ test.describe('Val Ark - Consumer Shell (Home status + Settings + Activity)', ()
     expect(expert).toBeGreaterThan(basic);
   });
 
+  test('deep link #/settings#storage renders Settings, not Home (#59)', async ({ page }) => {
+    // The router must split '#/route#anchor' and route on the base path — before the
+    // fix '/settings#storage' matched no branch and fell through to Home.
+    await page.goto(`file://${WEB_UI}#/settings#storage`);
+    await page.waitForSelector('#main-content', { timeout: 5000 });
+    await expect(page.locator('h1')).toHaveText('Settings');
+    await expect(page.locator('#storage')).toBeVisible();
+  });
+
+  test('Settings tiles (Storage/Update/About) stay on Settings and scroll to their section (#59)', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/settings`);
+    await page.waitForSelector('.settings-grid', { timeout: 5000 });
+    await page.locator('.seg-btn:has-text("Expert")').click();   // reveals the Update tile
+    await page.waitForTimeout(200);
+    for (const id of ['storage', 'update', 'about']) {
+      await page.locator(`.settings-item[data-section="${id}"]`).click();
+      await page.waitForTimeout(250);
+      await expect(page.locator('h1')).toHaveText('Settings');   // not re-routed Home
+      const section = page.locator(`#${id}`);
+      await expect(section).toBeVisible();                       // every tile has a real target
+      // scrollIntoView actually happened: the section's top is inside the viewport.
+      const inView = await page.evaluate(sid => {
+        const r = document.getElementById(sid)!.getBoundingClientRect();
+        return r.top > -r.height && r.top < window.innerHeight;
+      }, id);
+      expect(inView).toBe(true);
+    }
+  });
+
   test('Settings Downloads & Priorities offers a profile picker', async ({ page }) => {
     await page.goto(`file://${WEB_UI}#/settings`);
     await page.waitForSelector('#downloads', { timeout: 5000 });

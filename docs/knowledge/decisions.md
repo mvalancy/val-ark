@@ -6,6 +6,47 @@ later). See [README](README.md).
 
 ---
 
+## 2026‑07 — "Ask Val Ark" slice 1: an offline ask endpoint that reuses the moderation runtime (Phase 8, #67)
+
+- **Context:** Phase 8's core affordance is a "Ask Val Ark" helper backed by the box's OWN small
+  chat model. Every building block already existed — curated assistant models
+  (`data/models-extra.tsv` kind=`assistant`, land in `models/assistant/…`), the mirrored
+  llama.cpp runtime, and a PROVEN single-shot invocation (`verify.sh:104`, `moderation.sh`
+  `_mod_run_text`) — but nothing wired the box to answer "how do I…" anywhere in the UI.
+- **Decision (this slice — minimal, offline, zero-dep):** two endpoints in `scripts/server.js` +
+  a Home card. **`GET /api/status/ask`** → `{ready, runtime, model, reason, modelId}` (pure
+  presence checks, NO inference; read-gated for free by the `/api/status/` prefix). **`POST
+  /api/ask` `{question, context?}`** streams the answer as **SSE frames** (`event: token|soft|
+  error|done`, JSON-encoded `data` so newlines never break framing) — a per-request stream, NOT
+  the shared `sseClients` broadcast pool. Runtime reuse is exact: resolve `llama-completion`
+  (fallback `llama-cli`) by NAME under `tools/<platform>/llama-cpp` (the `_mod_find_bin` /
+  `findKiwixServe` pattern; `VALARK_TOOLS_DIR`-overridable) and the smallest `.gguf` > 10 MB under
+  `models/{assistant,llm}` (verify.sh's filter, assistant preferred). Invocation is the proven
+  single-shot argv `-m … -p <prompt> -n 256 -st -no-cnv --no-warmup --no-display-prompt --temp 0`.
+- **Why streaming, when the issue listed SSE as out-of-scope:** the worker task direction asked for
+  token-visible streaming; a single-shot `llama-cli` already emits tokens to stdout as it decodes,
+  so we stream **its stdout** — no persistent `llama-server` daemon (that stays out of scope). The
+  UI reads the stream with a `fetch()` + `ReadableStream` reader (EventSource can't POST) and a
+  tiny SSE frame parser; every token is rendered via `textContent` (auto-escaped — XSS-safe).
+- **Security posture (the whole point):** the user's `question` is DATA in ONE `-p` argv element —
+  `spawn(bin, argvArray)`, **never** a shell string / `sh -c`. Defence in depth: control-char
+  strip + 2000-char cap on the question (600 on context), `-n` token cap (hard max 1024), a
+  wall-clock `setTimeout`→`SIGKILL` backstop, a memory guard (`os.freemem()` vs model size) to
+  avoid OOM-killing community services, and an **admission cap** (`ASK_MAX_CONCURRENT`, default 2)
+  that 503s over-budget — mirroring the moderation/#62 in-flight cap so a burst can't fan out
+  unbounded 1–2 GB model loads.
+- **FAIL-SOFT (hard requirement):** the ARM64 appliance ships a llama.cpp SOURCE clone only, so a
+  bare box may have no binary and/or no model. Every such path returns **HTTP 200** with a friendly
+  `event: soft {reason: runtime|model|memory|empty}` (Home shows a one-click "Get the helper" that
+  fires the existing `POST /api/request {kind:'model', id:'qwen2.5-1.5b-instruct-gguf'}`), NEVER a
+  5xx, and never crashes the event loop. `VALARK_TEST_NO_SPAWN=1` returns a deterministic stub
+  answer AFTER the soft checks, so the Playwright suite never triggers a real model load while a
+  bare CI box still exercises the soft path; the offline bash validator leaves it UNSET to drive
+  the REAL spawn against a stub binary (proving the argv-array/no-shell contract).
+- **Deferred (later #67 slices):** doc-grounding/RAG over the bundled Linux docs + ZIM,
+  per-page context beyond Home, embed-everywhere, the "apply-the-fix" button, and — if single-shot
+  cold-load latency proves too slow on the appliance — a lazily-started persistent `llama-server`.
+
 ## 2026‑07 — Four‑tab consumer nav: Home · Library · Activity · Settings (#61 / epic #91 slice 1)
 
 - **Context:** the top nav had SEVEN links (Home, Software, Models, Library, Community, Settings,

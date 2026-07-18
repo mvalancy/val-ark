@@ -51,6 +51,18 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   not always the id — e.g. `piper-tts` → dir `piper`).
 - **Content shown "Not Mirrored" though present:** exact dated‑filename matching (`…_2025‑08.zim`)
   vs. the actual `…_2026‑02.zim`. **Fix:** match a date‑independent pattern (`CONTENT_LIBRARY[].match`).
+- **NEVER mix resumers on one `.part` — `curl -C -` on an aria2 partial silently corrupts** (#54).
+  An aria2 (`-x8`) `.part` is *segmented* — 8 non‑contiguous ranges, and with the default
+  `--file-allocation=prealloc` it is **full‑length from the start** — not a linear prefix. `curl -C -`
+  resumes from the file's byte‑length, so it "completes" a hole‑filled file instantly (curl ≥7.76
+  even treats the server's 416 as success); the ≥90 % size gate passes, a size‑only `verify` never
+  catches it → a corrupt flagship ZIM is served forever. **Rule:** the `.aria2` control file marks an
+  aria2‑owned partial; while it exists only aria2 may touch the `.part` (skip the curl fallback; if
+  aria2c was uninstalled, delete the pair and let curl start fresh). **Corollary:** a *transient*
+  failure must keep `.part`+`.aria2` (or a ~100 GB download restarts from 0 every cycle), while a
+  *size‑short‑after‑"complete"* file is a catalog/serve mismatch — resuming it wedges retries or
+  splices two file versions, so clear it. Kept partials are age‑GC'd in `verify`
+  (`VALARK_PARTIAL_MAX_AGE_DAYS`, default 14) so dead URLs can't strand gigabytes.
 
 ## Storage / data root
 
@@ -61,12 +73,26 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Test / VM harness
 
+- **`run-all.sh`'s green/red gate must not depend on node.** The runner's exit code came
+  solely from `report/generate.mjs`; with no node on the host (fresh appliance, minimal
+  container) it exited 0 even when suites failed. Every suite writes `results/*.json` with an
+  unspaced `"failed":N` (results.sh), so the no-node path greps `"failed":[1-9]` across them
+  and exits non-zero — zero-dep, and it covers bash validators, services e2e and the VM matrix
+  uniformly (their sub-runner exit codes are deliberately not the signal; the JSONs are).
+  Sandbox-tested by `test-runner-exit.sh` (copied runner + node-free PATH shim).
 - **multipass is snap‑confined:** its `home` interface reads only **non‑hidden files under
   `$HOME`**. Staging a transfer from `/tmp` → "sftp cannot access"; from `~/.cache` (hidden) →
   "permission denied." **Fix:** stage under a non‑hidden repo path (e.g. `tests/results/`).
 - **Unattended `setup.sh` needs headless mode** (`VALARK_YES` / non‑tty) or it prompts forever
   and the box ends up with no Node. For a truly offline bootstrap, `setup.sh` fetches Node from
   the source Ark (`VALARK_HOST`) before nodejs.org.
+- **CI gate vs public-mirror rate limits (`test-urls.sh`):** shared GitHub-runner egress IPs
+  get throttled (429/403) by public mirrors, so a *sustained* retryable status (000/429/403/
+  408/425/5xx) is a **WARN under CI** (`CI=true`/`GITHUB_ACTIONS`) and a FAIL only locally;
+  404/410 stays a hard FAIL everywhere (real dead-link detection). Don't re-add a ranged-GET
+  fallback after a definitive HEAD 429/403 — the second request only amplifies the throttle.
+  The logic is unit-tested offline by `test-urls-logic.sh` (sources the guarded functions,
+  stubs `curl`/`sleep` as shell functions — zero network).
 
 ## Community services / accounts
 
@@ -341,6 +367,30 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   fd, not a re-resolved path. `remove` is safe (`unlinkSync` removes the entry itself — never follows the
   final symlink — and the id is a basename). Also: the item-exists check must scan the FULL pending set,
   not the 200-item display slice, or held items past the cap become un-actionable.
+- **Never point the quarantine sweep at a DB-backed store** (real-box investigation). The sweep
+  *moves* a flagged file to quarantine — fine for a plain uploads tree, **corrupting** for a store
+  whose files a database references. MicroBin (SQLite) and maddy (imapsql/bbolt) both are: their
+  on-disk files are DB-referenced (and text pastes / mail bodies often aren't standalone files at
+  all), so a move breaks the store. The sweep's default service paths were also just wrong, so it
+  no-op'd — but "fixing" them to the real paths would have started corrupting mail/paste. Sweep
+  **only** explicit plain-file dirs (`VAL_ARK_UPLOADS` / `VALARK_MODERATION_DIRS`); per-service
+  enforcement needs a pre-store intercept or a service-native hook, never a post-store move. The
+  fail-closed instinct applies to integrity too: don't let the safety mechanism break what it guards.
+- **Newer llama.cpp split `llama-cli` into a REPL — a "fail-closed" classifier can invert into
+  block-everything** (#50, confirmed live on the mirrored b7824). `llama-cli` now *rejects*
+  `-no-cnv` ("--no-conversation is not supported by llama-cli"), drops into REPL mode, and ECHOES
+  the prompt to stdout — so an unsafe-wins substring parse reads the prompt's own "unsafe" and
+  blocks 100% of clean text (the model's actual "safe" answer is drowned out). And
+  `llama-mtmd-cli` rejects `-st`/`-no-cnv` outright ("error: invalid argument") → nonzero exit →
+  every image held + quarantined. Three rules: (1) prefer `llama-completion`, fall back to
+  `llama-cli` (verify.sh's fleet pattern) — and keep `mod_ready` probing the same binaries the
+  runner resolves; (2) classify in single-turn CONVERSATION mode (`-st`, **no** `-no-cnv`) with
+  `--no-display-prompt --temp 0` — raw completion skips the guard model's chat template and
+  Llama-Guard *continues* the prompt ("unsafe\n\nsafe") instead of answering it; (3) never trust
+  flag suppression alone — end prompts with a fixed sentinel line ("Answer only:") and parse only
+  the text AFTER its last occurrence, so an echoing build degrades to hold, never to mass
+  false-positives (and never to allow). Flag support differs per binary in the SAME build — test
+  each binary's argv against the mirrored build, not just "llama.cpp".
 
 ## Git / releases
 

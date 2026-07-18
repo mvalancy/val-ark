@@ -67,7 +67,7 @@ mount one shared mirror — see [Platforms](../docs/PLATFORMS.md).
 | `monitor.sh` | Watch active downloads and disk usage |
 | `status.sh` | Print current state of downloads, tools, and disk |
 | `retry-failed.sh` | Re-attempt previously failed model downloads |
-| `release.sh` | Tag a release (`./release.sh 1.2.0 [--push]`) |
+| `release.sh` | Tag a release from the `VERSION` file (`./release.sh [--push]`; unprefixed tags, e.g. `0.1.10`) |
 | `screenshots.sh` | Capture web/terminal screenshots for docs |
 | `optimize-images.py` | Compress/resize web-ui screenshots and logos |
 | `uninstall.sh` | Remove Val Ark config (leaves models and tools intact) |

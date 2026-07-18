@@ -72,20 +72,22 @@ mod_settings() {
     case "$json" in *'"enabled":false'*) MOD_ENABLED=0 ;; esac
 }
 
-# Which dirs to screen. Explicit VALARK_MODERATION_DIRS (colon-separated) wins; else
-# discover file-based community stores that exist (missing services are simply skipped).
+# Which dirs to screen. Explicit VALARK_MODERATION_DIRS (colon-separated) wins; otherwise
+# ONLY a dedicated PLAIN-FILE uploads area (VAL_ARK_UPLOADS).
+#
+# We deliberately do NOT sweep the community services' internal stores. MicroBin keeps text
+# pastes in SQLite (microbin.db) and maddy keeps mail in an imapsql/bbolt store — the files
+# on disk are referenced FROM a database, so moving one to quarantine would CORRUPT the
+# store, not screen it (and text pastes/mail bodies aren't standalone files at all). Real
+# per-service enforcement needs a PRE-store intercept or a service-native hook (a documented
+# follow-up), never a post-store file move. So the sweep screens only plain file trees an
+# operator explicitly points it at. See docs/knowledge/decisions.md (Phase 7).
 sweep_dirs() {
     if [ -n "${VALARK_MODERATION_DIRS:-}" ]; then
         printf '%s\n' "${VALARK_MODERATION_DIRS//:/$'\n'}"
         return
     fi
-    local d
-    for d in \
-        "${DATA_ROOT}/val-ark/state/services/paste/data" \
-        "${DATA_ROOT}/val-ark/state/services/mail/messages" \
-        "${VAL_ARK_UPLOADS:-}"; do
-        [ -n "$d" ] && [ -d "$d" ] && printf '%s\n' "$d"
-    done
+    [ -n "${VAL_ARK_UPLOADS:-}" ] && [ -d "${VAL_ARK_UPLOADS}" ] && printf '%s\n' "${VAL_ARK_UPLOADS}"
 }
 
 sweep() {

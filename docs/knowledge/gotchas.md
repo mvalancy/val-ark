@@ -586,6 +586,22 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   LAN/tailnet endpoint. Test: `tests/test-path-containment.sh` plants an in‑tree symlink to a
   secret OUTSIDE ROOT and asserts serveArchive 404s (secret not streamed) + `/api/packages` skips
   it, while a real file AND a within‑tree relative symlink both still serve 200.
+- <a id="realpath-containment-112"></a>**Same escape class had a THIRD surface #101 missed: the
+  kiwix‑serve feeder `findZimFiles()` (#112).** It `readdirSync`'s `content/zim`, then `statSync`'s
+  each `.zim` (FOLLOWS symlinks) and hands the surviving in‑tree paths to `kiwix-serve`. So an
+  in‑tree `X.zim` symlink pointing OUTSIDE ROOT was resolved and served by kiwix — the identical
+  in‑tree‑symlink escape, just on the ZIM‑serving path instead of download/enumeration. **When you
+  add a realpath‑containment fix, audit EVERY symlink‑following discovery surface, not just the one
+  in the ticket** — grep for `statSync`/`readdirSync` over a served tree. **Fix:** reuse the SAME
+  `realpathWithin(join(zimDir, f), zimDir)` inside the `findZimFiles()` filter (it realpaths the
+  base too, so the legit `content/zim` → data‑disk symlink layout and within‑tree relative links
+  still serve); skip escaping/dangling links with a `console.log`, no throw; keep passing the
+  in‑tree path to kiwix (unchanged invocation). Test: `test-path-containment.sh` Section C
+  unit‑invokes the REAL `findZimFiles()` (extracted + `vm`‑eval'd against an injected temp ROOT,
+  reusing the real `realpathWithin`) and asserts an escaping `.zim` (and a dangling one) are
+  EXCLUDED while a legit `.zim` and a within‑tree relative symlink are INCLUDED — no kiwix binary,
+  no network. Residual (also noted on #101): a `realpathWithin` → later `open` TOCTOU (low
+  reachability; a hardened form would open one fd and fstat it).
 
 ## Web UI / a11y (#107)
 

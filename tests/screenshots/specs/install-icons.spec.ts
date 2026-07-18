@@ -10,10 +10,12 @@ const TOOLS_SCRIPTS_DIR = path.join(PROJECT_ROOT, 'scripts/tools');
 test.describe('Val Ark - Tool Icons', () => {
 
   test('every tool card shows a real icon image (not just a letter)', async ({ page }) => {
-    await page.goto(BASE_URL);
+    // Four-tab nav (#61/#91): the Software list lives under the Library tab; deep-link
+    // straight to it (this test is about tool-card icons, not the nav path).
+    await page.goto(`${BASE_URL}/#/tools`);
     await page.waitForLoadState('load');
-    await page.click('a.nav-link:has-text("Software")');
-    await page.waitForTimeout(500);
+    await page.waitForSelector('.card', { timeout: 5000 });
+    await page.waitForTimeout(300);
 
     // Get all tool cards
     const cards = page.locator('.card');

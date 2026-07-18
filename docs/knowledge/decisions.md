@@ -6,6 +6,37 @@ later). See [README](README.md).
 
 ---
 
+## 2026‑07 — Four‑tab consumer nav: Home · Library · Activity · Settings (#61 / epic #91 slice 1)
+
+- **Context:** the top nav had SEVEN links (Home, Software, Models, Library, Community, Settings,
+  Getting Started). The easy‑consumer‑UI roadmap ("cap it at four tabs") wants a calm top bar.
+- **Decision (this slice — NAV SHELL only, no page internals redesigned):** reduce the top bar to
+  exactly four — **Home** (`#/`), **Library** (`#/content`), **Activity** (`#/activity`, surfaced
+  in the top nav for the first time), **Settings** (`#/settings`). The three former browse links
+  (Software `#/tools`, Models `#/models`, Content `#/content`) **plus** Downloads (`#/packages`)
+  now live UNDER the Library tab via an in‑page **segmented sub‑nav** (`renderLibraryNav(active)` →
+  `.library-nav`/`.lib-tab`, one real deep link per surface). `activeSection` maps
+  tools/models/content/library/packages → `library` (Library tab highlights on all of them),
+  activity/health → `activity`, settings → `settings`. Community & Getting Started **leave the top
+  bar but stay reachable** — Community via the Home hub card + a new footer link; Getting Started
+  via the footer + hero CTA. **No route changed:** `#/tools`, `#/models`, `#/content`, `#/library`
+  (alias), `#/community`, `#/quickstart`, `#/packages`, `#/health`, `#/tools/<id>` all still
+  deep‑link exactly as before.
+- **Why a sub‑nav, not a new landing page:** the roadmap said "pick the simplest coherent pattern."
+  A sub‑nav adds ZERO new routes and touches only the four list pages' top‑of‑body — the Library
+  tab points at the existing `#/content` ("Offline Library") default and the peers are one click
+  away. A new `#/library` landing would be page‑internals work this slice explicitly excluded.
+- **Gotchas for the next slice:** (1) the mobile hamburger reuses the SAME `.nav-links` DOM, so
+  four tabs there is automatic — no separate mobile list to keep in sync. (2) Playwright tests that
+  navigated via `page.click('a.nav-link:has-text("Software"|"Models"|"Getting Started"|"Community")')`
+  BREAK — those top links are gone. Fixed with an `openLibrarySection(page, sub)` helper (click
+  Library tab → click sub‑tab) and footer clicks for Community/Getting Started; the sub‑nav uses
+  `.lib-tab` (never `.nav-link`) so `:has-text("Library")` still resolves to exactly the one top
+  tab. (3) On a <480px viewport `.nav-link` is `display:none` until the hamburger opens — wait for
+  `.nav-hamburger`, not a visible nav link. New `tests/screenshots/specs/nav.spec.ts` (27 tests)
+  locks all of this in. Later #91 slices: Home one‑status‑light polish, Basic/Expert Settings,
+  Ask Val Ark (#67).
+
 ## 2026‑07 — Packages manifest: served `/api/packages` = present inventory, not the catalog (#89 slice 1)
 
 - **Context:** the box already serves individual downloads (per‑platform app archives via

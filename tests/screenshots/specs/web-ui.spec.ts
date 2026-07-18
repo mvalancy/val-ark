@@ -30,6 +30,17 @@ const MODEL_SLUGS = [
 // content/infra-only router profile)
 const PLATFORMS = ['jetson', 'thor', 'gb10', 'ubuntu', 'mac', 'windows', 'openwrt'];
 
+// Four-tab nav (#61/#91): Software, Models, the offline Library and Downloads live
+// under the single "Library" top tab and switch via an in-page sub-nav. From
+// anywhere, open a browse surface by clicking the Library tab then its sub-tab.
+// subLabel is one of 'Software' | 'AI Models' | 'Offline Library' | 'Downloads'.
+async function openLibrarySection(page, subLabel: string) {
+  await page.click('a.nav-link:has-text("Library")');
+  await page.waitForSelector('.library-nav', { timeout: 5000 });
+  await page.click(`.library-nav a.lib-tab:has-text("${subLabel}")`);
+  await page.waitForTimeout(200);
+}
+
 test.describe('Val Ark Web UI - Navigation', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(`file://${WEB_UI}`);
@@ -44,7 +55,7 @@ test.describe('Val Ark Web UI - Navigation', () => {
   });
 
   test('navigate to Software page via nav', async ({ page }) => {
-    await page.click('a.nav-link:has-text("Software")');
+    await openLibrarySection(page, 'Software');
     await page.waitForTimeout(300);
     // Should show tool cards
     const cards = page.locator('.card');
@@ -53,15 +64,16 @@ test.describe('Val Ark Web UI - Navigation', () => {
   });
 
   test('navigate to Models page via nav', async ({ page }) => {
-    await page.click('a.nav-link:has-text("Models")');
+    await openLibrarySection(page, 'AI Models');
     await page.waitForTimeout(300);
     const cards = page.locator('.card');
     await expect(cards.first()).toBeVisible();
     await page.screenshot({ path: path.join(OUTPUT_DIR, 'model-cards.png'), fullPage: true });
   });
 
-  test('navigate to Getting Started page via nav', async ({ page }) => {
-    await page.click('a.nav-link:has-text("Getting Started")');
+  test('navigate to Getting Started page via footer', async ({ page }) => {
+    // Getting Started left the top bar (four-tab nav) but stays in the footer.
+    await page.click('.site-footer a[href="#/quickstart"]');
     await page.waitForTimeout(500);
     expect(page.url()).toContain('#/quickstart');
     // Wait for the quickstart heading to appear
@@ -70,7 +82,7 @@ test.describe('Val Ark Web UI - Navigation', () => {
   });
 
   test('home nav logo returns to home', async ({ page }) => {
-    await page.click('a.nav-link:has-text("Software")');
+    await page.click('a.nav-link:has-text("Library")');
     await page.waitForTimeout(200);
     await page.click('a.nav-logo');
     await page.waitForTimeout(200);
@@ -266,7 +278,7 @@ test.describe('Val Ark Web UI - Tool Cards Clickable', () => {
   test('all tool cards on Software page are clickable', async ({ page }) => {
     await page.goto(`file://${WEB_UI}`);
     await page.waitForLoadState('domcontentloaded');
-    await page.click('a.nav-link:has-text("Software")');
+    await openLibrarySection(page, 'Software');
     await page.waitForSelector('.card', { timeout: 5000 });
     const cards = page.locator('a.card[href*="#/tools/"]');
     const count = await cards.count();
@@ -282,7 +294,7 @@ test.describe('Val Ark Web UI - Tool Cards Clickable', () => {
   test('all model cards on Models page are clickable', async ({ page }) => {
     await page.goto(`file://${WEB_UI}`);
     await page.waitForLoadState('domcontentloaded');
-    await page.click('a.nav-link:has-text("Models")');
+    await openLibrarySection(page, 'AI Models');
     await page.waitForSelector('.card', { timeout: 5000 });
     const cards = page.locator('a.card[href*="#/models/"]');
     const count = await cards.count();
@@ -347,7 +359,7 @@ test.describe('Val Ark Web UI - Install Status Badges', () => {
   test('tool cards show install status badges', async ({ page }) => {
     await page.goto(`file://${WEB_UI}`);
     await page.waitForLoadState('domcontentloaded');
-    await page.click('a.nav-link:has-text("Software")');
+    await openLibrarySection(page, 'Software');
     await page.waitForSelector('.card', { timeout: 5000 });
     const cards = page.locator('.card');
     const count = await cards.count();
@@ -390,7 +402,7 @@ test.describe('Val Ark Web UI - Full Page Navigation Flow', () => {
     await page.waitForTimeout(300);
 
     // Go to Software
-    await page.click('a.nav-link:has-text("Software")');
+    await openLibrarySection(page, 'Software');
     await page.waitForTimeout(300);
     expect(page.url()).toContain('#/tools');
 
@@ -401,7 +413,7 @@ test.describe('Val Ark Web UI - Full Page Navigation Flow', () => {
     expect(page.url()).toMatch(/#\/tools\/.+/);
 
     // Navigate to Models
-    await page.click('a.nav-link:has-text("Models")');
+    await openLibrarySection(page, 'AI Models');
     await page.waitForTimeout(300);
     expect(page.url()).toContain('#/models');
 
@@ -411,8 +423,8 @@ test.describe('Val Ark Web UI - Full Page Navigation Flow', () => {
     await page.waitForTimeout(300);
     expect(page.url()).toMatch(/#\/models\/.+/);
 
-    // Navigate to Getting Started
-    await page.click('a.nav-link:has-text("Getting Started")');
+    // Navigate to Getting Started (now in the footer, not the top bar)
+    await page.click('.site-footer a[href="#/quickstart"]');
     await page.waitForTimeout(300);
     expect(page.url()).toContain('#/quickstart');
 
@@ -645,7 +657,7 @@ test.describe('Val Ark - Web UI Data Integrity', () => {
   test('Software page shows all tool cards', async ({ page }) => {
     await page.goto(`file://${WEB_UI}`);
     await page.waitForLoadState('domcontentloaded');
-    await page.click('a.nav-link:has-text("Software")');
+    await openLibrarySection(page, 'Software');
     await page.waitForSelector('.card', { timeout: 5000 });
 
     // Count tool cards with href to tool detail pages
@@ -656,7 +668,7 @@ test.describe('Val Ark - Web UI Data Integrity', () => {
   test('Models page shows all model cards', async ({ page }) => {
     await page.goto(`file://${WEB_UI}`);
     await page.waitForLoadState('domcontentloaded');
-    await page.click('a.nav-link:has-text("Models")');
+    await openLibrarySection(page, 'AI Models');
     await page.waitForSelector('.card', { timeout: 5000 });
 
     const cardCount = await page.locator('a.card[href*="#/models/"]').count();
@@ -1519,12 +1531,14 @@ test.describe('Val Ark - First-boot Commissioning Wizard', () => {
 });
 
 test.describe('Val Ark - Community Hub', () => {
-  test('Community nav link exists and navigates', async ({ page }) => {
+  test('Community is reachable from the Home hub and navigates', async ({ page }) => {
+    // Four-tab nav (#61/#91): Community left the top bar but stays reachable via the
+    // Home hub card (and the footer). Its route is unchanged.
     await page.goto(`file://${WEB_UI}`);
     await page.waitForLoadState('domcontentloaded');
-    const link = page.locator('a.nav-link:has-text("Community")');
+    await expect(page.locator('.nav-links a.nav-link:has-text("Community")')).toHaveCount(0);
+    const link = page.locator('.home-card[href="#/community"]');
     await expect(link).toBeVisible();
-    await expect(link).toHaveAttribute('href', '#/community');
     await link.click();
     await page.waitForTimeout(300);
     expect(page.url()).toContain('#/community');
@@ -1539,11 +1553,14 @@ test.describe('Val Ark - Community Hub', () => {
     await expect(page.locator('.community-card')).toHaveCount(4);
   });
 
-  test('Community tab is active on #/community', async ({ page }) => {
+  test('Community is not a top-nav tab, but its footer link works', async ({ page }) => {
+    // Community deliberately has no top-bar tab in the four-tab nav; no top tab
+    // highlights on #/community (it is not one of Home/Library/Activity/Settings).
     await page.goto(`file://${WEB_UI}#/community`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('.community-card', { timeout: 5000 });
-    await expect(page.locator('a.nav-link:has-text("Community")')).toHaveClass(/active/);
+    await expect(page.locator('.nav-links .nav-link.active')).toHaveCount(0);
+    await expect(page.locator('.site-footer a[href="#/community"]')).toHaveCount(1);
   });
 
   test('Community page shows the Accounts & sign-up guidance for every service', async ({ page }) => {

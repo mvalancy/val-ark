@@ -567,3 +567,52 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   (`pgrep -f HOLDME` empty) **and** a subsequent ask is not 503 (slot freed). That assertion fails
   against the `req.on('close')` build and passes with the `res.on('close')` fix — the coverage gap that
   let the bug ship was that no test exercised a mid‑stream disconnect.
+
+## Server path safety (#101)
+
+- <a id="realpath-containment-101"></a>**A lexical path check does NOT stop an in‑tree symlink
+  from escaping ROOT — you MUST `realpathSync` before serving/statting.** `isPathSafe()` only does
+  `path.resolve` (no realpath), so a symlink planted **inside** a served tree (`tools/models/
+  content/sources`) that points **outside** ROOT passes it — and `fs.stat`/`statSync` then FOLLOW
+  the link. `serveArchive` streamed the out‑of‑tree target on download and the `/api/packages`
+  enumeration `statSync`'d it (shallow‑size leak). **Fix:** `realpathWithin(target, baseDir)` —
+  realpath BOTH the target and the base, require `real === base || real.startsWith(base + sep)`.
+  **The base MUST be realpathed too**, because on a real box `ROOT/tools` (etc.) are themselves
+  symlinks onto the data disk — comparing a realpathed target against a *lexical* `ROOT/tools`
+  would 404 **every legitimate download**. So anchor on `realpath(ROOT/<top>)` (serving) or
+  `realpath(<enumeration‑root>)` (listing); a legitimate WITHIN‑tree symlink still resolves inside
+  the base and keeps serving. Handle dangling/absent links by returning `null` (→ 404/skip), never
+  throw. Reachability is low (needs write access to the served tree) but it's a real gap on a
+  LAN/tailnet endpoint. Test: `tests/test-path-containment.sh` plants an in‑tree symlink to a
+  secret OUTSIDE ROOT and asserts serveArchive 404s (secret not streamed) + `/api/packages` skips
+  it, while a real file AND a within‑tree relative symlink both still serve 200.
+
+## Web UI / a11y (#107)
+
+- <a id="hamburger-a11y-107"></a>**A `<div onclick>` (even with `role="button" tabindex="0"`) is
+  NOT keyboard‑operable — a `<div>` does not fire on Enter/Space.** The mobile‑nav hamburger was a
+  focusable `<div>` but had no `keydown` handler, so a keyboard‑only user on a narrow viewport
+  could Tab TO it yet never OPEN the primary nav (the four‑tab menu was unreachable without a
+  pointer). **Fix:** use a native `<button type="button">` — focusable + Enter/Space‑activatable
+  for free, and it fires the existing `onclick`. Drop the now‑redundant `role`/`tabindex`; keep
+  `aria-controls` + `aria-expanded` toggling. **Watch the UA button chrome:** reset it in CSS
+  (`appearance:none; border:none; background:none; color:inherit; font:inherit`) on the base
+  `.nav-hamburger` rule so the look doesn't regress, and add a theme‑aware `:focus-visible` ring
+  (`outline: 2px solid var(--accent)`). Test (nav.spec.ts): assert `tagName==="BUTTON"`, then focus
+  the logo → Tab lands on the hamburger → Enter opens (`.mobile-open` + `aria-expanded=true`) →
+  Space closes — a `<div>` build fails the very first `tagName` assertion.
+
+## Setup / start.sh serve port (#105)
+
+- <a id="serve-port-105"></a>**Don't let a wrapper pass a hardcoded default that overrides the
+  program's own config resolution.** `start.sh serve)` passed `_port="${2:-3000}"` as argv to
+  `server.js`, and `server.js` prefers `process.argv[2]` over `VALARK_WEB_PORT` — so
+  `./start.sh serve` bound **3000 regardless of a custom `VALARK_WEB_PORT`**, while the bootstrap
+  hand‑off printed the `.env` port as the wizard URL → a dead link. **Fix (root cause):** with NO
+  explicit port arg, pass **nothing** to `server.js` (let it own the `VALARK_WEB_PORT` (env or
+  `.env`) `|| 3000` fallback via an empty bash array `"${_srv_args[@]}"`); an explicit
+  `serve <port>` still wins. Derive the port the SAME way ONLY for the printed URL so it always
+  agrees with the bound port. Test (`tests/test-serve-port.sh`) stubs `node` at
+  `$HOME/.local/node/bin/node` to record its argv + the port it WOULD bind, against an isolated
+  `SCRIPT_DIR`/`.env` — asserting env‑var, explicit‑arg, default, and `.env`‑only cases without
+  starting a real server.

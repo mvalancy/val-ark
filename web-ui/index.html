@@ -3457,9 +3457,9 @@ function renderNav(route) {
     return `
     <nav class="top-nav" aria-label="Primary">
         <a href="#/" class="nav-logo">Val Ark</a>
-        <div class="nav-hamburger" onclick="toggleMobileNav(this)" role="button" tabindex="0" aria-label="Toggle menu" aria-expanded="false" aria-controls="primary-nav">
+        <button type="button" class="nav-hamburger" onclick="toggleMobileNav(this)" aria-label="Toggle menu" aria-expanded="false" aria-controls="primary-nav">
             <span></span><span></span><span></span>
-        </div>
+        </button>
         <div class="nav-links" id="primary-nav">
             ${navLink('#/', 'home', 'Home')}
             ${navLink('#/content', 'library', 'Library')}

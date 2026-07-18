@@ -37,6 +37,20 @@ creds, or host paths.**
   entries in issue order.
 - **Screenshot binary churn:** some Playwright runs regenerate `docs/screenshots/*.png`; don't
   commit that churn unless the change intentionally alters those screens.
+- **Merging a stacked chain is a trap with squash.** Squash-merging a stacked PR's *parent* gives
+  the merged commit a new SHA, so the *child* branch (which still contains the parent's original
+  commit) conflicts against dev; worse, `--delete-branch` on the parent auto-**closes** the child
+  (its base branch vanished). Recover by dropping the already-merged parent commit:
+  `git rebase --onto origin/dev <parent-tip-sha> <child-branch>`, push to a fresh branch, open one
+  PR (reference both issues). Do this *before* deleting the parent branch. Prefer rebasing each
+  child onto dev right after its parent lands over relying on GitHub auto-retarget.
+
+## Issue tracking
+
+- **Merges to `dev` do NOT auto-close issues** — `Fixes #N` keywords only fire on merge to the
+  repository's **default branch** (`main`). In this dev-integration model, close issues manually
+  when their fix lands on `dev` (comment the PR + target release), and again confirm at release.
+  Otherwise fixed issues pile up open and the discovery sweep may re-file them.
 
 ## Test hygiene
 

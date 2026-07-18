@@ -2567,8 +2567,14 @@ function handleAsk(req, res, body) {
         else finish('error', { message: 'The assistant stopped unexpectedly.' });
     });
     child.on('close', () => finish(null));
-    // Client vanished mid-answer → kill the child and free the slot.
-    req.on('close', () => { if (!finished) finish(null); });
+    // Client vanished mid-answer → SIGKILL the child and free the admission slot NOW.
+    // Bind to res ('close'), NOT req: handleAsk runs inside readBody(req).then(...), so
+    // the request body is already fully drained and req's 'close' has ALREADY fired at
+    // body-end (attaching there is dead code — the leak the DoS review caught). For a
+    // streaming response, res 'close' is the true "client went away" signal and fires
+    // exactly on disconnect. It ALSO fires on normal completion after res.end(), but the
+    // idempotent finished/released guards make that a no-op (no double-kill/-release).
+    res.on('close', () => { if (!finished) finish(null); });
 }
 
 // In-flight service starts: forum/chat first-run builds take minutes, so a start is

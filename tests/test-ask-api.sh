@@ -38,8 +38,10 @@ esac
 
 # --- fixture trees ----------------------------------------------------------------
 # (1) tools/ with a stub single-shot llama binary. It echoes the -p PROMPT back as the
-#     "answer" (so we can prove the raw question arrived), and stalls on SLEEPME (so we
-#     can exercise the concurrency cap). It ignores every other flag.
+#     "answer" (so we can prove the raw question arrived), stalls on SLEEPME (so we can
+#     exercise the concurrency cap), and on HOLDME streams a token then stays alive for
+#     several seconds (so we can disconnect the client mid-stream and observe the slot).
+#     It ignores every other flag.
 mkdir -p "$T/tools/$PLAT/llama-cpp"
 cat > "$T/tools/$PLAT/llama-cpp/llama-completion" <<'EOF'
 #!/bin/bash
@@ -47,7 +49,10 @@ prompt=""
 while [ $# -gt 0 ]; do
   if [ "$1" = "-p" ]; then prompt="$2"; shift 2; else shift; fi
 done
-case "$prompt" in *SLEEPME*) sleep 4 ;; esac
+case "$prompt" in
+  *SLEEPME*) sleep 4 ;;
+  *HOLDME*)  printf 'HOLDTOKEN\n'; sleep 8 ;;   # stream a token, then linger (killed on disconnect)
+esac
 printf 'STUBANSWER:%s\n' "$prompt"
 EOF
 chmod +x "$T/tools/$PLAT/llama-cpp/llama-completion"
@@ -133,6 +138,37 @@ curl -s -o "$T/busy.out" -w '%{http_code}' --max-time 6 -X POST -H 'Content-Type
 [ "$(cat "$T/busy.code")" = 503 ]           && pass || fail "second concurrent ask over cap → 503 (got $(cat "$T/busy.code"))"
 grep -q '"busy":true' "$T/busy.out"         && pass || fail "over-cap response says busy (got: $(cat "$T/busy.out"))"
 wait "$SLOWPID" 2>/dev/null
+
+# --- 5. CLIENT DISCONNECT frees the admission slot + SIGKILLs the child NOW --------
+# Regression for the resource-exhaustion DoS (issue #67): when a LAN/tailnet client
+# aborts mid-stream, the spawned child must be SIGKILLed and the admission slot freed
+# IMMEDIATELY — not only when the child would finish generating or the ~120s timeout
+# reaps it. The disconnect cleanup MUST bind to res.on('close'): handleAsk runs inside
+# readBody(req).then(...), so req's 'close' has ALREADY fired at body-end (dead code) —
+# only res 'close' fires on the real client disconnect. Cap is 1, so a leaked slot is
+# directly observable as a wrongful 503 on the very next ask.
+#   * start an ask whose stub streams a token then lingers (HOLDME, in-flight=1)
+#   * abort the client mid-stream (curl --max-time closes the socket = disconnect)
+#   * assert the lingering child was killed AND a subsequent ask is NOT 503
+# This FAILS against the buggy req.on('close') build (slot pinned → 503 / child alive)
+# and PASSES with the res.on('close') fix (slot freed promptly → 200 STUBANSWER).
+curl -s -N --max-time 1.5 -X POST -H 'Content-Type: application/json' \
+     -d '{"question":"HOLDME hang around while I disconnect"}' "$BA/api/ask" >/dev/null 2>&1 &
+DPID=$!; ALL_PIDS="$ALL_PIDS $DPID"
+sleep 0.8                                         # ask #1 has spawned the stub child (in-flight=1)
+wait "$DPID" 2>/dev/null                           # curl hit --max-time → socket closed = client disconnect
+sleep 0.9                                          # let the server observe res 'close' → kill child + release slot
+# the disconnected child must be gone (SIGKILLed), not still lingering out its sleep
+if command -v pgrep >/dev/null 2>&1; then
+  [ -z "$(pgrep -f 'HOLDME' 2>/dev/null)" ]   && pass || fail "SECURITY: child not killed on disconnect — HOLDME stub still running (slot pinned)"
+else
+  pass                                             # no pgrep → rely on the 503 assertion below
+fi
+# a subsequent ask must NOT be 503 — the slot freed on disconnect, not at child-exit
+DCODE="$(curl -s -o "$T/disc.out" -w '%{http_code}' --max-time 8 -X POST \
+         -H 'Content-Type: application/json' -d '{"question":"after a disconnect"}' "$BA/api/ask")"
+[ "$DCODE" = 503 ] && fail "slot leaked on client disconnect — next ask got 503 (req.on('close') dead-code bug)" || pass
+grep -q 'STUBANSWER' "$T/disc.out"          && pass || fail "post-disconnect ask actually ran (slot was free), got: $(cat "$T/disc.out")"
 
 ###############################################################################
 # Server B — binary present, NO model → FAIL-SOFT reason:model (200, not 500).

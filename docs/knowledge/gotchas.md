@@ -78,6 +78,17 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   is owned by the librarian's `VALARK_ZIM_LANGS`; the web UI filters *output* languages in
   `scripts/lib/catalog-parse.js` (`parseCatalogTSV`, content ids end in `_<lang>`), so a browse can
   never degrade the on‑disk catalog. Do **not** pass `VALARK_ZIM_LANGS` from `server.js`.
+- **Removing the browse's `VALARK_ZIM_LANGS=eng` un‑masked a hidden cost: `cmd_catalog` refreshes
+  the OPDS cache for *every* kind — gate it to CONTENT** (#57 follow‑up). `librarian.sh catalog`
+  unconditionally ran `catalog_refresh_zim` before emitting *any* bucket. The old English‑only
+  override made that a single fast fetch; once `server.js` stopped forcing it (correct — see above),
+  even a `catalog model` browse paid the full ~9‑language live fetch (up to 90 s/lang). On a
+  cache‑less host (fresh CI checkout) that blew past the `/api/catalog/models` 15 s poll → the
+  browse returned 0 items and the Playwright models test failed — while it *passed* locally, where a
+  fresh `zim.tsv` sits inside the 1‑day TTL so the refresh is skipped. Model/installer candidates
+  come from local TSVs, not the OPDS feed, so **refresh only when the CONTENT bucket is requested**
+  (`content` | `all`). Lesson: a "browse" endpoint must never synchronously pay a live multi‑fetch a
+  warm cache normally hides — reproduce cache‑miss timing the way CI (empty state) hits it.
 
 ## Storage / data root
 

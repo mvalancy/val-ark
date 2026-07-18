@@ -21,6 +21,10 @@
 #   f) kiwix_catalog.py exit code is a COMPLETENESS signal (0 iff every lang ok)
 #   g) the web browse language filter (parseCatalogTSV) narrows OUTPUT only and
 #      can never narrow the shared cache
+#   h) the live OPDS refresh is gated to the CONTENT bucket — a `catalog model`
+#      / `catalog installer` browse never blocks on it (regression guard: #57
+#      dropped the server's VALARK_ZIM_LANGS=eng, so an unconditional refresh here
+#      now pays the full multi-language live-fetch cost and timed out the models feed)
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -163,6 +167,30 @@ if [ -n "$NODE" ]; then
 else
     echo "SKIP: no node runtime — parseCatalogTSV filter case skipped" >&2
 fi
+
+# === 10. browse refresh is gated to CONTENT only — model/installer never fetch =
+# Regression for the #57 side effect: server.js stopped forcing VALARK_ZIM_LANGS=eng
+# (a single-language fetch that would clobber the full cache), so cmd_catalog's ZIM
+# OPDS refresh now pays the full multi-language live-fetch cost. Only the CONTENT
+# bucket is fed by that OPDS feed; a `catalog model` browse must NOT block on it —
+# doing so timed out /api/catalog/models on a cache-less host (fresh CI checkout).
+# A probe fetch records (sentinel file) whether an OPDS refresh actually ran.
+cat > "$T/probe.py" <<'PYEOF'
+import os, sys
+open(os.environ["FETCH_SENTINEL"], "w").close()   # record that a fetch ran
+sys.exit(2)                                        # incomplete -> never overwrites a cache
+PYEOF
+KIWIX_PY="$T/probe.py"
+export FETCH_SENTINEL="$T/fetched.marker"
+
+rm -f "$ZIM_CACHE" "$FETCH_SENTINEL"
+mrows="$(cmd_catalog model 2>/dev/null | grep -c '^model:')"
+[ ! -e "$FETCH_SENTINEL" ] && pass || fail "catalog model must NOT trigger a live OPDS refresh"
+[ "$mrows" -gt 0 ] && pass || fail "catalog model must still emit model rows from the local TSV (got $mrows)"
+
+rm -f "$ZIM_CACHE" "$FETCH_SENTINEL"
+cmd_catalog content >/dev/null 2>&1
+[ -e "$FETCH_SENTINEL" ] && pass || fail "catalog content MUST refresh the ZIM OPDS cache"
 
 echo "catalog-cache: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

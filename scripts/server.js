@@ -574,6 +574,20 @@ function _versionMarker(dir) {
     catch (_) { return null; }
 }
 
+// Is this tools/models entry still IN FLIGHT — i.e. NOT a ready package? True for a
+// partial single-file download (`*.part`, e.g. a half-fetched .gguf) or a directory
+// still mid-extraction: one holding a `.tmp_*` archive temp, which
+// _common.sh's download_and_extract writes into the dest dir and removes only on a
+// successful extract. Mirrors that helper's own "already extracted" check and the
+// ZIM enum's `.part` skip, so a not-yet-ready tree is never advertised as ready.
+function _pkgInProgress(name, full, isDir) {
+    if (name.endsWith('.part')) return true;
+    if (isDir) {
+        for (const c of readdirSafe(full)) if (c.startsWith('.tmp_')) return true;
+    }
+    return false;
+}
+
 function computePackages() {
     const packages = [];
 
@@ -592,6 +606,7 @@ function computePackages() {
             if (realpathWithin(full, toolsDir) === null) continue;  // #101: skip in-tree symlinks that escape ROOT
             let st; try { st = fs.statSync(full); } catch (_) { continue; }
             const isDir = st.isDirectory();
+            if (_pkgInProgress(entry, full, isDir)) continue;       // #89: not a ready package (.part / mid-extraction)
             packages.push({
                 id: `app:${platform}:${entry}`,
                 name: entry,
@@ -653,6 +668,7 @@ function computePackages() {
             if (realpathWithin(full, MODEL_ROOT) === null) continue; // #101: skip in-tree symlinks that escape ROOT
             let st; try { st = fs.statSync(full); } catch (_) { continue; }
             const isDir = st.isDirectory();
+            if (_pkgInProgress(entry, full, isDir)) continue;        // #89: not a ready package (.part / mid-extraction)
             packages.push({
                 id: `model:${category}:${entry}`,
                 name: entry,
@@ -664,6 +680,28 @@ function computePackages() {
                 url: `/api/archive/models/${encodeURIComponent(category)}/${encodeURIComponent(entry)}`,
             });
         }
+    }
+
+    // 3b) Top-level single .gguf files directly under the model root — the flat
+    //     layout getModelsStatus also supports (models/<name>.gguf, no category dir),
+    //     served at /api/archive/models/<name>. A `*.gguf.part` in flight fails the
+    //     .gguf suffix test, so partials are excluded exactly like the ZIM enum.
+    for (const entry of readdirSafe(MODEL_ROOT)) {
+        if (entry.startsWith('.') || !entry.endsWith('.gguf')) continue;
+        const full = path.join(MODEL_ROOT, entry);
+        if (realpathWithin(full, MODEL_ROOT) === null) continue; // #101: skip a symlink escaping the model root
+        let st; try { st = fs.statSync(full); } catch (_) { continue; }
+        if (!st.isFile()) continue;
+        packages.push({
+            id: `model:${entry}`,
+            name: entry,
+            kind: 'model',
+            platform: null,
+            version: null,
+            size: st.size,
+            desc: 'AI model',
+            url: `/api/archive/models/${encodeURIComponent(entry)}`,
+        });
     }
 
     // 4) Complete local ZIMs: content/zim/*.zim (a bare `.zim`, not a `.part`),

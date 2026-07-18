@@ -32,6 +32,19 @@ head -c 500000  /dev/zero > "$T/models/llm/tiny.gguf"
 # Content: one complete ZIM + one still-downloading .part that must NOT be listed.
 head -c 3000000 /dev/zero > "$T/content/zim/wikipedia_en_all_mini.zim"
 head -c 111     /dev/zero > "$T/content/zim/incomplete.zim.part"
+# In-progress app/model entries that must NEVER be advertised as ready (#89):
+#  - a partial single-file model download (*.part) inside a category dir
+head -c 222 /dev/zero > "$T/models/llm/downloading.gguf.part"
+#  - a tool dir mid-extraction: holds only download_and_extract's .tmp_* archive temp
+mkdir -p "$T/tools/linux-x86_64/half-extracted"
+head -c 333 /dev/zero > "$T/tools/linux-x86_64/half-extracted/.tmp_half.tar.gz"
+#  - a model dir mid-extraction (same .tmp_* discipline)
+mkdir -p "$T/models/llm/half-model"
+head -c 444 /dev/zero > "$T/models/llm/half-model/.tmp_half.gguf.tar.gz"
+# Top-level single .gguf directly under the model root (flat layout, #89) — IS a
+# package; a top-level *.gguf.part partial stays excluded by the .gguf suffix test.
+head -c 800000 /dev/zero > "$T/models/toplevel.gguf"
+head -c 555    /dev/zero > "$T/models/incomplete-top.gguf.part"
 # Source: the self-replication bundle + tarball + a node runtime + real SHA256SUMS.
 head -c 900000  /dev/zero > "$T/sources/val-ark/val-ark.bundle"
 head -c 700000  /dev/zero > "$T/sources/val-ark/val-ark-latest.tar.gz"
@@ -91,6 +104,7 @@ echo "$PK" | BUNDLE_SHA="$BUNDLE_SHA" "$NODE" -e '
     const zim=by("content:wikipedia_en_all_mini.zim");
     const bundle=by("source:val-ark.bundle"), tar=by("source:val-ark-latest.tar.gz");
     const node=by("source:node-linux-x86_64.tar.gz");
+    const topModel=by("model:toplevel.gguf");
     const checks = {
       app:        app && app.kind==="app" && app.platform==="linux-x86_64" && app.version==="v25.01"
                     && app.size===400000 && app.url==="/api/archive/tools/linux-x86_64/helix",
@@ -99,7 +113,15 @@ echo "$PK" | BUNDLE_SHA="$BUNDLE_SHA" "$NODE" -e '
       modelFile:  modFile && modFile.kind==="model" && modFile.size===500000,
       zim:        zim && zim.kind==="content" && zim.size===3000000
                     && zim.url==="/api/archive/content/zim/wikipedia_en_all_mini.zim",
+      // #89: a top-level single .gguf under the model root IS surfaced (flat layout).
+      topLevelGguf: topModel && topModel.kind==="model" && topModel.size===800000
+                    && topModel.url==="/api/archive/models/toplevel.gguf",
       noPart:     !P.some(p=>String(p.name).includes(".part")),
+      // #89: no in-progress entry is advertised — no *.part row (partial single-file),
+      // no .tmp_* leak, and neither mid-extraction dir (holding only a .tmp_* temp).
+      noInProgress: !by("model:llm:downloading.gguf.part") && !by("model:incomplete-top.gguf.part")
+                    && !by("app:linux-x86_64:half-extracted") && !by("model:llm:half-model")
+                    && !P.some(p=>String(p.name).endsWith(".part") || String(p.name).includes(".tmp_")),
       bundle:     bundle && bundle.kind==="source" && bundle.version==="1.2.3"
                     && bundle.sha256===process.env.BUNDLE_SHA && bundle.url==="/sources/val-ark/val-ark.bundle",
       tarball:    tar && tar.kind==="source" && typeof tar.sha256==="string",
@@ -108,7 +130,7 @@ echo "$PK" | BUNDLE_SHA="$BUNDLE_SHA" "$NODE" -e '
     const bad = Object.entries(checks).filter(([k,v])=>!v).map(([k])=>k);
     if (bad.length) { console.error("failing checks: "+bad.join(",")); process.exit(1); }
     process.exit(0);
-  });' && pass || fail "manifest rows must carry correct kind/size/url/version and sha256 (from SHA256SUMS), and exclude .part"
+  });' && pass || fail "manifest rows must carry correct kind/size/url/version and sha256 (from SHA256SUMS), surface top-level .gguf, and exclude .part/in-progress entries"
 
 # No host filesystem paths or absolute host URLs may leak into the manifest.
 echo "$PK" | grep -qE '"/home/|'"$T"'|http://127|http://localhost|/tmp/' && fail "manifest must not leak filesystem paths / absolute host URLs" || pass

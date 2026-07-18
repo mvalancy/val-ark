@@ -510,4 +510,41 @@ test.describe('Val Ark API Server', () => {
     expect(resp.headers()['content-type']).toContain('application/json');
   });
 
+  // ---- "Ask Val Ark": on-box assistant (Phase 8, slice 1 / issue #67) --------------
+  test('GET /api/status/ask returns the readiness shape (tolerates a bare box)', async ({ request }) => {
+    const resp = await request.get(`${BASE_URL}/api/status/ask`);
+    expect(resp.ok()).toBeTruthy();
+    const d = await resp.json();
+    expect(typeof d.ready).toBe('boolean');
+    // reason is one of the documented states; a fresh CI checkout has no runtime/model.
+    expect(['ok', 'runtime', 'model']).toContain(d.reason);
+    // runtime/model are basenames or null — never an absolute host path (public repo).
+    for (const k of ['runtime', 'model'] as const) {
+      expect(d[k] === null || typeof d[k] === 'string').toBeTruthy();
+      if (typeof d[k] === 'string') expect(d[k]).not.toContain('/');
+    }
+    // A one-click "get the helper" target id is advertised for the not-ready UI.
+    expect(typeof d.modelId).toBe('string');
+  });
+
+  test('POST /api/ask streams a terminal done event and never 5xxs (fail-soft on a bare box)', async ({ request }) => {
+    // The suite runs with VALARK_TEST_NO_SPAWN=1, so a box WITH a model returns a
+    // deterministic stub and a bare CI box takes the fail-soft path — either way this
+    // must be 200 with an SSE stream that ends in `event: done`, never a 500.
+    const resp = await request.post(`${BASE_URL}/api/ask`, { data: { question: 'How do I add a disk?' } });
+    expect(resp.status()).toBe(200);
+    const body = await resp.text();
+    expect(body).toContain('event: done');
+    // Fail-soft (no model) OR a streamed/stub answer — both are acceptable here.
+    expect(/event: (soft|token)/.test(body)).toBeTruthy();
+  });
+
+  test('POST /api/ask with an empty question is a soft 200, not an error', async ({ request }) => {
+    const resp = await request.post(`${BASE_URL}/api/ask`, { data: { question: '   ' } });
+    expect(resp.status()).toBe(200);
+    const body = await resp.text();
+    expect(body).toContain('event: soft');
+    expect(body).toContain('event: done');
+  });
+
 });

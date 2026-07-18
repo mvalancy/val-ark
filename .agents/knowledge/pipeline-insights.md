@@ -62,6 +62,18 @@ creds, or host paths.**
   bash validators + Playwright; treat the VM matrix as a local/release-time gate.
 - **Loopback TCP buffers autotune large** (~tens of MiB): a backpressure-dependent test needs a
   payload big enough that streaming is still in progress when the assertion runs.
+- **Never `page.goto(..., {waitUntil:'networkidle'})` on the Val Ark SPA.** The shell holds an
+  open EventSource to `/api/downloads/stream` (and polls metrics), so the network NEVER idles and
+  goto hangs until timeout. Use `'domcontentloaded'` + explicit `waitForSelector` /
+  `waitForFunction`. Learned driving the Home "Ask Val Ark" card live (#67).
+- **Streaming/SSE endpoints stub cleanly with a fake native binary, not a spawn bypass.** For
+  `POST /api/ask` the offline validator plants a stub `llama-completion` on a fake
+  `VALARK_TOOLS_DIR/<platform>/llama-cpp` tree (that echoes its `-p` prompt back) + an 11 MB fake
+  `.gguf` under `VALARK_MODELS_DIR/assistant`, and leaves `VALARK_TEST_NO_SPAWN` UNSET — so the
+  REAL argv spawn runs and an injection payload (`;`/`$(...)`/backticks) in the question can be
+  proven inert via canary files (must survive / must not appear). A build the payload with an
+  UNQUOTED heredoc: `$CANARY` expands to real paths while `\$(...)`/`` \`…\` `` stay literal in the
+  JSON body — no `"`/`\` means it's still valid JSON.
 
 ## Scaling & cadence
 

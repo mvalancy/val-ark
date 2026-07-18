@@ -1203,6 +1203,11 @@ function handleAPI(req, res, urlPath) {
                 // Safety card: is on-device screening enabled, and is a classifier actually
                 // installed (else it holds everything). Read-gated by the /api/status/ prefix.
                 return sendJSON(res, req, getModerationStatus());
+            case '/api/status/ask':
+                // "Ask Val Ark" readiness (Phase 8): is the on-box assistant runtime + a
+                // chat model present? Pure presence checks, no inference. Read-gated by the
+                // /api/status/ prefix — the Home card uses it to show ask vs. get-the-helper.
+                return sendJSON(res, req, getAskStatus());
             case '/api/moderation/queue':
                 // The held-content review feed for the admin Safety card. Reveals flagged
                 // content details, so it's ADMIN-ONLY (localhost/console or a signed session)
@@ -1372,6 +1377,12 @@ function handleAPI(req, res, urlPath) {
                     const tok = auth.issueSession(STATE_DIR, 12 * 3600 * 1000, clientIp(req));
                     return sendJSON(res, req, { ok: true, recovery: rr.recovery }, 200, { 'Set-Cookie': sessionCookie(tok, 12 * 3600, isSecureReq(req)) });
                 }
+                case '/api/ask':
+                    // On-box assistant (Phase 8, slice 1). Streams the answer as SSE frames
+                    // and manages its own response — return before the trailing sendJSON. A
+                    // "use" action (NOT ADMIN_ONLY_POSTS): open on the LAN in Open mode, admin
+                    // in Passworded/Accounts (the gate above already enforced that). Fail-soft.
+                    return handleAsk(req, res, body);
                 case '/api/download/tools': {
                     const target = body.target || 'all';
                     if (!isAlphanumDash(target) || !VALID_TOOL_TARGETS.has(target)) {
@@ -2323,6 +2334,241 @@ function triggerRepair() {
     proc.on('error', () => { _repairProc = null; });
     proc.unref();
     return { ok: true, started: true, running: true };
+}
+
+// ---- "Ask Val Ark": the on-box assistant (roadmap Phase 8, slice 1) ----------
+// A minimal, offline, zero-dependency door to the box's OWN small chat model. It
+// wraps a SINGLE-SHOT llama.cpp invocation (no persistent daemon) exactly like
+// verify.sh's inference check and moderation's classifier spawn — reusing that
+// proven runtime rather than inventing a new one. FAIL-SOFT is a hard requirement:
+// a bare box (no binary or no model — the ARM64 appliance ships a source clone
+// only) answers with a friendly "not installed yet" payload, HTTP 200, never a 5xx,
+// and never crashes the event loop. SECURITY: the model binary is spawned with an
+// ARGV ARRAY (never a shell string) so the user's question is inert data in one arg;
+// the prompt is length-bounded + control-char-stripped, tokens are capped, a
+// wall-clock timer SIGKILLs a wedged child, and an admission cap bounds concurrent
+// model loads (each is 1-2 GB of RAM) — over cap → 503, never an unbounded fan-out.
+const ASK_MAX_Q = Number(process.env.VALARK_ASK_MAX_Q) || 2000;          // question char cap
+const ASK_MAX_CTX = Number(process.env.VALARK_ASK_MAX_CTX) || 600;       // page/status context char cap
+const ASK_N_TOKENS = Math.min(Number(process.env.VALARK_ASK_N_TOKENS) || 256, 1024); // answer token cap (hard max)
+const ASK_TIMEOUT_S = Number(process.env.VALARK_ASK_TIMEOUT) || 120;     // wall-clock per ask (SIGKILL backstop)
+const ASK_MAX_CONCURRENT = Number(process.env.VALARK_ASK_MAX_CONCURRENT) || 2; // concurrent inferences
+const ASK_MAX_ANSWER_BYTES = 256 * 1024;    // defence-in-depth: cap a runaway generation
+let askInFlight = 0;
+
+// Native tools tree that holds the mirrored llama.cpp build. cfg() honours a
+// VALARK_TOOLS_DIR override (tests point it at a fixture tree) then the repo 'tools'
+// symlink — same resolution as the packages endpoint (_pkgToolsDir).
+function _askToolsDir() { return cfg('VALARK_TOOLS_DIR') || path.join(ROOT, 'tools'); }
+function _askPlatformDir() {
+    const os = require('os');
+    if (os.platform() === 'darwin') return 'macos-arm64';
+    const a = os.arch();
+    if (a === 'arm64' || a === 'aarch64') return 'linux-arm64';
+    return 'linux-x86_64';
+}
+// Resolve an executable by NAME under a base dir (recursive — the mirror nests a
+// build-tag dir, e.g. llama-cpp/llama-bNNNN/llama-cli). Mirrors moderation.sh
+// _mod_find_bin ('find <base>/llama-cpp -name <n> -type f -perm -u+x | head -1').
+function _findAskExec(dir, name, depth) {
+    depth = depth || 0;
+    if (depth > 6) return null;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return null; }
+    for (const e of entries) {
+        if (e.isFile() && e.name === name) {
+            const p = path.join(dir, name);
+            try { fs.accessSync(p, fs.constants.X_OK); return p; } catch (_) {}
+        }
+    }
+    for (const e of entries) {
+        if (e.isDirectory()) { const hit = _findAskExec(path.join(dir, e.name), name, depth + 1); if (hit) return hit; }
+    }
+    return null;
+}
+// Prefer llama-completion, fall back to llama-cli — the same pair moderation resolves.
+function findLlamaBin() {
+    const base = path.join(_askToolsDir(), _askPlatformDir(), 'llama-cpp');
+    for (const name of ['llama-completion', 'llama-cli']) {
+        const hit = _findAskExec(base, name);
+        if (hit) return hit;
+    }
+    return null;
+}
+function _walkGguf(dir, cb, depth) {
+    depth = depth || 0;
+    if (depth > 4) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    for (const e of entries) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) _walkGguf(p, cb, depth + 1);
+        else if (e.isFile() && e.name.toLowerCase().endsWith('.gguf')) {
+            try { cb(p, fs.statSync(p).size); } catch (_) {}
+        }
+    }
+}
+// Smallest generative .gguf > 10 MB — assistant/ (curated chat models) first, then
+// llm/, mirroring verify.sh's selection (the >10 MB floor skips zero-byte/stub ggufs
+// and embedding heads). Returns { path, size } or null.
+function findAssistantModel() {
+    for (const sub of ['assistant', 'llm']) {
+        let best = null;
+        _walkGguf(path.join(MODEL_ROOT, sub), (p, size) => {
+            if (size > 10 * 1024 * 1024 && (!best || size < best.size)) best = { path: p, size };
+        });
+        if (best) return best;
+    }
+    return null;
+}
+// Read-only readiness (GET /api/status/ask) — pure presence checks, NEVER runs
+// inference. Read-gated for free by the /api/status/ prefix (isReadGated).
+function getAskStatus() {
+    const bin = findLlamaBin();
+    const model = findAssistantModel();
+    let reason = 'ok';
+    if (!bin) reason = 'runtime';
+    else if (!model) reason = 'model';
+    return {
+        ready: !!bin && !!model,
+        runtime: bin ? path.basename(bin) : null,
+        model: model ? path.basename(model.path) : null,
+        reason,
+        modelId: 'qwen2.5-1.5b-instruct-gguf',   // the one-click "get the helper" target
+    };
+}
+// Strip control chars (keep tab/newline) and hard-cap length. Defence in depth — the
+// value is spawned as a single argv element regardless, never through a shell.
+function _askSanitize(s, max) {
+    if (typeof s !== 'string') return '';
+    let t = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ');
+    if (t.length > max) t = t.slice(0, max);
+    return t;
+}
+// POST /api/ask {question, context?} — stream the answer back as SSE frames (the
+// project's event:/data: framing, per-request, NOT the shared broadcast pool):
+//   event: token  data: {"t":"..."}            one per stdout chunk (JSON-encoded so
+//                                               newlines never break SSE framing)
+//   event: soft   data: {"ready":false,...}    fail-soft (no runtime/model/memory/empty)
+//   event: error  data: {"message":"..."}      mid-stream failure (already 200)
+//   event: done   data: {"model":..,"ms":..}   terminal, always sent
+// The gate stack (LAN/tailnet, rate-limit, commissioned, auth-per-Use-Mode) already
+// ran in handleAPI — in Passworded/Accounts mode a non-admin LAN caller is 401'd
+// there, giving this the same read-gated posture as the other reads.
+function handleAsk(req, res, body) {
+    body = body || {};
+    const question = _askSanitize(body.question, ASK_MAX_Q).trim();
+    const context = _askSanitize(body.context, ASK_MAX_CTX).trim();
+    const corsOrigin = getCORSOrigin(req);
+    let headed = false;
+    const startSSE = () => {
+        if (headed) return; headed = true;
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+            ...(corsOrigin ? { 'Access-Control-Allow-Origin': corsOrigin } : {}),
+            ...SECURITY_HEADERS,
+        });
+    };
+    const sse = (event, data) => { try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch (_) {} };
+    const soft = (reason, message) => { startSSE(); sse('soft', { ready: false, reason, message }); sse('done', {}); try { res.end(); } catch (_) {} };
+
+    if (!question) return soft('empty', 'Type a question first.');
+
+    // Admission cap: bound concurrent model loads (1-2 GB RAM each). Over cap → 503
+    // with Retry-After BEFORE any streaming headers (mirrors the moderation/#62 cap).
+    if (askInFlight >= ASK_MAX_CONCURRENT) {
+        res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '5', ...SECURITY_HEADERS });
+        return res.end(JSON.stringify({ ready: false, busy: true, reason: 'busy', message: 'The assistant is busy right now — please try again in a moment.' }));
+    }
+
+    // FAIL-SOFT ladder: a bare box has no binary and/or no model. Never a 5xx.
+    const bin = findLlamaBin();
+    if (!bin) return soft('runtime', 'The AI helper runtime isn’t installed on this box yet.');
+    const model = findAssistantModel();
+    if (!model) return soft('model', 'No assistant model installed yet — add one from the Library ▸ Models tab.');
+    // Memory guard: refuse rather than OOM-kill community services loading the model.
+    try {
+        const os = require('os');
+        const free = os.freemem();
+        if (free > 0 && free < model.size + 128 * 1024 * 1024) {
+            return soft('memory', 'Not enough free memory right now to run the assistant — try again after other tasks finish.');
+        }
+    } catch (_) {}
+
+    // Test seam (mirrors moderation/repair): the Playwright suite runs the server with
+    // VALARK_TEST_NO_SPAWN=1 so it never triggers a real 1-2 GB model load. Only reached
+    // when a binary + model actually resolve, so a bare CI box still exercises the soft
+    // path above. The offline bash validator leaves this UNSET to drive the real spawn
+    // against a stub binary (proving the argv-array, no-shell contract).
+    if (process.env.VALARK_TEST_NO_SPAWN === '1') {
+        startSSE();
+        sse('token', { t: 'Test mode — the assistant is wired up (stubbed answer, no model was run).' });
+        sse('done', { model: path.basename(model.path), ms: 0, stub: true });
+        return res.end();
+    }
+
+    // Build the prompt server-side. question/context are DATA inside one -p argv
+    // element — NEVER interpolated into a shell string.
+    const sysline = "You are Val Ark's helpful offline assistant on a local, internet-free knowledge appliance. Answer briefly and in plain language.";
+    const ctxline = context ? `\nContext: ${context}` : '';
+    const prompt = `${sysline}${ctxline}\n\nQuestion: ${question}\nAnswer:`;
+    // Proven single-shot invocation (verify.sh:104 / moderation.sh): single-turn,
+    // conversation mode off, stdin closed, warmup off. --no-display-prompt keeps stdout
+    // to the answer only. ARGV ARRAY — no shell, ever.
+    const args = ['-m', model.path, '-p', prompt, '-n', String(ASK_N_TOKENS),
+                  '-st', '-no-cnv', '--no-warmup', '--no-display-prompt', '--temp', '0'];
+
+    let child, released = false;
+    const release = () => { if (released) return; released = true; askInFlight--; };
+    askInFlight++;
+    try {
+        child = spawn(bin, args, {
+            stdio: ['ignore', 'pipe', 'ignore'],
+            env: { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || '') },
+        });
+    } catch (_) {
+        release();
+        return soft('runtime', 'Couldn’t start the assistant on this box.');
+    }
+
+    startSSE();
+    const t0 = Date.now();
+    const { StringDecoder } = require('string_decoder');
+    const dec = new StringDecoder('utf8');
+    let wrote = 0, finished = false;
+    const finish = (ev, data) => {
+        if (finished) return; finished = true;
+        clearTimeout(killer);
+        try { child.kill('SIGKILL'); } catch (_) {}
+        release();
+        const tail = dec.end();
+        if (tail) sse('token', { t: tail });
+        if (ev) sse(ev, data || {});
+        sse('done', { model: path.basename(model.path), ms: Date.now() - t0 });
+        try { res.end(); } catch (_) {}
+    };
+    const killer = setTimeout(() => {
+        // Wedged/slow child: SIGKILL and close cleanly (answer so far already streamed).
+        if (wrote === 0) finish('error', { message: 'The assistant took too long to respond on this box.' });
+        else finish('error', { message: 'The assistant timed out — partial answer above.' });
+    }, ASK_TIMEOUT_S * 1000);
+    child.stdout.on('data', (d) => {
+        wrote += d.length;
+        if (wrote > ASK_MAX_ANSWER_BYTES) return finish('error', { message: 'Answer truncated (too long).' });
+        const s = dec.write(d);
+        if (s) sse('token', { t: s });
+    });
+    child.on('error', () => {
+        // Headers already flushed (SSE), so signal via a stream frame, not a status code.
+        if (wrote === 0) finish('soft', { ready: false, reason: 'runtime', message: 'The assistant couldn’t run on this box.' });
+        else finish('error', { message: 'The assistant stopped unexpectedly.' });
+    });
+    child.on('close', () => finish(null));
+    // Client vanished mid-answer → kill the child and free the slot.
+    req.on('close', () => { if (!finished) finish(null); });
 }
 
 // In-flight service starts: forum/chat first-run builds take minutes, so a start is

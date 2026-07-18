@@ -94,7 +94,7 @@ Downloads
 ## 4. Health monitoring (summary here; detail in [admin-console.md](admin-console.md))
 
 - Home status line: **green/amber/red + one sentence**.
-- Health page: each service up/down with a small uptime history, disk/CPU/temp, and any alerts — the metrics stack ([Telegraf/InfluxDB](../../CLAUDE.md)) surfaced as friendly tiles, not a raw dashboard. Grafana stays under Advanced for power users.
+- Health page (shipped): each service up/down, disk/CPU/temp, and any alerts as friendly tiles, not a raw dashboard — fed by `GET /api/status/metrics` (live `/proc`+`os` gauges) with inline sparklines from the zero-dep history ring buffer (`GET /api/status/metrics/history`). The Telegraf/InfluxDB retention stack (Grafana optional) is a deferred opt-in Advanced/fleet upgrade (issue #66), not what powers these tiles today.
 
 ## Principles
 - **Interests, not catalogs.** Jordan picks *topics*; the box picks *files*.

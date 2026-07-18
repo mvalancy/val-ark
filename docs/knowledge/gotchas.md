@@ -517,6 +517,19 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   `SHA256SUMS`. Note the GitHub-Release artifacts are a *separate* channel from the live Ark's
   `/sources/val-ark/*` (which `mirror-self.sh` still serves under the stable names); keep both formats
   identical so a file grabbed from either clones/extracts the same way. See `tests/test-ci-artifacts.sh`.
+- <a id="ci-sha-pin-88"></a>**Pin GitHub Actions to a full commit SHA, not a floating `@vN` tag; and
+  make the artifact validator assert `--all`, not just `git bundle create`.** A floating major tag
+  (`actions/checkout@v7`) silently follows whoever moves the tag — supply‑chain exposure in a public
+  repo. Pin to the 40‑hex commit the tag points at with a trailing `# vN` marker
+  (`actions/checkout@9c091bb… # v7`) — the hardened form dependabot still bumps. Resolve the commit
+  with `gh api repos/<owner>/<action>/commits/<tag> --jq .sha` (this endpoint **dereferences an
+  annotated tag to its commit** for you; the raw `git/refs/tags/<tag>` may return a `tag` object you'd
+  otherwise have to deref via `git/tags/<sha>` — `softprops/action-gh-release@v3` is annotated, the
+  `actions/*` ones are lightweight → commit directly). Guard both properties in tests, offline: a
+  lint (`^…uses:…[^#]*@v[0-9]`, `[^#]*` so the `# vN` comment never trips it) fails if any workflow
+  regresses to a floating ref, and the bundle grep is tightened to `git bundle create .*--all` so a
+  future edit dropping `--all` (→ a shallow, unclonable bundle) fails CI instead of shipping. See
+  `tests/test-ci-artifacts.sh` (24/0).
 
 ## Benign, don't "fix"
 
@@ -542,6 +555,24 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 - **`mirror-self.sh` SHA256SUMS + an empty glob.** `sha256sum a b node-*.tar.gz` with no node
   runtimes leaves `node-*.tar.gz` literal → sha256sum exits non‑zero → `&& mv` is skipped and the
   good hashes are discarded. Use `shopt -s nullglob` + an existence filter before hashing.
+- <a id="pkg-inprogress-89"></a>**A mid‑download/mid‑extraction entry must not be advertised as a
+  ready package.** The ZIM enum only lists `*.zim` (a `foo.zim.part` partial fails the suffix), but
+  the app/model enums iterated every non‑dotfile entry, so a `model.gguf.part` partial or a tool dir
+  still mid‑extraction showed up as a downloadable package (the dir even reported size 0, since
+  `_shallowSize` skips dotfiles). Apply the same discipline via `_pkgInProgress(name, full, isDir)`:
+  skip a `*.part` single file, and skip a **directory** holding a `.tmp_*` child —
+  `_common.sh`'s `download_and_extract` writes `${dir}/.tmp_<archive>` and removes it **only on a
+  successful extract**, so its presence is the in‑flight signal (it also covers the mid‑*download* of
+  that archive, which lands at `.tmp_<archive>.part`, still `.tmp_`‑prefixed). Mirrors that helper's
+  own "already extracted" file count (`! -name '.tmp_*' ! -name '*.part'`).
+- <a id="pkg-toplevel-gguf-89"></a>**`getModelsStatus` supports a flat model layout that the manifest
+  didn't.** Models live at `models/<category>/<name>`, but a single `.gguf` dropped directly under the
+  model root (`models/foo.gguf`, no category dir) is also valid — `getModelsStatus` surfaces those
+  under a synthetic `_top`. `computePackages` section 3 only descends into category **directories**
+  (`if (!cstat.isDirectory()) continue`), so top‑level files were silently dropped. Added a second
+  pass over the model root that lists each top‑level `*.gguf` **file** as `model:<name>` →
+  `/api/archive/models/<name>`. Requiring the `.gguf` suffix keeps a `foo.gguf.part` partial out for
+  free — the same trick the ZIM enum uses, no extra `.part` guard needed on that path.
 
 ## Ask assistant (`POST /api/ask`, #67)
 
@@ -586,6 +617,22 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   LAN/tailnet endpoint. Test: `tests/test-path-containment.sh` plants an in‑tree symlink to a
   secret OUTSIDE ROOT and asserts serveArchive 404s (secret not streamed) + `/api/packages` skips
   it, while a real file AND a within‑tree relative symlink both still serve 200.
+- <a id="realpath-containment-112"></a>**Same escape class had a THIRD surface #101 missed: the
+  kiwix‑serve feeder `findZimFiles()` (#112).** It `readdirSync`'s `content/zim`, then `statSync`'s
+  each `.zim` (FOLLOWS symlinks) and hands the surviving in‑tree paths to `kiwix-serve`. So an
+  in‑tree `X.zim` symlink pointing OUTSIDE ROOT was resolved and served by kiwix — the identical
+  in‑tree‑symlink escape, just on the ZIM‑serving path instead of download/enumeration. **When you
+  add a realpath‑containment fix, audit EVERY symlink‑following discovery surface, not just the one
+  in the ticket** — grep for `statSync`/`readdirSync` over a served tree. **Fix:** reuse the SAME
+  `realpathWithin(join(zimDir, f), zimDir)` inside the `findZimFiles()` filter (it realpaths the
+  base too, so the legit `content/zim` → data‑disk symlink layout and within‑tree relative links
+  still serve); skip escaping/dangling links with a `console.log`, no throw; keep passing the
+  in‑tree path to kiwix (unchanged invocation). Test: `test-path-containment.sh` Section C
+  unit‑invokes the REAL `findZimFiles()` (extracted + `vm`‑eval'd against an injected temp ROOT,
+  reusing the real `realpathWithin`) and asserts an escaping `.zim` (and a dangling one) are
+  EXCLUDED while a legit `.zim` and a within‑tree relative symlink are INCLUDED — no kiwix binary,
+  no network. Residual (also noted on #101): a `realpathWithin` → later `open` TOCTOU (low
+  reachability; a hardened form would open one fd and fstat it).
 
 ## Web UI / a11y (#107)
 

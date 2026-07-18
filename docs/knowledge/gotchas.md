@@ -481,6 +481,19 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   and `dev` share content but diverge by SHA. Dependabot PRs are cut from the *pre-release* `main`;
   retargeting them to `dev` corrupts the merge base into a huge false diff. Leave them on `main`
   (or set `target-branch: dev` in `dependabot.yml` so future ones start there), don't retarget.
+- **Release artifacts must match what `bootstrap.sh` consumes, not just "a bundle + a tarball"** (#88).
+  The offline self-replication payload has an exact shape, set by `bootstrap.sh` + `scripts/mirror-self.sh`:
+  the **git bundle** must be full-history (`git bundle create … --all`) because bootstrap does a plain
+  `git clone <bundle>`; the **source tarball** must carry a `val-ark/` top-level prefix
+  (`git archive --prefix="val-ark/"`) because bootstrap extracts with `tar --strip-components=1`. Drop
+  the prefix and every path lands one level too high. Build these **inline with plain git** in
+  `release.yml` — do NOT call `mirror-self.sh` from a bare runner: it sources `valark-env.sh`, which
+  autodetects a data-disk root (falling back to the repo) and writes **stable, unversioned** names
+  (`val-ark.bundle`, `val-ark-latest.tar.gz`) into that data tree, plus mirrors node runtimes — none of
+  which fits a versioned, data-diskless CI release. Same git commands, versioned output names, ship a
+  `SHA256SUMS`. Note the GitHub-Release artifacts are a *separate* channel from the live Ark's
+  `/sources/val-ark/*` (which `mirror-self.sh` still serves under the stable names); keep both formats
+  identical so a file grabbed from either clones/extracts the same way. See `tests/test-ci-artifacts.sh`.
 
 ## Benign, don't "fix"
 

@@ -40,6 +40,23 @@ test.describe('Val Ark Health & Repairs', () => {
     await expect(page.locator('.hp-fix-all')).toBeDisabled();
   });
 
+  test('Health cards are readable in light theme (#60)', async ({ page }) => {
+    await page.goto(BASE_URL + '/#/health', { waitUntil: 'load' });
+    await page.waitForSelector('.hp-card', { timeout: 10000 });
+    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+    // Before #60 the injected health CSS used undefined vars (--card-bg/--text), so
+    // light theme rendered near-black #16181d slabs with #1e293b text (~1.06:1).
+    const { bg, fg } = await page.evaluate(() => {
+      const card = document.querySelector('.hp-card')!;
+      return {
+        bg: getComputedStyle(card).backgroundColor,
+        fg: getComputedStyle(card.querySelector('.hp-name')!).color,
+      };
+    });
+    expect(bg).toBe('rgb(255, 255, 255)');   // light --bg-card
+    expect(fg).toBe('rgb(30, 41, 59)');      // light --text-primary — readable on white
+  });
+
   test('renders the Safety card (content moderation) with a toggle + review queue', async ({ page }) => {
     await page.goto(BASE_URL + '/#/health', { waitUntil: 'load' });
     // The Safety card lands once /api/status/moderation answers.

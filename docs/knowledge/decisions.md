@@ -440,3 +440,23 @@ later). See [README](README.md).
   diversity → small‑value → fill → evict‑for‑better; value = curated category weight + language +
   density + topic boosts (now including a strong Linux/shell boost, so an offline user can get
   setup help from the box).
+
+## 2026‑07 — Notification center: bell/inbox slice 1 (#69)
+- <a id="notify-bell-69-slice1"></a>**The notification center is a READ‑ONLY aggregation, not a
+  new store.** `GET /api/status/notifications` composes the signals the box *already* writes —
+  `heal-events.jsonl` (self‑heal events) + `selfheal.json`/`verify.json`/disk/Safe‑Mode (current
+  conditions) — into one severity‑tagged list. No new state file, no daemon, zero deps. This keeps
+  the endpoint read‑gated like the rest of `/api/status/*` and avoids an unauthenticated write path.
+- **Dismiss is client‑side (localStorage) for slice 1** so the endpoint stays read‑only. That
+  needs **stable item identity**: `heal-events.jsonl` lines carry only `ts|kind|detail` (no id,
+  tail‑capped at 200), so the server assigns `ev-<djb2-hash(ts|kind|detail)>` for events and a
+  fixed key per condition (`cond-safemode`, `cond-disk-warning|critical`, `cond-verify-<comp>`,
+  `cond-missing-assets`). A disk *escalation* gets its own id (`…-critical` vs `…-warning`) so a
+  worsening condition re‑surfaces even if the warning was dismissed. **Server‑side, cross‑device
+  dismiss** is the deferred follow‑up (adds a write path → same adversarial bar as
+  `POST /api/maintenance/repair`); routing into mail/board/chat, the Immediately/Daily/Never
+  frequency, and the on‑box LED are also later #69 slices.
+- **Severity maps to the existing color grammar** (green info / yellow warning / red critical).
+  Self‑heal events are reassuring **info** ("handled it for you"); the lone exception is
+  `moderation-error` (could NOT quarantine) → **warning**. Failed functional‑verify checks are
+  **warning** ("working on it — self‑heal re‑verifies"), matching the Health page framing.

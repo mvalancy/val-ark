@@ -7,7 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="mask-icon" href="favicon.svg" color="#4da6ff">
 <meta name="theme-color" content="#0d1420">
-<link rel="stylesheet" href="styles.css?v=3">
+<link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
 <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -3028,6 +3028,22 @@ function esc(str) {
     div.textContent = str;
     return div.innerHTML;
 }
+// Escape a value for interpolation into a DOUBLE-QUOTED HTML *attribute*. esc() is a
+// TEXT-node escape: it neutralizes < > & but NOT quotes, so a value like `x" onmouseover="…`
+// dropped into `data-id="${esc(v)}"` breaks OUT of the attribute and injects a real
+// event-handler attribute (executable script) with no < > needed. escAttr() also escapes
+// " and ' so the value stays inside its quotes. Use escAttr() for ANY value interpolated
+// into an attribute; use esc() only for text between tags. (Cleaner still: setAttribute /
+// element.dataset, which never touches an HTML parser.) (#121)
+function escAttr(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 function toggleMobileNav(hamburger) {
     hamburger.classList.toggle('open');
@@ -3116,6 +3132,8 @@ function openLightbox(src, caption) {
 document.addEventListener('keydown', e => {
     // Escape: Close modals, lightbox, or clear search
     if (e.key === 'Escape') {
+        // Close the notification inbox first (it's the topmost transient surface).
+        if (_notifOpen) { closeNotifPanel(); return; }
         // Close keyboard help modal
         const kbModal = document.getElementById('keyboardHelpModal');
         if (kbModal && kbModal.classList.contains('visible')) {
@@ -3467,6 +3485,7 @@ function renderNav(route) {
             ${navLink('#/settings', 'settings', 'Settings')}
         </div>
         <div class="nav-disk" id="nav-disk">${renderDiskBar()}</div>
+        ${renderNotifBell()}
         <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme" title="Toggle light/dark theme">
             <span class="icon-sun">&#x2600;</span>
             <span class="icon-moon">&#x263D;</span>
@@ -3889,14 +3908,14 @@ function renderDownloadCard(d) {
     const running = d.status === 'running';
     const st = _dlStatus(d);
     const eta = running ? _dlEta(d) : '';
-    return `<div class="dl-card" data-id="${esc(String(d.id))}">
+    return `<div class="dl-card" data-id="${escAttr(d.id)}">
         <div class="dl-card-top"><span class="dl-card-name">${esc(_dlLabel(d))}</span><span class="dl-pill dl-${st.cls}">${esc(st.label)}</span></div>
         <div class="dl-card-bar"><span class="dl-card-fill${running ? ' anim' : ''}" style="width:${pct}%"></span></div>
         <div class="dl-card-meta">
             <span class="dl-card-pct">${running ? pct + '%' : ''}${eta ? ' · ' + esc(eta) : ''}</span>
             <span class="dl-card-line">${esc((d.lastLine || '').toString().slice(0, 72))}</span>
-            <span class="dl-card-act">${running ? `<button class="dl-mini" onclick="cancelDownload('${esc(String(d.id))}')">Cancel</button>`
-                : (d.status === 'failed' ? `<button class="dl-mini" onclick="retryDownload('${esc(String(d.type))}')">Retry</button>` : '')}</span>
+            <span class="dl-card-act">${running ? `<button class="dl-mini" data-dl-act="cancel" data-id="${escAttr(d.id)}" onclick="dlMiniAction(this)">Cancel</button>`
+                : (d.status === 'failed' ? `<button class="dl-mini" data-dl-act="retry" data-type="${escAttr(d.type)}" onclick="dlMiniAction(this)">Retry</button>` : '')}</span>
         </div>
     </div>`;
 }
@@ -3923,6 +3942,17 @@ function _fmtDuration(ms) {
 }
 function retryDownload(type) {
     triggerDownload(['tools', 'models', 'content', 'update'].includes(type) ? type : 'content', 'all');
+}
+// dl-card mini buttons carry their id/type in data-* attributes and invoke a CONSTANT
+// handler (dlMiniAction(this), which reads them via getAttribute) — no id/type reaches an
+// inline-JS parser. But that alone is NOT enough: the id/type is still interpolated into a
+// double-quoted attribute, so it MUST be attribute-escaped (escAttr, quotes included) or a
+// `"` in the value would break out and inject a real event-handler attribute. esc()
+// (text-context, no quote escaping) is insufficient for an attribute. (#121)
+function dlMiniAction(el) {
+    const act = el.getAttribute('data-dl-act');
+    if (act === 'cancel') cancelDownload(el.getAttribute('data-id'));
+    else if (act === 'retry') retryDownload(el.getAttribute('data-type'));
 }
 // Merge the server's full download objects (with startedAt) into the SSE-built map.
 async function loadDownloads() {
@@ -3993,6 +4023,207 @@ function loadHistory() {
 }
 function startHealthLive() { stopHealthLive(); loadHealth(); loadMetrics(); loadHistory(); loadModeration(); _healthTimer = setInterval(() => { loadHealth(); loadMetrics(); loadHistory(); loadModeration(); }, 15000); }
 function stopHealthLive() { if (_healthTimer) { clearInterval(_healthTimer); _healthTimer = null; } if (_healthPoll) { clearTimeout(_healthPoll); _healthPoll = null; } _metricsData = null; _metricsHistory = null; _modStatus = null; _modQueue = null; }
+
+// ===== Notification center (issue #69 slice 1) ===============================
+// A cross-page bell/inbox that aggregates self-heal notifications from the
+// read-only GET /api/status/notifications. Dismiss + "seen" persist client-side in
+// localStorage so the endpoint stays read-only (server-side cross-device dismiss is
+// a documented follow-up). Rendered TEXT is escaped with esc() (neutralizes <>& but NOT
+// quotes). The dismiss/restore buttons carry their id in a data-id ATTRIBUTE, read by a
+// delegated click handler (_onNotifAction) — so the id never reaches an inline-JS parser,
+// AND the data-id value is attribute-escaped (escAttr, quotes included) so a `"` in it
+// can't break out of the attribute and inject an event handler. esc() alone is NOT safe
+// for an attribute value. (#121)
+// The bell is a real <button> (keyboard + screen-reader friendly); it closes on Esc or
+// a backdrop click. Deferred to later slices: routing into mail/board/chat, an
+// Immediately/Daily/Never frequency setting, and an on-box LED.
+let _notifData = null, _notifOpen = false, _notifFilter = 'all', _notifTimer = null;
+const NOTIF_DISMISS_KEY = 'ark-notif-dismissed', NOTIF_SEEN_KEY = 'ark-notif-seen';
+function _notifIdSet(key) {
+    try { const a = JSON.parse(localStorage.getItem(key) || '[]'); return new Set(Array.isArray(a) ? a : []); }
+    catch (_) { return new Set(); }
+}
+function _notifSaveIdSet(key, set) {
+    try { localStorage.setItem(key, JSON.stringify([...set].slice(-500))); } catch (_) {}
+}
+function _notifItems() { return (_notifData && Array.isArray(_notifData.items)) ? _notifData.items : []; }
+// Active = everything the box currently reports that the owner hasn't dismissed.
+function _notifActive() { const d = _notifIdSet(NOTIF_DISMISS_KEY); return _notifItems().filter(n => !d.has(n.id)); }
+// Unread = active AND not yet seen (opening the inbox marks the current set seen).
+function _notifUnread() { const s = _notifIdSet(NOTIF_SEEN_KEY); return _notifActive().filter(n => !s.has(n.id)); }
+
+function loadNotifications() {
+    fetch('/api/status/notifications').then(r => r.ok ? r.json() : null).then(d => {
+        if (d && Array.isArray(d.items)) { _notifData = d; syncNotifUI(); }
+    }).catch(() => {});
+}
+function startNotifications() {
+    if (_notifTimer) return;   // one global poller for the whole session
+    loadNotifications();
+    _notifTimer = setInterval(loadNotifications, 30000);
+}
+
+const _NOTIF_SEV = {
+    critical: { icon: '✕', label: 'Critical' },   // ✕
+    warning:  { icon: '⚠', label: 'Warning' },    // ⚠
+    info:     { icon: '✓', label: 'Info' },        // ✓
+};
+function _notifSev(s) { return _NOTIF_SEV[s] || _NOTIF_SEV.info; }
+
+// The nav bell button (rendered inside renderNav → present on every page).
+function renderNotifBell() {
+    const unread = _notifUnread().length;
+    const badge = unread > 0
+        ? `<span class="notif-badge" id="notif-badge">${unread > 99 ? '99+' : unread}</span>`
+        : `<span class="notif-badge" id="notif-badge" hidden></span>`;
+    const aria = unread > 0 ? `Notifications, ${unread} unread` : 'Notifications';
+    return `<button type="button" class="notif-bell" id="notif-bell" onclick="toggleNotifPanel()"
+        aria-label="${aria}" aria-haspopup="dialog" aria-expanded="${_notifOpen ? 'true' : 'false'}" title="Notifications">
+        <span class="notif-bell-icon" aria-hidden="true">\u{1F514}</span>${badge}
+    </button>`;
+}
+
+function _notifFilteredList() {
+    const items = _notifActive();
+    if (_notifFilter === 'dismissed') {
+        const d = _notifIdSet(NOTIF_DISMISS_KEY);
+        return _notifItems().filter(n => d.has(n.id));
+    }
+    if (_notifFilter === 'all') return items;
+    return items.filter(n => n.severity === _notifFilter);
+}
+function _notifChips() {
+    const active = _notifActive();
+    const counts = {
+        all: active.length,
+        critical: active.filter(n => n.severity === 'critical').length,
+        warning: active.filter(n => n.severity === 'warning').length,
+        info: active.filter(n => n.severity === 'info').length,
+        dismissed: _notifIdSet(NOTIF_DISMISS_KEY).size,
+    };
+    const defs = [['all', 'All'], ['critical', 'Critical'], ['warning', 'Warning'], ['info', 'Info'], ['dismissed', 'Dismissed']];
+    return defs.map(([key, label]) => {
+        const on = _notifFilter === key;
+        return `<button type="button" class="notif-chip${on ? ' active' : ''}" role="tab" aria-selected="${on ? 'true' : 'false'}"
+            data-filter="${key}" onclick="setNotifFilter('${key}')">${label}<span class="notif-chip-n">${counts[key]}</span></button>`;
+    }).join('');
+}
+function _notifRows() {
+    const list = _notifFilteredList();
+    if (!list.length) {
+        const msg = _notifFilter === 'dismissed' ? 'Nothing dismissed yet.'
+            : _notifFilter === 'all' ? 'All clear — nothing needs your attention.'
+            : 'Nothing here right now.';
+        return `<li class="notif-empty">${esc(msg)}</li>`;
+    }
+    const dismissed = _notifFilter === 'dismissed';
+    return list.map(n => {
+        const sev = _notifSev(n.severity);
+        const when = _ago(n.ts);
+        const action = dismissed
+            ? `<button type="button" class="notif-act" data-notif-act="restore" data-id="${escAttr(n.id)}" aria-label="Restore notification">Restore</button>`
+            : `<button type="button" class="notif-act" data-notif-act="dismiss" data-id="${escAttr(n.id)}" aria-label="Dismiss notification">Dismiss</button>`;
+        return `<li class="notif-item notif-${esc(n.severity)}">
+            <span class="notif-dot" aria-hidden="true">${sev.icon}</span>
+            <div class="notif-body">
+                <div class="notif-title">${esc(n.title || '')}</div>
+                ${n.detail ? `<div class="notif-detail">${esc(n.detail)}</div>` : ''}
+                <div class="notif-meta"><span class="notif-sev-tag">${esc(sev.label)}</span>${when ? `<span class="notif-when">${esc(when)}</span>` : ''}</div>
+            </div>
+            ${action}
+        </li>`;
+    }).join('');
+}
+function renderNotifPanelBody() {
+    const canDismissAll = _notifFilter !== 'dismissed' && _notifActive().length > 0;
+    return `<div class="notif-head">
+            <h2 id="notif-title">Notifications</h2>
+            ${canDismissAll ? `<button type="button" class="notif-dismiss-all" onclick="dismissAllNotif()">Dismiss all</button>` : ''}
+        </div>
+        <div class="notif-filters" role="tablist" aria-label="Filter notifications">${_notifChips()}</div>
+        <ul class="notif-list">${_notifRows()}</ul>`;
+}
+function openNotifPanel() {
+    closeNotifPanel();   // idempotent
+    const backdrop = document.createElement('div');
+    backdrop.id = 'notif-backdrop';
+    backdrop.className = 'notif-backdrop';
+    backdrop.onclick = closeNotifPanel;
+    const panel = document.createElement('div');
+    panel.id = 'notif-panel';
+    panel.className = 'notif-panel';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'false');
+    panel.setAttribute('aria-labelledby', 'notif-title');
+    panel.innerHTML = renderNotifPanelBody();
+    // Delegated on the (persistent) panel element so it survives the innerHTML swap in
+    // setNotifFilter and is GC'd with the panel on close — dismiss/restore ids ride in a
+    // data-id attribute (escAttr-escaped at render so they can't break out of it), read
+    // from the DOM via getAttribute, never interpolated into inline JS (#121).
+    panel.addEventListener('click', _onNotifAction);
+    document.body.appendChild(backdrop);
+    document.body.appendChild(panel);
+    _notifOpen = true;
+    // Opening the inbox marks the current active set as "seen" → clears the badge.
+    const seen = _notifIdSet(NOTIF_SEEN_KEY);
+    for (const n of _notifActive()) seen.add(n.id);
+    _notifSaveIdSet(NOTIF_SEEN_KEY, seen);
+    _syncNotifBell();
+    const bell = document.getElementById('notif-bell');
+    if (bell) bell.setAttribute('aria-expanded', 'true');
+}
+function closeNotifPanel() {
+    document.getElementById('notif-panel')?.remove();
+    document.getElementById('notif-backdrop')?.remove();
+    _notifOpen = false;
+    const bell = document.getElementById('notif-bell');
+    if (bell) bell.setAttribute('aria-expanded', 'false');
+}
+function toggleNotifPanel() { _notifOpen ? closeNotifPanel() : openNotifPanel(); }
+function setNotifFilter(f) {
+    _notifFilter = f;
+    const panel = document.getElementById('notif-panel');
+    if (panel) panel.innerHTML = renderNotifPanelBody();
+}
+// Delegated click handler for the notification panel: dismiss/restore carry their id in
+// data-id (read from the DOM, not a JS string), so even a future less-constrained id can
+// never become executable script here — defense-in-depth over the server id-constraint (#121).
+function _onNotifAction(e) {
+    const btn = e.target.closest('button[data-notif-act]');
+    if (!btn) return;
+    const id = btn.getAttribute('data-id');
+    if (!id) return;
+    if (btn.getAttribute('data-notif-act') === 'restore') restoreNotif(id);
+    else dismissNotif(id);
+}
+function dismissNotif(id) {
+    const d = _notifIdSet(NOTIF_DISMISS_KEY); d.add(id); _notifSaveIdSet(NOTIF_DISMISS_KEY, d);
+    syncNotifUI();
+}
+function restoreNotif(id) {
+    const d = _notifIdSet(NOTIF_DISMISS_KEY); d.delete(id); _notifSaveIdSet(NOTIF_DISMISS_KEY, d);
+    syncNotifUI();
+}
+function dismissAllNotif() {
+    const d = _notifIdSet(NOTIF_DISMISS_KEY);
+    for (const n of _notifActive()) d.add(n.id);
+    _notifSaveIdSet(NOTIF_DISMISS_KEY, d);
+    syncNotifUI();
+}
+// Update the badge in place (no full re-render), and refresh the panel body if open.
+function _syncNotifBell() {
+    const badge = document.getElementById('notif-badge');
+    const bell = document.getElementById('notif-bell');
+    if (!badge || !bell) return;
+    const unread = _notifUnread().length;
+    if (unread > 0) { badge.textContent = unread > 99 ? '99+' : String(unread); badge.hidden = false;
+        bell.setAttribute('aria-label', `Notifications, ${unread} unread`); }
+    else { badge.textContent = ''; badge.hidden = true; bell.setAttribute('aria-label', 'Notifications'); }
+}
+function syncNotifUI() {
+    _syncNotifBell();
+    if (_notifOpen) { const panel = document.getElementById('notif-panel'); if (panel) panel.innerHTML = renderNotifPanelBody(); }
+}
 
 function _ago(iso) {
     if (!iso) return '';
@@ -7119,7 +7350,7 @@ function renderProgressPanel() {
         html += `<div class="dl-item">
             <div class="dl-item-header">
                 <span class="dl-item-type">${dl.type}${statusIcon}</span>
-                ${dl.status === 'running' ? `<button class="dl-cancel-btn" onclick="cancelDownload('${id}')">Cancel</button>` : ''}
+                ${dl.status === 'running' ? `<button class="dl-cancel-btn" data-dl-act="cancel" data-id="${escAttr(id)}" onclick="dlMiniAction(this)">Cancel</button>` : ''}
             </div>
             <div class="dl-progress-bar"><div class="dl-progress-fill" style="width:${dl.progress}%"></div></div>
             <div class="dl-item-line">${((dl.lastLine || (dl.status === 'running' ? 'Starting...' : dl.status)) + '').slice(0, 60)}</div>
@@ -7151,6 +7382,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // Try combined API first (single request, single re-render)
     const apiOk = await initFromAPI();
+    startNotifications();   // cross-page bell/inbox poller (harmless no-op without a server)
     if (apiOk) {
         connectSSE();
         loadDownloads();   // catch up on any downloads already running before this page loaded

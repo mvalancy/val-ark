@@ -2930,6 +2930,19 @@ function findZimFiles() {
         return fs.readdirSync(zimDir)
             .filter(f => f.endsWith('.zim'))
             .filter(f => {
+                // #112: realpath-contain each .zim before handing it to kiwix-serve.
+                // The statSync below FOLLOWS symlinks, so an in-tree X.zim symlink
+                // pointing OUTSIDE ROOT would otherwise be resolved and served — the
+                // same in-tree-symlink-escape class #101 closed on serveArchive + the
+                // packages enumeration, here on the ZIM-serving path. realpathWithin()
+                // (issue #101) realpaths the base too, so the legit content/zim →
+                // data-disk symlink layout and within-tree relative links stay
+                // contained and still serve; escaping/dangling links are skipped (no
+                // throw). We keep passing the in-tree path to kiwix (unchanged).
+                if (realpathWithin(path.join(zimDir, f), zimDir) === null) {
+                    console.log(`Skipping ZIM outside content tree (escaping/dangling symlink): ${f}`);
+                    return false;
+                }
                 // Serve every complete .zim. The librarian downloads atomically
                 // (partials are *.zim.part, which don't match .zim), so any .zim
                 // here is finished — no size floor needed beyond skipping empties.

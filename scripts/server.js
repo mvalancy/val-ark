@@ -1226,6 +1226,12 @@ function handleAPI(req, res, urlPath) {
                 // functional-verify per-check results (verify.json), the timestamped
                 // heal-events feed, and Safe-Mode state. Read-gated like all /api/status.
                 return sendJSON(res, req, getHealthDetail());
+            case '/api/status/notifications':
+                // Notification center (issue #69 slice 1): a read-only aggregation of
+                // recent self-heal events + current warning/critical conditions for the
+                // web UI's bell/inbox. Read-gated by the /api/status/ prefix; never throws
+                // on a bare box (empty → {items:[]}). Dismiss is client-side this slice.
+                return sendJSON(res, req, getNotifications());
             case '/api/status/metrics': {
                 // Live host gauges for the Health page's System tiles — pure local reads
                 // (/proc + os + cached disk), no external service, never throws. Read-gated
@@ -1867,6 +1873,105 @@ function getHealthDetail() {
     } catch (_) {}
     const sm = safeModeState();
     return { verify, heal, events, safeMode: sm.safeMode, safeModeReasons: sm.reasons, repairRunning: repairInFlight() };
+}
+
+// ---- Notification center (issue #69 slice 1) --------------------------------
+// A READ-ONLY aggregation for the web UI's bell/inbox: recent self-heal events
+// (heal-events.jsonl) folded together with the current warning/critical conditions
+// the health report already knows (Safe Mode, disk almost full, a failed
+// functional-verify check, unresolved missing assets). Pure state-file + cached-df
+// reads — it NEVER throws on a bare box (no state yet → { items: [] }), adds ZERO
+// deps, and is read-gated by the /api/status/ prefix like every other status read.
+// Dismiss is client-side (localStorage) for this slice, so the endpoint stays
+// read-only; the stable ids below are what make a dismissal persist across reloads.
+// Deferred to later slices: routing digests into the box's own mail/board/chat,
+// Immediately/Daily/Never frequency, an on-box LED, and server-side (cross-device)
+// dismiss state. See docs/design/errors-selfheal.md ("Notifications are offline-native").
+const NOTIF_MAX = 60;          // hard cap on returned items (newest kept)
+const NOTIF_EVENTS_MAX = 40;   // how many recent heal-events to fold in
+function _notifHash(s) {
+    // djb2 → short hex. Deterministic and dependency-free; only needs to be stable
+    // and collision-resistant enough to key a client-side dismissal, not cryptographic.
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+    return h.toString(16);
+}
+// Self-heal event kind → severity. The loop only records things it DID (a restart, a
+// start, a quarantine) — those are reassuring "handled it for you" info. The lone
+// exception is moderation-error: the loop could NOT quarantine a flagged upload, which
+// still needs a human, so it rises to a warning.
+function _notifEventSeverity(kind) { return kind === 'moderation-error' ? 'warning' : 'info'; }
+function _notifEventTitle(kind) {
+    switch (kind) {
+        case 'restart': return 'Service restarted automatically';
+        case 'start': return 'Service started automatically';
+        case 'quarantine': return 'Flagged upload quarantined';
+        case 'moderation-error': return 'Could not quarantine a flagged upload';
+        default: return 'Self-heal action';
+    }
+}
+// Friendly component names for a failed functional-verify check (verify.json comp).
+const _NOTIF_COMP_TITLE = { models: 'AI models', apps: 'A tool', library: 'Library', server: 'Web server', integrity: 'File integrity', mesh: 'Fleet mesh' };
+const _NOTIF_COMP_LABEL = { models: 'the AI models', apps: 'a mirrored tool', library: 'the offline library', server: 'the web server', integrity: 'file integrity', mesh: 'the fleet mesh' };
+function getNotifications() {
+    const items = [];
+    // 1) Recent self-heal events (append-only jsonl, newest last). Reassuring info,
+    //    mostly — the id is a stable content hash so a client-side dismiss sticks.
+    try {
+        const raw = fs.readFileSync(path.join(STATE_DIR, 'heal-events.jsonl'), 'utf8').trim();
+        if (raw) {
+            for (const l of raw.split('\n').slice(-NOTIF_EVENTS_MAX)) {
+                let o; try { o = JSON.parse(l); } catch (_) { continue; }
+                if (!o || !o.kind) continue;
+                const ts = o.ts || '', detail = o.detail || '';
+                items.push({
+                    id: 'ev-' + _notifHash(ts + '|' + o.kind + '|' + detail),
+                    ts, severity: _notifEventSeverity(o.kind),
+                    title: _notifEventTitle(o.kind), detail, source: 'self-heal',
+                });
+            }
+        }
+    } catch (_) {}
+    // 2) Current conditions the box knows right now (state files + cached disk). Each
+    //    gets a STABLE id keyed on the condition (not a fluctuating value) so a
+    //    dismissal persists; a critical escalation carries its OWN id so it re-surfaces.
+    const heal = readStateJson('selfheal.json');
+    const verify = readStateJson('verify.json');
+    const sm = safeModeState();
+    const condTs = () => (heal && heal.ts) || (verify && verify.ts) || new Date().toISOString();
+    if (sm.safeMode) items.push({ id: 'cond-safemode', ts: condTs(), severity: 'critical',
+        title: 'Val Ark is in recovery mode',
+        detail: 'The box booted core-only because its settings could not be read. Your content is safe. Open Health to recover and set a new passcode.',
+        source: 'config' });
+    // Disk almost full — same thresholds the Health page uses (>=97 act now, >=90 filling up).
+    let diskPct = null;
+    try { const d = getDiskStatus(); if (d && d.total) diskPct = d.used / d.total * 100; } catch (_) {}
+    if (diskPct != null) {
+        const p = Math.round(diskPct);
+        if (diskPct >= 97) items.push({ id: 'cond-disk-critical', ts: condTs(), severity: 'critical',
+            title: 'Disk almost full', detail: 'The disk is ' + p + '% full. Free some space so downloads and services keep working.', source: 'storage' });
+        else if (diskPct >= 90) items.push({ id: 'cond-disk-warning', ts: condTs(), severity: 'warning',
+            title: 'Disk filling up', detail: 'The disk is ' + p + '% full. The librarian makes room by evicting the lowest-priority content automatically.', source: 'storage' });
+    }
+    // A functional-verify check that failed — self-heal re-verifies, so it's a yellow
+    // "working on it", one deduped item per affected component.
+    if (verify && Array.isArray(verify.checks)) {
+        const failed = [...new Set(verify.checks.filter(c => c && c.status === 'FAIL' && c.comp).map(c => c.comp))];
+        for (const comp of failed) items.push({ id: 'cond-verify-' + comp, ts: condTs(), severity: 'warning',
+            title: (_NOTIF_COMP_TITLE[comp] || comp) + ' self-check failed',
+            detail: 'A functional check for ' + (_NOTIF_COMP_LABEL[comp] || comp) + ' did not pass. Self-heal re-verifies every cycle; if it persists the file may be re-downloading.',
+            source: 'self-heal' });
+    }
+    // Missing linked files the loop hasn't re-linked yet — a genuine box residue.
+    if (heal && typeof heal.missingAssets === 'number' && heal.missingAssets > 0) items.push({
+        id: 'cond-missing-assets', ts: condTs(), severity: 'warning',
+        title: heal.missingAssets + ' file' + (heal.missingAssets === 1 ? '' : 's') + ' need re-linking',
+        detail: 'The last self-check found ' + heal.missingAssets + ' missing linked file(s). The loop re-links them automatically on the next cycle.',
+        source: 'self-heal' });
+    // Newest first; a severity tiebreak floats criticals above equal-timestamped info.
+    const rank = { critical: 3, warning: 2, info: 1 };
+    items.sort((a, b) => (b.ts || '').localeCompare(a.ts || '') || (rank[b.severity] || 0) - (rank[a.severity] || 0));
+    return { items: items.slice(0, NOTIF_MAX), ts: new Date().toISOString() };
 }
 
 // ---- Live host metrics (Health page System tiles) ---------------------------

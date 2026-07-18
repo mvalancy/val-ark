@@ -663,3 +663,80 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   `$HOME/.local/node/bin/node` to record its argv + the port it WOULD bind, against an isolated
   `SCRIPT_DIR`/`.env` — asserting env‑var, explicit‑arg, default, and `.env`‑only cases without
   starting a real server.
+
+## Running Playwright from a git worktree (#69)
+
+- <a id="playwright-in-worktree-69"></a>**A parallel worktree has no `tests/screenshots/node_modules`**
+  (it's git‑ignored and per‑directory), so `npx playwright test` there fails with
+  `Cannot find module '@playwright/test'` while loading `playwright.config.ts`. **Fix:** symlink the
+  main checkout's install in — `ln -sfn <main>/tests/screenshots/node_modules
+  tests/screenshots/node_modules` — then run `./node_modules/.bin/playwright test <spec>`. Browsers
+  live in the shared `~/.cache/ms-playwright`, so no re‑download. **Watch the commit:** the ignore
+  rule is `tests/screenshots/node_modules/` (**directory**, trailing slash), which does NOT match a
+  *symlink* of that name — `git status` shows it as untracked. Remove the symlink (`rm -f
+  tests/screenshots/node_modules`) before committing, and never `git add .` — add the touched files
+  explicitly.
+- **Drive UI specs against the live `:3001` server and stub the endpoint with `page.route`.** The
+  notification spec (`notifications.spec.ts`) intercepts `**/api/status/notifications` so the bell,
+  badge, filters, and dismiss‑persist‑across‑reload assertions are deterministic regardless of the
+  shared box's real state (route handlers persist across `page.reload()`; localStorage persists
+  within the same context). The endpoint's own shape/gating is covered separately by
+  `tests/test-notifications.sh`.
+
+## Web UI: `esc()` is a TEXT escape — an HTML *attribute* needs `escAttr()` (#121)
+
+- <a id="esc-not-onclick-safe-121"></a>**`esc()` (textContent→innerHTML) escapes `<>&` but NOT
+  quotes.** That has TWO consequences, and the second was originally mis‑documented as "safe":
+  - **(1) Inline JS.** A value in a JS‑string‑inside‑an‑attribute like
+    `onclick="dismissNotif('${esc(id)}')"` is unprotected — a single quote in `id` breaks straight
+    out of the JS string. **Never interpolate data into inline JS.**
+  - **(2) Any HTML attribute — the subtle one.** Even the "safe" delegated pattern
+    `data-id="${esc(id)}"` is **still an XSS vector**: `esc()` leaves `"` intact, so a value like
+    `x" onmouseover="…"` breaks OUT of the double‑quoted attribute and injects a **real
+    event‑handler attribute (executable script) with NO `<>` needed** — it fires on hover, no click
+    required. The delegated handler reading via `getAttribute` is injection‑safe *for the read*, but
+    does nothing for the *render*. Moving an id from `onclick` to `data-id` fixes (1) but NOT (2).
+- **Rule:** pick the escape by CONTEXT. `esc()` only for text between tags; **`escAttr()`** (escapes
+  `& < > " '`) for anything interpolated into an attribute value; better still, set it with
+  `element.setAttribute` / `element.dataset` so no value ever touches an HTML parser. Do **not** claim
+  a value "can't become executable script" unless it truly cannot break its attribute.
+- **Accepted patterns in `web-ui/index.html`:** (a) **data‑`*` (via `escAttr`) + a delegated
+  handler** — buttons carry `data-id`/`data-act` and a listener on a PERSISTENT parent reads them via
+  `getAttribute`; or (b) the file's **`onclick="fn(this)"` idiom** (constant argument, handler reads
+  `this.getAttribute(...)`, e.g. `triggerRequestFromEl`/`dlMiniAction`) — again with `escAttr` on any
+  interpolated `data-*`. For a panel whose innerHTML is re‑rendered in place (the notif panel), attach
+  the delegated listener to the panel ELEMENT, not its children, so it survives the `innerHTML =` swap
+  and is GC'd when the panel is removed.
+- The notif inbox, dl‑card minis, and the dl‑panel Cancel button are currently safe both because ids
+  are server‑constrained (`ev-<hex>`, fixed `cond-*` keys) AND because they now `escAttr` the value —
+  don't rely on the first alone. Test it by stubbing an id containing a **double quote + an
+  `onmouseover` payload** and asserting the button has no injected handler attribute, `window.__xss`
+  stays undefined on hover, AND dismiss still works (`notifications.spec.ts`).
+
+## Catalog: an HTTP‑200 but ENTRY‑LESS feed is NOT "complete" (#95)
+
+- <a id="catalog-empty-feed-95"></a>**A completeness signal built only on exceptions misses the
+  200/empty case.** `kiwix_catalog.py` marked a language failed only when its fetch/parse *raised*
+  (timeout/429/non‑200/truncated). A well‑formed HTTP‑200 feed with **zero entries** for a requested
+  language parsed to 0 rows and counted as *complete* → `catalog_refresh_zim` would atomically
+  replace a fuller multi‑language cache with the entry‑less subset and silently DROP that language
+  (unlike the exception path, it did not self‑preserve). **Fix:** treat **0 rows for a requested
+  language as INCOMPLETE** (`return 2`), preserving #57's invariant (a partial fetch never replaces a
+  fuller cache) and the bootstrap exception (stdout still carries whatever rows fetched, so a
+  cache‑less first boot bootstraps). Count rows per language with `before = len(rows)` around
+  `parse()` — this fires on a genuinely empty feed but NOT on cross‑language duplicate URLs (dedup is
+  at stdout, so `parse()` still appends). Offline test: inject a `<feed/>` with no `<entry>` via a
+  fixture and assert the prior fuller cache stays byte‑identical (`tests/test-catalog-cache.sh`).
+
+## Structural test asserts must skip the comment line (#96)
+
+- <a id="grep-operative-not-comment-96"></a>**`grep -q '8>&-'` over a function body matches the
+  explanatory `# 8>&- : …` comment too — so the assertion passes even if the OPERATIVE redirect is
+  deleted (vacuous).** When a structural test asserts a token that also appears in a nearby comment,
+  either **strip comment lines first** (`grep -v '^[[:space:]]*#'`) or **anchor to the operative
+  line** (`grep 'setsid.*8>&-'` / `grep 'timeout .*bash .*8>&-'`). Prove non‑vacuousness by mutating
+  the source to drop the operative token while keeping the comment: the old bare grep still passes,
+  the fixed one fails. And back a structural assertion with a **functional** one where you can —
+  `test-loop-lock.sh` §6/§6b drive the REAL `_va_start_web`/`ensure_services` spawns (fake long‑lived
+  daemon, hold `loop.lock` on fd 8 like `run_locked`, then assert a fresh `flock -n` acquires it) so
+  an fd‑8 leak into a detached daemon fails the test regardless of source formatting.

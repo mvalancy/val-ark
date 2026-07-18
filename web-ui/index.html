@@ -3898,8 +3898,8 @@ function renderDownloadCard(d) {
         <div class="dl-card-meta">
             <span class="dl-card-pct">${running ? pct + '%' : ''}${eta ? ' · ' + esc(eta) : ''}</span>
             <span class="dl-card-line">${esc((d.lastLine || '').toString().slice(0, 72))}</span>
-            <span class="dl-card-act">${running ? `<button class="dl-mini" onclick="cancelDownload('${esc(String(d.id))}')">Cancel</button>`
-                : (d.status === 'failed' ? `<button class="dl-mini" onclick="retryDownload('${esc(String(d.type))}')">Retry</button>` : '')}</span>
+            <span class="dl-card-act">${running ? `<button class="dl-mini" data-dl-act="cancel" data-id="${esc(String(d.id))}" onclick="dlMiniAction(this)">Cancel</button>`
+                : (d.status === 'failed' ? `<button class="dl-mini" data-dl-act="retry" data-type="${esc(String(d.type))}" onclick="dlMiniAction(this)">Retry</button>` : '')}</span>
         </div>
     </div>`;
 }
@@ -3926,6 +3926,15 @@ function _fmtDuration(ms) {
 }
 function retryDownload(type) {
     triggerDownload(['tools', 'models', 'content', 'update'].includes(type) ? type : 'content', 'all');
+}
+// dl-card mini buttons carry their id/type in data-* and invoke a CONSTANT handler
+// (dlMiniAction(this)) — no download id/type is ever interpolated into inline JS, so a
+// future less-constrained value can't become executable script (#121, defense-in-depth;
+// esc() escapes <>& but NOT quotes). Mirrors the file's triggerRequestFromEl(this) idiom.
+function dlMiniAction(el) {
+    const act = el.getAttribute('data-dl-act');
+    if (act === 'cancel') cancelDownload(el.getAttribute('data-id'));
+    else if (act === 'retry') retryDownload(el.getAttribute('data-type'));
 }
 // Merge the server's full download objects (with startedAt) into the SSE-built map.
 async function loadDownloads() {
@@ -4001,8 +4010,10 @@ function stopHealthLive() { if (_healthTimer) { clearInterval(_healthTimer); _he
 // A cross-page bell/inbox that aggregates self-heal notifications from the
 // read-only GET /api/status/notifications. Dismiss + "seen" persist client-side in
 // localStorage so the endpoint stays read-only (server-side cross-device dismiss is
-// a documented follow-up). All rendered text is escaped (esc()) — XSS-safe. The bell
-// is a real <button> (keyboard + screen-reader friendly); the panel closes on Esc or
+// a documented follow-up). All rendered text is escaped with esc(), which neutralizes
+// <>& but NOT quotes — so the dismiss/restore buttons pass their id via data-id read by
+// a delegated click handler (_onNotifAction), never interpolated into inline JS (#121).
+// The bell is a real <button> (keyboard + screen-reader friendly); it closes on Esc or
 // a backdrop click. Deferred to later slices: routing into mail/board/chat, an
 // Immediately/Daily/Never frequency setting, and an on-box LED.
 let _notifData = null, _notifOpen = false, _notifFilter = 'all', _notifTimer = null;
@@ -4089,8 +4100,8 @@ function _notifRows() {
         const sev = _notifSev(n.severity);
         const when = _ago(n.ts);
         const action = dismissed
-            ? `<button type="button" class="notif-act" onclick="restoreNotif('${esc(n.id)}')" aria-label="Restore notification">Restore</button>`
-            : `<button type="button" class="notif-act" onclick="dismissNotif('${esc(n.id)}')" aria-label="Dismiss notification">Dismiss</button>`;
+            ? `<button type="button" class="notif-act" data-notif-act="restore" data-id="${esc(n.id)}" aria-label="Restore notification">Restore</button>`
+            : `<button type="button" class="notif-act" data-notif-act="dismiss" data-id="${esc(n.id)}" aria-label="Dismiss notification">Dismiss</button>`;
         return `<li class="notif-item notif-${esc(n.severity)}">
             <span class="notif-dot" aria-hidden="true">${sev.icon}</span>
             <div class="notif-body">
@@ -4124,6 +4135,10 @@ function openNotifPanel() {
     panel.setAttribute('aria-modal', 'false');
     panel.setAttribute('aria-labelledby', 'notif-title');
     panel.innerHTML = renderNotifPanelBody();
+    // Delegated on the (persistent) panel element so it survives the innerHTML swap in
+    // setNotifFilter and is GC'd with the panel on close — dismiss/restore ids ride in
+    // data-id, read from the DOM, never interpolated into inline JS (#121).
+    panel.addEventListener('click', _onNotifAction);
     document.body.appendChild(backdrop);
     document.body.appendChild(panel);
     _notifOpen = true;
@@ -4147,6 +4162,17 @@ function setNotifFilter(f) {
     _notifFilter = f;
     const panel = document.getElementById('notif-panel');
     if (panel) panel.innerHTML = renderNotifPanelBody();
+}
+// Delegated click handler for the notification panel: dismiss/restore carry their id in
+// data-id (read from the DOM, not a JS string), so even a future less-constrained id can
+// never become executable script here — defense-in-depth over the server id-constraint (#121).
+function _onNotifAction(e) {
+    const btn = e.target.closest('button[data-notif-act]');
+    if (!btn) return;
+    const id = btn.getAttribute('data-id');
+    if (!id) return;
+    if (btn.getAttribute('data-notif-act') === 'restore') restoreNotif(id);
+    else dismissNotif(id);
 }
 function dismissNotif(id) {
     const d = _notifIdSet(NOTIF_DISMISS_KEY); d.add(id); _notifSaveIdSet(NOTIF_DISMISS_KEY, d);

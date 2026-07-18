@@ -94,6 +94,45 @@ test.describe('Notification center — bell/inbox (#69 slice 1)', () => {
     await expect(page.locator('#notif-panel')).toContainText('Val Ark is in recovery mode');
   });
 
+  test('dismiss/restore carry the id via data-id + delegation, not inline JS (#121)', async ({ page }) => {
+    await stubNotifications(page);
+    await page.goto(BASE_URL + '/#/', { waitUntil: 'load' });
+    await page.locator('#notif-bell').click();
+    const act = page.locator('#notif-panel .notif-item .notif-act').first();
+    // The action button carries its id in data-id and calls NO inline JS — the id is
+    // read from the DOM by a delegated handler, never interpolated into an onclick.
+    await expect(act).toHaveAttribute('data-notif-act', /^(dismiss|restore)$/);
+    await expect(act).toHaveAttribute('data-id', /.+/);
+    expect(await act.evaluate((el) => el.getAttribute('onclick'))).toBeNull();
+    // …and the delegated path still works end-to-end: clicking Dismiss removes the row.
+    await page.locator('.notif-chip[data-filter="critical"]').click();
+    await page.locator('#notif-panel .notif-item .notif-act').click();
+    await page.locator('.notif-chip[data-filter="all"]').click();
+    await expect(page.locator('#notif-panel .notif-item')).toHaveCount(2);
+  });
+
+  test('a quote/JS-bearing id cannot execute and dismiss still works via delegation (#121)', async ({ page }) => {
+    // The single quote + markup is exactly what would have broken out of the old
+    // onclick="dismissNotif('${id}')" (esc() does not escape quotes). With data-id +
+    // delegation the value never reaches a JS/HTML parser as code.
+    const evilId = "ev-x'-')//<img src=x onerror=window.__xss=1>";
+    const items = [{ id: evilId, ts: '2026-07-18T00:03:00Z', severity: 'info', title: 'Evil', detail: 'x', source: 'self-heal' }];
+    await stubNotifications(page, items);
+    await page.goto(BASE_URL + '/#/', { waitUntil: 'load' });
+    await page.locator('#notif-bell').click();
+    await expect(page.locator('#notif-panel .notif-item')).toHaveCount(1);
+    // The id rides in data-id verbatim; clicking Dismiss reads it via getAttribute.
+    await page.locator('#notif-panel .notif-item .notif-act').click();
+    // No injected script ran…
+    expect(await page.evaluate(() => (window as any).__xss)).toBeUndefined();
+    // …and the delegated dismiss actually removed the row (active list now empty).
+    await page.locator('.notif-chip[data-filter="all"]').click();
+    await expect(page.locator('#notif-panel .notif-item')).toHaveCount(0);
+    // The dismissed one is retrievable under the Dismissed filter (id survived intact).
+    await page.locator('.notif-chip[data-filter="dismissed"]').click();
+    await expect(page.locator('#notif-panel .notif-item')).toHaveCount(1);
+  });
+
   test('inbox is readable in light theme (#69)', async ({ page }) => {
     await stubNotifications(page);
     await page.goto(BASE_URL + '/#/', { waitUntil: 'load' });

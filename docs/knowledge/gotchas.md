@@ -682,3 +682,48 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   shared box's real state (route handlers persist across `page.reload()`; localStorage persists
   within the same context). The endpoint's own shape/gating is covered separately by
   `tests/test-notifications.sh`.
+
+## Web UI: `esc()` does NOT protect an inline `onclick` (#121)
+
+- <a id="esc-not-onclick-safe-121"></a>**`esc()` (textContent→innerHTML) escapes `<>&` but NOT
+  quotes**, so it gives ZERO protection for a value interpolated into a JS‑string‑inside‑an‑attribute
+  like `onclick="dismissNotif('${esc(id)}')"`. A single quote in `id` breaks straight out of the JS
+  string. The notification inbox and the dl‑card mini buttons were safe ONLY because every id is
+  server‑constrained (`ev-<hex>`, fixed `cond-*` keys) — a latent trap the moment any id is derived
+  from less‑constrained data. **Rule:** never interpolate data into inline JS. Two accepted patterns
+  in `web-ui/index.html`: (a) **data‑`*` + a delegated handler** — buttons carry `data-id`/`data-act`
+  and a listener on a PERSISTENT parent reads them via `getAttribute` (the value never reaches a JS
+  parser); or (b) the file's **`onclick="fn(this)"` idiom** (constant argument, handler reads
+  `this.getAttribute(...)`, e.g. `triggerRequestFromEl`/`dlMiniAction`). For a panel whose innerHTML
+  is re‑rendered in place (the notif panel), attach the delegated listener to the panel ELEMENT, not
+  its children, so it survives the `innerHTML =` swap and is GC'd when the panel is removed. Test it
+  by stubbing an id containing `'` + `<img onerror>` and asserting no script ran AND dismiss still
+  worked (`notifications.spec.ts`).
+
+## Catalog: an HTTP‑200 but ENTRY‑LESS feed is NOT "complete" (#95)
+
+- <a id="catalog-empty-feed-95"></a>**A completeness signal built only on exceptions misses the
+  200/empty case.** `kiwix_catalog.py` marked a language failed only when its fetch/parse *raised*
+  (timeout/429/non‑200/truncated). A well‑formed HTTP‑200 feed with **zero entries** for a requested
+  language parsed to 0 rows and counted as *complete* → `catalog_refresh_zim` would atomically
+  replace a fuller multi‑language cache with the entry‑less subset and silently DROP that language
+  (unlike the exception path, it did not self‑preserve). **Fix:** treat **0 rows for a requested
+  language as INCOMPLETE** (`return 2`), preserving #57's invariant (a partial fetch never replaces a
+  fuller cache) and the bootstrap exception (stdout still carries whatever rows fetched, so a
+  cache‑less first boot bootstraps). Count rows per language with `before = len(rows)` around
+  `parse()` — this fires on a genuinely empty feed but NOT on cross‑language duplicate URLs (dedup is
+  at stdout, so `parse()` still appends). Offline test: inject a `<feed/>` with no `<entry>` via a
+  fixture and assert the prior fuller cache stays byte‑identical (`tests/test-catalog-cache.sh`).
+
+## Structural test asserts must skip the comment line (#96)
+
+- <a id="grep-operative-not-comment-96"></a>**`grep -q '8>&-'` over a function body matches the
+  explanatory `# 8>&- : …` comment too — so the assertion passes even if the OPERATIVE redirect is
+  deleted (vacuous).** When a structural test asserts a token that also appears in a nearby comment,
+  either **strip comment lines first** (`grep -v '^[[:space:]]*#'`) or **anchor to the operative
+  line** (`grep 'setsid.*8>&-'` / `grep 'timeout .*bash .*8>&-'`). Prove non‑vacuousness by mutating
+  the source to drop the operative token while keeping the comment: the old bare grep still passes,
+  the fixed one fails. And back a structural assertion with a **functional** one where you can —
+  `test-loop-lock.sh` §6/§6b drive the REAL `_va_start_web`/`ensure_services` spawns (fake long‑lived
+  daemon, hold `loop.lock` on fd 8 like `run_locked`, then assert a fresh `flock -n` acquires it) so
+  an fd‑8 leak into a detached daemon fails the test regardless of source formatting.

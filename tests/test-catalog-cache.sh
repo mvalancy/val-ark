@@ -38,14 +38,16 @@ export VAL_ARK_DATA="$T/data"; mkdir -p "$VAL_ARK_DATA"
 export VAL_ARK_CONFIG="$T/empty.env"; : > "$VAL_ARK_CONFIG"
 
 # --- injected OPDS fetch: wraps the REAL kiwix_catalog.py, no network ----------
-# FAIL_LANGS (space-separated) lists languages whose fetch() raises; every other
-# requested language returns a minimal-but-valid single-entry Atom feed.
+# FAIL_LANGS (space-separated) lists languages whose fetch() raises; EMPTY_LANGS
+# lists languages that return a well-formed but ENTRY-LESS HTTP-200 feed (0 rows,
+# #95); every other requested language returns a minimal-but-valid single-entry feed.
 export REAL_KIWIX_PY="$ROOT/scripts/lib/kiwix_catalog.py"
 cat > "$T/fake_opds.py" <<'PYEOF'
 import importlib.util, os, sys
 spec = importlib.util.spec_from_file_location("kc", os.environ["REAL_KIWIX_PY"])
 kc = importlib.util.module_from_spec(spec); spec.loader.exec_module(kc)
 FAIL = set(w for w in os.environ.get("FAIL_LANGS", "").split() if w)
+EMPTY = set(w for w in os.environ.get("EMPTY_LANGS", "").split() if w)
 def _feed(lang):
     return ('<feed xmlns="http://www.w3.org/2005/Atom"><entry>'
             '<name>wikipedia_%s_all</name><language>%s</language>'
@@ -56,6 +58,9 @@ def _feed(lang):
 def fake_fetch(lang):
     if lang in FAIL:
         raise RuntimeError("simulated OPDS failure for %s" % lang)
+    if lang in EMPTY:
+        # HTTP 200, well-formed, but zero entries (the #95 tail).
+        return b'<feed xmlns="http://www.w3.org/2005/Atom"></feed>'
     return _feed(lang).encode("utf-8")
 kc.fetch = fake_fetch
 sys.exit(kc.main())
@@ -130,6 +135,30 @@ out="$(FAIL_LANGS="spa" python3 "$T/fake_opds.py" eng spa fra 2>/dev/null)"; r=$
 out="$(FAIL_LANGS="eng spa fra" python3 "$T/fake_opds.py" eng spa fra 2>/dev/null)"; r=$?
 [ "$r" != 0 ] && pass || fail "a total-failure fetch must exit non-zero (rc $r)"
 [ -z "$out" ] && pass || fail "a total-failure fetch must emit no rows"
+
+# === 8b. an HTTP-200 but ENTRY-LESS feed for a requested language is INCOMPLETE (#95) ==
+# A well-formed 200 feed with zero entries parses to 0 rows for that language. Unlike an
+# exception it LOOKS successful — but treating it as complete would let it replace a
+# fuller cache and silently drop the language. It must exit non-zero (completeness gate),
+# while still emitting whatever OTHER languages fetched (so a first boot can bootstrap).
+out="$(EMPTY_LANGS="spa" python3 "$T/fake_opds.py" eng spa fra 2>/dev/null)"; r=$?
+[ "$r" != 0 ] && pass || fail "a 200/empty feed for one language must exit non-zero (incomplete) (rc $r)"
+[ "$(printf '%s\n' "$out" | grep -c .)" = 2 ] && pass || fail "a 200/empty fetch must still emit the 2 populated rows (got $(printf '%s\n' "$out" | grep -c .))"
+
+# === 8c. a 200/empty feed must NOT clobber a more-complete cache (#95, invariant a) ====
+# Build a full 3-language cache, then refresh with eng coming back 200-but-empty. Before
+# the fix eng parsed to 0 rows yet counted as "complete" → the cache was replaced with a
+# spa+fra subset, dropping English. The completeness gate must now keep the fuller cache.
+rm -f "$ZIM_CACHE"
+FAIL_LANGS="" catalog_refresh_zim --force >/dev/null 2>&1
+[ "$(cache_lines)" = 3 ] && pass || fail "setup: full cache must hold all 3 languages before the empty-feed refresh"
+cp "$ZIM_CACHE" "$T/full95.snapshot"
+EMPTY_LANGS="eng" catalog_refresh_zim --force; r=$?     # eng 200-but-empty, spa+fra ok
+[ "$r" = 0 ] && pass || fail "a 200/empty refresh must return 0 when it keeps a good cache (rc $r)"
+has_lang eng && pass || fail "English MUST survive a 200/empty (eng-empty) refresh — never dropped (#95)"
+[ "$(cache_lines)" = 3 ] && pass || fail "cache must still hold all 3 languages after a 200/empty refresh"
+cmp -s "$ZIM_CACHE" "$T/full95.snapshot" && pass || fail "a 200/empty refresh must leave the cache byte-identical"
+no_tmp && pass || fail "a 200/empty refresh must not leave a temp file"
 
 # === 9. web browse language filter narrows OUTPUT only (invariant g) ==========
 # parseCatalogTSV is the server's replacement for the old VALARK_ZIM_LANGS=eng

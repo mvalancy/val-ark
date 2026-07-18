@@ -683,22 +683,35 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   within the same context). The endpoint's own shape/gating is covered separately by
   `tests/test-notifications.sh`.
 
-## Web UI: `esc()` does NOT protect an inline `onclick` (#121)
+## Web UI: `esc()` is a TEXT escape — an HTML *attribute* needs `escAttr()` (#121)
 
 - <a id="esc-not-onclick-safe-121"></a>**`esc()` (textContent→innerHTML) escapes `<>&` but NOT
-  quotes**, so it gives ZERO protection for a value interpolated into a JS‑string‑inside‑an‑attribute
-  like `onclick="dismissNotif('${esc(id)}')"`. A single quote in `id` breaks straight out of the JS
-  string. The notification inbox and the dl‑card mini buttons were safe ONLY because every id is
-  server‑constrained (`ev-<hex>`, fixed `cond-*` keys) — a latent trap the moment any id is derived
-  from less‑constrained data. **Rule:** never interpolate data into inline JS. Two accepted patterns
-  in `web-ui/index.html`: (a) **data‑`*` + a delegated handler** — buttons carry `data-id`/`data-act`
-  and a listener on a PERSISTENT parent reads them via `getAttribute` (the value never reaches a JS
-  parser); or (b) the file's **`onclick="fn(this)"` idiom** (constant argument, handler reads
-  `this.getAttribute(...)`, e.g. `triggerRequestFromEl`/`dlMiniAction`). For a panel whose innerHTML
-  is re‑rendered in place (the notif panel), attach the delegated listener to the panel ELEMENT, not
-  its children, so it survives the `innerHTML =` swap and is GC'd when the panel is removed. Test it
-  by stubbing an id containing `'` + `<img onerror>` and asserting no script ran AND dismiss still
-  worked (`notifications.spec.ts`).
+  quotes.** That has TWO consequences, and the second was originally mis‑documented as "safe":
+  - **(1) Inline JS.** A value in a JS‑string‑inside‑an‑attribute like
+    `onclick="dismissNotif('${esc(id)}')"` is unprotected — a single quote in `id` breaks straight
+    out of the JS string. **Never interpolate data into inline JS.**
+  - **(2) Any HTML attribute — the subtle one.** Even the "safe" delegated pattern
+    `data-id="${esc(id)}"` is **still an XSS vector**: `esc()` leaves `"` intact, so a value like
+    `x" onmouseover="…"` breaks OUT of the double‑quoted attribute and injects a **real
+    event‑handler attribute (executable script) with NO `<>` needed** — it fires on hover, no click
+    required. The delegated handler reading via `getAttribute` is injection‑safe *for the read*, but
+    does nothing for the *render*. Moving an id from `onclick` to `data-id` fixes (1) but NOT (2).
+- **Rule:** pick the escape by CONTEXT. `esc()` only for text between tags; **`escAttr()`** (escapes
+  `& < > " '`) for anything interpolated into an attribute value; better still, set it with
+  `element.setAttribute` / `element.dataset` so no value ever touches an HTML parser. Do **not** claim
+  a value "can't become executable script" unless it truly cannot break its attribute.
+- **Accepted patterns in `web-ui/index.html`:** (a) **data‑`*` (via `escAttr`) + a delegated
+  handler** — buttons carry `data-id`/`data-act` and a listener on a PERSISTENT parent reads them via
+  `getAttribute`; or (b) the file's **`onclick="fn(this)"` idiom** (constant argument, handler reads
+  `this.getAttribute(...)`, e.g. `triggerRequestFromEl`/`dlMiniAction`) — again with `escAttr` on any
+  interpolated `data-*`. For a panel whose innerHTML is re‑rendered in place (the notif panel), attach
+  the delegated listener to the panel ELEMENT, not its children, so it survives the `innerHTML =` swap
+  and is GC'd when the panel is removed.
+- The notif inbox, dl‑card minis, and the dl‑panel Cancel button are currently safe both because ids
+  are server‑constrained (`ev-<hex>`, fixed `cond-*` keys) AND because they now `escAttr` the value —
+  don't rely on the first alone. Test it by stubbing an id containing a **double quote + an
+  `onmouseover` payload** and asserting the button has no injected handler attribute, `window.__xss`
+  stays undefined on hover, AND dismiss still works (`notifications.spec.ts`).
 
 ## Catalog: an HTTP‑200 but ENTRY‑LESS feed is NOT "complete" (#95)
 

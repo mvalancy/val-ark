@@ -133,6 +133,33 @@ test.describe('Notification center — bell/inbox (#69 slice 1)', () => {
     await expect(page.locator('#notif-panel .notif-item')).toHaveCount(1);
   });
 
+  test('a double-quote id cannot break out of the data-id attribute to inject a handler (#121)', async ({ page }) => {
+    // esc() (text context) does NOT escape quotes, so a double quote in the id would
+    // break OUT of the double-quoted data-id="…" attribute and inject a REAL onmouseover
+    // handler — executable script with no <> needed, firing on hover, no click required.
+    // escAttr() (attribute context) encodes the quote so the payload stays inside data-id.
+    // This test FAILS against the pre-escAttr code and PASSES after the fix.
+    const evilId = 'ev-x" onmouseover="window.__xss=1" data-z="';
+    const items = [{ id: evilId, ts: '2026-07-18T00:03:00Z', severity: 'info', title: 'Evil', detail: 'x', source: 'self-heal' }];
+    await stubNotifications(page, items);
+    await page.goto(BASE_URL + '/#/', { waitUntil: 'load' });
+    await page.locator('#notif-bell').click();
+    const act = page.locator('#notif-panel .notif-item .notif-act').first();
+    await expect(act).toHaveCount(1);
+    // No injected event-handler attribute was parsed onto the button…
+    expect(await act.evaluate((el) => el.getAttribute('onmouseover'))).toBeNull();
+    // …the whole payload stayed INSIDE data-id and round-trips verbatim via getAttribute…
+    expect(await act.evaluate((el) => el.getAttribute('data-id'))).toBe('ev-x" onmouseover="window.__xss=1" data-z="');
+    // …and hovering the button (what the injected handler would fire on) executes nothing.
+    await act.hover();
+    await page.waitForTimeout(50);
+    expect(await page.evaluate(() => (window as any).__xss)).toBeUndefined();
+    // The delegated dismiss still works and the id survives intact under Dismissed.
+    await act.click();
+    await page.locator('.notif-chip[data-filter="dismissed"]').click();
+    await expect(page.locator('#notif-panel .notif-item')).toHaveCount(1);
+  });
+
   test('inbox is readable in light theme (#69)', async ({ page }) => {
     await stubNotifications(page);
     await page.goto(BASE_URL + '/#/', { waitUntil: 'load' });

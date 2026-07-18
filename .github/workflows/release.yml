@@ -36,6 +36,32 @@ jobs:
           echo "$CHANGELOG" > /tmp/changelog.md
           echo "changelog_file=/tmp/changelog.md" >> "$GITHUB_OUTPUT"
 
+      - name: Build offline self-replication artifacts
+        id: artifacts
+        run: |
+          # Val Ark is offline-first and self-replicating: a Release must ship the
+          # SAME payload scripts/mirror-self.sh serves at /sources/val-ark/ and that
+          # bootstrap.sh consumes — a full-history git bundle (`git clone <bundle>`)
+          # and a source tarball (`tar --strip-components=1`, so it carries a
+          # val-ark/ prefix). We build them inline with plain git (mirror-self.sh
+          # resolves a data-disk root and emits stable/unversioned names into that
+          # tree, neither of which fits a bare runner or a versioned release), then
+          # attach them below. Version comes from the tag, never hardcoded.
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"          # 0.1.11 or v0.1.11 -> 0.1.11
+          OUT="${RUNNER_TEMP}/val-ark-artifacts"
+          mkdir -p "$OUT"
+          BUNDLE="val-ark-${VERSION}.bundle"
+          TARBALL="val-ark-${VERSION}.tar.gz"
+          # Full-history bundle — clonable offline, exactly like bootstrap.sh does.
+          git bundle create "${OUT}/${BUNDLE}" --all
+          git bundle verify "${OUT}/${BUNDLE}"
+          # Source tarball with the val-ark/ prefix bootstrap.sh strips on extract.
+          git archive --format=tar.gz --prefix="val-ark/" -o "${OUT}/${TARBALL}" HEAD
+          # Checksums over the artifact basenames (verify with `sha256sum -c`).
+          ( cd "$OUT" && sha256sum "$BUNDLE" "$TARBALL" > SHA256SUMS )
+          echo "dir=${OUT}" >> "$GITHUB_OUTPUT"
+
       - name: Create release
         uses: softprops/action-gh-release@v3
         with:
@@ -43,3 +69,7 @@ jobs:
           body_path: /tmp/changelog.md
           draft: false
           prerelease: false
+          files: |
+            ${{ steps.artifacts.outputs.dir }}/val-ark-*.bundle
+            ${{ steps.artifacts.outputs.dir }}/val-ark-*.tar.gz
+            ${{ steps.artifacts.outputs.dir }}/SHA256SUMS

@@ -51,6 +51,18 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   not always the id — e.g. `piper-tts` → dir `piper`).
 - **Content shown "Not Mirrored" though present:** exact dated‑filename matching (`…_2025‑08.zim`)
   vs. the actual `…_2026‑02.zim`. **Fix:** match a date‑independent pattern (`CONTENT_LIBRARY[].match`).
+- **NEVER mix resumers on one `.part` — `curl -C -` on an aria2 partial silently corrupts** (#54).
+  An aria2 (`-x8`) `.part` is *segmented* — 8 non‑contiguous ranges, and with the default
+  `--file-allocation=prealloc` it is **full‑length from the start** — not a linear prefix. `curl -C -`
+  resumes from the file's byte‑length, so it "completes" a hole‑filled file instantly (curl ≥7.76
+  even treats the server's 416 as success); the ≥90 % size gate passes, a size‑only `verify` never
+  catches it → a corrupt flagship ZIM is served forever. **Rule:** the `.aria2` control file marks an
+  aria2‑owned partial; while it exists only aria2 may touch the `.part` (skip the curl fallback; if
+  aria2c was uninstalled, delete the pair and let curl start fresh). **Corollary:** a *transient*
+  failure must keep `.part`+`.aria2` (or a ~100 GB download restarts from 0 every cycle), while a
+  *size‑short‑after‑"complete"* file is a catalog/serve mismatch — resuming it wedges retries or
+  splices two file versions, so clear it. Kept partials are age‑GC'd in `verify`
+  (`VALARK_PARTIAL_MAX_AGE_DAYS`, default 14) so dead URLs can't strand gigabytes.
 
 ## Storage / data root
 

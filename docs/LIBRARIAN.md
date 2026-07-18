@@ -72,7 +72,12 @@ Downloads prefer **aria2** (8 connections, ~3x faster on per-connection-throttle
 mirrors), falling back to single-stream `curl -C -` (and `hf` for repo pulls). All
 are resumable, retried, size-verified, atomically renamed, recorded in
 `state/manifest.tsv`, and a single `flock` ensures only one filler runs at a time.
-A `state/STOP` flag halts filling.
+A `state/STOP` flag halts filling. Resumers never mix: an aria2 partial (marked by
+its `.aria2` control file) is only ever resumed by aria2 — the curl fallback skips
+it, because an aria2 `.part` is segmented and `curl -C -` would "complete" it with
+holes. Failed attempts keep the partial + control file so the next cycle resumes
+where it left off; abandoned partials are garbage-collected by `verify` after
+`VALARK_PARTIAL_MAX_AGE_DAYS` (default 14).
 
 ## The 24/7 loop
 

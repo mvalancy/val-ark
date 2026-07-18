@@ -19,8 +19,13 @@ dates are never an issue. Pure stdlib; no third-party deps.
 Usage:
     kiwix_catalog.py [lang ...]      # default: eng
     kiwix_catalog.py eng spa fra ara hin   # multiple languages
-Exits non-zero (after emitting nothing) if the network fetch fails, so callers
-can fall back to a cached copy.
+
+Exit code is a COMPLETENESS signal, not just liveness: it is 0 only when EVERY
+requested language fetched successfully. If ANY language's feed fails (timeout,
+429, non-200, truncated/unparseable body) it exits non-zero, so a caller can
+refuse to overwrite a more-complete cache with a partial subset. Whatever rows
+did fetch are still written to stdout, so a first-boot caller with no cache can
+still bootstrap from a partial result. See catalog.sh:catalog_refresh_zim.
 """
 import sys
 import urllib.request
@@ -99,12 +104,12 @@ def parse(xml_bytes, rows):
 def main():
     langs = sys.argv[1:] or ["eng"]
     rows = []
-    ok = False
+    failed = []
     for lang in langs:
         try:
             parse(fetch(lang), rows)
-            ok = True
         except Exception as ex:  # noqa
+            failed.append(lang)
             sys.stderr.write("kiwix_catalog: fetch failed for lang=%s: %s\n" % (lang, ex))
     # De-duplicate identical (url) rows that can appear across language queries.
     seen = set()
@@ -113,7 +118,14 @@ def main():
             continue
         seen.add(r[7])
         sys.stdout.write("\t".join(r) + "\n")
-    if not ok and not rows:
+    # Fail closed: a partial fetch (any requested language missing) must NOT be
+    # mistaken for a complete one, or catalog_refresh_zim would atomically replace
+    # the full multi-language cache with this subset. Exit non-zero unless every
+    # requested language fetched. stdout already carries whatever we got, so a
+    # cache-less first boot can still bootstrap from a partial result.
+    if failed:
+        sys.stderr.write("kiwix_catalog: INCOMPLETE — %d/%d languages failed: %s\n"
+                         % (len(failed), len(langs), " ".join(failed)))
         return 2
     return 0
 

@@ -8,6 +8,12 @@
 .env
 .valark.conf
 
+# Data-disk identity marker + mount-wait breadcrumb (issue #58): root-fs state
+# recording which disk holds the val-ark tree so a late/failed mount can't rebuild
+# it on the wrong fs. Host-specific; never commit.
+/.valark-data-id
+/.valark-mount-wait
+
 # Downloaded tools and binaries (large, re-downloadable)
 tools/
 !scripts/tools/

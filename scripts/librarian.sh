@@ -326,7 +326,6 @@ cmd_evict() {
 cmd_catalog() {
     local kind="${1:-all}"
     ensure_state
-    catalog_refresh_zim >/dev/null 2>&1 || warn "ZIM catalog refresh failed; using cache if any" >&2
     local bucket=""
     case "$kind" in
         content) bucket="content" ;;
@@ -335,6 +334,17 @@ cmd_catalog() {
         all|"") bucket="" ;;
         *) err "unknown catalog kind: $kind (content|model|installer|all)" >&2; return 1 ;;
     esac
+    # The live Kiwix OPDS refresh only feeds the CONTENT (ZIM) bucket — model and
+    # installer candidates come from local TSVs. Refresh ONLY when content rows are
+    # requested (content | all), so a `catalog model`/`catalog installer` browse
+    # never blocks on a multi-language OPDS fetch. This matters after #57: server.js
+    # no longer forces VALARK_ZIM_LANGS=eng (that single-language fetch would clobber
+    # the full multi-language cache), so an unconditional refresh here now pays the
+    # full ~9-language live-fetch cost (up to 90s/lang) on every browse — the models
+    # feed doesn't need it, and paying it there times out /api/catalog/models. (#57)
+    if [ -z "$bucket" ] || [ "$bucket" = "content" ]; then
+        catalog_refresh_zim >/dev/null 2>&1 || warn "ZIM catalog refresh failed; using cache if any" >&2
+    fi
     if [ -n "$bucket" ]; then
         gen_candidates | awk -F'\t' -v b="$bucket" '$2==b' | python3 "$PLANNER" --budget 1 --list-absent
     else

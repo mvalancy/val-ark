@@ -139,6 +139,9 @@ cmd_start() {
     #   - DISABLE_UPDATE_CHECKING : no GitHub version pings (offline box)
     #   - BASIC_AUTH_*        : gate the whole instance behind a login
     #   - ADMIN_PASSWORD      : protect destructive admin actions
+    # 8>&- (below): never inherit the loop's run_locked loop.lock fd (fd 8) into this
+    # detached daemon — a shared fd holds the flock forever and deadlocks every later
+    # self-heal cycle. See docs/knowledge/gotchas.md.
     (
         cd "$DATA_DIR" || exit 1
         MICROBIN_PORT="$PASTE_PORT" \
@@ -155,7 +158,7 @@ cmd_start() {
         MICROBIN_ADMIN_PASSWORD="$PASTE_ADMIN_PASSWORD" \
         MICROBIN_BASIC_AUTH_USERNAME="$PASTE_AUTH_USER" \
         MICROBIN_BASIC_AUTH_PASSWORD="$PASTE_AUTH_PASSWORD" \
-        nohup "$bin" >>"$LOG_FILE" 2>&1 &
+        nohup "$bin" >>"$LOG_FILE" 2>&1 8>&- &
         echo $! > "$PID_FILE"
     )
 

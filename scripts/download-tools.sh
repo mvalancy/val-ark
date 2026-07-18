@@ -236,8 +236,41 @@ show_usage() {
     echo ""
 }
 
+# --- Serialize tool mirroring across ALL entry points (issue #55) -------------
+# download-tools.sh is spawned four ways with no shared lock: the loop's weekly
+# tool_refresh (`all`), the web one-click "request tool" (librarian.sh request →
+# here) and POST /api/download/tools, and manual CLI runs. Two runs mirroring the
+# SAME tool both `curl -C -` into the same <dest>.part at independent offsets,
+# interleaving bytes; when the HEAD Content-Length is empty (chunked responses)
+# the size check (_common.sh) can't catch it and the corrupt part is mv'd into
+# place, version-stamped current, and served. A single whole-run flock on
+# tools.lock serialises every entry point — and covers version_gate/version_stamp
+# and the "already extracted" file-count check too, which a per-.part lock would
+# not. Single-tool runs WAIT briefly then report "queued" (the tool is already
+# pinned, and a running bulk mirrors it anyway); the bulk `all` refresh yields
+# immediately (-n) so the loop retries it on a later tick.
+TOOLS_LOCK_FD=7
+acquire_tools_lock() {
+    local mode="$1" sdir="${STATE_DIR:-${TOOLS_DIR}/.state}"
+    command -v flock >/dev/null 2>&1 || return 0        # no flock → best-effort, don't serialise
+    mkdir -p "$sdir" 2>/dev/null || true
+    ( : > "${sdir}/tools.lock" ) 2>/dev/null || { log_warn "cannot create tools.lock in ${sdir} — proceeding unlocked"; return 0; }
+    exec 7>"${sdir}/tools.lock"
+    if [ "$mode" = bulk ]; then
+        flock -n "$TOOLS_LOCK_FD" && return 0
+        log_warn "another tool mirror is in progress — skipping this bulk refresh (retries next tick)"
+        return 1
+    fi
+    flock -w "${VALARK_TOOL_LOCK_WAIT:-30}" "$TOOLS_LOCK_FD" && return 0
+    log_info "tool mirror busy — request queued; the running refresh/mirror will complete it"
+    return 1
+}
+
 case "${1:-all}" in
     all)
+        # Bulk refresh yields to any in-flight mirror; exit 75 (temp-fail) so the
+        # loop's tool_refresh takes its retry path instead of stamping "done".
+        acquire_tools_lock bulk || exit 75
         run_all
         ;;
     validate)
@@ -257,6 +290,10 @@ case "${1:-all}" in
     *)
         target=$(resolve_target "$1")
         if tool_exists "$target"; then
+            # Single-tool request: wait briefly for an in-flight mirror, else queue.
+            # exit 0 (success) — the tool is pinned before we get here (librarian
+            # request) and the running mirror will complete it.
+            acquire_tools_lock single || exit 0
             run_tool "$target"
         else
             echo -e "${RED}Unknown tool:${NC} $1"

@@ -93,13 +93,18 @@ verify_local() {
     # Newer llama-cli auto-enters conversation mode for instruct models and never
     # exits on stdin EOF (it hangs until killed), so run it single-turn
     # (-st -no-cnv) with stdin closed: it generates one turn and exits cleanly.
-    # Pick the smallest *generative* model under models/llm — embedding models
-    # under models/embed are BERT-arch and can't text-generate (false FAIL); the
-    # >10M filter also skips zero-byte/stub ggufs. Cold loads off NTFS are slow,
-    # hence the generous timeout; the fast inference path is the fleet GPU.
+    # Pick the smallest *generative* model under models/{assistant,llm} — the
+    # curated setup-assistant chat models land in models/assistant (see
+    # data/models-extra.tsv), and on footprint-capped or mid-fill boxes an
+    # assistant gguf may be the ONLY generative model present, so search both or
+    # the check perpetually SKIPs and a corrupt assistant model goes uncaught.
+    # Exclude models/embed — embedding models there are BERT-arch and can't
+    # text-generate (false FAIL); the >10M filter also skips zero-byte/stub
+    # ggufs. Cold loads off NTFS are slow, hence the generous timeout; the fast
+    # inference path is the fleet GPU.
     local lc; lc=$(find "$td/llama-cpp" -name 'llama-cli' -type f \( -perm -u+x -o -perm -g+x -o -perm -o+x \) 2>/dev/null | head -1)
     [ -n "$lc" ] || lc="$td/llama-cli"
-    local sg; sg=$(find "$MODELS_DIR/llm" -name '*.gguf' -size +10M -printf '%s\t%p\n' 2>/dev/null | sort -n | head -1 | cut -f2)
+    local sg; sg=$(find "$MODELS_DIR/assistant" "$MODELS_DIR/llm" -name '*.gguf' -size +10M -printf '%s\t%p\n' 2>/dev/null | sort -n | head -1 | cut -f2)
     if [ -x "$lc" ] && [ -n "$sg" ]; then
         if timeout 150 "$lc" -m "$sg" -p "hello" -n 8 -st -no-cnv --no-warmup </dev/null >/dev/null 2>&1; then
             chk "llama.cpp inference works ($(basename "$sg"))"
@@ -160,7 +165,7 @@ verify_fleet() {
                 # stdin closed; skip cleanly if neither single-shot binary exists.
                 local rcmd
                 rcmd=$(cat <<EOF
-g=\$(find "$fdata/models/llm" "$fdata/models/embed" -name '*.gguf' 2>/dev/null | sort | head -1)
+g=\$(find "$fdata/models/assistant" "$fdata/models/llm" "$fdata/models/embed" -name '*.gguf' 2>/dev/null | sort | head -1)
 [ -n "\$g" ] || exit 0
 bin=""
 command -v llama-completion >/dev/null 2>&1 && bin=llama-completion

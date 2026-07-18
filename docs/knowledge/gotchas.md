@@ -63,6 +63,32 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   *size‑short‑after‑"complete"* file is a catalog/serve mismatch — resuming it wedges retries or
   splices two file versions, so clear it. Kept partials are age‑GC'd in `verify`
   (`VALARK_PARTIAL_MAX_AGE_DAYS`, default 14) so dead URLs can't strand gigabytes.
+- **A *partial* Kiwix OPDS fetch must never overwrite a *more‑complete* cache** (#57). The live
+  catalog is fetched per‑language (`kiwix_catalog.py eng spa fra …`) and cached to
+  `state/catalog/zim.tsv`. The old code set `ok=True` if *any* language fetched, so one language
+  timing out / 429‑ing (or returning a truncated feed) still exited 0, and `catalog_refresh_zim`
+  atomically replaced the full multi‑language cache with the truncated subset — dropping whole
+  languages from the browse feed and breaking `request`/refill for them until the next full refresh.
+  A separate trigger: the web browse shelled `librarian.sh catalog` with `VALARK_ZIM_LANGS=eng`,
+  which made the *shared* cache re‑fetch English‑only. **Rule (fail‑closed):** `kiwix_catalog.py`
+  exit code is a **completeness** signal — 0 **only** if *every* requested language fetched;
+  `catalog_refresh_zim` swaps the cache **only** on a complete fetch (still atomic temp+rename),
+  keeps the existing cache on any partial/failure, and accepts a partial **only** to bootstrap a
+  box that has *no* cache yet. **And never let a browse narrow the shared cache:** the language set
+  is owned by the librarian's `VALARK_ZIM_LANGS`; the web UI filters *output* languages in
+  `scripts/lib/catalog-parse.js` (`parseCatalogTSV`, content ids end in `_<lang>`), so a browse can
+  never degrade the on‑disk catalog. Do **not** pass `VALARK_ZIM_LANGS` from `server.js`.
+- **Removing the browse's `VALARK_ZIM_LANGS=eng` un‑masked a hidden cost: `cmd_catalog` refreshes
+  the OPDS cache for *every* kind — gate it to CONTENT** (#57 follow‑up). `librarian.sh catalog`
+  unconditionally ran `catalog_refresh_zim` before emitting *any* bucket. The old English‑only
+  override made that a single fast fetch; once `server.js` stopped forcing it (correct — see above),
+  even a `catalog model` browse paid the full ~9‑language live fetch (up to 90 s/lang). On a
+  cache‑less host (fresh CI checkout) that blew past the `/api/catalog/models` 15 s poll → the
+  browse returned 0 items and the Playwright models test failed — while it *passed* locally, where a
+  fresh `zim.tsv` sits inside the 1‑day TTL so the refresh is skipped. Model/installer candidates
+  come from local TSVs, not the OPDS feed, so **refresh only when the CONTENT bucket is requested**
+  (`content` | `all`). Lesson: a "browse" endpoint must never synchronously pay a live multi‑fetch a
+  warm cache normally hides — reproduce cache‑miss timing the way CI (empty state) hits it.
 
 ## Storage / data root
 

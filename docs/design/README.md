@@ -12,7 +12,7 @@ This directory is the cohesive architecture for that redesign. It is written
 
 | Doc | Scope | Status |
 |-----|-------|--------|
-| [current-state.md](current-state.md) | Honest baseline + gap analysis (answers "is there web setup / admin / recovery / access control?") | ✅ |
+| [current-state.md](current-state.md) | As-of-0.1.14 snapshot of the shipped appliance + what's still open (answers "is there web setup / admin / recovery / access control?" — now yes) | ✅ |
 | [vision.md](vision.md) | Product vision, the person we build for ("Jordan"), simplicity principles | ✅ |
 | [commissioning.md](commissioning.md) | First-boot wizard — the exact screens, browser *and* plugged-in monitor, claim token | ✅ |
 | [admin-console.md](admin-console.md) | Home screen + the 4-tab admin/settings information architecture | ✅ |

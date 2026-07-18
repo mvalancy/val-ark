@@ -35,12 +35,28 @@ else
 fi
 
 # --- 2. the artifact build + attach wiring must be present (keeps CI in lockstep)
-grep -q 'git bundle create' "$WF"  && pass || fail "workflow must build a git bundle"
+# Require the FULL-HISTORY form: `git bundle create … --all`. A future edit dropping
+# --all would ship a shallow, unclonable bundle yet still pass a bare-substring grep.
+grep -Eq 'git bundle create .*--all' "$WF" && pass || fail "workflow must build a FULL-HISTORY git bundle (git bundle create … --all)"
 grep -q 'git archive'       "$WF"  && pass || fail "workflow must build a source tarball"
 grep -q 'prefix="val-ark/"' "$WF"  && pass || fail "tarball must carry the val-ark/ prefix bootstrap.sh strips"
 grep -q 'sha256sum'         "$WF"  && pass || fail "workflow must generate SHA256SUMS"
 grep -q 'files:'            "$WF"  && pass || fail "workflow must attach files to the release"
 grep -q 'GITHUB_REF_NAME'   "$WF"  && pass || fail "version must come from the tag (GITHUB_REF_NAME), never hardcoded"
+
+# --- 2b. every GitHub Action must be SHA-pinned, not a floating @vN tag (#88) ---
+# Supply-chain hardening: a pinned step reads `uses: owner/action@<40-hex> # vN`;
+# a floating one reads `uses: owner/action@vN`, which silently follows a moved tag.
+# Grep every workflow for a `uses:` whose ref is a bare version tag. `[^#]*` stops
+# at the comment, so the trailing `# vN` marker (dependabot reads it) never trips it.
+FLOAT=0
+for f in "$ROOT/.github/workflows/ci.yml" "$WF"; do
+    [ -f "$f" ] || continue
+    if grep -Eq '^[[:space:]]*(- )?uses:[[:space:]]*[^#]*@v[0-9]' "$f"; then
+        FLOAT=1; grep -EnH '^[[:space:]]*(- )?uses:[[:space:]]*[^#]*@v[0-9]' "$f" >&2
+    fi
+done
+[ "$FLOAT" -eq 0 ] && pass || fail "GitHub Actions must be pinned to a full commit SHA (found a floating @vN tag)"
 
 # --- 3. bash -n the artifacts step's shell (the `run: |` block) ----------------
 # Extract the block bounded by `id: artifacts` .. its `run: |` .. the next

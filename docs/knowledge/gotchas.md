@@ -481,8 +481,41 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   and `dev` share content but diverge by SHA. Dependabot PRs are cut from the *pre-release* `main`;
   retargeting them to `dev` corrupts the merge base into a huge false diff. Leave them on `main`
   (or set `target-branch: dev` in `dependabot.yml` so future ones start there), don't retarget.
+- **Release artifacts must match what `bootstrap.sh` consumes, not just "a bundle + a tarball"** (#88).
+  The offline self-replication payload has an exact shape, set by `bootstrap.sh` + `scripts/mirror-self.sh`:
+  the **git bundle** must be full-history (`git bundle create … --all`) because bootstrap does a plain
+  `git clone <bundle>`; the **source tarball** must carry a `val-ark/` top-level prefix
+  (`git archive --prefix="val-ark/"`) because bootstrap extracts with `tar --strip-components=1`. Drop
+  the prefix and every path lands one level too high. Build these **inline with plain git** in
+  `release.yml` — do NOT call `mirror-self.sh` from a bare runner: it sources `valark-env.sh`, which
+  autodetects a data-disk root (falling back to the repo) and writes **stable, unversioned** names
+  (`val-ark.bundle`, `val-ark-latest.tar.gz`) into that data tree, plus mirrors node runtimes — none of
+  which fits a versioned, data-diskless CI release. Same git commands, versioned output names, ship a
+  `SHA256SUMS`. Note the GitHub-Release artifacts are a *separate* channel from the live Ark's
+  `/sources/val-ark/*` (which `mirror-self.sh` still serves under the stable names); keep both formats
+  identical so a file grabbed from either clones/extracts the same way. See `tests/test-ci-artifacts.sh`.
 
 ## Benign, don't "fix"
 
 - **NodeBB `/app/forum/` 503s under rapid bursts** — a transient of `pipeProxy`, self‑recovers.
   Render as "recovering," not an error; don't rework the proxy.
+
+## Packages manifest (`/api/packages`, #89)
+
+- **Enumerate from the SAME roots the download URLs resolve through.** `serveArchive` and the
+  static router serve strictly from `path.join(ROOT, <top>)` (`ROOT/tools`, `ROOT/models`,
+  `ROOT/content`, `ROOT/sources`). `getPackages()` may enumerate via env overrides
+  (`VALARK_TOOLS_DIR`, `VALARK_MODELS_DIR`, …), but the emitted URLs are ALWAYS repo‑relative
+  (`/api/archive/…`, `/sources/…`). This is consistent on a real box **only because**
+  `valark_ensure_layout` symlinks `ROOT/tools` → the configured dir. A test that sets
+  `VALARK_TOOLS_DIR` **without** creating the `ROOT/tools` symlink gets a correct manifest but the
+  download URLs **404** — for a true end‑to‑end check, lay down the repo‑root symlinks (they're
+  git‑ignored + absent in a fresh worktree) instead of only the env overrides.
+- **Never hash multi‑GB files on the request path.** `sha256` for the source bundle/tarball comes
+  from a `SHA256SUMS` written **once at mirror time** by `scripts/mirror-self.sh` and read back
+  cheaply; the manifest omits `sha256` when that file is absent. Directory packages (tool trees)
+  report a cheap shallow (immediate‑children, dotfiles skipped) size — no recursive `du`. The whole
+  manifest is cached 60s and `getPackages()` never throws (empty inventory on any error).
+- **`mirror-self.sh` SHA256SUMS + an empty glob.** `sha256sum a b node-*.tar.gz` with no node
+  runtimes leaves `node-*.tar.gz` literal → sha256sum exits non‑zero → `&& mv` is skipped and the
+  good hashes are discarded. Use `shopt -s nullglob` + an existence filter before hashing.

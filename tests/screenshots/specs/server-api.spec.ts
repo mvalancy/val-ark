@@ -473,4 +473,41 @@ test.describe('Val Ark API Server', () => {
     expect(body).toContain('BEGIN CERTIFICATE');
   });
 
+  test('GET /api/packages returns the documented manifest shape', async ({ request }) => {
+    // The PRESENT-inventory manifest: what this box can hand out now (app archives,
+    // the self-replication source bundle/tarball/node runtimes, on-disk models,
+    // complete ZIMs) — distinct from /api/catalog/* (the upstream browse feed).
+    const resp = await request.get(`${BASE_URL}/api/packages`);
+    expect(resp.ok()).toBeTruthy();
+    const d = await resp.json();
+    expect(typeof d.generatedAt).toBe('string');
+    expect(typeof d.version).toBe('string');
+    expect(typeof d.count).toBe('number');
+    expect(Array.isArray(d.packages)).toBeTruthy();
+    expect(d.count).toBe(d.packages.length);
+    // CI/fresh checkout has no mirror → an empty list is valid; when populated,
+    // every row carries a stable id/name/kind, a numeric size and a RELATIVE url.
+    for (const p of d.packages) {
+      expect(typeof p.id).toBe('string');
+      expect(typeof p.name).toBe('string');
+      expect(['app', 'source', 'model', 'content']).toContain(p.kind);
+      expect(typeof p.size).toBe('number');
+      expect(typeof p.url).toBe('string');
+      expect(p.url.startsWith('/')).toBeTruthy();      // relative, never an absolute host URL
+      expect(p.url).not.toMatch(/^https?:\/\//);
+    }
+    // Public-repo safety: the manifest must expose only relative URLs + metadata,
+    // never a host filesystem path. (The 401 read-gate is proven in test-packages.sh —
+    // this Open localhost box can't produce a 401.)
+    const raw = JSON.stringify(d);
+    expect(raw).not.toContain('/home/');
+    expect(raw).not.toMatch(/http:\/\/(?!localhost)/);
+  });
+
+  test('GET /api/packages is served (read-gate class) and JSON, never a 5xx', async ({ request }) => {
+    const resp = await request.get(`${BASE_URL}/api/packages`);
+    expect(resp.status()).toBeLessThan(500);
+    expect(resp.headers()['content-type']).toContain('application/json');
+  });
+
 });

@@ -499,3 +499,23 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 - **NodeBB `/app/forum/` 503s under rapid bursts** — a transient of `pipeProxy`, self‑recovers.
   Render as "recovering," not an error; don't rework the proxy.
+
+## Packages manifest (`/api/packages`, #89)
+
+- **Enumerate from the SAME roots the download URLs resolve through.** `serveArchive` and the
+  static router serve strictly from `path.join(ROOT, <top>)` (`ROOT/tools`, `ROOT/models`,
+  `ROOT/content`, `ROOT/sources`). `getPackages()` may enumerate via env overrides
+  (`VALARK_TOOLS_DIR`, `VALARK_MODELS_DIR`, …), but the emitted URLs are ALWAYS repo‑relative
+  (`/api/archive/…`, `/sources/…`). This is consistent on a real box **only because**
+  `valark_ensure_layout` symlinks `ROOT/tools` → the configured dir. A test that sets
+  `VALARK_TOOLS_DIR` **without** creating the `ROOT/tools` symlink gets a correct manifest but the
+  download URLs **404** — for a true end‑to‑end check, lay down the repo‑root symlinks (they're
+  git‑ignored + absent in a fresh worktree) instead of only the env overrides.
+- **Never hash multi‑GB files on the request path.** `sha256` for the source bundle/tarball comes
+  from a `SHA256SUMS` written **once at mirror time** by `scripts/mirror-self.sh` and read back
+  cheaply; the manifest omits `sha256` when that file is absent. Directory packages (tool trees)
+  report a cheap shallow (immediate‑children, dotfiles skipped) size — no recursive `du`. The whole
+  manifest is cached 60s and `getPackages()` never throws (empty inventory on any error).
+- **`mirror-self.sh` SHA256SUMS + an empty glob.** `sha256sum a b node-*.tar.gz` with no node
+  runtimes leaves `node-*.tar.gz` literal → sha256sum exits non‑zero → `&& mv` is skipped and the
+  good hashes are discarded. Use `shopt -s nullglob` + an existence filter before hashing.

@@ -72,6 +72,27 @@ Notification Center / TrueNAS alert bell):
 - **Delivery uses the box's own comms** it already ships — a message to the local mail/board/
   chat, an on-box LED, and the home status line.
 
+### As built (bell/inbox — issue #69 slice 1)
+
+- **`GET /api/status/notifications`** (read-gated, like all `/api/status/*`) aggregates the
+  read-only self-heal signals the box already writes into one severity-tagged list: recent
+  `heal-events.jsonl` entries (info; a `moderation-error` rises to warning) plus the current
+  warning/critical conditions the health report knows — Safe Mode, disk almost full (same
+  ≥90/≥97 thresholds as the Health page), a failed functional-verify check, unresolved missing
+  assets. Each item is `{ id, ts, severity (critical|warning|info), title, detail, source }`
+  with a **stable id** (a content hash for events, a fixed key per condition), bounded to the
+  last 60, and it **never throws on a bare box** (empty → `{items:[]}`).
+- **Bell/inbox in the shell** (`web-ui/`): a real `<button>` bell in the top nav with an
+  unread-count badge, a dropdown inbox listing items newest-first with critical/warning/info
+  styling and **All / Critical / Warning / Info / Dismissed** filter chips. Esc- and
+  backdrop-dismissible; both themes; all rendered text escaped. **Persistent dismiss is
+  client-side (localStorage)** this slice, so the endpoint stays read-only; "unread" =
+  active-and-not-yet-seen (opening the inbox marks the set seen).
+- **Deferred to later slices** (still open under #69): routing digests into the box's own
+  mail/board/chat; the Immediately / Daily / Never frequency setting; the on-box LED; and
+  **server-side (cross-device) dismiss** state — the natural next step once a dismiss write
+  path is added (held to the same adversarial bar as `POST /api/maintenance/repair`).
+
 ## Never make the owner hunt for a credential
 
 Any tool that generates a login (paste, forum admin, etc.) shows it in a post-setup dialog

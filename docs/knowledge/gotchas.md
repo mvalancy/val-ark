@@ -663,3 +663,22 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   `$HOME/.local/node/bin/node` to record its argv + the port it WOULD bind, against an isolated
   `SCRIPT_DIR`/`.env` — asserting env‑var, explicit‑arg, default, and `.env`‑only cases without
   starting a real server.
+
+## Running Playwright from a git worktree (#69)
+
+- <a id="playwright-in-worktree-69"></a>**A parallel worktree has no `tests/screenshots/node_modules`**
+  (it's git‑ignored and per‑directory), so `npx playwright test` there fails with
+  `Cannot find module '@playwright/test'` while loading `playwright.config.ts`. **Fix:** symlink the
+  main checkout's install in — `ln -sfn <main>/tests/screenshots/node_modules
+  tests/screenshots/node_modules` — then run `./node_modules/.bin/playwright test <spec>`. Browsers
+  live in the shared `~/.cache/ms-playwright`, so no re‑download. **Watch the commit:** the ignore
+  rule is `tests/screenshots/node_modules/` (**directory**, trailing slash), which does NOT match a
+  *symlink* of that name — `git status` shows it as untracked. Remove the symlink (`rm -f
+  tests/screenshots/node_modules`) before committing, and never `git add .` — add the touched files
+  explicitly.
+- **Drive UI specs against the live `:3001` server and stub the endpoint with `page.route`.** The
+  notification spec (`notifications.spec.ts`) intercepts `**/api/status/notifications` so the bell,
+  badge, filters, and dismiss‑persist‑across‑reload assertions are deterministic regardless of the
+  shared box's real state (route handlers persist across `page.reload()`; localStorage persists
+  within the same context). The endpoint's own shape/gating is covered separately by
+  `tests/test-notifications.sh`.

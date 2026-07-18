@@ -83,7 +83,9 @@ touch "$T/release"; wait "$HOLDER" 2>/dev/null; HOLDER=""
 # --- 5. structural: the shipped dispatch wires the lock the RIGHT way ---------
 # `once` (cron / admin repair) must exit-skip; `run` must skip-survive + release.
 disp="$(sed -n '/^case "${1:-once}" in/,/^esac/p' "$LOOP")"
-echo "$disp" | grep -qE 'once\).*run_locked exit loop_once' && pass \
+# once) arm (up to its first ;;) must call run_locked in exit mode — robust to the
+# arm being one line or several (a mount guard now precedes the mkdir + lock).
+echo "$disp" | awk '/^    once\)/,/;;/' | grep -q 'run_locked exit loop_once' && pass \
     || fail "the once) arm must call 'run_locked exit loop_once'"
 echo "$disp" | grep -q 'run_locked skip loop_once' && pass \
     || fail "the run) arm must guard each iteration with 'run_locked skip loop_once'"

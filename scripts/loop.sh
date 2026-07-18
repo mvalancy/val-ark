@@ -395,21 +395,50 @@ run_locked() {
     "$@"
 }
 
+# Data-disk mount guard (issue #58). When Val Ark lives on a SEPARATE disk, refuse to
+# build/fill the tree on the ROOT fs if that disk is not mounted yet (a late/failed
+# fstab mount at @reboot). Bounded retry-wait for a still-enumerating disk, then SKIP
+# so the next cron tick converges once the mount appears. On failure we deliberately
+# use echo + a ROOT-fs breadcrumb, NOT log() — log() mkdirs LOG_DIR, which lives on the
+# missing disk and would itself start a stray tree there. Returns 0=mounted, 1=skip.
+DATA_WAIT_FLAG="${VALARK_MOUNT_WAIT_FLAG:-${PROJECT_ROOT}/.valark-mount-wait}"   # health breadcrumb on the ROOT fs
+data_disk_guard() {
+    valark_data_mounted && { rm -f "$DATA_WAIT_FLAG" 2>/dev/null; return 0; }
+    local tries="${VALARK_MOUNT_WAIT_TRIES:-6}" secs="${VALARK_MOUNT_WAIT_SECS:-10}" i=0
+    while [ "$i" -lt "$tries" ]; do
+        sleep "$secs"
+        valark_data_mounted && { rm -f "$DATA_WAIT_FLAG" 2>/dev/null; log "${GREEN}data disk mounted${NC}: $DATA_ROOT (resumed after wait)"; return 0; }
+        i=$((i + 1))
+    done
+    printf '{"ts":"%s","overall":"attention","reason":"data disk not mounted at %s — cycle skipped, will retry"}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$DATA_ROOT" > "$DATA_WAIT_FLAG" 2>/dev/null || true
+    echo "${YELLOW}[$(date '+%F %T')] data disk not mounted${NC} at $DATA_ROOT — skipping cycle to avoid rebuilding state/content on the root fs. It converges on the next tick once the disk mounts. (If you deliberately switched to single-disk mode, remove ${VALARK_DATA_MARKER}.)" >&2
+    return 1
+}
+
 case "${1:-once}" in
-    once) mkdir -p "$STATE_DIR" "$LOG_DIR" 2>/dev/null; run_locked exit loop_once ;;
+    once)
+        # Guard BEFORE any mkdir: an unmounted, user-writable mountpoint passes the
+        # writability probe, so the plain mkdir would seed the tree on the wrong disk.
+        data_disk_guard || exit 0
+        mkdir -p "$STATE_DIR" "$LOG_DIR" 2>/dev/null; run_locked exit loop_once ;;
     run)
         interval="${2:-1800}"
-        mkdir -p "$STATE_DIR" "$LOG_DIR" 2>/dev/null
-        log "loop: starting continuous run (interval ${interval}s). Touch ${STATE_DIR}/STOP to halt."
+        echo "loop: starting continuous run (interval ${interval}s). Touch ${STATE_DIR}/STOP to halt."
         while true; do
-            [ -f "${STATE_DIR}/STOP" ] && { log "STOP flag present; exiting loop"; break; }
-            # Take the SAME loop.lock as the cron `once` tick, non-blocking: if a cron
-            # tick (or a still-running prior iteration) holds it, skip THIS iteration
-            # rather than stack a second concurrent loop_once. run_locked returns here
-            # (never exits), so the forever loop survives contention.
-            run_locked skip loop_once || true
-            exec 8>&-   # release the lock so a cron `once` tick can work during our sleep
-            log "sleeping ${interval}s"; sleep "$interval"
+            [ -f "${STATE_DIR}/STOP" ] && { echo "STOP flag present; exiting loop"; break; }
+            # Skip the whole iteration if the data disk isn't mounted (same reasoning
+            # as `once`); the mkdir + lock only happen once the disk is confirmed.
+            if data_disk_guard; then
+                mkdir -p "$STATE_DIR" "$LOG_DIR" 2>/dev/null
+                # Take the SAME loop.lock as the cron `once` tick, non-blocking: if a
+                # cron tick (or a still-running prior iteration) holds it, skip THIS
+                # iteration rather than stack a second concurrent loop_once. run_locked
+                # returns here (never exits), so the forever loop survives contention.
+                run_locked skip loop_once || true
+                exec 8>&-   # release the lock so a cron `once` tick can work during our sleep
+            fi
+            echo "sleeping ${interval}s"; sleep "$interval"
         done ;;
     install)   cron_install "${2:-30}" ;;
     uninstall) cron_uninstall ;;

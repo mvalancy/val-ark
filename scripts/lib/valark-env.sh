@@ -222,7 +222,52 @@ valark_ensure_layout() {
         valark_link sources   "$SOURCES_DIR"
         valark_link assets    "$ASSETS_DIR"
         valark_link installers "$INSTALLERS_DIR"
+        valark_data_stamp     # record the data-disk identity (idempotent, one-shot)
     fi
+}
+
+# --- Data-disk identity guard (issue #58) -------------------------------------
+# When data lives on a SEPARATE disk (DATA_ROOT != PROJECT_ROOT), a late or failed
+# mount at boot (fstab `nofail`; a USB/NTFS disk still enumerating past the @reboot
+# sleep) would let the loop's unconditional mkdir rebuild the state/content tree on
+# the ROOT filesystem under the empty mountpoint — the librarian would then fill the
+# root disk, and once the real disk mounts it shadows that tree (stale pins/manifest)
+# while a second cron tick opens a DIFFERENT loop.lock inode and runs concurrently.
+#
+# Guard: stamp a random id INTO the data tree (a sentinel ON the disk) and record the
+# SAME id in a repo-local, git-ignored marker on the ROOT fs (so it survives the disk
+# being unmounted). The mount is "present" only when the on-disk sentinel exists AND
+# its id matches the recorded marker — i.e. the intended disk is really mounted here.
+# A box never commissioned onto a separate disk has no marker, so single-disk / dev
+# layouts (DATA_ROOT == PROJECT_ROOT, or /data on the root fs) are never affected.
+VALARK_DATA_SENTINEL="${VALARK_DATA_SENTINEL:-${VALARK_HOME}/.valark-data}"   # ON the data disk
+VALARK_DATA_MARKER="${VALARK_DATA_MARKER:-${PROJECT_ROOT}/.valark-data-id}"   # on the root fs (gitignored)
+export VALARK_DATA_SENTINEL VALARK_DATA_MARKER
+
+# Stamp the sentinel + marker. One-shot: only at first commissioning (when no marker
+# exists yet and the tree was just created on a writable, mounted disk). Deliberately
+# never re-writes the sentinel afterwards — doing so from an unmounted cycle would put
+# a matching sentinel on the ROOT fs and defeat the guard.
+valark_data_stamp() {
+    [ "$DATA_ROOT" = "$PROJECT_ROOT" ] && return 0
+    [ -s "$VALARK_DATA_MARKER" ] && return 0
+    local id
+    id=$(cat /proc/sys/kernel/random/uuid 2>/dev/null) || id="$(date +%s)-$$"
+    printf '%s\n' "$id" > "$VALARK_DATA_SENTINEL" 2>/dev/null || true
+    printf '%s\n' "$id" > "$VALARK_DATA_MARKER"   2>/dev/null || true
+}
+
+# 0 = the intended data disk is mounted here (safe to build/fill);
+# 1 = commissioned onto a separate disk that is NOT currently mounted (skip the cycle).
+valark_data_mounted() {
+    # No marker → never commissioned onto a separate disk (single-disk / dev / genuine
+    # first run): allow, so commissioning can create + stamp the tree.
+    [ -s "$VALARK_DATA_MARKER" ] || return 0
+    # Commissioned. If autodetect fell back to the repo, the disk is simply gone.
+    [ "$DATA_ROOT" = "$PROJECT_ROOT" ] && return 1
+    # The on-disk sentinel must be present and carry the recorded id (right disk here).
+    [ -s "$VALARK_DATA_SENTINEL" ] || return 1
+    [ "$(cat "$VALARK_DATA_MARKER" 2>/dev/null)" = "$(cat "$VALARK_DATA_SENTINEL" 2>/dev/null)" ]
 }
 
 # --- Robust reachability check (used by link-repair / tests) ------------------

@@ -67,6 +67,13 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 - **Unattended `setup.sh` needs headless mode** (`VALARK_YES` / non‑tty) or it prompts forever
   and the box ends up with no Node. For a truly offline bootstrap, `setup.sh` fetches Node from
   the source Ark (`VALARK_HOST`) before nodejs.org.
+- **CI gate vs public-mirror rate limits (`test-urls.sh`):** shared GitHub-runner egress IPs
+  get throttled (429/403) by public mirrors, so a *sustained* retryable status (000/429/403/
+  408/425/5xx) is a **WARN under CI** (`CI=true`/`GITHUB_ACTIONS`) and a FAIL only locally;
+  404/410 stays a hard FAIL everywhere (real dead-link detection). Don't re-add a ranged-GET
+  fallback after a definitive HEAD 429/403 — the second request only amplifies the throttle.
+  The logic is unit-tested offline by `test-urls-logic.sh` (sources the guarded functions,
+  stubs `curl`/`sleep` as shell functions — zero network).
 
 ## Community services / accounts
 

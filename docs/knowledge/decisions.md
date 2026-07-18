@@ -6,6 +6,27 @@ later). See [README](README.md).
 
 ---
 
+## 2026‑07 — Release tags: unprefixed 0.x, minted by release.sh from the VERSION file (#64)
+
+- **Context:** the shipped series is **unprefixed** (`0.1.7`, `0.1.8`, `0.1.9`), created by hand
+  because `scripts/release.sh` still minted `vX.Y.Z` tags, never read the `VERSION` file, and its
+  clean‑tree check used to trip on untracked local files. A single stray v‑tag would permanently
+  outrank every unprefixed tag under version sort (`v0.1.10` > `0.2.0`), silently corrupting any
+  "latest tag" logic; and a tag could ship while `/api/health` still served the old version.
+- **Decision:** the canonical tag scheme is the **unprefixed `X.Y.Z`** the series already uses —
+  shipped tags stay as‑is, no renormalizing. `release.sh` now derives the tag from the repo‑root
+  `VERSION` file (no argument needed; an explicit argument must match it, leading `v` stripped,
+  never minted), only blocks on uncommitted **tracked** changes (untracked cruft can't change what
+  a tag of HEAD captures), refuses a double release under either prefix, and computes the
+  changelog baseline via `git describe --tags --abbrev=0` (nearest **ancestor** tag) instead of
+  the highest version‑sorted tag repo‑wide. `.github/workflows/release.yml` now also triggers on
+  unprefixed tags (it only knew `v*.*.*`, so it never fired for 0.1.7–0.1.9) with the same
+  ancestor‑tag baseline. Validated offline by `tests/test-release.sh` against scratch repos.
+- **Why:** one source of truth (`VERSION` → tag → `/api/health`) and one tag scheme make "cut a
+  release" a no‑judgment operation: bump `VERSION` in the release commit, merge to `main`, run
+  `scripts/release.sh --push` on main's tip. The old `.memsearch/` clean‑tree workaround is
+  obsolete (gitignored since ce214a7) — use the helper, not manual `git tag`.
+
 ## 2026‑07 — Safety card ships without "restore"; review is remove/dismiss only (Phase 7, 4/n)
 
 - **Context:** the admin Safety card's review queue needs actions on held items. The natural
@@ -304,8 +325,9 @@ later). See [README](README.md).
   commits onto `main`, so after a release `main` and `dev` share *content* but diverge by *SHA*
   (`git diff origin/main origin/dev` is empty; commit counts differ). This is benign: GitHub's
   rebase‑merge skips already‑applied patches, so the next release applies only new commits. Tag
-  `main`'s tip directly (`git tag -a vX.Y.Z`) — `scripts/release.sh` wants a clean tree, which the
-  untracked local `.memsearch/` trips.
+  `main`'s tip with `scripts/release.sh` (unprefixed `X.Y.Z` from the `VERSION` file — see the
+  release‑tags decision above; the old "untracked `.memsearch/` trips the clean‑tree check"
+  workaround is obsolete).
 
 ## 2026‑07 — Feature branch: discover/request + self‑replication + tests (PR #1)
 - Shipped + deployed to the ARM64 NAS test node + tested (337 tests): Library relabel; Community hub; one‑click

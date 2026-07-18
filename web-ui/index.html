@@ -3032,13 +3032,14 @@ function esc(str) {
 function toggleMobileNav(hamburger) {
     hamburger.classList.toggle('open');
     const navLinks = document.querySelector('.nav-links');
-    navLinks.classList.toggle('mobile-open');
+    const open = navLinks.classList.toggle('mobile-open');
+    hamburger.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
 function closeMobileNav() {
     const hamburger = document.querySelector('.nav-hamburger');
     const navLinks = document.querySelector('.nav-links');
-    if (hamburger) hamburger.classList.remove('open');
+    if (hamburger) { hamburger.classList.remove('open'); hamburger.setAttribute('aria-expanded', 'false'); }
     if (navLinks) navLinks.classList.remove('mobile-open');
 }
 
@@ -3433,28 +3434,34 @@ let _lastRoute = null;
 const COMMUNITY_NAV_LABELS = { chat: 'Chat', mail: 'Mail', forum: 'Forum', paste: 'Files' };
 
 function renderNav(route) {
+    // Consumer-simple top nav: exactly four destinations (#91 / #61). "Library" is
+    // the umbrella over the four browse surfaces — Software, AI Models, the offline
+    // Library and Downloads — which share an in-page sub-nav (renderLibraryNav).
+    // Community & Getting Started leave the top bar but stay reachable (Home cards,
+    // Settings, footer); their routes are unchanged, so #/community, #/quickstart,
+    // #/tools, #/models, #/packages, #/health … all still deep-link exactly as before.
     const activeSection = route === '/' ? 'home' :
-        route.startsWith('/tools') ? 'tools' :
-        route.startsWith('/models') ? 'models' :
-        (route.startsWith('/content') || route.startsWith('/library')) ? 'content' :
-        (route.startsWith('/community') || route.startsWith('/app')) ? 'community' :
-        (route.startsWith('/settings') || route.startsWith('/activity')) ? 'settings' :
-        route.startsWith('/quickstart') ? 'quickstart' : 'home';
+        (route.startsWith('/tools') || route.startsWith('/models') ||
+         route.startsWith('/content') || route.startsWith('/library') ||
+         route.startsWith('/packages')) ? 'library' :
+        (route.startsWith('/activity') || route.startsWith('/health')) ? 'activity' :
+        route.startsWith('/settings') ? 'settings' : '';
+    const navLink = (href, section, label) => {
+        const on = activeSection === section;
+        return `<a href="${href}" class="nav-link ${on ? 'active' : ''}"${on ? ' aria-current="page"' : ''} onclick="closeMobileNav()">${label}</a>`;
+    };
 
     return `
-    <nav class="top-nav">
+    <nav class="top-nav" aria-label="Primary">
         <a href="#/" class="nav-logo">Val Ark</a>
-        <div class="nav-hamburger" onclick="toggleMobileNav(this)" aria-label="Toggle menu">
+        <div class="nav-hamburger" onclick="toggleMobileNav(this)" role="button" tabindex="0" aria-label="Toggle menu" aria-expanded="false" aria-controls="primary-nav">
             <span></span><span></span><span></span>
         </div>
-        <div class="nav-links">
-            <a href="#/" class="nav-link ${activeSection === 'home' ? 'active' : ''}" onclick="closeMobileNav()">Home</a>
-            <a href="#/tools" class="nav-link ${activeSection === 'tools' ? 'active' : ''}" onclick="closeMobileNav()">Software</a>
-            <a href="#/models" class="nav-link ${activeSection === 'models' ? 'active' : ''}" onclick="closeMobileNav()">Models</a>
-            <a href="#/content" class="nav-link ${activeSection === 'content' ? 'active' : ''}" onclick="closeMobileNav()">Library</a>
-            <a href="#/community" class="nav-link ${activeSection === 'community' ? 'active' : ''}" onclick="closeMobileNav()">Community</a>
-            <a href="#/settings" class="nav-link ${activeSection === 'settings' ? 'active' : ''}" onclick="closeMobileNav()">Settings</a>
-            <a href="#/quickstart" class="nav-link ${activeSection === 'quickstart' ? 'active' : ''}" onclick="closeMobileNav()">Getting Started</a>
+        <div class="nav-links" id="primary-nav">
+            ${navLink('#/', 'home', 'Home')}
+            ${navLink('#/content', 'library', 'Library')}
+            ${navLink('#/activity', 'activity', 'Activity')}
+            ${navLink('#/settings', 'settings', 'Settings')}
         </div>
         <div class="nav-disk" id="nav-disk">${renderDiskBar()}</div>
         <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme" title="Toggle light/dark theme">
@@ -3462,6 +3469,27 @@ function renderNav(route) {
             <span class="icon-moon">&#x263D;</span>
         </button>
     </nav>`;
+}
+
+// In-page sub-navigation for the unified Library surface (#91 / #61). The four
+// browse surfaces that used to be separate top-nav links now live under the one
+// "Library" tab and switch here. Each item is a real deep link, so #/tools,
+// #/models, #/content and #/packages keep working directly and can be bookmarked.
+// `active` is one of 'tools' | 'models' | 'content' | 'packages'.
+const _LIBRARY_TABS = [
+    { key: 'tools',    href: '#/tools',    label: 'Software' },
+    { key: 'models',   href: '#/models',   label: 'AI Models' },
+    { key: 'content',  href: '#/content',  label: 'Offline Library' },
+    { key: 'packages', href: '#/packages', label: 'Downloads' },
+];
+function renderLibraryNav(active) {
+    let html = '<nav class="library-nav" aria-label="Library sections">';
+    for (const t of _LIBRARY_TABS) {
+        const on = t.key === active;
+        html += `<a href="${t.href}" class="lib-tab${on ? ' active' : ''}"${on ? ' aria-current="page"' : ''}>${t.label}</a>`;
+    }
+    html += '</nav>';
+    return html;
 }
 
 function renderBreadcrumb(parts) {
@@ -3501,6 +3529,7 @@ function renderFooter() {
     // Quick Links column
     html += '<div class="footer-col"><h4>Quick Links</h4>';
     html += '<a href="#/quickstart">Getting Started</a>';
+    html += '<a href="#/community">Community</a>';
     html += '<a href="#/packages">Downloads</a>';
     html += '<a href="#/tools/ollama">Ollama</a>';
     html += '<a href="#/tools/llama-cpp">llama.cpp</a>';
@@ -3690,6 +3719,7 @@ const _PKG_KIND = { app: 'App', model: 'AI model', content: 'Library (ZIM)', sou
 function renderPackages() {
     let html = `${_SHELL_CSS}${_PACKAGES_CSS}<div class="container" id="main-content">`;
     html += renderBreadcrumb([{ label: 'Downloads' }]);
+    html += renderLibraryNav('packages');
     html += '<h1>Downloads</h1>';
     html += `<p class="pkg-intro">Everything this box can hand you right now — apps, AI models, offline library files, and the Val Ark source itself. All served from here, no internet needed.</p>`;
     if (!_packagesData) { html += `<p class="activity-empty" id="packages-list">Loading the list…</p></div>`; return html; }
@@ -4470,6 +4500,7 @@ let activeToolCategory = 'all';
 function renderToolsList() {
     let html = '<div class="container" id="main-content">';
     html += renderBreadcrumb([{label: 'Tools & Software'}]);
+    html += renderLibraryNav('tools');
     html += '<h1 style="font-size:1.6em;margin-bottom:12px">Tools & Software</h1>';
     html += '<p style="color:var(--text-secondary);margin-bottom:16px;font-size:0.9em">' + TOOLS.length + ' tools across ' + Object.keys(TOOL_CATEGORIES).length + ' categories</p>';
 
@@ -4831,6 +4862,7 @@ function renderModelsList() {
 
     let html = '<div class="container" id="main-content">';
     html += renderBreadcrumb([{label: 'Models'}]);
+    html += renderLibraryNav('models');
 
     html += `<div class="search-bar">
         <span class="search-icon">&#x1F50D;</span>
@@ -5081,6 +5113,7 @@ function renderFullWikipediaHero() {
 function renderContentLibrary() {
     let html = '<div class="container" id="main-content">';
     html += renderBreadcrumb([{label: 'Library'}]);
+    html += renderLibraryNav('content');
     html += '<h1>Offline Library</h1>';
     html += '<p class="section-desc">Whole websites, mirrored offline and served by <a href="#/tools/kiwix">Kiwix</a> — Wikipedia, StackExchange, wikis, textbooks, courses and reference material. Browse from any device on your network, no internet required.</p>';
 

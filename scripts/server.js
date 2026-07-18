@@ -209,6 +209,21 @@ const sseClients = new Set();
 let downloadCounter = 0;
 
 const MAX_SSE_CONNECTIONS = 50;
+// One peer opening 50 EventSource streams (or a laptop that sleeps and leaves them dangling
+// with no FIN) can exhaust the global pool for everyone — nothing is ever written to an idle
+// SSE socket, so a dead peer is never noticed. Cap streams PER IP and heartbeat every stream
+// so vanished peers get reaped and their slot freed. (Defence-in-depth on top of the global cap.)
+const MAX_SSE_PER_IP = Number(process.env.VALARK_MAX_SSE_PER_IP) || 6;
+const SSE_HEARTBEAT_MS = 30000;
+const sseByIp = new Map();   // clientIp -> live stream count
+
+// A directory /api/archive/<dir> spawns an on-the-fly `tar -czf -` over the whole subtree —
+// CPU-bound gzip with no cap. The per-IP rate bucket can't bound this (a handful of requests,
+// well under the bucket, pin every core for hours on multi-GB trees), so cap the number of
+// concurrent tar spawns globally (mirrors the MAX_SSE_CONNECTIONS 503 pattern). Single-file
+// downloads don't spawn tar and are unaffected — the first-class tool-download path stays open.
+const MAX_ARCHIVE_TAR = Number(process.env.VALARK_MAX_ARCHIVE_TAR) || 3;
+let archiveTarInFlight = 0;
 
 function broadcastSSE(event, data) {
     const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -216,6 +231,12 @@ function broadcastSSE(event, data) {
         try { res.write(msg); } catch (e) { sseClients.delete(res); }
     }
 }
+
+// Keepalive comment (ignored by EventSource) — provokes a write on otherwise-idle streams so a
+// dead peer surfaces as a socket 'close' and gets reaped, freeing its global + per-IP slot.
+setInterval(() => {
+    for (const res of sseClients) { try { res.write(': ping\n\n'); } catch (_) { try { res.destroy(); } catch (_) {} } }
+}, SSE_HEARTBEAT_MS).unref();
 
 function startDownload(type, scriptPath, args = []) {
     // Reject duplicate concurrent downloads of same type
@@ -1037,11 +1058,17 @@ function handleAPI(req, res, urlPath) {
                 return sendJSON(res, req, getCatalog('content'));
             case '/api/catalog/models':
                 return sendJSON(res, req, getCatalog('models'));
-            case '/api/downloads/stream':
-                // SSE connection limit
+            case '/api/downloads/stream': {
+                // SSE connection limits: a global pool cap AND a per-IP cap, so one peer
+                // can't monopolise the progress stream for every other client/tab.
                 if (sseClients.size >= MAX_SSE_CONNECTIONS) {
                     res.writeHead(503, { 'Retry-After': '10' });
                     return res.end('Too many SSE connections');
+                }
+                const sseIp = clientIp(req) || 'local';
+                if ((sseByIp.get(sseIp) || 0) >= MAX_SSE_PER_IP) {
+                    res.writeHead(503, { 'Retry-After': '10' });
+                    return res.end('Too many SSE connections from this client');
                 }
                 res.writeHead(200, {
                     'Content-Type': 'text/event-stream',
@@ -1052,8 +1079,14 @@ function handleAPI(req, res, urlPath) {
                 });
                 res.write(`event: init\ndata: ${JSON.stringify({ connected: true })}\n\n`);
                 sseClients.add(res);
-                req.on('close', () => sseClients.delete(res));
+                sseByIp.set(sseIp, (sseByIp.get(sseIp) || 0) + 1);
+                req.on('close', () => {
+                    sseClients.delete(res);
+                    const n = (sseByIp.get(sseIp) || 1) - 1;
+                    if (n <= 0) sseByIp.delete(sseIp); else sseByIp.set(sseIp, n);
+                });
                 return;
+            }
             default:
                 // Handle /api/archive/<path> for tarball downloads
                 if (urlPath.startsWith('/api/archive/')) {
@@ -1360,6 +1393,15 @@ function serveArchive(res, req, relPath) {
             return res.end();
         }
         if (stat.isDirectory()) {
+            // Cap concurrent tar+gzip streams so a few cheap GETs can't pin every core on
+            // large trees. Fail politely (503 + Retry-After) before writing 200 headers.
+            if (archiveTarInFlight >= MAX_ARCHIVE_TAR) {
+                res.writeHead(503, { 'Content-Type': 'text/plain', 'Retry-After': '10', ...SECURITY_HEADERS });
+                return res.end('Too many concurrent archive downloads — please retry shortly.\n');
+            }
+            archiveTarInFlight++;
+            let tarReleased = false;
+            const releaseTar = () => { if (tarReleased) return; tarReleased = true; archiveTarInFlight--; };
             res.writeHead(200, {
                 'Content-Type': 'application/gzip',
                 'Content-Disposition': `attachment; filename="${base}.tar.gz"`,
@@ -1367,7 +1409,8 @@ function serveArchive(res, req, relPath) {
             });
             const tar = spawn('tar', ['-czf', '-', '-C', path.dirname(target), base]);
             tar.stdout.pipe(res);
-            tar.on('error', () => { try { res.destroy(); } catch (_) {} });
+            tar.on('error', () => { releaseTar(); try { res.destroy(); } catch (_) {} });
+            tar.on('close', releaseTar);          // normal exit, error, or req-close kill — always freed
             req.on('close', () => { try { tar.kill(); } catch (_) {} });
         } else {
             res.writeHead(200, {
@@ -1750,6 +1793,16 @@ function repairInFlight() { return !!_repairProc || (Date.now() - _repairStarted
 const MOD_SCRIPT = path.join(__dirname, 'lib', 'moderation.sh');
 const MOD_CHECK_MAX = Number(process.env.VALARK_MODERATION_MAX_BYTES) || 25 * 1024 * 1024;  // matches moderation.sh MOD_MAX_BYTES
 const MOD_TIMEOUT_S = Number(process.env.VALARK_MODERATION_TIMEOUT) || 150;
+// Concurrency budget for /api/moderation/check. The per-IP rate limiter bounds the
+// admission RATE (30/min) but NOT how many checks run at once, and each buffers up to
+// MOD_CHECK_MAX (25 MiB) in memory then spawns a classifier child — so a burst of slow
+// uploads (one peer, or many) could pin unbounded RAM/CPU and OOM a small ARM node. Cap
+// both the number of concurrent checks AND the cumulative in-flight bytes. Over budget →
+// fail-closed {decision:'hold'} + 503 Retry-After (Phase-7 semantics: never an implicit
+// allow). Held from body-read through the classifier callback, so it bounds children too.
+const MOD_MAX_CONCURRENT = Number(process.env.VALARK_MODERATION_MAX_CONCURRENT) || 4;
+const MOD_MAX_INFLIGHT_BYTES = Number(process.env.VALARK_MODERATION_MAX_INFLIGHT) || 3 * MOD_CHECK_MAX;
+let modInFlight = 0, modInFlightBytes = 0;
 // Where screened bytes are staged. A dedicated 0700 dir under <state>; each scan file is
 // 0600, random-named, realpath-confined, and unlinked the instant the runner returns.
 const MOD_SCAN_DIR = path.join(STATE_DIR, 'moderation', 'scan');
@@ -1904,31 +1957,67 @@ function handleModerationCheck(req, res) {
     // engine as approval; they get decision:'skip' + enabled:false and decide for themselves.
     if (!cfg.enabled) return sendJSON(res, req, { decision: 'skip', enabled: false, reason: 'moderation disabled' });
 
+    // On an early refusal we never read the body — tear the socket down once the reply
+    // flushes so a client still streaming a huge payload can't keep it half-read on the
+    // keep-alive connection (a synchronous destroy would truncate the reply first).
+    const refuse = (obj, code) => {
+        res.on('finish', () => { try { req.destroy(); } catch (_) {} });
+        return sendJSON(res, req, obj, code);
+    };
+    // Reject a DECLARED oversize body before buffering a single byte (backstop; the
+    // streaming guard below still catches chunked / lying Content-Length uploads).
+    const clen = Number(req.headers['content-length']);
+    if (Number.isFinite(clen) && clen > MOD_CHECK_MAX) {
+        return refuse({ decision: 'hold', reason: 'content exceeds size cap' }, 413);
+    }
+    // Admission control: refuse (fail-closed hold) when too many checks are already in
+    // flight or the cumulative buffered bytes are at the ceiling. This is what actually
+    // bounds memory/child-process fan-out — the rate limiter only paces admissions.
+    if (modInFlight >= MOD_MAX_CONCURRENT || modInFlightBytes >= MOD_MAX_INFLIGHT_BYTES) {
+        res.setHeader('Retry-After', '5');
+        return refuse({ decision: 'hold', reason: 'moderation busy — retry shortly' }, 503);
+    }
+
     const kind = 'auto', sens = cfg.sensitivity;   // type = magic bytes; sensitivity = admin policy
 
     const chunks = []; let size = 0, over = false, ended = false;
+    let myBytes = 0, classifierStarted = false, released = false;
+    modInFlight++;
+    // Give back this request's slot + buffered-byte contribution exactly once, on ANY
+    // terminal path (overflow, budget, error, empty, client disconnect, classifier done).
+    const release = () => { if (released) return; released = true; modInFlight--; modInFlightBytes -= myBytes; myBytes = 0; };
+    // Fail-closed teardown after the response flushes (a synchronous req.destroy() can
+    // truncate the reply into an ECONNRESET instead of the clean hold the caller expects).
+    const holdAndClose = (obj, code) => {
+        over = true;
+        res.on('finish', () => { try { req.destroy(); } catch (_) {} });
+        sendJSON(res, req, obj, code);
+        release();
+    };
     req.on('data', (c) => {
         if (over || ended) return;
         size += c.length;
-        if (size > MOD_CHECK_MAX) {   // fail-closed on overflow: hold (413), stop buffering
-            over = true;
-            // Let the 413 flush before tearing down the shared TCP socket — a synchronous
-            // req.destroy() here can truncate the response so the client sees ECONNRESET
-            // instead of the clean hold. Further 'data' is discarded (over-guard above), so
-            // memory stays bounded even if the client keeps uploading until we destroy.
-            res.on('finish', () => { try { req.destroy(); } catch (_) {} });
-            sendJSON(res, req, { decision: 'hold', reason: 'content exceeds size cap' }, 413);
-            return;
-        }
+        if (size > MOD_CHECK_MAX) return holdAndClose({ decision: 'hold', reason: 'content exceeds size cap' }, 413);
+        // Count each buffered chunk against the global in-flight budget; a mid-stream
+        // crossing (concurrent uploads racing up together) also fails closed.
+        myBytes += c.length; modInFlightBytes += c.length;
         chunks.push(c);
+        if (modInFlightBytes > MOD_MAX_INFLIGHT_BYTES) {
+            res.setHeader('Retry-After', '5');
+            return holdAndClose({ decision: 'hold', reason: 'moderation busy — retry shortly' }, 503);
+        }
     });
-    req.on('error', () => { if (!over && !ended) { ended = true; if (!res.headersSent) sendJSON(res, req, { decision: 'hold', reason: 'read error' }, 200); } });
+    req.on('error', () => { if (!over && !ended) { ended = true; if (!res.headersSent) sendJSON(res, req, { decision: 'hold', reason: 'read error' }, 200); } release(); });
+    // Client vanished mid-upload (slow-loris drop) before we handed off to the classifier
+    // → free the slot now. Once the classifier is running its callback owns the release.
+    req.on('close', () => { if (!classifierStarted) release(); });
     req.on('end', () => {
         if (over || ended) return;
         ended = true;
         const buf = Buffer.concat(chunks);
-        if (buf.length === 0) return sendJSON(res, req, { decision: 'hold', reason: 'empty content' }, 400);
-        _runModeration(buf, kind, sens, (out) => sendJSON(res, req, out, 200));
+        if (buf.length === 0) { release(); return sendJSON(res, req, { decision: 'hold', reason: 'empty content' }, 400); }
+        classifierStarted = true;
+        _runModeration(buf, kind, sens, (out) => { release(); sendJSON(res, req, out, 200); });
     });
 }
 

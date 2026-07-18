@@ -11,7 +11,7 @@
 #   - a symlink in the store is quarantined as the LINK, never read through
 #   - idempotent: a screened file is skipped next sweep
 #   - disabled engine → sweep is a no-op (nothing touched)
-#   - action=flag leaves the original served but still queues a copy for review
+#   - default sweep-dirs: only VAL_ARK_UPLOADS is swept, never a DB-backed service store
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -155,6 +155,47 @@ run_sweep >/dev/null; r=$?
 [ ! -L "$STORE/dangling-link" ] && pass || fail "a dangling store symlink must be removed from the store"
 [ -f "$OUT/payload.txt" ] && pass || fail "the symlink TARGET outside the store must be left untouched (link moved, not followed)"
 grep -q '"reason":"symlink in store"' "$QUEUE" && pass || fail "a quarantined symlink must be queued with the symlink reason"
+
+# --- 10. #53: DEFAULT sweep-dirs behavior (regression guard for #46, which removed the
+#         DB-backed community-store defaults). With VALARK_MODERATION_DIRS UNSET the sweep
+#         screens ONLY VAL_ARK_UPLOADS — never a service store (whose files a DB references,
+#         so a quarantine MOVE would corrupt it). We plant flagged files at the exact paths
+#         #46 deleted; reverting sweep_dirs() to those defaults would quarantine them here.
+#         VAL_ARK_CONFIG → an empty file so valark-env.sh ignores the repo .env and our
+#         VAL_ARK_DATA (which derives DATA_ROOT and the state tree) is authoritative.
+: > "$T/empty.conf"
+D2="$T/data2"
+UP2="$D2/val-ark/uploads";                 mkdir -p "$UP2"
+PASTE_STORE="$D2/val-ark/state/services/paste/data";   mkdir -p "$PASTE_STORE"
+MAIL_STORE="$D2/val-ark/state/services/mail/messages"; mkdir -p "$MAIL_STORE"
+printf 'BADWORD in the plain uploads area' > "$UP2/upload-bad.txt"
+printf 'BADWORD in a DB-backed paste store' > "$PASTE_STORE/paste.txt"
+printf 'BADWORD in a DB-backed mail store'  > "$MAIL_STORE/mail.txt"
+sweep_defaults() {   # NO explicit dirs / state override; all three unset up front, a caller
+                     # re-adds VAL_ARK_UPLOADS via a trailing assignment (which wins over -u).
+    env -u VALARK_STATE_DIR -u VALARK_MODERATION_DIRS -u VAL_ARK_UPLOADS \
+        VAL_ARK_CONFIG="$T/empty.conf" VAL_ARK_DATA="$D2" VALARK_MODERATION_CMD="$T/stub" "$@" \
+        bash "$SWEEP" sweep 2>&1
+}
+
+# 10a. VAL_ARK_UPLOADS set → its flagged file IS quarantined (sweep_dirs requires -d, so the
+#      dir must exist — it does).
+out=$(sweep_defaults VAL_ARK_UPLOADS="$UP2"); r=$?
+[ "$r" = 10 ] && pass || fail "default sweep must screen VAL_ARK_UPLOADS and quarantine its flagged file (got rc $r: $out)"
+[ ! -f "$UP2/upload-bad.txt" ] && pass || fail "a flagged file in VAL_ARK_UPLOADS must be quarantined"
+# 10b. the DB-backed service stores were NOT swept (would corrupt them) → files untouched.
+[ -f "$PASTE_STORE/paste.txt" ] && pass || fail "a DB-backed paste store must NOT be swept by default (#46 regression guard)"
+[ -f "$MAIL_STORE/mail.txt" ]   && pass || fail "a DB-backed mail store must NOT be swept by default (#46 regression guard)"
+
+# 10c. a MISSING VAL_ARK_UPLOADS path yields no dirs → clean no-op (rc 0) with a discoverable
+#      log line, not a bare "scanned 0" or a crash.
+out=$(sweep_defaults VAL_ARK_UPLOADS="$D2/no-such-dir"); r=$?
+[ "$r" = 0 ] && pass || fail "a nonexistent VAL_ARK_UPLOADS must be a clean no-op (rc 0, got $r: $out)"
+echo "$out" | grep -q 'no upload dirs to screen' && pass || fail "a missing sweep dir must log a discoverable message (got: $out)"
+# 10d. NOTHING configured (no VAL_ARK_UPLOADS at all) → same discoverable no-op.
+out=$(sweep_defaults); r=$?
+[ "$r" = 0 ] && pass || fail "no configured sweep dirs must be a clean no-op (rc 0, got $r)"
+echo "$out" | grep -q 'no upload dirs to screen' && pass || fail "no configured sweep dirs must log the discoverable message (got: $out)"
 
 echo "mod-sweep: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

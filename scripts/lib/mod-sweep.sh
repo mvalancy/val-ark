@@ -117,6 +117,15 @@ sweep() {
     if [ "$MOD_ENABLED" != 1 ]; then log "moderation disabled — sweep skipped"; return 0; fi
     compact_marker
 
+    # No configured/existing upload dir → the sweep has nothing to screen. Say so plainly
+    # (not a bare "scanned 0") so the loop log is discoverable: enabled screening claims
+    # nothing while VAL_ARK_UPLOADS / VALARK_MODERATION_DIRS are unset or point nowhere.
+    local dirs; dirs=$(sweep_dirs)
+    if [ -z "$dirs" ]; then
+        log "sweep: no upload dirs to screen (set VAL_ARK_UPLOADS or VALARK_MODERATION_DIRS)"
+        return 0
+    fi
+
     local scanned=0 flagged=0 errors=0 f sz mt key out dec reason rel qdst
     while IFS= read -r d; do
         [ -d "$d" ] || continue
@@ -171,7 +180,7 @@ sweep() {
                 log "ERROR: could not quarantine $f (still served — will retry next sweep)"
             fi
         done < <(find -H "$d" \( -type f -o -type l \) -print0 2>/dev/null)
-    done < <(sweep_dirs)
+    done <<< "$dirs"
 
     log "sweep: scanned ${scanned}, quarantined ${flagged}, errors ${errors}"
     if [ "$errors" -gt 0 ]; then return 11; fi     # hard failure: a flagged file is still served

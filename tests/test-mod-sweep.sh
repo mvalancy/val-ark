@@ -7,6 +7,8 @@
 #   - a clean file is left served + recorded (never re-screened)
 #   - a flagged file is moved to quarantine (gone from the store) + queued
 #   - FAIL-CLOSED: unparseable/hold verdict → quarantined, never left served
+#   - a control-character filename still yields a VALID (parseable) review-queue line
+#   - a symlink in the store is quarantined as the LINK, never read through
 #   - idempotent: a screened file is skipped next sweep
 #   - disabled engine → sweep is a no-op (nothing touched)
 #   - action=flag leaves the original served but still queues a copy for review
@@ -124,6 +126,35 @@ grep border.txt "$QUEUE" | grep -q '"decision":"hold"' && pass || fail "score-0.
 
 # restore default policy for any future case
 set_sens balanced
+
+# --- 8. #52 part 1: a control-character byte in a filename must not orphan the item. It is
+#        legal in a Unix filename but ILLEGAL raw in a JSON string, so it must be \u00XX-
+#        escaped or server.js _readJsonl's JSON.parse throws and silently drops the record
+#        (the quarantined file becomes invisible + un-actionable in the review queue).
+ctl=$(printf 'evil\x01ctrl.txt')
+printf 'BADWORD via a control-char name' > "$STORE/$ctl"
+run_sweep >/dev/null; r=$?
+[ ! -e "$STORE/$ctl" ] && pass || fail "a control-char flagged file must be quarantined"
+# EVERY queue line must be valid JSON — the pre-fix writer left a raw 0x01 that throws here.
+"$NODE" -e 'const fs=require("fs");const L=fs.readFileSync(process.argv[1],"utf8").split("\n").filter(Boolean);let bad=0;for(const l of L){try{JSON.parse(l)}catch(e){bad++}}process.exit(bad?1:0)' "$QUEUE" \
+    && pass || fail "every queue line must be valid JSON even for a control-char filename (no orphan)"
+
+# --- 9. #52 part 2: a symlink in a swept store must be quarantined AS THE LINK — never read
+#        through (a link to out-of-store / flagged / dir-tree content is a screening bypass:
+#        find -type f alone skipped it and the bytes stayed reachable through the store path).
+#        Covers link→file, link→dir (whole tree), and a dangling link; the target is untouched.
+OUT="$T/outside"; mkdir -p "$OUT"
+printf 'BADWORD reachable only through a store symlink' > "$OUT/payload.txt"
+ln -s "$OUT/payload.txt" "$STORE/file-link.txt"     # link → out-of-store flagged file
+ln -s "$OUT"             "$STORE/dir-link"           # link → out-of-store dir (whole tree)
+ln -s "$OUT/missing.txt" "$STORE/dangling-link"      # dangling link
+run_sweep >/dev/null; r=$?
+[ "$r" = 10 ] && pass || fail "quarantining store symlinks must return rc 10 (got $r)"
+[ ! -L "$STORE/file-link.txt" ] && pass || fail "a store symlink→file must be removed from the store (bypass closed)"
+[ ! -L "$STORE/dir-link" ]      && pass || fail "a store symlink→dir must be removed from the store"
+[ ! -L "$STORE/dangling-link" ] && pass || fail "a dangling store symlink must be removed from the store"
+[ -f "$OUT/payload.txt" ] && pass || fail "the symlink TARGET outside the store must be left untouched (link moved, not followed)"
+grep -q '"reason":"symlink in store"' "$QUEUE" && pass || fail "a quarantined symlink must be queued with the symlink reason"
 
 echo "mod-sweep: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

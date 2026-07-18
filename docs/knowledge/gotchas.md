@@ -391,6 +391,25 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   the text AFTER its last occurrence, so an echoing build degrades to hold, never to mass
   false-positives (and never to allow). Flag support differs per binary in the SAME build — test
   each binary's argv against the mirrored build, not just "llama.cpp".
+- **The sweep must enumerate symlinks, and quarantine the LINK — never read through it** (#52,
+  adversarial-review). `find -H "$d" -type f` skips every symlink found during traversal (with `-H`
+  they aren't followed → they fail `-type f`), so a store `innocent.txt → /outside/flagged` was
+  neither screened nor moved while the bytes stayed reachable through the store path (a file server
+  that follows symlinks re-serves them; a link back into `<state>/moderation/quarantine` re-exposes
+  quarantined content). *Reading the target* would be worse — the dedupe key is `stat`-derived, so an
+  attacker earns an `allow` on a benign target then `touch -r`-forges size+mtime after retargeting the
+  link (TOCTOU → permanent allow for arbitrary bytes). Rule: enumerate `\( -type f -o -type l \)`,
+  test `[ -L ]` **before** `[ -f ]` (which follows the link), and quarantine any symlink as a
+  fail-closed `hold` — `mv` moves the link itself, never the target, and one branch covers
+  link→file, link→dir (a whole out-of-store tree), and dangling links.
+- **`_json()` must escape EVERY C0 control byte, not just `\n`/`\r`/`\t`** (#52). A byte `0x01`-`0x1f`
+  is legal in a Unix filename but ILLEGAL raw inside a JSON string, so a filename like `evil␁name.txt`
+  wrote a `queue.jsonl` line that `server.js` `_readJsonl` (a `try{JSON.parse}catch{}`) silently
+  dropped — the quarantined file became an invisible, un-actionable orphan (never in `_modPending`,
+  `reviewModerationItem` returns "not found"). Fail-closed on quarantine still held, but review-queue
+  state consistency broke. Fix at the WRITER (not by making the reader lenient): after the short
+  escapes, replace each remaining `0x01`-`0x1f` byte with `\u00XX`. Forward-only — lines already
+  malformed at rest stay orphaned (no migration).
 
 ## Git / releases
 

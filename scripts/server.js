@@ -506,6 +506,200 @@ function getModelsStatus() {
     return models;
 }
 
+// =============================================================================
+// Packages manifest — what THIS box can hand out RIGHT NOW
+// =============================================================================
+// A consolidated, machine- + human-readable inventory of the downloadable
+// packages actually present on disk: the per-platform app/tool archives (served
+// as on-the-fly tarballs via /api/archive/tools/…), the offline self-replication
+// source bundle + tarball + per-platform Node runtimes under /sources/val-ark/,
+// the on-disk AI models, and the complete local ZIMs.
+//
+// This is DISTINCT from /api/catalog/* — that is the UPSTREAM browse feed of
+// NOT-yet-downloaded items; this is the PRESENT inventory the box can serve now.
+//
+// Constraints (prime directives):
+//  - Zero-dep, offline, never throws: an empty/missing tree yields {packages:[]}.
+//  - Fast + non-blocking: NO recursive du and NO file hashing on the request path.
+//    Single-file packages report their exact stat size; directory packages (tool
+//    and multi-file model trees) report a cheap shallow (immediate-children) size.
+//    sha256 is attached ONLY from a precomputed SHA256SUMS (written at mirror time
+//    by scripts/mirror-self.sh) — multi-GB files are never hashed here.
+//  - Public-repo safe: relative URLs + package metadata only, never an absolute
+//    host URL or a host filesystem path (the box is LAN/tailnet-only). The URLs
+//    resolve through the same read-gate as the manifest itself.
+let _packagesCache = { data: null, ts: 0 };
+const PACKAGES_TTL = 60000; // 60s — matches statusCache; the on-disk inventory moves slowly
+
+// Enumeration roots, resolved like the rest of the server (env override → repo
+// symlink). The emitted URLs are always repo-relative (/api/archive/… or
+// /sources/…), which on a Val Ark box resolve to these same bytes via the layout
+// symlinks that serveArchive/the static router serve from.
+function _pkgToolsDir()   { return cfg('VALARK_TOOLS_DIR')   || path.join(ROOT, 'tools'); }
+function _pkgSourcesDir() { return cfg('VALARK_SOURCES_DIR') || path.join(ROOT, 'sources'); }
+function _pkgZimDir() {
+    return process.env.VALARK_ZIM_DIR
+        || (process.env.VALARK_CONTENT_DIR ? path.join(process.env.VALARK_CONTENT_DIR, 'zim')
+            : path.join(ROOT, 'content', 'zim'));
+}
+
+// Sum of immediate-child file sizes — a cheap, bounded, non-recursive size for a
+// directory package (never walks the whole tree over the FUSE mount).
+function _shallowSize(dir) {
+    let size = 0;
+    for (const e of readdirSafe(dir)) {
+        if (e.startsWith('.')) continue;   // skip metadata markers (.version, .dist, …)
+        try { const s = fs.statSync(path.join(dir, e)); if (s.isFile()) size += s.size; } catch (_) {}
+    }
+    return size;
+}
+
+// Parse a `sha256sum`-style SHA256SUMS file into { basename: hash }. Cheap (a few
+// short lines). Missing/garbage → {} (sha256 is simply omitted from those rows).
+function _parseSha256Sums(file) {
+    const out = {};
+    let txt;
+    try { txt = fs.readFileSync(file, 'utf8'); } catch (_) { return out; }
+    for (const line of txt.split('\n')) {
+        const m = line.match(/^([0-9a-fA-F]{64})\s+\*?(.+?)\s*$/);
+        if (m) out[path.basename(m[2])] = m[1].toLowerCase();
+    }
+    return out;
+}
+
+// A tool's mirrored version from its .version marker (see _common.sh version_stamp).
+// Absent/unreadable → null. Never throws.
+function _versionMarker(dir) {
+    try { return (fs.readFileSync(path.join(dir, '.version'), 'utf8').trim() || null); }
+    catch (_) { return null; }
+}
+
+function computePackages() {
+    const packages = [];
+
+    // 1) Apps/tools: tools/<platform>/<entry> — each a separately downloadable
+    //    archive at /api/archive/tools/<platform>/<entry> (dirs stream as .tar.gz).
+    const toolsDir = _pkgToolsDir();
+    for (const platform of readdirSafe(toolsDir)) {
+        if (platform.startsWith('.')) continue;
+        const platDir = path.join(toolsDir, platform);
+        let pstat; try { pstat = fs.statSync(platDir); } catch (_) { continue; }
+        if (!pstat.isDirectory()) continue;
+        for (const entry of readdirSafe(platDir)) {
+            if (entry.startsWith('.')) continue;
+            const full = path.join(platDir, entry);
+            let st; try { st = fs.statSync(full); } catch (_) { continue; }
+            const isDir = st.isDirectory();
+            packages.push({
+                id: `app:${platform}:${entry}`,
+                name: entry,
+                kind: 'app',
+                platform,
+                version: isDir ? _versionMarker(full) : null,
+                size: isDir ? _shallowSize(full) : st.size,
+                desc: `App for ${platform}`,
+                url: `/api/archive/tools/${encodeURIComponent(platform)}/${encodeURIComponent(entry)}`,
+            });
+        }
+    }
+
+    // 2) Offline self-replication: the source bundle + tarball + per-platform Node
+    //    runtimes served straight from /sources/val-ark/. Version comes from the
+    //    mirror's VERSION metadata (falls back to the box app version); sha256 from
+    //    a precomputed SHA256SUMS when present (never hashed on the request path).
+    const vaDir = path.join(_pkgSourcesDir(), 'val-ark');
+    const sums = _parseSha256Sums(path.join(vaDir, 'SHA256SUMS'));
+    let mirrorRef = null;
+    try {
+        const meta = fs.readFileSync(path.join(vaDir, 'VERSION'), 'utf8');
+        const m = meta.match(/^ref=(.+)$/m);
+        if (m) mirrorRef = m[1].trim();
+    } catch (_) { /* no mirror metadata yet */ }
+    const srcVersion = mirrorRef || APP_VERSION;
+    const pushSource = (file, name, platform, desc) => {
+        const full = path.join(vaDir, file);
+        let st; try { st = fs.statSync(full); } catch (_) { return; }
+        if (!st.isFile()) return;
+        const pkg = {
+            id: `source:${file}`, name, kind: 'source', platform,
+            version: srcVersion, size: st.size, desc,
+            url: `/sources/val-ark/${encodeURIComponent(file)}`,
+        };
+        if (sums[file]) pkg.sha256 = sums[file];
+        packages.push(pkg);
+    };
+    pushSource('val-ark.bundle',        'Val Ark source (git bundle)', null, 'Full-history git bundle — clone it offline');
+    pushSource('val-ark-latest.tar.gz', 'Val Ark source (tarball)',    null, 'Working-tree tarball — extract & set up, no git');
+    // node-<platform>.tar.gz runtimes — what makes the offline clone actually run.
+    for (const f of readdirSafe(vaDir)) {
+        const m = /^node-(.+)\.tar\.gz$/.exec(f);
+        if (m) pushSource(f, `Node.js runtime (${m[1]})`, m[1], 'Bundled Node runtime for the offline installer');
+    }
+
+    // 3) On-disk AI models: models/<category>/<name> (dirs or single .gguf files),
+    //    served at /api/archive/models/<category>/<name>.
+    for (const category of readdirSafe(MODEL_ROOT)) {
+        if (category.startsWith('.') || category === 'logs' || category === 'tools') continue;
+        const catDir = path.join(MODEL_ROOT, category);
+        let cstat; try { cstat = fs.statSync(catDir); } catch (_) { continue; }
+        if (!cstat.isDirectory()) continue;
+        for (const entry of readdirSafe(catDir)) {
+            if (entry.startsWith('.')) continue;
+            const full = path.join(catDir, entry);
+            let st; try { st = fs.statSync(full); } catch (_) { continue; }
+            const isDir = st.isDirectory();
+            packages.push({
+                id: `model:${category}:${entry}`,
+                name: entry,
+                kind: 'model',
+                platform: null,
+                version: null,
+                size: isDir ? _shallowSize(full) : st.size,
+                desc: `AI model (${category})`,
+                url: `/api/archive/models/${encodeURIComponent(category)}/${encodeURIComponent(entry)}`,
+            });
+        }
+    }
+
+    // 4) Complete local ZIMs: content/zim/*.zim (a bare `.zim`, not a `.part`),
+    //    served at /api/archive/content/zim/<file> (readable in-shell via Kiwix).
+    const zimDir = _pkgZimDir();
+    for (const f of readdirSafe(zimDir)) {
+        if (f.startsWith('.') || !f.endsWith('.zim')) continue;
+        const full = path.join(zimDir, f);
+        let st; try { st = fs.statSync(full); } catch (_) { continue; }
+        if (!st.isFile()) continue;
+        packages.push({
+            id: `content:${f}`,
+            name: f,
+            kind: 'content',
+            platform: null,
+            version: null,
+            size: st.size,
+            desc: 'Offline library (ZIM)',
+            url: `/api/archive/content/zim/${encodeURIComponent(f)}`,
+        });
+    }
+
+    // Stable ordering: by kind, then name.
+    const KIND_ORDER = { app: 0, model: 1, content: 2, source: 3 };
+    packages.sort((a, b) =>
+        ((KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9)) || String(a.name).localeCompare(String(b.name)));
+
+    return { generatedAt: new Date().toISOString(), version: APP_VERSION, count: packages.length, packages };
+}
+
+// Cached manifest (60s). Never throws → an empty inventory on any error.
+function getPackages() {
+    const now = Date.now();
+    if (_packagesCache.data && (now - _packagesCache.ts) < PACKAGES_TTL) return _packagesCache.data;
+    let data;
+    try { data = computePackages(); }
+    catch (_) { data = { generatedAt: new Date().toISOString(), version: APP_VERSION, count: 0, packages: [] }; }
+    _packagesCache = { data, ts: now };
+    return data;
+}
+
 // Total bytes under a directory tree, ASYNC so a multi-hundred-GB walk never
 // blocks the single-threaded event loop (a synchronous du here would freeze the
 // whole web server for every client while it ran). `du -sb` is native/fast; no
@@ -816,6 +1010,9 @@ function isReadGated(urlPath) {
     if (urlPath === '/api/health' || urlPath === '/api/status/tls') return false;
     if (urlPath.startsWith('/api/status/') || urlPath.startsWith('/api/catalog/') ||
         urlPath.startsWith('/api/archive/') || urlPath === '/api/downloads/stream') return true;
+    // The packages manifest enumerates the library (what's on the box) → gate it
+    // like the archive/catalog reads it points at, not like the open UI shell.
+    if (urlPath === '/api/packages') return true;
     if (urlPath === '/kiwix' || urlPath.startsWith('/kiwix/')) return true;
     if (/^\/app\//.test(urlPath)) return true;
     // The raw data/content trees the static router serves straight from ROOT (the
@@ -1048,6 +1245,13 @@ function handleAPI(req, res, urlPath) {
                 return sendJSON(res, req, getCatalog('content'));
             case '/api/catalog/models':
                 return sendJSON(res, req, getCatalog('models'));
+            case '/api/packages':
+                // The PRESENT inventory this box can hand out now: app archives,
+                // the self-replication source bundle/tarball/node runtimes, on-disk
+                // models, complete ZIMs — relative URLs + metadata only. Read-gated
+                // like the library it enumerates (see isReadGated). Distinct from
+                // /api/catalog/* (the upstream not-yet-downloaded browse feed).
+                return sendJSON(res, req, getPackages());
             case '/api/downloads/stream': {
                 // SSE connection limits: a global pool cap AND a per-IP cap, so one peer
                 // can't monopolise the progress stream for every other client/tab.

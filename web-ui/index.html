@@ -3361,6 +3361,8 @@ function router() {
         html += renderSettings();
     } else if (route === '/activity') {
         html += renderActivity();
+    } else if (route === '/packages') {
+        html += renderPackages();
     } else if (route === '/health') {
         html += renderHealth();
     } else if (route === '/https' || route === '/trust') {
@@ -3415,6 +3417,7 @@ function router() {
         if (route === '/content') loadCatalog('content');
         else if (route === '/models') loadCatalog('models');
         else if (route === '/community') refreshServices();
+        else if (route === '/packages') loadPackages();
         else if (route === '/health') startHealthLive();
     }
 
@@ -3498,6 +3501,7 @@ function renderFooter() {
     // Quick Links column
     html += '<div class="footer-col"><h4>Quick Links</h4>';
     html += '<a href="#/quickstart">Getting Started</a>';
+    html += '<a href="#/packages">Downloads</a>';
     html += '<a href="#/tools/ollama">Ollama</a>';
     html += '<a href="#/tools/llama-cpp">llama.cpp</a>';
     html += '<a href="#/tools/comfyui">ComfyUI</a>';
@@ -3661,6 +3665,55 @@ function renderActivity() {
     html += '</div>';
     return html;
 }
+
+// ===================== Downloads: the "what can I grab now?" list =============
+// Renders GET /api/packages — the box's PRESENT inventory (apps, AI models, the
+// offline library, and Val Ark's own source) as an easy list with direct
+// download links. Distinct from the Library/Models BROWSE pages, which offer
+// not-yet-downloaded items to request. Theme-aware via the shared CSS vars.
+const _PACKAGES_CSS = `<style>
+.pkg-intro{color:var(--text-muted,#8a8f98);margin:0 0 1rem;max-width:62ch}
+.pkg-wrap{overflow-x:auto;border:1px solid var(--border,#2a2d34);border-radius:12px}
+.pkg-table{width:100%;border-collapse:collapse;font-size:.92rem}
+.pkg-table th,.pkg-table td{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--border,#2a2d34);vertical-align:top}
+.pkg-table thead th{color:var(--text-muted,#8a8f98);font-weight:600;font-size:.78rem;text-transform:uppercase;letter-spacing:.03em}
+.pkg-table tbody tr:last-child td{border-bottom:0}
+.pkg-name{font-weight:650;color:var(--text-primary,#e8eaed)}
+.pkg-ver{font-weight:500;color:var(--text-muted,#8a8f98);font-size:.82rem}
+.pkg-desc{color:var(--text-muted,#8a8f98);font-weight:400;font-size:.82rem;margin-top:.15rem}
+.pkg-size{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pkg-dl{display:inline-block;padding:.3rem .8rem;border:1px solid var(--accent,#e0603a);border-radius:8px;color:var(--accent,#e0603a);text-decoration:none;font-size:.85rem;white-space:nowrap}
+.pkg-dl:hover{background:var(--accent,#e0603a);color:#fff}
+.pkg-note{color:var(--text-muted,#8a8f98);font-size:.85rem;margin-top:1rem}
+</style>`;
+const _PKG_KIND = { app: 'App', model: 'AI model', content: 'Library (ZIM)', source: 'Val Ark source' };
+function renderPackages() {
+    let html = `${_SHELL_CSS}${_PACKAGES_CSS}<div class="container" id="main-content">`;
+    html += renderBreadcrumb([{ label: 'Downloads' }]);
+    html += '<h1>Downloads</h1>';
+    html += `<p class="pkg-intro">Everything this box can hand you right now — apps, AI models, offline library files, and the Val Ark source itself. All served from here, no internet needed.</p>`;
+    if (!_packagesData) { html += `<p class="activity-empty" id="packages-list">Loading the list…</p></div>`; return html; }
+    const pkgs = (_packagesData.packages || []);
+    if (!pkgs.length) {
+        html += `<p class="activity-empty" id="packages-list">Nothing to download yet. As the box mirrors apps, models and library content, they’ll appear here automatically.</p></div>`;
+        return html;
+    }
+    html += `<div class="pkg-wrap"><table class="pkg-table" id="packages-list"><thead><tr>
+        <th>Name</th><th>Type</th><th>Platform</th><th class="pkg-size">Size</th><th></th></tr></thead><tbody>`;
+    for (const p of pkgs) {
+        html += `<tr class="pkg-row" data-kind="${esc(p.kind)}">
+            <td><div class="pkg-name">${esc(p.name)}${p.version ? ` <span class="pkg-ver">${esc(p.version)}</span>` : ''}</div>${p.desc ? `<div class="pkg-desc">${esc(p.desc)}</div>` : ''}</td>
+            <td>${esc(_PKG_KIND[p.kind] || p.kind)}</td>
+            <td>${esc(p.platform || '—')}</td>
+            <td class="pkg-size">${esc(formatBytes(p.size || 0))}</td>
+            <td><a class="pkg-dl" href="${esc(p.url)}" download>Download</a></td>
+        </tr>`;
+    }
+    html += `</tbody></table></div>`;
+    html += `<p class="pkg-note">${pkgs.length} package${pkgs.length === 1 ? '' : 's'} available · also machine-readable as JSON at <code>/api/packages</code>.</p>`;
+    html += '</div>';
+    return html;
+}
 function renderDownloadCard(d) {
     const pct = Math.max(0, Math.min(100, d.progress || 0));
     const running = d.status === 'running';
@@ -3742,6 +3795,15 @@ function loadModeration() {
 function loadHealth() {
     fetch('/api/status/health').then(r => r.ok ? r.json() : null).then(d => {
         if (d) { _healthData = d; if (getRoute() === '/health') scheduleRender(); }
+    }).catch(() => {});
+}
+
+// Downloads page: the present-inventory manifest (read-gated; a login wall or a
+// bare box just yields an empty list — never an error surface).
+let _packagesData = null;
+function loadPackages() {
+    fetch('/api/packages').then(r => r.ok ? r.json() : null).then(d => {
+        if (d) { _packagesData = d; if (getRoute() === '/packages') scheduleRender(); }
     }).catch(() => {});
 }
 // Live host gauges. Fires on the SAME 15s cadence as loadHealth — that interval is

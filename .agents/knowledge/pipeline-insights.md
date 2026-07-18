@@ -68,3 +68,25 @@ creds, or host paths.**
 - **More agents is not always better.** Match parallelism to the work; a methodical few beats a
   swarm when tasks interact or when a credit budget is at risk. Keep independent work on disjoint
   files to avoid merge collisions.
+
+## Bash server-test footguns (learned on #89)
+
+Two bugs that make a server‑booting `tests/test-*.sh` silently hit a STALE/leaked server and
+report nonsense (e.g. a populated mirror returning `count:0`):
+
+- **Never start the background server inside `$(command substitution)`.** `SRV_PID=$!` set in the
+  subshell never reaches the parent, so per‑step `kill "$SRV_PID"` and the EXIT trap kill nothing —
+  servers leak and later runs bind‑fail, so your `curl` hits a *previous* run's server. Start the
+  server in the PARENT (`start_srv() { … & SRV_PID=$!; ALL_PIDS="$ALL_PIDS $SRV_PID"; }`), track all
+  PIDs, and only the readiness probe runs in `$(…)`. On failure, `kill 395x` leftovers by port.
+- **`${VAR:+NAME=value}` is NOT an env‑assignment prefix.** A `NAME=value` produced by *expansion*
+  is a plain word, so bash tries to *run* it (`VALARK_TEST_FORCE_REMOTE=1: command not found`) and
+  the server never starts. Prefix the launch with `env` (which parses `NAME=value` args at runtime),
+  or write the assignment literally.
+- Give each throwaway server a **unique `VALARK_HTTPS_PORT`** (`$((port+9000))`) so its TLS listener
+  never collides with a live Ark's 8443 (the HTTP server still binds, but avoid the noise). See the
+  existing `tests/screenshots/playwright.config.ts` which does the same for :3001.
+- **Playwright deps live in the primary checkout, not a fresh worktree.** Symlink
+  `tests/screenshots/node_modules` → the main repo's install to run specs locally. Note the
+  `.gitignore` `node_modules/` (trailing slash) does NOT ignore a *symlink* of that name — don't
+  `git add -A`; commit explicit paths (or remove the symlink first).

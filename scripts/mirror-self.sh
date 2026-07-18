@@ -106,4 +106,26 @@ done
     echo "tarball=$(basename "$TARBALL")"
 } > "$META"
 
+# Checksums for the served artifacts. Computed ONCE here (mirror time), not on
+# every /api/packages request — the web server reads these back cheaply so the
+# manifest can expose a sha256 without ever hashing multi-GB files on a hot path.
+# Basenames only (relative), so the file is public-repo safe. Best-effort.
+# nullglob + an existence filter so a non-matching node-*.tar.gz glob can't make
+# sha256sum fail and discard the (good) bundle/tarball hashes.
+if command -v sha256sum >/dev/null 2>&1; then
+    (
+        cd "$DEST" || exit 0
+        shopt -s nullglob
+        real=()
+        for f in val-ark.bundle val-ark-latest.tar.gz node-*.tar.gz; do
+            [ -f "$f" ] && real+=("$f")
+        done
+        if [ "${#real[@]}" -gt 0 ] && sha256sum "${real[@]}" > SHA256SUMS.tmp 2>/dev/null; then
+            mv -f SHA256SUMS.tmp SHA256SUMS
+        else
+            rm -f SHA256SUMS.tmp
+        fi
+    ) 2>/dev/null || true
+fi
+
 log "self-mirror ready: ${ref} (clone: git clone <ark>/sources/val-ark/val-ark.bundle)"

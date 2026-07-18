@@ -6,6 +6,26 @@ later). See [README](README.md).
 
 ---
 
+## 2026‑07 — Packages manifest: served `/api/packages` = present inventory, not the catalog (#89 slice 1)
+
+- **Context:** the box already serves individual downloads (per‑platform app archives via
+  `/api/archive/`, the self‑replication bundle/tarball via `/sources/val-ark/`, ZIMs via kiwix) but
+  had no consolidated, machine‑ + human‑readable **packages list**. Epic #89 wants a versioned,
+  checksummed package set + a manifest the UI renders as a "downloads" list.
+- **Decision (this slice):** add a read‑gated `GET /api/packages` that enumerates what THIS box can
+  hand out **right now** — app/tool archives (per platform, version from `.version` markers), the
+  self‑replication source bundle/tarball/node runtimes (version from the mirror's `VERSION`, sha256
+  from a `SHA256SUMS`), on‑disk models, and complete ZIMs — each with a stable `id`, `name`, `kind`
+  (app|source|model|content), `platform`, `version`, `size`, optional `sha256`, `desc`, and a
+  **relative** `url`. Plus a minimal "Downloads" page (`#/packages`) that renders it. Deferred to
+  later slices: wiring artifacts into the CI/CD release + attaching the manifest to the GH Release.
+- **Why this shape:** it is deliberately DISTINCT from `/api/catalog/*` (the *upstream, not‑yet‑
+  downloaded* browse feed that one‑click `POST /api/request` pulls). `/api/packages` is the *present
+  inventory* — no network, no eviction, just "what's on disk to grab." Keeping URLs relative +
+  metadata‑only preserves the public‑repo / LAN‑only posture (no host paths or absolute URLs ever
+  cross the boundary); reusing the existing read‑gate keeps the same access posture as the library
+  it lists; hashing at mirror time (not per request) keeps the endpoint fast on a multi‑GB box.
+
 ## 2026‑07 — Release tags: unprefixed 0.x, minted by release.sh from the VERSION file (#64)
 
 - **Context:** the shipped series is **unprefixed** (`0.1.7`, `0.1.8`, `0.1.9`), created by hand

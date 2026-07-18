@@ -542,3 +542,28 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 - **`mirror-self.sh` SHA256SUMS + an empty glob.** `sha256sum a b node-*.tar.gz` with no node
   runtimes leaves `node-*.tar.gz` literal → sha256sum exits non‑zero → `&& mv` is skipped and the
   good hashes are discarded. Use `shopt -s nullglob` + an existence filter before hashing.
+
+## Ask assistant (`POST /api/ask`, #67)
+
+- **Client‑disconnect cleanup for a streaming response whose body was read first MUST bind to
+  `res.on('close')`, NOT `req.on('close')`.** `handleAsk` runs inside `readBody(req).then(...)`, so
+  by the time it attaches listeners the request body is fully drained and `req`'s `'close'` has
+  **already fired** at body‑end (Node auto‑destroys the consumed readable) — a `req.on('close')`
+  listener there is **dead code that never runs**. The consequence is a real resource‑exhaustion DoS:
+  a LAN/tailnet client that aborts mid‑stream (closes tab / fire‑and‑disconnect) leaves the spawned
+  `llama.cpp` child un‑SIGKILLed and its admission slot (`askInFlight`, cap `ASK_MAX_CONCURRENT`)
+  pinned until the child finishes generating `-n` tokens or the ~120s `ASK_TIMEOUT_S` backstop reaps
+  it — two aborts occupy both slots, 503‑ing legitimate callers and starving co‑resident community
+  services. `res` `'close'` is the true "client went away" signal for a streaming response and fires
+  exactly on disconnect; it **also** fires on normal completion after `res.end()`, so the cleanup
+  must stay idempotent (the existing `finished`/`released` guards make the normal‑completion `'close'`
+  a no‑op — no double‑release, no kill‑after‑completion). Rule of thumb: **bind disconnect cleanup to
+  the object that is still live when the client leaves — the response, not the already‑consumed
+  request.**
+- **Test the disconnect path with a real (stub) child, not `VALARK_TEST_NO_SPAWN`.** The slot leak is
+  only observable when an actual child is alive and holding the slot. `tests/test-ask-api.sh` drives a
+  stub `llama-completion` that streams a token then lingers (`HOLDME` → `sleep`), aborts the client
+  mid‑stream (`curl --max-time` closes the socket), then asserts the child was SIGKILLed
+  (`pgrep -f HOLDME` empty) **and** a subsequent ask is not 503 (slot freed). That assertion fails
+  against the `req.on('close')` build and passes with the `res.on('close')` fix — the coverage gap that
+  let the bug ship was that no test exercised a mid‑stream disconnect.

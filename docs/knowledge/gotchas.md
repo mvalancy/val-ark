@@ -115,6 +115,29 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   missing). Never use a "findmnt resolves to non-root fs" heuristic — it wrongly locks out valid
   single-disk-server layouts where the data root lives on the root fs.
 
+## First-run / bootstrap hand-off (#90)
+
+- <a id="bootstrap-handoff-90"></a>**`./start.sh` (no args) opens the interactive TUI menu — it does NOT start the
+  web server.** The web UI/API server is `./start.sh serve [port]` (the `serve` dispatch case). Any
+  "next steps" text that tells a fresh owner to run bare `./start.sh` to "start the web UI" is wrong
+  — they land in a text menu, not a running box. `bootstrap.sh`'s post-setup hand-off prints
+  `cd <dir> && ./start.sh serve` for this reason. Keep this in mind anywhere you write start guidance.
+- <a id="bootstrap-env-optional-90"></a>**Editing `.env` (`VAL_ARK_DATA`) is OPTIONAL, not a required
+  first step.** `scripts/lib/valark-env.sh` autodetects the largest writable mount (`/mnt/*`, `/data`,
+  `/srv/val-ark`, …) and only falls back to the repo. So the hand-off must only tell the owner to set
+  `VAL_ARK_DATA` when the resolved `DATA_ROOT` lands on the **OS/boot volume** (would fill the system
+  disk) — the exact condition `setup.sh` warns on (`DATA_ROOT == PROJECT_ROOT` **or** the same `df`
+  source as `/`). `bootstrap_on_os_vol()` encodes that verdict; `bootstrap_handoff()` omits the `.env`
+  step otherwise. Telling every owner to hand-edit `.env` first is misleading noise for the common case.
+- <a id="bootstrap-lib-test-seam-90"></a>**Unit-test `bootstrap.sh` offline via its library seam.**
+  `VALARK_BOOTSTRAP_LIB=1 . bootstrap.sh` sources it and returns at a sentinel **before** the installer
+  runs (no host resolution, no clone, no setup, no server) — so the pure hand-off helpers
+  (`bootstrap_port_from_env`, `bootstrap_on_os_vol`, `bootstrap_handoff`, `bootstrap_print_handoff`) can
+  be asserted hermetically. A full-flow idempotency test runs the whole installer against a stubbed
+  checkout (fake `curl`/`git` on `PATH`, stub `setup.sh`) with a canary `curl` proving zero network
+  calls. See `tests/test-bootstrap.sh`. The sentinel is unset in production, so `curl … | bash` is
+  unaffected, and `__VALARK_HOST__` (templated by `server.js` at serve time) stays a placeholder.
+
 ## Test / VM harness
 
 - **`run-all.sh`'s green/red gate must not depend on node.** The runner's exit code came

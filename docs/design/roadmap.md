@@ -82,6 +82,14 @@ below are the appliance around it.**
 - Curate the NSFW model into `models-extra.tsv`.
 
 ## Phase 8 — The assistant, everywhere
+- **[DONE — Ask Val Ark, slice 1]** A minimal offline ask affordance: `GET /api/status/ask`
+  (runtime + model readiness, read-gated) + `POST /api/ask` (streams the box's own small chat
+  model's answer as SSE frames), and a Home "Ask Val Ark" card. Reuses the proven single-shot
+  llama.cpp invocation (verify.sh / moderation) — argv-array spawn (no shell), token cap,
+  wall-clock SIGKILL, concurrency admission cap, and FAIL-SOFT (a bare box answers "not installed
+  yet", never a 5xx). See [`../knowledge/decisions.md`](../knowledge/decisions.md).
+- **NEXT** — embed it everywhere: doc-grounding/RAG over the bundled Linux/setup docs + ZIM,
+  per-page context beyond Home, and — where safe — a button that applies the fix.
 - **"Ask Val Ark"** embedded across the shell: the on-box LLM (already curated) + the bundled
   Linux/setup docs, context-aware help, and — where safe — a button that applies the fix.
 

@@ -174,4 +174,36 @@ test.describe('Mobile nav mirrors the four tabs (#61 / #91)', () => {
       await expect(page.locator(`.nav-links a.nav-link:has-text("${label}")`)).toBeVisible();
     }
   });
+
+  // #107: the hamburger must be operable by keyboard alone. It was a <div onclick>
+  // (focusable via tabindex but DEAD to Enter/Space); a native <button> fixes it.
+  // A keyboard-only user on a narrow viewport must be able to open the primary nav.
+  test('hamburger is a native button and opens the nav via Tab + Enter/Space (#107)', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto(`file://${WEB_UI}`);
+    const hamburger = page.locator('.nav-hamburger');
+    await expect(hamburger).toBeVisible({ timeout: 10000 });
+    // It is a real <button> (not a <div>) — the crux of the fix.
+    await expect(hamburger).toHaveJSProperty('tagName', 'BUTTON');
+    await expect(hamburger).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('.nav-links')).not.toHaveClass(/mobile-open/);
+
+    // Reach it purely by keyboard: focus the logo, then Tab lands on the hamburger
+    // (next focusable in source order), then Enter activates it — a <div onclick>
+    // would ignore Enter entirely.
+    await page.locator('.nav-logo').focus();
+    await page.keyboard.press('Tab');
+    await expect(hamburger).toBeFocused();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+    await expect(page.locator('.nav-links')).toHaveClass(/mobile-open/);
+    await expect(hamburger).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('.nav-links a.nav-link:has-text("Home")')).toBeVisible();
+
+    // Space toggles it closed again (also native to <button>).
+    await page.keyboard.press(' ');
+    await page.waitForTimeout(150);
+    await expect(page.locator('.nav-links')).not.toHaveClass(/mobile-open/);
+    await expect(hamburger).toHaveAttribute('aria-expanded', 'false');
+  });
 });

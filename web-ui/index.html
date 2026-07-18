@@ -3410,6 +3410,9 @@ function router() {
         });
     }
 
+    // Wire the Home "Ask Val Ark" card whenever Home is on screen.
+    if (document.getElementById('askForm')) initAskCard();
+
     // Once per navigation (not on every rAF repaint): pull the live catalog for the
     // browse panels and refresh community-service status for the Community hub.
     if (route !== _lastRoute) {
@@ -3454,9 +3457,9 @@ function renderNav(route) {
     return `
     <nav class="top-nav" aria-label="Primary">
         <a href="#/" class="nav-logo">Val Ark</a>
-        <div class="nav-hamburger" onclick="toggleMobileNav(this)" role="button" tabindex="0" aria-label="Toggle menu" aria-expanded="false" aria-controls="primary-nav">
+        <button type="button" class="nav-hamburger" onclick="toggleMobileNav(this)" aria-label="Toggle menu" aria-expanded="false" aria-controls="primary-nav">
             <span></span><span></span><span></span>
-        </div>
+        </button>
         <div class="nav-links" id="primary-nav">
             ${navLink('#/', 'home', 'Home')}
             ${navLink('#/content', 'library', 'Library')}
@@ -3587,6 +3590,143 @@ function renderHomeStatus() {
         <a class="home-card util" href="#/settings"><span class="hc-ic" aria-hidden="true">💽</span><span class="hc-b"><span class="hc-t">Storage</span><span class="hc-s">${diskPct || 'Usage &amp; cleanup'}</span></span></a>
         <a class="home-card util" href="#/settings"><span class="hc-ic" aria-hidden="true">⚙</span><span class="hc-b"><span class="hc-t">Settings</span><span class="hc-s">Manage this box</span></span></a>
     </div>`;
+}
+
+// "Ask Val Ark" — the on-box assistant affordance (Phase 8, slice 1). A single input
+// that POSTs to /api/ask and streams the box's own AI answer back (offline). Starts
+// disabled; initAskCard() enables it once /api/status/ask reports a runtime + model,
+// or shows a one-click "get the helper" affordance when the model isn't downloaded yet.
+function renderAskCard() {
+    return `<section class="ask-card" aria-labelledby="ask-h">
+        <div class="ask-head">
+            <span class="ask-ic" aria-hidden="true">💬</span>
+            <div>
+                <h2 id="ask-h" class="ask-title">Ask Val Ark</h2>
+                <p class="ask-sub" id="askSub">Ask this box anything — it answers on its own AI, fully offline.</p>
+            </div>
+        </div>
+        <form class="ask-row" id="askForm" autocomplete="off">
+            <input type="text" id="askInput" class="ask-input" placeholder="e.g. How do I add a disk?" aria-label="Ask Val Ark a question" maxlength="2000" disabled>
+            <button type="submit" class="ask-btn" id="askBtn" disabled>Ask</button>
+        </form>
+        <div class="ask-answer soft" id="askAnswer" role="status" aria-live="polite" hidden></div>
+        <div class="ask-note" id="askGet" hidden>
+            <span id="askGetMsg">The AI helper isn’t downloaded yet.</span>
+            <button class="ask-getbtn" id="askGetBtn" type="button" data-id="qwen2.5-1.5b-instruct-gguf">Get the helper</button>
+        </div>
+    </section>`;
+}
+
+let _askBusy = false;
+// Wire the Home ask card once per render (idempotent) + fetch readiness.
+async function initAskCard() {
+    const form = document.getElementById('askForm');
+    if (!form || form.dataset.wired) return;
+    form.dataset.wired = '1';
+    form.addEventListener('submit', (e) => { e.preventDefault(); askSubmit(); });
+    const getBtn = document.getElementById('askGetBtn');
+    if (getBtn) getBtn.addEventListener('click', () => triggerRequest('model', getBtn.dataset.id || 'qwen2.5-1.5b-instruct-gguf', getBtn));
+    try {
+        const r = await fetch('/api/status/ask');
+        if (r.status === 401) return;                 // read-gated; the login wall handles auth
+        applyAskReady(await r.json());
+    } catch (_) { /* offline / not reachable — leave disabled */ }
+}
+function applyAskReady(d) {
+    const input = document.getElementById('askInput');
+    const btn = document.getElementById('askBtn');
+    if (!input || !btn) return;
+    const sub = document.getElementById('askSub');
+    const get = document.getElementById('askGet');
+    const getBtn = document.getElementById('askGetBtn');
+    const getMsg = document.getElementById('askGetMsg');
+    if (d && d.ready) {
+        input.disabled = false; btn.disabled = false;
+        if (get) get.hidden = true;
+        if (sub) sub.textContent = 'Ask this box anything — it answers on its own AI, fully offline.';
+    } else {
+        input.disabled = true; btn.disabled = true;
+        if (get) {
+            get.hidden = false;
+            if (getBtn && d && d.modelId) getBtn.dataset.id = d.modelId;
+            if (getMsg) getMsg.textContent = (d && d.reason === 'runtime')
+                ? 'The AI helper runtime isn’t installed on this box yet.'
+                : 'The AI helper isn’t downloaded yet.';
+        }
+    }
+}
+// Parse one SSE frame ("event: X\ndata: {...}") → {event, data}. Comment lines (': ping') ignored.
+function _parseSSEFrame(frame) {
+    let event = 'message', data = '';
+    for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data += line.slice(5).trim();
+    }
+    let parsed = null; if (data) { try { parsed = JSON.parse(data); } catch (_) {} }
+    return { event, data: parsed };
+}
+function _askFinish(btn) {
+    _askBusy = false;
+    if (btn) { btn.disabled = false; btn.textContent = btn.dataset.o || 'Ask'; }
+}
+// POST the question and render the streamed answer. ALL output goes through
+// textContent (auto-escaped) — a token like "<script>" renders as literal text, never runs.
+async function askSubmit() {
+    if (_askBusy) return;
+    const input = document.getElementById('askInput');
+    const btn = document.getElementById('askBtn');
+    const ans = document.getElementById('askAnswer');
+    if (!input || !btn || !ans) return;
+    const q = (input.value || '').trim();
+    if (!q) { input.focus(); return; }
+    _askBusy = true;
+    btn.dataset.o = btn.textContent; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Thinking…';
+    ans.hidden = false; ans.className = 'ask-answer thinking';
+    ans.textContent = 'Thinking — this can take a minute on this box…';
+    let acc = '', gotToken = false;
+    try {
+        const resp = await fetch('/api/ask', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: q, context: 'page ' + (location.hash || '#/') }),
+        });
+        if (resp.status === 401) { _askFinish(btn); if (typeof signIn === 'function') signIn('Sign in to ask Val Ark.'); return; }
+        if (resp.status === 503) {
+            let d = {}; try { d = await resp.json(); } catch (_) {}
+            ans.className = 'ask-answer soft'; ans.textContent = (d && d.message) || 'The assistant is busy — please try again in a moment.';
+            _askFinish(btn); return;
+        }
+        if (!resp.body || !resp.body.getReader) {   // no stream support → best-effort text
+            ans.className = 'ask-answer'; ans.textContent = await resp.text(); _askFinish(btn); return;
+        }
+        const reader = resp.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            let idx;
+            while ((idx = buf.indexOf('\n\n')) >= 0) {
+                const frame = buf.slice(0, idx); buf = buf.slice(idx + 2);
+                const ev = _parseSSEFrame(frame);
+                if (ev.event === 'token' && ev.data && typeof ev.data.t === 'string') {
+                    if (!gotToken) { gotToken = true; ans.className = 'ask-answer'; ans.textContent = ''; }
+                    acc += ev.data.t; ans.textContent = acc;           // textContent = XSS-safe
+                } else if (ev.event === 'soft') {
+                    ans.className = 'ask-answer soft';
+                    ans.textContent = (ev.data && ev.data.message) || 'The assistant isn’t available yet.';
+                } else if (ev.event === 'error' && !gotToken) {
+                    ans.className = 'ask-answer soft';
+                    ans.textContent = (ev.data && ev.data.message) || 'The assistant had a problem.';
+                }
+            }
+        }
+        if (gotToken && !acc.trim()) ans.textContent = '(No answer — try rephrasing your question.)';
+    } catch (e) {
+        ans.className = 'ask-answer soft';
+        ans.textContent = 'Could not reach the assistant: ' + ((e && e.message) || 'network error');
+    }
+    _askFinish(btn);
 }
 
 // The admin console: one Settings list (Basic by default, Expert reveals the rest).
@@ -4334,6 +4474,24 @@ const _SHELL_CSS = `<style>
 .dl-mini{padding:.25rem .7rem;border:1px solid var(--border,#2a2d34);border-radius:7px;background:transparent;color:var(--text-primary,#e8eaed);font-size:.8rem;cursor:pointer}
 .dl-mini:hover{border-color:var(--accent,#e0603a)}
 @media(prefers-reduced-motion:reduce){.dl-card-fill.anim{animation:none}}
+.ask-card{border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--bg-card,var(--bg-primary,#16181d));padding:1rem 1.1rem;margin:0 0 2rem}
+.ask-head{display:flex;gap:.7rem;align-items:flex-start;margin-bottom:.75rem}
+.ask-ic{font-size:1.6rem;line-height:1}
+.ask-title{margin:0;font-size:1.05rem;font-weight:700}
+.ask-sub{margin:.15rem 0 0;color:var(--text-muted,#8a8f98);font-size:.86rem}
+.ask-row{display:flex;gap:.5rem;flex-wrap:wrap}
+.ask-input{flex:1;min-width:200px;padding:.6rem .8rem;border:1px solid var(--border,#2a2d34);border-radius:10px;background:var(--bg-primary,#0f1115);color:var(--text-primary,#e8eaed);font-size:.95rem}
+.ask-input:focus{outline:none;border-color:var(--accent,#e0603a)}
+.ask-input:disabled{opacity:.6;cursor:not-allowed}
+.ask-btn{padding:.6rem 1.2rem;border:0;border-radius:10px;background:var(--accent,#e0603a);color:#fff;font-weight:650;cursor:pointer;font-size:.95rem;white-space:nowrap}
+.ask-btn:hover:not(:disabled){filter:brightness(1.06)}
+.ask-btn:disabled{opacity:.6;cursor:not-allowed}
+.ask-answer{margin-top:.8rem;padding:.8rem 1rem;border:1px solid var(--border,#2a2d34);border-radius:10px;background:var(--bg-primary,#0f1115);color:var(--text-primary,#e8eaed);white-space:pre-wrap;word-break:break-word;line-height:1.5;font-size:.92rem}
+.ask-answer.thinking{color:var(--text-muted,#8a8f98);font-style:italic}
+.ask-answer.soft{color:var(--text-muted,#8a8f98)}
+.ask-note{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:.75rem;color:var(--text-muted,#8a8f98);font-size:.88rem}
+.ask-getbtn{padding:.4rem .9rem;border:1px solid var(--accent,#e0603a);border-radius:8px;background:transparent;color:var(--accent,#e0603a);font-weight:600;cursor:pointer;font-size:.85rem}
+.ask-getbtn:hover{background:rgba(224,96,58,.1)}
 </style>`;
 
 function renderHome() {
@@ -4348,6 +4506,9 @@ function renderHome() {
     // Consumer shell: a calm "is it well?" status summary + big area/utility cards,
     // shown first (a health-app glance), with the full catalog below to explore.
     html += renderHomeStatus();
+
+    // "Ask Val Ark": one input to ask the box's own offline AI (Phase 8, slice 1).
+    html += renderAskCard();
 
     // Hero
     html += `

@@ -147,13 +147,66 @@ if flock -n "$WLOCK" -c 'true'; then pass; else \
     fail "loop.lock LEAKED into the detached web daemon — a fresh flock -n must succeed after a cycle (daemon must be spawned with 8>&-)"; fi
 kill "$DPID" 2>/dev/null
 
+# --- 6b. functional: a community-service spawn must NOT leak the cycle lock (issue #56) ---
+# The web server is not the only daemon reachable from loop_once: ensure_services runs
+# `timeout 120 bash "$sh" start … 8>&-` under the cycle lock, and each service script
+# spawns long-lived detached daemons (ngIRCd/The Lounge/maddy/NodeBB/…). The 8>&- on
+# that central guard must close fd 8 for the whole service subtree so no service daemon
+# inherits loop.lock (a shared fd holds the flock forever, deadlocking every later cycle).
+# Drive the REAL ensure_services with a fake service that spawns a long-lived detached
+# daemon — exactly the way section 6 drives _va_start_web — then assert a fresh flock -n
+# ACQUIRES the lock while the daemon is still alive. FAILS if 8>&- is dropped from the
+# ensure_services guard (daemon inherits fd 8); PASSES with it.
+SVCROOT="$T/svcroot"; mkdir -p "$SVCROOT/services"
+cat > "$SVCROOT/services/chat.sh" <<EOF
+#!/bin/bash
+[ "\$1" = "start" ] || exit 0
+# spawn a detached, long-lived daemon that keeps whatever fds it inherits open
+setsid bash -c 'echo \$\$ > "$T/svc.pid"; exec sleep 30' </dev/null >/dev/null 2>&1 &
+disown 2>/dev/null || true
+exit 0
+EOF
+chmod +x "$SVCROOT/services/chat.sh"
+# extend cleanup to also reap the service daemon
+trap 'kill "$(cat "$T/daemon.pid" 2>/dev/null)" 2>/dev/null; kill "$(cat "$T/svc.pid" 2>/dev/null)" 2>/dev/null; [ -n "$HOLDER" ] && kill "$HOLDER" 2>/dev/null; rm -rf "$T"' EXIT
+
+SVCLOCK="$STATE_DIR/loop3.lock"; rm -f "$T/svc.pid"
+SH="$T/svcharness.sh"
+{
+    echo '_DIR="'"$SVCROOT"'"'
+    echo 'log(){ :; }'
+    echo 'VALARK_SERVICES="chat"'
+    sed -n '/^ensure_services()/,/^}/p' "$LOOP"
+} > "$SH"
+grep -q 'timeout .*bash "\$sh" start' "$SH" && pass || fail "service harness must contain the real ensure_services"
+# Simulate one run_locked cycle: take loop.lock on fd 8, launch the service, then release
+# OUR copy — exactly what the `run` loop's `exec 8>&-` does per iteration.
+(
+    . "$SH"
+    exec 8>"$SVCLOCK"
+    flock -n 8 || exit 7
+    ensure_services
+    exec 8>&-
+) 2>/dev/null
+for i in $(seq 1 100); do [ -f "$T/svc.pid" ] && break; sleep 0.03; done
+SPID="$(cat "$T/svc.pid" 2>/dev/null)"
+[ -n "$SPID" ] && kill -0 "$SPID" 2>/dev/null && pass \
+    || fail "the fake service daemon must be alive during the lock check (else the test proves nothing)"
+# THE assertion: the detached service daemon must NOT hold loop.lock.
+if flock -n "$SVCLOCK" -c 'true'; then pass; else \
+    fail "loop.lock LEAKED into a detached service daemon — ensure_services must spawn with 8>&-"; fi
+kill "$SPID" 2>/dev/null
+
 # --- 7. structural: cycle-reachable daemon spawns close the lock fd (8>&-) -----------
 # Belt-and-suspenders for the spawns section 6 can't all drive live: the web server
-# spawn AND the central service-launch guard must close fd 8.
-awk '/^_va_start_web\(\) \{/,/^\}/' "$LOOP" | grep -q '8>&-' && pass \
-    || fail "_va_start_web must close the lock fd (8>&-) on the web-server spawn"
-sed -n '/^ensure_services()/,/^}/p' "$LOOP" | grep -q '8>&-' && pass \
-    || fail "ensure_services must close the lock fd (8>&-) when it spawns a service script"
+# spawn AND the central service-launch guard must close fd 8. Assert the OPERATIVE
+# redirection, NOT the explanatory comment: both functions carry a "# 8>&- : …" comment,
+# so a bare `grep 8>&-` would still PASS even if the real redirect were deleted (#96).
+# Strip full-line comments first, then require 8>&- on the actual spawn command line.
+awk '/^_va_start_web\(\) \{/,/^\}/' "$LOOP" | grep -v '^[[:space:]]*#' | grep -q 'setsid.*8>&-' && pass \
+    || fail "_va_start_web must close the lock fd (8>&-) on the actual web-server spawn line (not just a comment)"
+sed -n '/^ensure_services()/,/^}/p' "$LOOP" | grep -v '^[[:space:]]*#' | grep -q 'timeout .*bash .*8>&-' && pass \
+    || fail "ensure_services must close the lock fd (8>&-) on the actual service-spawn line (not just a comment)"
 
 echo "loop-lock: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

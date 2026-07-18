@@ -21,11 +21,13 @@ Usage:
     kiwix_catalog.py eng spa fra ara hin   # multiple languages
 
 Exit code is a COMPLETENESS signal, not just liveness: it is 0 only when EVERY
-requested language fetched successfully. If ANY language's feed fails (timeout,
-429, non-200, truncated/unparseable body) it exits non-zero, so a caller can
-refuse to overwrite a more-complete cache with a partial subset. Whatever rows
-did fetch are still written to stdout, so a first-boot caller with no cache can
-still bootstrap from a partial result. See catalog.sh:catalog_refresh_zim.
+requested language fetched successfully AND yielded at least one entry. If ANY
+language's feed fails (timeout, 429, non-200, truncated/unparseable body) OR comes
+back as a well-formed but ENTRY-LESS HTTP-200 feed (0 rows for a requested
+language, #95) it exits non-zero, so a caller can refuse to overwrite a
+more-complete cache with a partial subset. Whatever rows did fetch are still
+written to stdout, so a first-boot caller with no cache can still bootstrap from a
+partial result. See catalog.sh:catalog_refresh_zim.
 """
 import sys
 import urllib.request
@@ -105,9 +107,22 @@ def main():
     langs = sys.argv[1:] or ["eng"]
     rows = []
     failed = []
+    empty = []
     for lang in langs:
         try:
+            before = len(rows)
             parse(fetch(lang), rows)
+            if len(rows) == before:
+                # HTTP 200 with a well-formed but ENTRY-LESS feed for a requested
+                # language yields 0 rows. Unlike an exception, this looks "successful",
+                # but accepting it would let an empty feed atomically replace a fuller
+                # cache and silently DROP that language (#95). Treat 0 rows for a
+                # requested language as INCOMPLETE so the completeness gate keeps the
+                # fuller cache — the exception path already self-preserves; this closes
+                # the remaining 200/empty tail without changing the bootstrap behaviour
+                # (stdout still carries whatever rows we got).
+                empty.append(lang)
+                sys.stderr.write("kiwix_catalog: EMPTY feed (HTTP 200, 0 entries) for lang=%s\n" % lang)
         except Exception as ex:  # noqa
             failed.append(lang)
             sys.stderr.write("kiwix_catalog: fetch failed for lang=%s: %s\n" % (lang, ex))
@@ -123,9 +138,10 @@ def main():
     # the full multi-language cache with this subset. Exit non-zero unless every
     # requested language fetched. stdout already carries whatever we got, so a
     # cache-less first boot can still bootstrap from a partial result.
-    if failed:
-        sys.stderr.write("kiwix_catalog: INCOMPLETE — %d/%d languages failed: %s\n"
-                         % (len(failed), len(langs), " ".join(failed)))
+    incomplete = failed + empty
+    if incomplete:
+        sys.stderr.write("kiwix_catalog: INCOMPLETE — %d/%d languages unusable (failed: %s; empty: %s)\n"
+                         % (len(incomplete), len(langs), " ".join(failed) or "-", " ".join(empty) or "-"))
         return 2
     return 0
 

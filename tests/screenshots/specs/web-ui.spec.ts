@@ -1413,6 +1413,33 @@ test.describe('Val Ark - Consumer Shell (Home status + Settings + Activity)', ()
     expect(fns).toEqual(['function', 'function', 'function']);
   });
 
+  test('Activity dl-card: a double-quote id cannot inject a handler attribute (#121)', async ({ page }) => {
+    // The dl-card mini Cancel button carries its id in data-id; esc() would leave a `"`
+    // intact and let it break OUT of the attribute (a real onmouseover). escAttr() encodes
+    // it. Fails against the pre-escAttr render, passes after the fix.
+    await page.goto(`file://${WEB_UI}#/activity`);
+    await page.waitForSelector('#main-content', { timeout: 5000 });
+    const evilId = 'dl-x" onmouseover="window.__xss=1" data-z="';
+    await page.evaluate((id) => {
+      // @ts-ignore  — _activeDownloads is a page-global const (see the test above)
+      _activeDownloads.set(id, { id, type: 'content', status: 'running', progress: 25, lastLine: 'Progress: 25%', startedAt: Date.now() - 30000 });
+      (window as any).scheduleRender();
+    }, evilId);
+    await page.waitForSelector('.dl-card .dl-mini', { timeout: 3000 });
+    const card = page.locator('.dl-card').first();
+    const mini = card.locator('.dl-mini');
+    await expect(mini).toHaveText('Cancel');
+    // No handler attribute leaked onto the card container or its button…
+    expect(await card.evaluate((el) => el.getAttribute('onmouseover'))).toBeNull();
+    expect(await mini.evaluate((el) => el.getAttribute('onmouseover'))).toBeNull();
+    // …the id round-trips verbatim inside data-id…
+    expect(await mini.evaluate((el) => el.getAttribute('data-id'))).toBe('dl-x" onmouseover="window.__xss=1" data-z="');
+    // …and hovering executes nothing.
+    await mini.hover();
+    await page.waitForTimeout(50);
+    expect(await page.evaluate(() => (window as any).__xss)).toBeUndefined();
+  });
+
   test('the shell renders in light theme too', async ({ page }) => {
     await page.goto(`file://${WEB_UI}#/settings`);
     await page.waitForSelector('.settings-grid', { timeout: 5000 });

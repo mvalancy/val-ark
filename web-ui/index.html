@@ -3028,6 +3028,22 @@ function esc(str) {
     div.textContent = str;
     return div.innerHTML;
 }
+// Escape a value for interpolation into a DOUBLE-QUOTED HTML *attribute*. esc() is a
+// TEXT-node escape: it neutralizes < > & but NOT quotes, so a value like `x" onmouseover="…`
+// dropped into `data-id="${esc(v)}"` breaks OUT of the attribute and injects a real
+// event-handler attribute (executable script) with no < > needed. escAttr() also escapes
+// " and ' so the value stays inside its quotes. Use escAttr() for ANY value interpolated
+// into an attribute; use esc() only for text between tags. (Cleaner still: setAttribute /
+// element.dataset, which never touches an HTML parser.) (#121)
+function escAttr(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 function toggleMobileNav(hamburger) {
     hamburger.classList.toggle('open');
@@ -3892,14 +3908,14 @@ function renderDownloadCard(d) {
     const running = d.status === 'running';
     const st = _dlStatus(d);
     const eta = running ? _dlEta(d) : '';
-    return `<div class="dl-card" data-id="${esc(String(d.id))}">
+    return `<div class="dl-card" data-id="${escAttr(d.id)}">
         <div class="dl-card-top"><span class="dl-card-name">${esc(_dlLabel(d))}</span><span class="dl-pill dl-${st.cls}">${esc(st.label)}</span></div>
         <div class="dl-card-bar"><span class="dl-card-fill${running ? ' anim' : ''}" style="width:${pct}%"></span></div>
         <div class="dl-card-meta">
             <span class="dl-card-pct">${running ? pct + '%' : ''}${eta ? ' · ' + esc(eta) : ''}</span>
             <span class="dl-card-line">${esc((d.lastLine || '').toString().slice(0, 72))}</span>
-            <span class="dl-card-act">${running ? `<button class="dl-mini" onclick="cancelDownload('${esc(String(d.id))}')">Cancel</button>`
-                : (d.status === 'failed' ? `<button class="dl-mini" onclick="retryDownload('${esc(String(d.type))}')">Retry</button>` : '')}</span>
+            <span class="dl-card-act">${running ? `<button class="dl-mini" data-dl-act="cancel" data-id="${escAttr(d.id)}" onclick="dlMiniAction(this)">Cancel</button>`
+                : (d.status === 'failed' ? `<button class="dl-mini" data-dl-act="retry" data-type="${escAttr(d.type)}" onclick="dlMiniAction(this)">Retry</button>` : '')}</span>
         </div>
     </div>`;
 }
@@ -3926,6 +3942,17 @@ function _fmtDuration(ms) {
 }
 function retryDownload(type) {
     triggerDownload(['tools', 'models', 'content', 'update'].includes(type) ? type : 'content', 'all');
+}
+// dl-card mini buttons carry their id/type in data-* attributes and invoke a CONSTANT
+// handler (dlMiniAction(this), which reads them via getAttribute) — no id/type reaches an
+// inline-JS parser. But that alone is NOT enough: the id/type is still interpolated into a
+// double-quoted attribute, so it MUST be attribute-escaped (escAttr, quotes included) or a
+// `"` in the value would break out and inject a real event-handler attribute. esc()
+// (text-context, no quote escaping) is insufficient for an attribute. (#121)
+function dlMiniAction(el) {
+    const act = el.getAttribute('data-dl-act');
+    if (act === 'cancel') cancelDownload(el.getAttribute('data-id'));
+    else if (act === 'retry') retryDownload(el.getAttribute('data-type'));
 }
 // Merge the server's full download objects (with startedAt) into the SSE-built map.
 async function loadDownloads() {
@@ -4001,8 +4028,13 @@ function stopHealthLive() { if (_healthTimer) { clearInterval(_healthTimer); _he
 // A cross-page bell/inbox that aggregates self-heal notifications from the
 // read-only GET /api/status/notifications. Dismiss + "seen" persist client-side in
 // localStorage so the endpoint stays read-only (server-side cross-device dismiss is
-// a documented follow-up). All rendered text is escaped (esc()) — XSS-safe. The bell
-// is a real <button> (keyboard + screen-reader friendly); the panel closes on Esc or
+// a documented follow-up). Rendered TEXT is escaped with esc() (neutralizes <>& but NOT
+// quotes). The dismiss/restore buttons carry their id in a data-id ATTRIBUTE, read by a
+// delegated click handler (_onNotifAction) — so the id never reaches an inline-JS parser,
+// AND the data-id value is attribute-escaped (escAttr, quotes included) so a `"` in it
+// can't break out of the attribute and inject an event handler. esc() alone is NOT safe
+// for an attribute value. (#121)
+// The bell is a real <button> (keyboard + screen-reader friendly); it closes on Esc or
 // a backdrop click. Deferred to later slices: routing into mail/board/chat, an
 // Immediately/Daily/Never frequency setting, and an on-box LED.
 let _notifData = null, _notifOpen = false, _notifFilter = 'all', _notifTimer = null;
@@ -4089,8 +4121,8 @@ function _notifRows() {
         const sev = _notifSev(n.severity);
         const when = _ago(n.ts);
         const action = dismissed
-            ? `<button type="button" class="notif-act" onclick="restoreNotif('${esc(n.id)}')" aria-label="Restore notification">Restore</button>`
-            : `<button type="button" class="notif-act" onclick="dismissNotif('${esc(n.id)}')" aria-label="Dismiss notification">Dismiss</button>`;
+            ? `<button type="button" class="notif-act" data-notif-act="restore" data-id="${escAttr(n.id)}" aria-label="Restore notification">Restore</button>`
+            : `<button type="button" class="notif-act" data-notif-act="dismiss" data-id="${escAttr(n.id)}" aria-label="Dismiss notification">Dismiss</button>`;
         return `<li class="notif-item notif-${esc(n.severity)}">
             <span class="notif-dot" aria-hidden="true">${sev.icon}</span>
             <div class="notif-body">
@@ -4124,6 +4156,11 @@ function openNotifPanel() {
     panel.setAttribute('aria-modal', 'false');
     panel.setAttribute('aria-labelledby', 'notif-title');
     panel.innerHTML = renderNotifPanelBody();
+    // Delegated on the (persistent) panel element so it survives the innerHTML swap in
+    // setNotifFilter and is GC'd with the panel on close — dismiss/restore ids ride in a
+    // data-id attribute (escAttr-escaped at render so they can't break out of it), read
+    // from the DOM via getAttribute, never interpolated into inline JS (#121).
+    panel.addEventListener('click', _onNotifAction);
     document.body.appendChild(backdrop);
     document.body.appendChild(panel);
     _notifOpen = true;
@@ -4147,6 +4184,17 @@ function setNotifFilter(f) {
     _notifFilter = f;
     const panel = document.getElementById('notif-panel');
     if (panel) panel.innerHTML = renderNotifPanelBody();
+}
+// Delegated click handler for the notification panel: dismiss/restore carry their id in
+// data-id (read from the DOM, not a JS string), so even a future less-constrained id can
+// never become executable script here — defense-in-depth over the server id-constraint (#121).
+function _onNotifAction(e) {
+    const btn = e.target.closest('button[data-notif-act]');
+    if (!btn) return;
+    const id = btn.getAttribute('data-id');
+    if (!id) return;
+    if (btn.getAttribute('data-notif-act') === 'restore') restoreNotif(id);
+    else dismissNotif(id);
 }
 function dismissNotif(id) {
     const d = _notifIdSet(NOTIF_DISMISS_KEY); d.add(id); _notifSaveIdSet(NOTIF_DISMISS_KEY, d);
@@ -7302,7 +7350,7 @@ function renderProgressPanel() {
         html += `<div class="dl-item">
             <div class="dl-item-header">
                 <span class="dl-item-type">${dl.type}${statusIcon}</span>
-                ${dl.status === 'running' ? `<button class="dl-cancel-btn" onclick="cancelDownload('${id}')">Cancel</button>` : ''}
+                ${dl.status === 'running' ? `<button class="dl-cancel-btn" data-dl-act="cancel" data-id="${escAttr(id)}" onclick="dlMiniAction(this)">Cancel</button>` : ''}
             </div>
             <div class="dl-progress-bar"><div class="dl-progress-fill" style="width:${dl.progress}%"></div></div>
             <div class="dl-item-line">${((dl.lastLine || (dl.status === 'running' ? 'Starting...' : dl.status)) + '').slice(0, 60)}</div>

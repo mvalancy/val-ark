@@ -96,7 +96,17 @@ if [ -n "$NODE_DIR" ]; then
     echo -e "  Report: ${BOLD}${RESULTS_DIR}/report.html${NC}"
     echo -e "  Host it: ${BOLD}(cd ${RESULTS_DIR} && python3 -m http.server 8099)${NC} -> http://<host>:8099/report.html"
 else
-    echo -e "  ${YELLOW}node not found — cannot render HTML report${NC}"; RC=0
+    echo -e "  ${YELLOW}node not found — cannot render HTML report${NC}"
+    # No generate.mjs to aggregate the results, so scan the suite JSONs
+    # directly (results.sh writes "failed":N unspaced) — every suite (bash
+    # validators, services e2e, VM matrix) records failures there, and the
+    # gate must not go green just because node is missing.
+    if grep -q '"failed":[1-9]' "$RESULTS_DIR"/*.json 2>/dev/null; then
+        echo -e "  ${RED}suite failures recorded in ${RESULTS_DIR} — exiting non-zero${NC}"
+        RC=1
+    else
+        RC=0
+    fi
 fi
 echo "=================================================================="
 echo ""

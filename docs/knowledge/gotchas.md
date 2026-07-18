@@ -73,6 +73,13 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Test / VM harness
 
+- **`run-all.sh`'s green/red gate must not depend on node.** The runner's exit code came
+  solely from `report/generate.mjs`; with no node on the host (fresh appliance, minimal
+  container) it exited 0 even when suites failed. Every suite writes `results/*.json` with an
+  unspaced `"failed":N` (results.sh), so the no-node path greps `"failed":[1-9]` across them
+  and exits non-zero — zero-dep, and it covers bash validators, services e2e and the VM matrix
+  uniformly (their sub-runner exit codes are deliberately not the signal; the JSONs are).
+  Sandbox-tested by `test-runner-exit.sh` (copied runner + node-free PATH shim).
 - **multipass is snap‑confined:** its `home` interface reads only **non‑hidden files under
   `$HOME`**. Staging a transfer from `/tmp` → "sftp cannot access"; from `~/.cache` (hidden) →
   "permission denied." **Fix:** stage under a non‑hidden repo path (e.g. `tests/results/`).

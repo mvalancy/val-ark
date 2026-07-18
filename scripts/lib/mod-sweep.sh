@@ -36,12 +36,20 @@ log(){ printf '%s\n' "$*"; }
 _now(){ date +%s 2>/dev/null || echo 0; }
 _rand(){ head -c6 /dev/urandom 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n' || echo "$$"; }
 
-# JSON-escape for the queue line: backslash, quote, AND the control chars that would
-# otherwise split a JSONL record or inject a forged line (newline/tab/CR in a filename).
+# JSON-escape for the queue line: backslash, quote, AND every C0 control byte. A raw
+# control char in a filename would otherwise pass straight into queue.jsonl, and JSON is
+# forbidden from containing a literal control char in a string — so server.js _readJsonl's
+# JSON.parse THROWS and silently drops the record, orphaning a quarantined file in the
+# review queue (invisible, un-actionable). We escape newline/tab/CR to their short forms
+# and every remaining 0x01-0x1f byte to \u00XX (NUL cannot occur in a Unix filename).
 _json(){
-    local s="$1"
+    local s="$1" i c hex
     s=${s//\\/\\\\}; s=${s//\"/\\\"}
     s=${s//$'\n'/\\n}; s=${s//$'\r'/\\r}; s=${s//$'\t'/\\t}
+    for i in 1 2 3 4 5 6 7 8 11 12 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31; do
+        c=$(printf "\\$(printf '%03o' "$i")")
+        case "$s" in *"$c"*) hex=$(printf '\\u%04x' "$i"); s=${s//"$c"/$hex} ;; esac
+    done
     printf '%s' "$s"
 }
 
@@ -109,32 +117,55 @@ sweep() {
     if [ "$MOD_ENABLED" != 1 ]; then log "moderation disabled — sweep skipped"; return 0; fi
     compact_marker
 
+    # No configured/existing upload dir → the sweep has nothing to screen. Say so plainly
+    # (not a bare "scanned 0") so the loop log is discoverable: enabled screening claims
+    # nothing while VAL_ARK_UPLOADS / VALARK_MODERATION_DIRS are unset or point nowhere.
+    local dirs; dirs=$(sweep_dirs)
+    if [ -z "$dirs" ]; then
+        log "sweep: no upload dirs to screen (set VAL_ARK_UPLOADS or VALARK_MODERATION_DIRS)"
+        return 0
+    fi
+
     local scanned=0 flagged=0 errors=0 f sz mt key out dec reason rel qdst
     while IFS= read -r d; do
         [ -d "$d" ] || continue
         # -H: dereference a symlinked store dir given on the command line (else find -P
         # returns nothing for it and the whole store is silently unscreened) but NOT
-        # symlinks found during traversal. -print0/-d '' so odd filenames can't split.
+        # symlinks found during traversal. We enumerate BOTH regular files and symlinks
+        # (-type f -o -type l): a symlink is screened too, but as the LINK — never followed.
+        # -print0/-d '' so odd filenames can't split.
         while IFS= read -r -d '' f; do
-            [ -f "$f" ] || continue
             case "$f" in "$MOD_STATE"/*) continue ;; esac       # never screen our own state tree
-            sz=$(stat -c%s "$f" 2>/dev/null || echo 0)
+            # Accept regular files AND symlinks; skip anything else (sockets, fifos, …). The
+            # -L test MUST come before -f, because -f follows the link (a link→file passes it).
+            if [ -L "$f" ]; then :; elif [ -f "$f" ]; then :; else continue; fi
+            sz=$(stat -c%s "$f" 2>/dev/null || echo 0)          # -L not passed → lstat, never follows
             mt=$(stat -c%Y "$f" 2>/dev/null || echo 0)
             key=$(_key "$f" "$sz" "$mt" "$MOD_SENS")
             already_screened "$key" && continue
             [ "$scanned" -ge "$MAX_FILES" ] && break 2
             scanned=$((scanned + 1))
-            # Screen it at the ADMIN's configured sensitivity (type decided by magic bytes
-            # INSIDE moderation.sh, never here) — not a hardcoded 'balanced' default.
-            out=$(bash "$MOD" check "$f" --sensitivity "$MOD_SENS" 2>/dev/null)
-            dec=$(printf '%s' "$out" | sed -n 's/.*"decision":"\([a-z]*\)".*/\1/p' | head -1)
-            case "$dec" in allow|block|hold|skip) ;; *) dec=hold ;; esac   # unknown/empty → fail-closed hold
-            if [ "$dec" = allow ]; then
-                mark_screened "$key" allow
-                continue
+            if [ -L "$f" ]; then
+                # A symlink in a plain-file store is never legitimate and must NEVER be read
+                # THROUGH — following it is a TOCTOU / out-of-store exfiltration bypass (a link
+                # to flagged or out-of-tree content, incl. a whole dir tree or back into the
+                # quarantine, would be served from the store while the sweep ignored it). Fail
+                # closed: quarantine the LINK ITSELF (mv moves the link, never its target).
+                # See docs/knowledge/gotchas.md (never follow traversal symlinks).
+                out=''; dec=hold; reason="symlink in store"
+            else
+                # Screen it at the ADMIN's configured sensitivity (type decided by magic bytes
+                # INSIDE moderation.sh, never here) — not a hardcoded 'balanced' default.
+                out=$(bash "$MOD" check "$f" --sensitivity "$MOD_SENS" 2>/dev/null)
+                dec=$(printf '%s' "$out" | sed -n 's/.*"decision":"\([a-z]*\)".*/\1/p' | head -1)
+                case "$dec" in allow|block|hold|skip) ;; *) dec=hold ;; esac   # unknown/empty → fail-closed hold
+                if [ "$dec" = allow ]; then
+                    mark_screened "$key" allow
+                    continue
+                fi
+                # non-allow (block|hold|skip) → MOVE the file out of the store (quarantine).
+                reason=$(printf '%s' "$out" | sed -n 's/.*"reason":"\([^"]*\)".*/\1/p' | head -1)
             fi
-            # non-allow (block|hold|skip) → MOVE the file out of the store (quarantine).
-            reason=$(printf '%s' "$out" | sed -n 's/.*"reason":"\([^"]*\)".*/\1/p' | head -1)
             rel=$(printf '%s' "$f" | sed 's#[^A-Za-z0-9._-]#_#g' | tail -c 80)
             qdst="${QUARANTINE}/$(_now)_$(_rand)_${rel}"
             # Refuse to clobber, and only record the file as resolved if the move ACTUALLY
@@ -148,8 +179,8 @@ sweep() {
                 errors=$((errors + 1))
                 log "ERROR: could not quarantine $f (still served — will retry next sweep)"
             fi
-        done < <(find -H "$d" -type f -print0 2>/dev/null)
-    done < <(sweep_dirs)
+        done < <(find -H "$d" \( -type f -o -type l \) -print0 2>/dev/null)
+    done <<< "$dirs"
 
     log "sweep: scanned ${scanned}, quarantined ${flagged}, errors ${errors}"
     if [ "$errors" -gt 0 ]; then return 11; fi     # hard failure: a flagged file is still served

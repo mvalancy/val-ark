@@ -1,81 +1,139 @@
-# Val Ark — Current State & Gap Analysis
+# Val Ark — Current State (as of `VERSION` 0.1.14)
 
-> Honest baseline for the consumer-appliance redesign. This answers, directly, the
-> questions: *Can a non-technical person commission it from a web UI? Is there an
-> admin menu? What happens if they forget their password? Can they choose open vs.
-> account-gated? Are there real access controls?* Short answer today: **no, no, N/A,
-> no, and not really.** Val Ark is currently a power-user / CLI tool. The redesign
-> turns it into a router-app / health-app appliance.
+> Snapshot of the **shipped** consumer appliance. It answers, directly, the questions this
+> redesign set out to solve: *Can a non-technical person commission it from a web UI? Is there
+> an admin area? What happens if they forget their password? Can they choose open vs.
+> account-gated? Are there real access controls?* Short answer today: **yes, yes, yes, yes,
+> yes.** The CLI still works for power users, but it is no longer the only path.
+>
+> [roadmap.md](roadmap.md) is the live phase tracker (what shipped in which release, what is
+> still open). This file is the point-in-time "what is true right now" companion to it.
 
 Part of the [design hierarchy](README.md).
 
 ---
 
-## Who Val Ark is built for today vs. who it must serve
+## Where it started vs. where it is now
 
-| | Today (implicit) | Target |
+The redesign began from a power-user / CLI baseline (mid-2026, pre-Phase-1). Phases 1–3 and 5
+have since shipped, Phase 6 and 7 shipped their core slices, and Phase 8 shipped its first slice.
+
+| | Baseline (pre-redesign) | Now (0.1.14) |
 |---|---|---|
-| User | A Linux admin comfortable with `.env`, `ssh`, `bash` | A person who "barely knows what GitHub is" |
-| Setup | Edit files + run scripts in a terminal | A guided wizard in a browser (or on a plugged-in monitor) |
-| Manage | Read logs, run CLI commands | Simple menus; the box explains itself |
-| Recover | Know the right script/flag | An obvious "I'm locked out / start over" path |
+| User | A Linux admin comfortable with `.env`, `ssh`, `bash` | A person who "barely knows what GitHub is" (CLI still available) |
+| Setup | Edit files + run scripts in a terminal | Browser (or console) first-boot wizard behind a claim token |
+| Manage | Read logs, run CLI commands | Four-tab shell: Home · Library · Activity · Settings |
+| Recover | Know the right script/flag | Paper recovery card, forgot-password flow, Safe Mode, two-tier reset |
 | Mental model | "A mirror engine you configure" | "One EASY button that just works" |
 
 ---
 
 ## What exists today
 
-**Setup is entirely command-line.**
-- `cp .env.example .env`, then hand-edit `VAL_ARK_DATA` and other keys.
-- `./start.sh setup` (installs deps + Node; interactive y/N prompts — now also headless via `VALARK_YES`).
-- `./start.sh serve` starts the web server; `./scripts/loop.sh install 30` installs the 24/7 self-heal cron.
-- There is an interactive **terminal** menu (`./start.sh` with no args) — but nothing in a browser.
+**Commissioning is a browser (or console) wizard, not hand-edited files.**
+- A first-boot flow gated by a one-time **claim token** (fail-closed): create the first admin,
+  name the box, confirm the found disk, pick a profile/emphasis, offer port 80, and print a
+  **recovery card**. Backed by `GET /api/setup/state`, `POST /api/setup/commission`,
+  `GET /api/setup/recovery-card`, `POST /api/setup/profile`.
+- The CLI path still works (`start.sh setup` / `serve`, headless via `VALARK_YES`, `loop.sh
+  install` for the 24/7 cron) — it is now one option, not the only one.
 
-**The web UI is a catalog + a download console, not an admin console.**
-- Home / Software / Models / **Library** / **Community** / Getting Started.
-- It can now browse the live catalog and one-click **request** downloads, show live download progress (SSE), start community services, and download mirrored app artifacts.
-- It has **no** settings/config screen, no first-run wizard, no admin area, no user management, no system/health dashboard, no log/error viewer.
+**The web UI is a four-tab consumer shell (epic #91), not a bare catalog.**
+- **Home · Library · Activity · Settings** (`web-ui/index.html` `renderNav`). Library carries an
+  in-page sub-nav — Software · Models · Content · **Downloads**.
+- **Home** = a status light + one sentence + big cards, including an **Ask Val Ark** box.
+- **Settings** = a consolidated admin panel with a Basic/Expert detail toggle; **Activity** shows
+  the download queue and the self-heal event feed.
+- **Downloads** lists the packages actually present on the box via `GET /api/packages` (present
+  inventory, not the catalog — epic #89 slice 1).
 
-**Access control is "open on the trusted network," with action-gating.**
-- The UI has **no login** — anyone who can reach the address sees everything.
-- Write actions (`POST /api/download/*`, `/api/request`, `/api/service/start`) are gated to **LAN + tailnet + localhost** with a per-IP rate limit. Reads are open.
-- The appliance is assumed reachable only on the LAN + tailscale (never the public internet).
+**There is a real Val Ark identity + operator-chosen access model.**
+- **Use Mode: Open / Passworded / Accounts**, two roles (Admin + optional Viewer), with
+  **localhost & console implicitly trusted**. Login/logout/recover via `GET /api/auth/status`,
+  `POST /api/auth/login|logout|recover`; admin-only POSTs are enforced server-side
+  (`ADMIN_ONLY_POSTS`).
+- Underneath, the original floor still holds: write actions and the reads behind the wall are
+  gated to **LAN + tailnet + localhost** with a per-IP rate limit; the box is assumed reachable
+  only on the LAN + tailscale, never the public internet.
 
-**Identity/accounts live *inside individual community services*, not in Val Ark.**
-- Forum (NodeBB): self-service register. Chat (The Lounge): host runs `chat.sh adduser`. Mail (maddy): host runs `mail.sh creds create`. Paste (MicroBin): a shared credential written to `<data>/credentials.txt`.
-- There is **no Val Ark account, no Val Ark password, and therefore no Val Ark password-recovery.**
+**Recovery is fully local and paper-backed.**
+- Forgot-password flow, the printed recovery card, **Safe Mode** boot (core-only when config is
+  broken), and a two-tier reset that **never wipes content** (`valark/state` config is physically
+  separate from the multi-TB content). (Phase 2 — v1.3.0 / v1.4.0.)
 
-**Configuration is files + env, not UI.**
-- Footprint caps (`VALARK_MAX_GB`, `VALARK_MODEL_MAX_GB`), ports, services enabled (`VALARK_SERVICES`), curation weights (`catalog.sh`), tool-refresh cadence — all live in `.env` or source. None are editable from the UI.
+**Health, metrics, and self-heal are a real dashboard (Phase 6, issue #28 closed).**
+- `#/health` composes the loop/verify reports into strict green/yellow/red per-component cards
+  with fault attribution and a **healed-events feed**; **one-click Repair** =
+  `POST /api/maintenance/repair` (fixed-argv `loop.sh once`, admin-only, no request data reaches
+  the shell). `loop.sh` writes `state/selfheal.json` + `heal-events.jsonl`; `verify.sh` writes
+  per-check results; served read-gated at `GET /api/status/health`.
+- **Live host gauges** at `GET /api/status/metrics` (CPU/memory/load/uptime/net/temperature,
+  read from `/proc` + `os` by the zero-dep server) plus a **zero-dep on-disk history ring buffer**
+  (`state/metrics-history.jsonl`) at `GET /api/status/metrics/history`, which drives inline
+  sparklines on each tile. The planned Telegraf/InfluxDB retention stack was **descoped to an
+  opt-in Advanced/fleet upgrade** (issue #66); the offline notification center is the last open
+  Phase-6 slice (issue #69).
 
-**Monitoring is logs + a self-heal loop, no dashboard.**
-- `loop.sh` repairs/verifies/fills every cycle and writes `state/selfheal.json`; `verify.sh` checks apps. Metrics tooling (Telegraf/InfluxDB/Grafana) is *mirrored* but **not running**.
-- The UI shows a disk/storage bar and live download progress, but no system health, no service uptime history, no alerts, no error surface.
+**Shared uploads are moderated, fail-closed (Phase 7, 0.1.9).**
+- On-device moderation screens content (`POST /api/moderation/check`), an admin **Safety card** +
+  review queue (`GET /api/status/moderation`, `GET /api/moderation/queue`, admin-only
+  `POST /api/moderation/review`), tunable via `POST /api/setup/moderation` (`VALARK_MODERATION_*`).
+  An error, timeout, or ambiguous result **holds/quarantines** — never allows. A loop sweep
+  (`loop.sh` step 7c) quarantines flagged files in the explicit plain-file uploads area
+  (`VAL_ARK_UPLOADS` / `VALARK_MODERATION_DIRS`); per-service (paste/forum/mail) pre-store
+  intercepts are a documented follow-up.
 
-**Errors are surfaced as raw text / files.**
-- Failures land in `logs/` and `state/logs/`; the UI shows an `alert()` or an inline "run this script" hint. There is no friendly "something went wrong → here's what and how to fix it" experience, and no in-UI retry/repair.
+**The box can start to help you: Ask Val Ark (Phase 8 slice 1, 0.1.14, issue #67).**
+- A Home "Ask Val Ark" card streams the box's own small chat model's answer over SSE
+  (`POST /api/ask`, readiness at `GET /api/status/ask`), reusing the hardened single-shot
+  llama.cpp path (argv-array spawn, token cap, wall-clock kill, concurrency cap) and **failing
+  soft** on a bare box ("not installed yet", never a 5xx). **No RAG yet** — it passes only the
+  question plus an optional caller-supplied context string.
+
+**It replicates itself offline, with real release artifacts.**
+- `/bootstrap.sh` hands out a host-aware offline installer; the source **bundle + tarball** are
+  served at `/sources/val-ark/` (mirrored by `scripts/mirror-self.sh`). Tagging a release runs
+  `.github/workflows/release.yml`, which builds the same git bundle + `val-ark/`-prefixed source
+  tarball + `SHA256SUMS` and attaches them to the GitHub release (epic #88 slice).
+- File serving is **realpath-contained**: `/api/archive/*` and `findZimFiles` reject in-tree
+  symlinks that escape the data tree (#101 / #112).
 
 ---
 
 ## Direct answers to the questions raised
 
-1. **Easy web-UI commissioning of a new system?** — *No.* Setup is CLI-only. The first thing a new user hits is a shell, an `.env`, and `./start.sh`.
-2. **An actual admin menu?** — *No web admin.* Only a terminal menu.
-3. **Forgot the password — recovery on a local monitor / different localhost experience?** — *N/A / no.* There is no Ark password to forget, no recovery flow, and no distinct localhost/console "rescue" experience beyond write-actions being localhost/LAN-gated.
-4. **Can the operator choose open vs. account-gated?** — *No.* It is always open-on-LAN; there is no setting to require accounts.
-5. **Real access controls (roles, admin vs. user)?** — *No.* No Ark identity, no roles, no admin/guest distinction. Only network-position gating on writes.
+1. **Easy web-UI commissioning of a new system?** — *Yes.* A browser/console first-boot wizard
+   behind a claim token; no `.env` editing required (the CLI path still exists for power users).
+2. **An actual admin area?** — *Yes.* The Settings tab is a consolidated admin panel (Basic/Expert),
+   with Health, Activity, Downloads, and moderation surfaces.
+3. **Forgot the password — recovery on a local monitor / localhost experience?** — *Yes.* A
+   forgot-password flow, a printed recovery card, Safe Mode, and a two-tier reset that keeps
+   content; localhost & console are implicitly trusted.
+4. **Can the operator choose open vs. account-gated?** — *Yes.* Use Mode is **Open / Passworded /
+   Accounts**, chosen at setup and changeable later.
+5. **Real access controls (roles, admin vs. user)?** — *Yes.* A Val Ark identity with Admin +
+   optional Viewer roles and server-enforced admin-only actions, on top of the network-position
+   gate on writes.
 
 ---
 
-## The gaps to close (what the redesign must add)
+## What's still open
 
-1. **First-boot commissioning wizard** — browser-based (and console-friendly for headless boxes): pick disk, set the box's name, choose the access model, create the first admin, choose what to mirror first, one-click "make it reachable at http://<name>/". No `.env` editing.
-2. **A real admin console in the web UI** — a settings/system area with clear IA: Storage, Downloads & Priorities, Services, Network & Access, Users, Health, Logs/Errors, Update, Backup/Replicate.
-3. **A Val Ark identity + access model the operator chooses** — Open / Passworded / Accounts, with an admin vs. everyone distinction and real controls; localhost/console always trusted.
-4. **Recovery** — forgot-password + lockout + factory-reset, workable both on a plugged-in monitor (console rescue) and headless (localhost-only reset), with a clear, safe path.
-5. **Priority picker + download/monitoring dashboard** — pick "what matters to me" in plain language; watch ZIM/software/model downloads with progress, queue, and pause/resume.
-6. **Error & self-heal UX** — surface problems in plain language, auto-fix what the loop can, and offer a one-click "try to repair" for the rest — never a raw stack trace.
-7. **Monitoring foundation** — stand up the metrics stack (Telegraf/InfluxDB, Grafana optional) so health/alerts are real and drive self-healing.
-8. **"Baked-in intelligence"** — sensible defaults, plain-language everything, progressive disclosure, and the offline setup-assistant model wired in so the box can literally help the user.
+- **Storage as a pool (Phase 4).** Still single-root (`valark-env.sh`). The SeaweedFS *service*
+  exists (opt-in), but the pool descriptor (`state/storage.json`), add/remove-drive, and union
+  mount are future work.
+- **Offline notification center (issue #69).** The last open Phase-6 slice — a bell/inbox routing
+  self-heal events into the box's own mail/board/chat.
+- **Opt-in retention stack (issue #66).** Telegraf + InfluxDB (+ optional Grafana) for
+  long-horizon retention and fleet rollup, grafted onto the same `metrics/history` endpoint —
+  deferred, since native sparklines already cover the single-box case.
+- **Assistant, everywhere (issue #67 next slices).** Doc-grounding/RAG over the bundled Linux/setup
+  docs + ZIM, per-page context beyond Home, and safe "apply the fix" buttons.
+- **Per-service moderation enforcement.** A pre-store intercept or service-native hook for
+  paste/forum/mail — a recorded deliberate follow-up (see [`../knowledge/decisions.md`](../knowledge/decisions.md)).
+- **Epic remainders.** Fuller dev→main release automation (#88), a broader published package set
+  (#89), and continued easy-setup / onboarding polish (#90 / #91).
 
-The rest of this hierarchy specifies each of these, informed by how the best comparable products (Synology DSM, TrueNAS, Home Assistant, Umbrel/CasaOS, consumer routers, and health apps) solve them.
+The rest of this hierarchy specifies each phase, informed by how the best comparable products
+(Synology DSM, TrueNAS, Home Assistant, Umbrel/CasaOS, consumer routers, and health apps) solve
+these problems.

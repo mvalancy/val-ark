@@ -98,7 +98,7 @@ the existing repair logic exposed as a friendly page instead of a dead port
 - **Safe Mode** boot path (shared with [recovery.md](recovery.md)) + the always-matching
   color/LED grammar.
 
-## As built (Health/Repairs UX — shipped; metrics stack next)
+## As built (Health/Repairs UX + live metrics + history — shipped)
 
 - **Reports the loop already had — now actually written.** `verify.sh` serialises every
   functional check into `verify.json` as `checks[]` (`{status, comp, label}`, `comp` ∈
@@ -116,5 +116,13 @@ the existing repair logic exposed as a friendly page instead of a dead port
   a **fixed-argv** `bash loop.sh once` — the loop's own fixers — spawned detached, deduped +
   rate-limited, **no request data reaches the command**. Per-service Restart reuses
   `POST /api/service/start`; Safe-Mode uses the existing Recover flow.
+- **Live metrics + history — shipped.** `GET /api/status/metrics` reads host gauges straight from
+  `/proc` + `os` (CPU/memory/load/uptime/net/temperature); a **zero-dep on-disk ring buffer**
+  (`state/metrics-history.jsonl`, single-writer server) serves `GET /api/status/metrics/history`,
+  which draws an inline sparkline on each System tile (falling back to a neutral "live-only"
+  indicator only when the ring is empty). This replaced the Telegraf/InfluxDB dependency for the
+  single-appliance case.
 - Entry points: the Home status strip's "Health & repairs ›" link, Settings → Health, and the
-  Activity → Events pointer. **Next:** feed live Telegraf/InfluxDB metrics into the same strip.
+  Activity → Events pointer. **Next:** the offline notification center (issue #69, the last open
+  slice of the now-closed #28); the Telegraf/InfluxDB retention stack is a deferred opt-in
+  Advanced/fleet upgrade (issue #66).

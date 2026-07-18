@@ -585,9 +585,11 @@ function computePackages() {
         const platDir = path.join(toolsDir, platform);
         let pstat; try { pstat = fs.statSync(platDir); } catch (_) { continue; }
         if (!pstat.isDirectory()) continue;
+        if (realpathWithin(platDir, toolsDir) === null) continue;   // #101: no escape via a platform symlink
         for (const entry of readdirSafe(platDir)) {
             if (entry.startsWith('.')) continue;
             const full = path.join(platDir, entry);
+            if (realpathWithin(full, toolsDir) === null) continue;  // #101: skip in-tree symlinks that escape ROOT
             let st; try { st = fs.statSync(full); } catch (_) { continue; }
             const isDir = st.isDirectory();
             packages.push({
@@ -618,6 +620,7 @@ function computePackages() {
     const srcVersion = mirrorRef || APP_VERSION;
     const pushSource = (file, name, platform, desc) => {
         const full = path.join(vaDir, file);
+        if (realpathWithin(full, vaDir) === null) return;   // #101: skip a symlink escaping the source dir
         let st; try { st = fs.statSync(full); } catch (_) { return; }
         if (!st.isFile()) return;
         const pkg = {
@@ -643,9 +646,11 @@ function computePackages() {
         const catDir = path.join(MODEL_ROOT, category);
         let cstat; try { cstat = fs.statSync(catDir); } catch (_) { continue; }
         if (!cstat.isDirectory()) continue;
+        if (realpathWithin(catDir, MODEL_ROOT) === null) continue;   // #101: no escape via a category symlink
         for (const entry of readdirSafe(catDir)) {
             if (entry.startsWith('.')) continue;
             const full = path.join(catDir, entry);
+            if (realpathWithin(full, MODEL_ROOT) === null) continue; // #101: skip in-tree symlinks that escape ROOT
             let st; try { st = fs.statSync(full); } catch (_) { continue; }
             const isDir = st.isDirectory();
             packages.push({
@@ -667,6 +672,7 @@ function computePackages() {
     for (const f of readdirSafe(zimDir)) {
         if (f.startsWith('.') || !f.endsWith('.zim')) continue;
         const full = path.join(zimDir, f);
+        if (realpathWithin(full, zimDir) === null) continue;   // #101: skip a symlink escaping the zim dir
         let st; try { st = fs.statSync(full); } catch (_) { continue; }
         if (!st.isFile()) continue;
         packages.push({
@@ -1511,6 +1517,24 @@ function isPathSafe(resolved, baseDir) {
     return path.resolve(resolved).startsWith(base) || path.resolve(resolved) === path.resolve(baseDir);
 }
 
+// Realpath containment (issue #101). isPathSafe() above is purely LEXICAL, so a
+// symlink planted INSIDE a served tree (tools/models/content/sources) that points
+// OUTSIDE ROOT passes it — and fs.stat/statSync then FOLLOW the link. This resolves
+// every symlink in `target` and confirms the REAL path is still inside the REAL
+// `baseDir`. baseDir itself may be a symlink onto the data disk (the tools/models/
+// content/sources trees ARE — the layout symlinks the repo back onto the big disk),
+// so we realpath the base too and compare real-to-real; a legitimate within-tree
+// symlink stays contained and still serves. Returns the resolved real path when
+// contained, else null (dangling/absent links and an unreadable base → null, so the
+// caller 404s / skips). Never throws.
+function realpathWithin(target, baseDir) {
+    let base, real;
+    try { base = fs.realpathSync(baseDir); } catch (_) { return null; }
+    try { real = fs.realpathSync(target); } catch (_) { return null; }
+    if (real === base || real.startsWith(base + path.sep)) return real;
+    return null;
+}
+
 function serveStatic(res, filePath, req) {
     fs.stat(filePath, (err, stat) => {
         if (err) return send404(res);
@@ -1583,6 +1607,10 @@ function serveArchive(res, req, relPath) {
     if (!ARCHIVE_DIRS.includes(top)) return send404(res);
     const target = path.join(ROOT, clean);
     if (!isPathSafe(target, path.join(ROOT, top))) return send404(res);
+    // Beyond the lexical check: an in-tree symlink could point outside ROOT and
+    // fs.stat would follow it. Require the realpath to stay within the (realpathed)
+    // top-level served dir before serving. Dangling links → null → 404. (#101)
+    if (realpathWithin(target, path.join(ROOT, top)) === null) return send404(res);
 
     fs.stat(target, (err, stat) => {
         if (err) return send404(res);

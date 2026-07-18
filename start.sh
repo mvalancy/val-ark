@@ -707,12 +707,29 @@ case "${1:-}" in
         python3 "${SCRIPTS}/optimize-images.py"
         ;;
     serve)
-        _port="${2:-3000}"
         _node="$HOME/.local/node/bin/node"
         [ ! -x "$_node" ] && _node=$(which node 2>/dev/null)
         if [ -z "$_node" ]; then echo -e "${RED}Node.js not found${NC}"; exit 1; fi
+        # Port resolution MIRRORS server.js (issue #105): an explicit `serve <port>`
+        # wins; with NO port arg we pass NOTHING to server.js and let it fall through
+        # to VALARK_WEB_PORT (env or .env) || 3000. Passing a hardcoded 3000 here used
+        # to override a custom VALARK_WEB_PORT, so `./start.sh serve` bound 3000 while
+        # the bootstrap hand-off printed the .env port — a dead link. Deriving the
+        # port only for the printed URL keeps that URL in agreement with the bound port.
+        _srv_args=()
+        if [ -n "${2:-}" ]; then
+            _port="$2"
+            _srv_args=("$_port")
+        else
+            _port="${VALARK_WEB_PORT:-}"
+            if [ -z "$_port" ]; then
+                _port="$(sed -n 's/^[[:space:]]*VALARK_WEB_PORT[[:space:]]*=//p' "${SCRIPT_DIR}/.env" 2>/dev/null | head -1)"
+                _port="${_port//[[:space:]]/}"; _port="${_port//\"/}"; _port="${_port//\'/}"
+            fi
+            _port="${_port:-3000}"
+        fi
         echo -e "  ${GREEN}http://localhost:${_port}${NC}"
-        exec "$_node" "${SCRIPTS}/server.js" "$_port"
+        exec "$_node" "${SCRIPTS}/server.js" "${_srv_args[@]}"
         ;;
     port80|port-80)
         # Make this machine reachable at http://<its-ip>/  (no :3000 to remember).

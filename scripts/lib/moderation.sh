@@ -12,10 +12,10 @@
 # yields no usable verdict — the answer is HOLD, never a silent allow. The
 # common bare-box/CI/VM case (no model) MUST resolve to hold with zero inference.
 #
-# Runtime (no new deps): text via llama-cli + the mirrored Llama-Guard-3-8B; image
-# via llama-mtmd-cli + a mirrored tiny VLM (moondream2/SmolVLM) — the exact
-# verify.sh single-turn invocation. Type is decided by MAGIC BYTES, never the
-# client-supplied extension/Content-Type. Tests inject a stub via VALARK_MODERATION_CMD.
+# Runtime (no new deps): text via llama-completion (llama-cli fallback) + the mirrored
+# Llama-Guard-3-8B; image via llama-mtmd-cli + a mirrored tiny VLM (moondream2/SmolVLM).
+# Type is decided by MAGIC BYTES, never the client-supplied extension/Content-Type.
+# Tests inject a stub via VALARK_MODERATION_CMD.
 ###############################################################################
 set -o pipefail
 _MOD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -116,17 +116,44 @@ _mod_parse_verdict() {
     # ambiguous / empty → emit nothing → mod_decide holds
 }
 
+# Both classifier prompts end with a fixed "Answer only:" sentinel line. If that
+# sentinel appears in the RAW output, the binary echoed the prompt (REPL-style builds
+# ignore/reject the suppression flags — issue #50) — and the echoed prompt itself
+# contains "unsafe" plus the user's own content, which unsafe-wins parsing misreads as
+# a verdict (every clean file blocked). Keep ONLY the text after the LAST sentinel
+# line: everything up to it is our own prompt, never the model's answer. No sentinel →
+# the output is already prompt-free → unchanged. Model emitted nothing after the echo
+# → empty → the caller HOLDS (fail-closed, never allow).
+_MOD_SENTINEL='Answer only:'
+_mod_strip_echo() {
+    case "$1" in *"$_MOD_SENTINEL"*) ;; *) printf '%s' "$1"; return ;; esac
+    printf '%s\n' "$1" | awk -v s="$_MOD_SENTINEL" \
+        '{ l[NR] = $0; if (index($0, s)) n = NR } END { for (i = n + 1; i <= NR; i++) print l[i] }'
+}
+
 # --- run the text classifier (Llama-Guard) → echo RAW output (parsed by caller) ---
+# Binary choice mirrors verify.sh's fleet pattern (issue #50): newer llama.cpp builds
+# turned llama-cli into a REPL that REJECTS -no-cnv ("--no-conversation is not
+# supported by llama-cli") and ECHOES the prompt — whose own "unsafe" then wins the
+# unsafe-wins parse, blocking 100% of clean text. The old single-shot behavior ships
+# as llama-completion: prefer it, fall back to llama-cli (older mirrors). Invocation
+# is single-turn CONVERSATION mode (-st, no -no-cnv) so the guard model's chat
+# template is applied — raw completion makes Llama-Guard continue the prompt
+# ("unsafe\n\nsafe") instead of answering it. --no-display-prompt keeps the prompt
+# (and the user content embedded in it) out of the parsed output; --temp 0 for
+# deterministic verdicts. _mod_strip_echo backstops any build that echoes regardless.
 _mod_run_text() {
     local f="$1" bin model out
-    bin="$(_mod_find_bin llama-cli)"; [ -x "$bin" ] || return 3
+    bin="$(_mod_find_bin llama-completion)"
+    [ -x "$bin" ] || bin="$(_mod_find_bin llama-cli)"
+    [ -x "$bin" ] || return 3
     model=$(find "${MODELS_DIR:-}/safety" -iname '*guard*.gguf' -size +10M 2>/dev/null | head -1)
     [ -n "$model" ] || return 3
     # Llama-Guard classifies the supplied content; single-turn, stdin closed.
     local content; content="$(head -c "$MOD_MAX_BYTES" "$f" 2>/dev/null)"
     out=$(timeout "$MOD_TIMEOUT" "$bin" -m "$model" -p "Task: classify the following user content as safe or unsafe.
 Content: ${content}
-Answer only: safe or unsafe." -n 16 -st -no-cnv --no-warmup </dev/null 2>/dev/null) || return 4
+Answer only: safe or unsafe." -n 16 -st -cnv --no-warmup --no-display-prompt --temp 0 </dev/null 2>/dev/null) || return 4
     printf '%s' "$out"
 }
 
@@ -137,9 +164,13 @@ _mod_run_image() {
     model=$(find "${MODELS_DIR:-}/vlm" -iname '*.gguf' ! -iname '*mmproj*' -size +10M 2>/dev/null | head -1)
     mmproj=$(find "${MODELS_DIR:-}/vlm" -iname '*mmproj*.gguf' 2>/dev/null | head -1)
     [ -n "$model" ] && [ -n "$mmproj" ] || return 3
+    # llama-mtmd-cli is single-shot with -p/--image and REJECTS -st/-no-cnv outright
+    # ("error: invalid argument: -st" on the mirrored b7824 → rc 4 → EVERY image held
+    # and quarantined, issue #50). Pass only flags it accepts; stdin is closed so a
+    # chat-mode build can never wedge (EOF exits), and timeout caps it regardless.
     out=$(timeout "$MOD_TIMEOUT" "$bin" -m "$model" --mmproj "$mmproj" --image "$f" \
         -p "Is this image sexual, nude, or explicit? Answer only: unsafe or safe." \
-        -n 8 -st -no-cnv --no-warmup </dev/null 2>/dev/null) || return 4
+        -n 8 --no-warmup --temp 0 </dev/null 2>/dev/null) || return 4
     printf '%s' "$out"
 }
 
@@ -193,7 +224,9 @@ mod_check() {
     fi
 
     # Reduce raw output to a verdict (UNSAFE-WINS, fail-closed on ambiguity), then decide.
+    # First drop any echoed prompt (REPL builds) — its own "unsafe" is not a verdict (#50).
     local verdict decision
+    raw="$(_mod_strip_echo "$raw")"
     verdict="$(_mod_parse_verdict "$raw")"
     decision="$(mod_decide "$verdict" "$sens")"
     case "$decision" in
@@ -209,7 +242,10 @@ mod_check() {
 # checks — never loads a model. Exit 0 if any classifier is ready, else 1.
 mod_ready() {
     local textbin textmodel imgbin imgmodel imgmm text=false image=false
-    textbin="$(_mod_find_bin llama-cli)"
+    # Probe the same binaries the runner resolves (llama-completion first — a modern
+    # mirror may ship no usable llama-cli at all), or "ready" lies to the Safety card.
+    textbin="$(_mod_find_bin llama-completion)"
+    [ -x "$textbin" ] || textbin="$(_mod_find_bin llama-cli)"
     textmodel=$(find "${MODELS_DIR:-}/safety" -iname '*guard*.gguf' -size +10M 2>/dev/null | head -1)
     imgbin="$(_mod_find_bin llama-mtmd-cli)"
     imgmodel=$(find "${MODELS_DIR:-}/vlm" -iname '*.gguf' ! -iname '*mmproj*' -size +10M 2>/dev/null | head -1)

@@ -3319,7 +3319,18 @@ function getCommand(variant, family) {
 // =============================================================================
 function getRoute() {
     const hash = window.location.hash || '#/';
-    return hash.replace(/^#/, '') || '/';
+    // Links may carry an in-page anchor after a second '#' (e.g. '#/settings#storage').
+    // Route on the base path only; getAnchor() exposes the anchor for post-render scroll.
+    return hash.replace(/^#/, '').split('#')[0] || '/';
+}
+
+// The in-page anchor of an '#/route#anchor' link, or '' when there is none. The
+// browser treats everything after the FIRST '#' as the fragment, so these links
+// never natively scroll — router() must scrollIntoView after rendering.
+function getAnchor() {
+    const hash = window.location.hash || '';
+    const i = hash.indexOf('#', 1);
+    return i > 0 ? hash.slice(i + 1) : '';
 }
 
 function router() {
@@ -3383,7 +3394,9 @@ function router() {
 
     html += renderFooter();
     app.innerHTML = html;
-    window.scrollTo(0, 0);
+    // '#/route#anchor' links jump to their section after render; plain routes reset to top.
+    const anchorEl = getAnchor() && document.getElementById(getAnchor());
+    if (anchorEl) anchorEl.scrollIntoView(); else window.scrollTo(0, 0);
 
     // Rebind search if present
     const searchInput = document.getElementById('searchInput');
@@ -3605,11 +3618,18 @@ function renderSettings() {
                 <span class="setup-profile-tx"><strong>${esc(p.label)}</strong><span class="setup-profile-desc">${esc(p.desc)}</span></span>
             </button>`).join('')}</div>
         <p style="color:var(--text-muted);font-size:.9em">Watch it fill in <a href="#/activity">Activity</a>. Requesting a specific item from the Library / Models / Software pages jumps it to the front of the queue.</p></div>`;
+    // Update: the Expert tile's scroll target. One-click update with rollback is
+    // roadmap work — until it lands, this documents how updates actually happen.
+    html += `<div id="update" class="detail-section" style="margin-top:1.5rem"><h2>Update</h2>
+        <p>Mirrored tools refresh to the latest upstream automatically — the self-heal loop re-mirrors them weekly (<code>VALARK_TOOL_REFRESH_DAYS</code> in <code>.env</code>). To update Val Ark itself, from the box:</p>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>git pull                       # update Val Ark itself (run in the repo)</div>
+        <div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/loop.sh once           # apply: repair, refresh &amp; verify now</div>
+        <p style="color:var(--text-muted);font-size:.9em">One-click update with rollback is coming; until then updates never touch your Library or models.</p></div>`;
     html += `<div id="about" class="detail-section" style="margin-top:1.5rem"><h2>About &amp; Rescue</h2>
         <p>Val Ark — offline-first knowledge &amp; AI appliance. Forgot the admin passcode or need to start over? It’s always recoverable.</p>
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.6rem 0 1rem">
             <button class="dl-action-btn" onclick="openRecoveryCard()">Show recovery card</button>
-            <button class="dl-action-btn" style="background:transparent;color:var(--text,#e8eaed);border-color:var(--border,#2a2d34)" onclick="recoverFlow()">Reset admin passcode</button>
+            <button class="dl-action-btn" style="background:transparent;color:var(--text-primary,#e8eaed);border-color:var(--border,#2a2d34)" onclick="recoverFlow()">Reset admin passcode</button>
         </div>
         <p>Or from the box itself:</p>
         <div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/valark reset --tier1   # forget admin, keep everything</div>
@@ -4080,7 +4100,7 @@ async function runSelfHeal(btn) {
 }
 
 const _HEALTH_CSS = `<style>
-.hp-hero{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;padding:1rem 1.2rem;margin:0 0 1.2rem;border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--card-bg,#16181d);border-left-width:4px}
+.hp-hero{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;padding:1rem 1.2rem;margin:0 0 1.2rem;border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--bg-card,#16181d);border-left-width:4px}
 .hp-h-good{border-left-color:#2fbf71}.hp-h-working{border-left-color:#e6a817}.hp-h-attention{border-left-color:#e0553a}
 .hp-hero-l{display:flex;align-items:center;gap:.8rem}
 .hp-glance{font-weight:800;font-size:1.15rem}
@@ -4089,7 +4109,7 @@ const _HEALTH_CSS = `<style>
 .hp-fix-all{display:inline-flex;align-items:center;gap:.45rem;padding:.6rem 1rem;border-radius:10px;border:1px solid var(--border,#2a2d34);background:var(--accent,#e0603a);color:#fff;font-weight:700;cursor:pointer;font-size:.95rem}
 .hp-fix-all:disabled{opacity:.7;cursor:default}
 .hp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.85rem;margin:0 0 1.5rem}
-.hp-card{padding:1rem 1.1rem;border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--card-bg,#16181d);border-left-width:4px;border-left-color:#2fbf71}
+.hp-card{padding:1rem 1.1rem;border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--bg-card,#16181d);border-left-width:4px;border-left-color:#2fbf71}
 .hp-l-warn{border-left-color:#e6a817}.hp-l-bad{border-left-color:#e0553a}
 .hp-card-h{display:flex;align-items:center;gap:.55rem;margin-bottom:.4rem}
 .hp-ic{font-size:1.1rem}.hp-name{font-weight:700}
@@ -4098,7 +4118,7 @@ const _HEALTH_CSS = `<style>
 .hp-detail{color:var(--text-muted,#aab);font-size:.9rem;line-height:1.45}
 .hp-fault{margin-top:.5rem;font-size:.82rem;color:var(--text-muted,#8a8f98)}
 .hp-actions{margin-top:.7rem;display:flex;gap:.5rem;flex-wrap:wrap}
-.hp-btn{display:inline-flex;align-items:center;gap:.4rem;padding:.42rem .8rem;border-radius:9px;border:1px solid var(--border,#3a3d44);background:transparent;color:var(--text,#e8eaed);font-size:.85rem;font-weight:600;cursor:pointer;text-decoration:none}
+.hp-btn{display:inline-flex;align-items:center;gap:.4rem;padding:.42rem .8rem;border-radius:9px;border:1px solid var(--border,#3a3d44);background:transparent;color:var(--text-primary,#e8eaed);font-size:.85rem;font-weight:600;cursor:pointer;text-decoration:none}
 .hp-btn:hover{border-color:var(--accent,#e0603a)}
 .hp-btn-primary{background:var(--accent,#e0603a);color:#fff;border-color:var(--accent,#e0603a)}
 .hp-btn:disabled{opacity:.6;cursor:default}
@@ -4111,7 +4131,7 @@ const _HEALTH_CSS = `<style>
 .hp-ev-ago{color:var(--text-muted,#8a8f98);font-size:.8rem;white-space:nowrap;font-variant-numeric:tabular-nums}
 .hp-empty,.hp-note{color:var(--text-muted,#8a8f98);font-size:.9rem;line-height:1.5}
 .hp-note{margin-top:1rem}
-.hp-sys{margin:0 0 1.2rem;padding:.9rem 1.1rem;border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--card-bg,#16181d)}
+.hp-sys{margin:0 0 1.2rem;padding:.9rem 1.1rem;border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--bg-card,#16181d)}
 .hp-sys-h{display:flex;align-items:baseline;justify-content:space-between;gap:.6rem;margin-bottom:.7rem}
 .hp-sys-t{font-weight:700;font-size:.95rem}
 .hp-hist{color:var(--text-muted,#8a8f98);font-size:.78rem}
@@ -4122,7 +4142,7 @@ const _HEALTH_CSS = `<style>
 .hp-tile-s{color:var(--text-muted,#8a8f98);font-size:.76rem;margin-top:.2rem;font-variant-numeric:tabular-nums}
 .hp-spark{display:block;width:100%;height:22px;margin-top:.35rem;color:var(--accent,#e0603a);opacity:.85;overflow:visible}
 /* Safety card (content moderation) */
-.hp-safety{border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--card-bg,#16181d);padding:1rem 1.2rem;margin:0 0 1.2rem}
+.hp-safety{border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--bg-card,#16181d);padding:1rem 1.2rem;margin:0 0 1.2rem}
 .hp-safety-h{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 .hp-safety-l{display:flex;align-items:flex-start;gap:.7rem;flex:1;min-width:240px}
 .hp-safety-t{font-weight:700;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
@@ -4140,7 +4160,7 @@ const _HEALTH_CSS = `<style>
 .hp-safety-rl{color:var(--text-muted,#aab);font-size:.82rem;min-width:90px}
 .hp-safety-rv{font-variant-numeric:tabular-nums;font-size:.85rem}
 .hp-seg{display:inline-flex;border:1px solid var(--border,#2a2d34);border-radius:10px;overflow:hidden}
-.hp-seg-b{background:transparent;border:0;color:var(--text,#e7e9ee);padding:.35rem .7rem;font-size:.82rem;cursor:pointer}
+.hp-seg-b{background:transparent;border:0;color:var(--text-primary,#e7e9ee);padding:.35rem .7rem;font-size:.82rem;cursor:pointer}
 .hp-seg-b.on{background:var(--accent,#e0603a);color:#fff;font-weight:700}
 .hp-queue{margin-top:1rem;border-top:1px solid var(--border,#23262d);padding-top:.8rem}
 .hp-queue-h{font-weight:700;font-size:.9rem;display:flex;align-items:center;gap:.5rem}
@@ -4168,28 +4188,28 @@ async function setDownloadProfile(profile) {
 }
 
 const _SHELL_CSS = `<style>
-.home-status{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.8rem 1rem;margin:0 0 1rem;border:1px solid var(--border,#2a2d34);border-radius:12px;background:var(--card-bg,var(--bg,#16181d))}
+.home-status{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.8rem 1rem;margin:0 0 1rem;border:1px solid var(--border,#2a2d34);border-radius:12px;background:var(--bg-card,var(--bg-primary,#16181d))}
 .hs-dot{width:12px;height:12px;border-radius:50%;flex:none;box-shadow:0 0 0 3px rgba(0,0,0,.06)}
-.hs-ok{background:#2fbf71}.hs-busy{background:#e6a817}.hs-warn{background:#e0553a}
+.hs-ok{background:#2fbf71}.hs-busy{background:#e6a817}.hs-warn{background:#e0553a}.hs-idle{background:var(--text-muted,#8a8f98)}
 .hs-glance{font-weight:700}.hs-text{color:var(--text-muted,#aab)}
 .hs-meta{margin-left:auto;color:var(--text-muted,#8a8f98);font-size:.9em;font-variant-numeric:tabular-nums}
 .hs-more{margin-left:auto;color:var(--accent,#e0603a);font-size:.86em;font-weight:600;text-decoration:none;white-space:nowrap}
 .hs-more:hover{text-decoration:underline}
 .home-status .hs-meta+.hs-more{margin-left:.8rem}
 .home-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:.8rem;margin:0 0 2rem}
-.home-card{display:flex;gap:.75rem;align-items:center;padding:1rem;border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--card-bg,var(--bg,#16181d));color:var(--text,#e8eaed);text-decoration:none}
+.home-card{display:flex;gap:.75rem;align-items:center;padding:1rem;border:1px solid var(--border,#2a2d34);border-radius:14px;background:var(--bg-card,var(--bg-primary,#16181d));color:var(--text-primary,#e8eaed);text-decoration:none}
 .home-card:hover{border-color:var(--accent,#e0603a)}
-.home-card.area{background:linear-gradient(180deg,var(--card-bg,#16181d),rgba(224,96,58,.05))}
+.home-card.area{background:linear-gradient(180deg,var(--bg-card,#16181d),rgba(224,96,58,.05))}
 .hc-ic{font-size:1.7rem;line-height:1}.hc-b{display:flex;flex-direction:column;gap:.15rem}
 .hc-t{font-weight:700}.hc-s{color:var(--text-muted,#8a8f98);font-size:.86rem}
 .settings-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 .seg{display:inline-flex;border:1px solid var(--border,#2a2d34);border-radius:9px;overflow:hidden}
-.seg-btn{padding:.4rem .9rem;background:transparent;color:var(--text,#e8eaed);border:0;cursor:pointer;font-size:.9rem}
+.seg-btn{padding:.4rem .9rem;background:transparent;color:var(--text-primary,#e8eaed);border:0;cursor:pointer;font-size:.9rem}
 .seg-btn.on{background:var(--accent,#e0603a);color:#fff}
 .settings-signin{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:.6rem 0 1rem;padding:.7rem 1rem;border:1px solid var(--border,#2a2d34);border-radius:10px}
 .settings-signin .ss-act{margin-left:auto}
 .settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.7rem;margin:1rem 0}
-.settings-item{display:flex;gap:.75rem;align-items:center;padding:.9rem 1rem;border:1px solid var(--border,#2a2d34);border-radius:12px;background:var(--card-bg,var(--bg,#16181d));color:var(--text,#e8eaed);text-decoration:none}
+.settings-item{display:flex;gap:.75rem;align-items:center;padding:.9rem 1rem;border:1px solid var(--border,#2a2d34);border-radius:12px;background:var(--bg-card,var(--bg-primary,#16181d));color:var(--text-primary,#e8eaed);text-decoration:none}
 .settings-item:hover{border-color:var(--accent,#e0603a)}
 .si-ic{font-size:1.3rem}.si-b{display:flex;flex-direction:column;gap:.1rem;flex:1}
 .si-name{font-weight:650}.si-p{color:var(--text-muted,#8a8f98);font-size:.84rem}
@@ -4203,7 +4223,7 @@ const _SHELL_CSS = `<style>
 .q-head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 .q-note{color:var(--text-muted,#8a8f98);font-size:.85rem}
 .dlq{display:flex;flex-direction:column;gap:.7rem;margin:.5rem 0}
-.dl-card{border:1px solid var(--border,#2a2d34);border-radius:12px;padding:.85rem 1rem;background:var(--card-bg,var(--bg,#16181d))}
+.dl-card{border:1px solid var(--border,#2a2d34);border-radius:12px;padding:.85rem 1rem;background:var(--bg-card,var(--bg-primary,#16181d))}
 .dl-card-top{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-bottom:.5rem}
 .dl-card-name{font-weight:650}
 .dl-pill{font-size:.75rem;padding:.15rem .55rem;border-radius:999px;white-space:nowrap}
@@ -4219,7 +4239,7 @@ const _SHELL_CSS = `<style>
 .dl-card-pct{font-variant-numeric:tabular-nums;white-space:nowrap}
 .dl-card-line{color:var(--text-muted,#8a8f98);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dl-card-act{margin-left:auto}
-.dl-mini{padding:.25rem .7rem;border:1px solid var(--border,#2a2d34);border-radius:7px;background:transparent;color:var(--text,#e8eaed);font-size:.8rem;cursor:pointer}
+.dl-mini{padding:.25rem .7rem;border:1px solid var(--border,#2a2d34);border-radius:7px;background:transparent;color:var(--text-primary,#e8eaed);font-size:.8rem;cursor:pointer}
 .dl-mini:hover{border-color:var(--accent,#e0603a)}
 @media(prefers-reduced-motion:reduce){.dl-card-fill.anim{animation:none}}
 </style>`;
@@ -6415,7 +6435,7 @@ function renderCommunity() {
             <tr><td><strong>Files &amp; Pastebin</strong></td><td>One shared, access-gated instance — no per-user signup. The host shares the access code:<div class="code-block" onclick="copyText(this)"><span class="copy-hint">copy</span>scripts/services/paste.sh creds</div></td></tr>
         </table>`;
     if (admin) {
-        const inp = 'padding:.45rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--card-bg,var(--bg));color:var(--text);font-size:.95em';
+        const inp = 'padding:.45rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg-card,var(--bg-primary));color:var(--text-primary);font-size:.95em';
         html += `<div class="signup-admin" style="margin-top:1rem;padding:1rem;border:1px solid var(--border);border-radius:10px">
             <h4 style="margin:0 0 .6rem">Create a login <span style="font-weight:normal;color:var(--text-muted);font-size:.85em">— you're on the Ark host</span></h4>
             <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
@@ -6598,8 +6618,8 @@ async function checkSetup() {
 }
 
 const _SETUP_CSS = `<style>
-.setup-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg,#0e0f12)}
-.setup-card{width:100%;max-width:520px;background:var(--card-bg,var(--bg,#16181d));border:1px solid var(--border,#2a2d34);border-radius:16px;padding:36px 34px;box-shadow:0 12px 48px rgba(0,0,0,.28)}
+.setup-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg-primary,#0e0f12)}
+.setup-card{width:100%;max-width:520px;background:var(--bg-card,var(--bg-primary,#16181d));border:1px solid var(--border,#2a2d34);border-radius:16px;padding:36px 34px;box-shadow:0 12px 48px rgba(0,0,0,.28)}
 .setup-brand{font-size:.82rem;letter-spacing:.14em;text-transform:uppercase;color:var(--text-muted,#8a8f98);display:flex;align-items:center;gap:.5rem}
 .setup-logo{color:var(--accent,#e0603a);font-size:1.1rem}
 .setup-dots{display:flex;gap:.4rem;margin:14px 0 22px}
@@ -6608,7 +6628,7 @@ const _SETUP_CSS = `<style>
 .setup-stepbody h1{font-size:1.7rem;margin:0 0 .5rem;line-height:1.15}
 .setup-lead{color:var(--text-muted,#aab);font-size:1rem;line-height:1.5;margin:0 0 20px}
 .setup-hint{color:var(--text-muted,#8a8f98);font-size:.85rem;margin:8px 0 0}
-.setup-input{width:100%;box-sizing:border-box;padding:.7rem .85rem;border:1px solid var(--border,#2a2d34);border-radius:9px;background:var(--bg,#0e0f12);color:var(--text,#e8eaed);font-size:1.05rem}
+.setup-input{width:100%;box-sizing:border-box;padding:.7rem .85rem;border:1px solid var(--border,#2a2d34);border-radius:9px;background:var(--bg-primary,#0e0f12);color:var(--text-primary,#e8eaed);font-size:1.05rem}
 .setup-input:focus{outline:2px solid var(--accent,#e0603a);outline-offset:1px}
 .setup-code{text-transform:uppercase;letter-spacing:.18em;text-align:center;font-family:ui-monospace,monospace}
 .setup-meter{min-height:1.1rem;font-size:.82rem;color:var(--text-muted,#8a8f98);margin-top:6px}
@@ -6616,10 +6636,10 @@ const _SETUP_CSS = `<style>
 .setup-navr{display:flex;gap:.6rem}
 .setup-btn{display:inline-flex;align-items:center;gap:.4rem;padding:.62rem 1.15rem;border-radius:9px;border:1px solid var(--accent,#e0603a);background:var(--accent,#e0603a);color:#fff;font-size:1rem;font-weight:600;cursor:pointer;text-decoration:none}
 .setup-btn:hover{filter:brightness(1.06)}
-.setup-btn.ghost{background:transparent;color:var(--text,#e8eaed);border-color:var(--border,#2a2d34)}
+.setup-btn.ghost{background:transparent;color:var(--text-primary,#e8eaed);border-color:var(--border,#2a2d34)}
 .setup-btn:disabled{opacity:.6;cursor:default}
 .setup-profiles{display:flex;flex-direction:column;gap:.6rem}
-.setup-profile{display:flex;gap:.85rem;align-items:flex-start;text-align:left;padding:.85rem 1rem;border:1px solid var(--border,#2a2d34);border-radius:11px;background:var(--bg,#0e0f12);color:var(--text,#e8eaed);cursor:pointer}
+.setup-profile{display:flex;gap:.85rem;align-items:flex-start;text-align:left;padding:.85rem 1rem;border:1px solid var(--border,#2a2d34);border-radius:11px;background:var(--bg-primary,#0e0f12);color:var(--text-primary,#e8eaed);cursor:pointer}
 .setup-profile.on{border-color:var(--accent,#e0603a);box-shadow:0 0 0 1px var(--accent,#e0603a) inset}
 .setup-profile-ic{font-size:1.4rem;line-height:1}
 .setup-profile-tx{display:flex;flex-direction:column;gap:.15rem}
@@ -6633,7 +6653,7 @@ const _SETUP_CSS = `<style>
 .setup-reccard{margin:1rem 0;padding:1rem;border:2px dashed var(--accent,#e0603a);border-radius:12px;text-align:center}
 .src-hd{font-weight:700;margin-bottom:.3rem}
 .src-sub{color:var(--text-muted,#8a8f98);font-size:.84rem;margin:0 0 .6rem}
-.src-code{font-family:ui-monospace,monospace;font-size:1.3rem;letter-spacing:.12em;background:var(--bg,#0e0f12);border:1px solid var(--border,#2a2d34);border-radius:8px;padding:.5rem .8rem;display:inline-block}
+.src-code{font-family:ui-monospace,monospace;font-size:1.3rem;letter-spacing:.12em;background:var(--bg-primary,#0e0f12);border:1px solid var(--border,#2a2d34);border-radius:8px;padding:.5rem .8rem;display:inline-block}
 @media(max-width:560px){.setup-card{padding:26px 20px}}
 </style>`;
 
@@ -6651,14 +6671,14 @@ function signIn(afterMsg) {
     const o = document.createElement('div');
     o.id = 'signin-overlay';
     o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:1000';
-    o.innerHTML = `<div style="width:100%;max-width:360px;background:var(--card-bg,var(--bg,#16181d));border:1px solid var(--border,#2a2d34);border-radius:14px;padding:26px">
+    o.innerHTML = `<div style="width:100%;max-width:360px;background:var(--bg-card,var(--bg-primary,#16181d));border:1px solid var(--border,#2a2d34);border-radius:14px;padding:26px">
         <h3 style="margin:0 0 .3rem">Sign in</h3>
         <p style="margin:0 0 1rem;color:var(--text-muted,#8a8f98);font-size:.9em">${afterMsg ? esc(afterMsg) : 'Enter the admin passcode to continue.'} On the box itself you don't need to.</p>
-        <input id="signin-pass" type="password" placeholder="admin passcode" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:.6rem .8rem;border:1px solid var(--border,#2a2d34);border-radius:8px;background:var(--bg,#0e0f12);color:var(--text,#e8eaed);font-size:1rem">
+        <input id="signin-pass" type="password" placeholder="admin passcode" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:.6rem .8rem;border:1px solid var(--border,#2a2d34);border-radius:8px;background:var(--bg-primary,#0e0f12);color:var(--text-primary,#e8eaed);font-size:1rem">
         <div id="signin-msg" style="min-height:1.1rem;margin:.5rem 0;font-size:.86em;color:var(--danger,#e0553a)"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem">
             <a href="javascript:void(0)" onclick="recoverFlow()" style="font-size:.85em;color:var(--text-muted,#8a8f98)">Forgot passcode?</a>
-            <span style="display:flex;gap:.5rem"><button class="dl-action-btn" style="background:transparent;color:var(--text,#e8eaed);border-color:var(--border,#2a2d34)" onclick="closeSignIn()">Cancel</button>
+            <span style="display:flex;gap:.5rem"><button class="dl-action-btn" style="background:transparent;color:var(--text-primary,#e8eaed);border-color:var(--border,#2a2d34)" onclick="closeSignIn()">Cancel</button>
             <button class="dl-action-btn" onclick="submitSignIn()">Sign in</button></span>
         </div>
     </div>`;
@@ -6724,14 +6744,14 @@ async function checkAccess() {
 
 // ---- Recovery card + forgot-password ----------------------------------------
 const _REC_CSS = `<style>
-.rec-modal{width:100%;max-width:440px;background:var(--card-bg,var(--bg,#16181d));border:1px solid var(--border,#2a2d34);border-radius:14px;padding:24px}
+.rec-modal{width:100%;max-width:440px;background:var(--bg-card,var(--bg-primary,#16181d));border:1px solid var(--border,#2a2d34);border-radius:14px;padding:24px}
 .rec-card{border:2px dashed var(--accent,#e0603a);border-radius:12px;padding:20px}
 .rec-card h2{margin:0 0 .3rem;font-size:1.2rem}
 .rec-sub{color:var(--text-muted,#8a8f98);font-size:.85rem;margin:0 0 1rem}
 .rec-row{display:flex;justify-content:space-between;gap:1rem;padding:.35rem 0;border-bottom:1px solid var(--border,#2a2d34)}
 .rec-row span{color:var(--text-muted,#8a8f98)}
 .rec-code{margin:1rem 0;text-align:center}
-.rec-code code{display:inline-block;margin-top:.3rem;font-size:1.4rem;letter-spacing:.12em;font-family:ui-monospace,monospace;background:var(--bg,#0e0f12);padding:.5rem .9rem;border-radius:8px;border:1px solid var(--border,#2a2d34)}
+.rec-code code{display:inline-block;margin-top:.3rem;font-size:1.4rem;letter-spacing:.12em;font-family:ui-monospace,monospace;background:var(--bg-primary,#0e0f12);padding:.5rem .9rem;border-radius:8px;border:1px solid var(--border,#2a2d34)}
 .rec-steps{color:var(--text-muted,#8a8f98);font-size:.85rem;margin:.6rem 0 0}
 .rec-actions{display:flex;justify-content:flex-end;gap:.5rem;margin-top:1rem}
 @media print{body *{visibility:hidden}#rec-overlay,#rec-overlay *{visibility:visible}#rec-overlay{position:absolute;inset:0;background:#fff}.rec-actions{display:none}}
@@ -6753,7 +6773,7 @@ function showRecoveryCard(d) {
     o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px;overflow:auto';
     o.innerHTML = `${_REC_CSS}<div class="rec-modal">${recoveryCardHtml(d)}
         <div class="rec-actions"><button class="dl-action-btn" onclick="window.print()">Print</button>
-        <button class="dl-action-btn" style="background:transparent;color:var(--text,#e8eaed);border-color:var(--border,#2a2d34)" onclick="document.getElementById('rec-overlay').remove()">Close</button></div></div>`;
+        <button class="dl-action-btn" style="background:transparent;color:var(--text-primary,#e8eaed);border-color:var(--border,#2a2d34)" onclick="document.getElementById('rec-overlay').remove()">Close</button></div></div>`;
     document.body.appendChild(o);
 }
 async function openRecoveryCard() {
@@ -6768,16 +6788,16 @@ async function openRecoveryCard() {
 function recoverFlow() {
     closeSignIn();
     if (document.getElementById('recover-overlay')) return;
-    const inp = 'width:100%;box-sizing:border-box;padding:.55rem .8rem;border:1px solid var(--border,#2a2d34);border-radius:8px;background:var(--bg,#0e0f12);color:var(--text,#e8eaed)';
+    const inp = 'width:100%;box-sizing:border-box;padding:.55rem .8rem;border:1px solid var(--border,#2a2d34);border-radius:8px;background:var(--bg-primary,#0e0f12);color:var(--text-primary,#e8eaed)';
     const o = document.createElement('div'); o.id = 'recover-overlay';
     o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:1001;padding:16px';
-    o.innerHTML = `<div style="width:100%;max-width:380px;background:var(--card-bg,var(--bg,#16181d));border:1px solid var(--border,#2a2d34);border-radius:14px;padding:26px">
+    o.innerHTML = `<div style="width:100%;max-width:380px;background:var(--bg-card,var(--bg-primary,#16181d));border:1px solid var(--border,#2a2d34);border-radius:14px;padding:26px">
         <h3 style="margin:0 0 .3rem">Reset your passcode</h3>
         <p style="margin:0 0 1rem;color:var(--text-muted,#8a8f98);font-size:.9em">Enter the recovery code from your recovery card, then a new passcode. On the box itself you can leave the code blank.</p>
         <input id="rec-code-in" placeholder="recovery code" autocomplete="off" spellcheck="false" style="${inp};margin-bottom:.5rem">
         <input id="rec-new-pass" type="password" placeholder="new passcode (8+ characters)" autocomplete="new-password" style="${inp}">
         <div id="rec-msg" style="min-height:1.1rem;margin:.5rem 0;font-size:.86em;color:var(--danger,#e0553a)"></div>
-        <div style="display:flex;justify-content:flex-end;gap:.5rem"><button class="dl-action-btn" style="background:transparent;color:var(--text,#e8eaed);border-color:var(--border,#2a2d34)" onclick="document.getElementById('recover-overlay').remove()">Cancel</button><button class="dl-action-btn" onclick="submitRecover()">Reset passcode</button></div>
+        <div style="display:flex;justify-content:flex-end;gap:.5rem"><button class="dl-action-btn" style="background:transparent;color:var(--text-primary,#e8eaed);border-color:var(--border,#2a2d34)" onclick="document.getElementById('recover-overlay').remove()">Cancel</button><button class="dl-action-btn" onclick="submitRecover()">Reset passcode</button></div>
     </div>`;
     document.body.appendChild(o);
     const i = document.getElementById('rec-code-in'); if (i) { i.focus(); i.addEventListener('keydown', e => { if (e.key === 'Enter') submitRecover(); }); }

@@ -182,7 +182,7 @@ body {
 .btn { padding: 10px 20px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 0.9em; transition: all 0.2s; }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover { background: #3d8fe6; transform: translateY(-1px); }
-.btn-secondary { background: var(--bg-tertiary); color: var(--text); border: 1px solid var(--border); }
+.btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); }
 .btn-secondary:hover { background: var(--bg-secondary); border-color: var(--accent); }
 
 /* Search */
@@ -403,7 +403,7 @@ body {
     opacity: 1;
     visibility: visible;
 }
-.attribution-bar { display: flex; gap: 16px; flex-wrap: wrap; padding: 10px 14px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; font-size: 0.85em; }
+.attribution-bar { display: flex; gap: 16px; flex-wrap: wrap; padding: 10px 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; font-size: 0.85em; }
 .attribution-bar .attr-item { color: var(--text-secondary); }
 .attribution-bar a { color: var(--accent); text-decoration: none; }
 .attribution-bar a:hover { text-decoration: underline; }
@@ -1174,7 +1174,7 @@ body.subapp-fullscreen-open { overflow: hidden; }
         display: block;
         width: 20px;
         height: 2px;
-        background: var(--text);
+        background: var(--text-primary);
         border-radius: 1px;
         transition: transform 0.2s;
     }

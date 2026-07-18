@@ -1407,6 +1407,30 @@ test.describe('Val Ark - Consumer Shell (Home status + Settings + Activity)', ()
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
     await expect(page.locator('.settings-grid')).toBeVisible();
     await expect(page.locator('.home-status')).toBeVisible();
+    // #60: the injected style blocks must use vars styles.css actually defines
+    // (--bg-card, not the undefined --card-bg) — in light theme a Settings tile is
+    // a white card, not the hardcoded dark #16181d fallback slab.
+    const bg = await page.evaluate(() => getComputedStyle(document.querySelector('.settings-item')!).backgroundColor);
+    expect(bg).toBe('rgb(255, 255, 255)');
+  });
+
+  test('Home cards and the idle status dot resolve real CSS vars in light theme (#60)', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/`);
+    await page.waitForSelector('.home-card', { timeout: 5000 });
+    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+    // .util cards carry the plain var background (.area cards layer a gradient over it,
+    // which the background shorthand reports as a transparent background-color).
+    const homeBg = await page.evaluate(() => getComputedStyle(document.querySelector('.home-card.util')!).backgroundColor);
+    expect(homeBg).toBe('rgb(255, 255, 255)');   // light --bg-card, not the dark fallback
+    // .hs-idle (the Safety card's dot when moderation is off) must paint a visible
+    // dot — before #60 the class had no CSS rule at all, leaving a blank gap.
+    const idleBg = await page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.className = 'hs-dot hs-idle';
+      document.body.appendChild(probe);
+      return getComputedStyle(probe).backgroundColor;
+    });
+    expect(idleBg).not.toBe('rgba(0, 0, 0, 0)');
   });
 
   test('Settings offers admin sign-in and the sign-in modal opens', async ({ page }) => {

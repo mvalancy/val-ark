@@ -4,8 +4,10 @@
 #
 # The whole point is that content is HELD (never silently allowed) whenever the
 # classifier can't give a usable verdict — the common bare-box/CI case with no
-# model. Exercises the pure decide() unit, magic-byte sniff, the stub runner, and
-# the no-model fail-closed path. No real model required.
+# model. Exercises the pure decide() unit, magic-byte sniff, the stub runner, the
+# no-model fail-closed path, and the #50 regression (REPL builds that echo the prompt
+# — whose own "unsafe" must never flag clean content — plus per-binary flag choice).
+# No real model required.
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -101,6 +103,81 @@ r=$(timeout 5 bash "$MOD" check "$T/txt" --kind >/dev/null 2>&1; echo $?)
 [ "$r" = 2 ] && pass || fail "dangling --kind must hold without hanging (got $r; 124=timeout/hang)"
 r=$(timeout 5 bash "$MOD" check "$T/txt" --sensitivity >/dev/null 2>&1; echo $?)
 [ "$r" = 2 ] && pass || fail "dangling --sensitivity must hold without hanging (got $r)"
+
+# --- 4d. REPL prompt-echo regression (#50): a llama build that echoes the prompt puts
+#        the prompt's OWN "unsafe" into stdout, and unsafe-wins parsing flagged 100% of
+#        clean content as blocked. Only text after the final "Answer only:" sentinel
+#        line is the model's verdict — the echo itself must never decide.
+cat > "$T/stub_echo_safe" <<'EOF'
+#!/bin/bash
+printf '> Task: classify the following user content as safe or unsafe.\nContent: The weather is lovely today and I baked some bread.\nAnswer only: safe or unsafe.\nsafe\n'
+EOF
+cat > "$T/stub_echo_unsafe" <<'EOF'
+#!/bin/bash
+printf '> Task: classify the following user content as safe or unsafe.\nContent: some nasty stuff\nAnswer only: safe or unsafe.\nunsafe\n'
+EOF
+cat > "$T/stub_echo_noanswer" <<'EOF'
+#!/bin/bash
+printf '> Task: classify the following user content as safe or unsafe.\nContent: x\nAnswer only: safe or unsafe.\n'
+EOF
+chmod +x "$T"/stub_echo_*
+r=$(VALARK_MODERATION_CMD="$T/stub_echo_safe" rc check "$T/txt" --kind text)
+[ "$r" = 0 ] && pass || fail "echoed prompt + 'safe' answer must ALLOW — the echo's own 'unsafe' must not flag clean content (#50, got exit $r)"
+r=$(VALARK_MODERATION_CMD="$T/stub_echo_unsafe" rc check "$T/txt" --kind text)
+[ "$r" = 1 ] && pass || fail "echoed prompt + 'unsafe' answer must still BLOCK (got exit $r)"
+r=$(VALARK_MODERATION_CMD="$T/stub_echo_noanswer" rc check "$T/txt" --kind text)
+[ "$r" = 2 ] && pass || fail "echoed prompt with NO answer after the sentinel must HOLD, never allow (got exit $r)"
+
+# --- 4e. binary selection + flags (#50): emulate the mirrored b7824 build. Its
+#        llama-cli is a REPL (rejects -no-cnv, echoes the prompt); the single-shot
+#        behavior ships as llama-completion; llama-mtmd-cli REJECTS -st/-no-cnv
+#        outright. The runner must pick llama-completion, suppress the prompt echo,
+#        use conversation mode (chat template), and pass mtmd only flags it accepts.
+FT="$T/ftools"; FM="$T/fmodels"
+mkdir -p "$FM/safety" "$FM/vlm"
+truncate -s 11M "$FM/safety/fake-guard.gguf"
+truncate -s 11M "$FM/vlm/fake-vlm.gguf"
+: > "$FM/vlm/fake-mmproj.gguf"
+cat > "$T/fake-llama-completion" <<'EOF'
+#!/bin/bash
+[ -n "${MODTEST_ARGLOG:-}" ] && printf '%s\n' "$*" > "$MODTEST_ARGLOG"
+echo safe
+EOF
+cat > "$T/fake-llama-cli" <<'EOF'
+#!/bin/bash
+# REPL build: echoes the prompt (with its "unsafe") and never answers cleanly.
+echo "> Task: classify the following user content as safe or unsafe. Answer only: safe or unsafe."
+EOF
+cat > "$T/fake-llama-mtmd-cli" <<'EOF'
+#!/bin/bash
+for a in "$@"; do case "$a" in -st|-no-cnv) echo "error: invalid argument: $a" >&2; exit 1 ;; esac; done
+echo safe
+EOF
+for p in linux-arm64 linux-x86_64 macos-arm64; do        # native tree per host arch
+    mkdir -p "$FT/$p/llama-cpp"
+    cp "$T/fake-llama-completion" "$FT/$p/llama-cpp/llama-completion"
+    cp "$T/fake-llama-cli"        "$FT/$p/llama-cpp/llama-cli"
+    cp "$T/fake-llama-mtmd-cli"   "$FT/$p/llama-cpp/llama-mtmd-cli"
+    chmod +x "$FT/$p/llama-cpp/"*
+done
+r=$(env VALARK_TOOLS_DIR="$FT" VALARK_MODELS_DIR="$FM" MODTEST_ARGLOG="$T/arglog" \
+    bash "$MOD" check "$T/txt" --kind text >/dev/null 2>&1; echo $?)
+[ "$r" = 0 ] && pass || fail "runner must prefer single-shot llama-completion over the REPL llama-cli (#50, got rc $r)"
+grep -q -- '--no-display-prompt' "$T/arglog" 2>/dev/null && pass || fail "text invocation must pass --no-display-prompt (prompt echo carries 'unsafe')"
+grep -qE '(^| )-cnv( |$)' "$T/arglog" 2>/dev/null && ! grep -qE '(^| )-no-cnv( |$)' "$T/arglog" 2>/dev/null \
+    && pass || fail "text invocation must use conversation mode (-cnv, guard chat template) and never -no-cnv (raw completion continues the prompt)"
+r=$(env VALARK_TOOLS_DIR="$FT" VALARK_MODELS_DIR="$FM" \
+    bash "$MOD" check "$T/img" --kind image >/dev/null 2>&1; echo $?)
+[ "$r" = 0 ] && pass || fail "image invocation must not pass -st/-no-cnv (llama-mtmd-cli rejects them → every image was held, #50; got rc $r)"
+# a modern mirror shipping ONLY llama-completion must still count as text-ready
+FT2="$T/ftools2"
+for p in linux-arm64 linux-x86_64 macos-arm64; do
+    mkdir -p "$FT2/$p/llama-cpp"
+    cp "$T/fake-llama-completion" "$FT2/$p/llama-cpp/llama-completion"
+    chmod +x "$FT2/$p/llama-cpp/llama-completion"
+done
+out=$(env VALARK_TOOLS_DIR="$FT2" VALARK_MODELS_DIR="$FM" bash "$MOD" ready 2>/dev/null)
+printf '%s' "$out" | grep -q '"text":true' && pass || fail "mod_ready must probe llama-completion too (got: $out)"
 
 # --- 5. over-size cap → hold (never OOM/allow) --------------------------------
 head -c 1024 /dev/zero > "$T/big"

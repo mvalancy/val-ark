@@ -376,6 +376,21 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   **only** explicit plain-file dirs (`VAL_ARK_UPLOADS` / `VALARK_MODERATION_DIRS`); per-service
   enforcement needs a pre-store intercept or a service-native hook, never a post-store move. The
   fail-closed instinct applies to integrity too: don't let the safety mechanism break what it guards.
+- **Newer llama.cpp split `llama-cli` into a REPL — a "fail-closed" classifier can invert into
+  block-everything** (#50, confirmed live on the mirrored b7824). `llama-cli` now *rejects*
+  `-no-cnv` ("--no-conversation is not supported by llama-cli"), drops into REPL mode, and ECHOES
+  the prompt to stdout — so an unsafe-wins substring parse reads the prompt's own "unsafe" and
+  blocks 100% of clean text (the model's actual "safe" answer is drowned out). And
+  `llama-mtmd-cli` rejects `-st`/`-no-cnv` outright ("error: invalid argument") → nonzero exit →
+  every image held + quarantined. Three rules: (1) prefer `llama-completion`, fall back to
+  `llama-cli` (verify.sh's fleet pattern) — and keep `mod_ready` probing the same binaries the
+  runner resolves; (2) classify in single-turn CONVERSATION mode (`-st`, **no** `-no-cnv`) with
+  `--no-display-prompt --temp 0` — raw completion skips the guard model's chat template and
+  Llama-Guard *continues* the prompt ("unsafe\n\nsafe") instead of answering it; (3) never trust
+  flag suppression alone — end prompts with a fixed sentinel line ("Answer only:") and parse only
+  the text AFTER its last occurrence, so an echoing build degrades to hold, never to mass
+  false-positives (and never to allow). Flag support differs per binary in the SAME build — test
+  each binary's argv against the mirrored build, not just "llama.cpp".
 
 ## Git / releases
 

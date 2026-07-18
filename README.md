@@ -362,11 +362,13 @@ cd tests/screenshots && npx playwright test          # Playwright suite on its o
 
 ## Releases
 
-Releases are created by pushing version tags:
+Releases are created by pushing version tags. The repo-root `VERSION` file is the single
+source of truth (served at `/api/health`); tags are unprefixed (`0.1.10`, matching the
+shipped series). Bump `VERSION` in the release commit, then on `main`'s tip:
 
 ```bash
-./scripts/release.sh 1.0.0          # Create annotated tag
-./scripts/release.sh 1.2.0 --push   # Create and push (triggers GitHub release)
+./scripts/release.sh                # Create annotated tag from the VERSION file
+./scripts/release.sh --push         # Create and push (triggers the GitHub release)
 ```
 
 The GitHub Actions workflow generates a changelog from commits and creates a release automatically.

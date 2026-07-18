@@ -96,6 +96,24 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   got pruned overnight). **Fix:** set `VAL_ARK_DATA` explicitly in `.env` on multi‑mount hosts.
 - **Default footprint cap can be tiny** — a box with 7 TB free had `VALARK_MAX_GB=500`, so almost
   nothing mirrored. Check the cap when "nothing downloads."
+- <a id="data-disk-mount-guard"></a>**A late/failed data-disk mount at `@reboot` would rebuild the
+  tree on the ROOT fs** — the writability probe (`valark_ensure_writable`) *passes* on an empty,
+  user-writable mountpoint, so `loop.sh`'s unconditional `mkdir` seeded `state/`+`content/` on the
+  boot volume, the librarian filled it toward the reserve, and once the real disk mounted it
+  shadowed that tree (stale pins/manifest) while a second cron tick opened a **different**
+  `loop.lock` inode → concurrent cycles. **Fix (#58):** a data-disk **identity guard** — at
+  commissioning `valark_data_stamp` writes a random id into an on-disk sentinel
+  (`$VALARK_HOME/.valark-data`) **and** a root-fs marker (`$PROJECT_ROOT/.valark-data-id`,
+  git-ignored); `valark_data_mounted` proceeds only when both exist and match, so an unmounted disk
+  (sentinel gone) or an autodetect fallback to the repo is **skipped**. `loop.sh`'s `data_disk_guard`
+  does a bounded retry-wait then skips with `exit 0` (the next cron tick converges) and drops a
+  root-fs breadcrumb (`.valark-mount-wait`) instead of `log()`-ing — `log()` mkdirs `LOG_DIR`, which
+  is on the missing disk. **Only for separate-disk boxes:** single-disk / dev mode
+  (`DATA_ROOT == PROJECT_ROOT`) is never marked, so `/data`-on-root layouts are never locked out.
+  **Deliberately switching a commissioned box back to single-disk mode?** Remove
+  `$PROJECT_ROOT/.valark-data-id`, or the guard will keep skipping (it still thinks a disk is
+  missing). Never use a "findmnt resolves to non-root fs" heuristic — it wrongly locks out valid
+  single-disk-server layouts where the data root lives on the root fs.
 
 ## Test / VM harness
 

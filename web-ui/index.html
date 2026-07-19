@@ -4185,9 +4185,12 @@ function setNotifFilter(f) {
     const panel = document.getElementById('notif-panel');
     if (panel) panel.innerHTML = renderNotifPanelBody();
 }
-// Delegated click handler for the notification panel: dismiss/restore carry their id in
-// data-id (read from the DOM, not a JS string), so even a future less-constrained id can
-// never become executable script here — defense-in-depth over the server id-constraint (#121).
+// Delegated click handler for the notification panel: dismiss/restore carry their id in a
+// data-id attribute — attribute-escaped with escAttr() at render (quotes included, so a `"`
+// can't break out of the attribute) and read here from the DOM via getAttribute (never
+// interpolated into a JS string, so a `'` can't break out either). Neither an attribute nor
+// an inline-JS breakout is possible, so even a future less-constrained id can never become
+// executable script here — defense-in-depth over the server id-constraint (#121).
 function _onNotifAction(e) {
     const btn = e.target.closest('button[data-notif-act]');
     if (!btn) return;
@@ -4351,7 +4354,7 @@ function _repairBtn(c) {
     if (act === 'storage') return `<a class="hp-btn" href="#/settings#storage">${esc(c.repair.label)}</a>`;
     if (act && act.indexOf('service:') === 0) {
         const ids = (c.extraServices && c.extraServices.length) ? c.extraServices : [act.slice(8)];
-        return ids.map(sid => `<button class="hp-btn" onclick="startCommunityService('${esc(sid)}', this)">Restart ${esc(COMMUNITY_NAV_LABELS[sid] || sid)}</button>`).join('');
+        return ids.map(sid => `<button class="hp-btn" data-svc-id="${escAttr(sid)}" onclick="startServiceFromEl(this)">Restart ${esc(COMMUNITY_NAV_LABELS[sid] || sid)}</button>`).join('');
     }
     return '';
 }
@@ -4500,8 +4503,8 @@ function renderSafety() {
                     <code class="hp-qi-p" title="${esc(it.path)}">${esc((it.path || '').split('/').pop() || it.id)}</code>
                     <span class="hp-qi-r">${esc(it.reason || '')}</span></div>
                 <div class="hp-qi-a">
-                    <button class="hp-btn" onclick="reviewModItem('${esc(it.id)}','dismiss',this)" title="Acknowledge — keep it out of the community, stop showing it here">Dismiss</button>
-                    <button class="hp-btn hp-btn-danger" onclick="reviewModItem('${esc(it.id)}','remove',this)" title="Delete the held file for good">Delete</button>
+                    <button class="hp-btn" data-mod-id="${escAttr(it.id)}" data-mod-act="dismiss" onclick="reviewModFromEl(this)" title="Acknowledge — keep it out of the community, stop showing it here">Dismiss</button>
+                    <button class="hp-btn hp-btn-danger" data-mod-id="${escAttr(it.id)}" data-mod-act="remove" onclick="reviewModFromEl(this)" title="Delete the held file for good">Delete</button>
                 </div></li>`).join('') + '</ul>';
         }
         html += '</div>';
@@ -4540,6 +4543,14 @@ async function reviewModItem(id, action, btn) {
     if (action === 'remove' && !confirm('Delete this held file permanently?')) return;
     const d = await _modPost('/api/moderation/review', { id, action }, btn);
     if (d) loadModeration();
+}
+// The review buttons carry the queue-item id + action in data-* attributes and invoke this
+// CONSTANT handler (reads them via getAttribute) instead of interpolating the id into an
+// inline-JS string: a `'` in the id can't break out of a JS string that no longer exists,
+// and the value is attribute-escaped (escAttr, quotes included) at render so it can't break
+// out of its attribute either. Same pattern as dlMiniAction / triggerRequestFromEl. (#121/#123)
+function reviewModFromEl(btn) {
+    reviewModItem(btn.getAttribute('data-mod-id'), btn.getAttribute('data-mod-act'), btn);
 }
 
 async function runSelfHeal(btn) {
@@ -4989,7 +5000,7 @@ function renderToolDetail(toolId) {
         html += `<div style="margin-bottom:16px"><a class="dl-action-btn" href="#/app/${tool.id}" style="text-decoration:none;display:inline-block">Launch ${esc(tool.name)} &rarr;</a>`;
         if (svc && svc.running === false) {
             if (svc.startable) {
-                html += `<button class="dl-action-btn" onclick="startCommunityService('${tool.id}',this)" style="margin-left:10px">Start service</button>`;
+                html += `<button class="dl-action-btn" data-svc-id="${escAttr(tool.id)}" onclick="startServiceFromEl(this)" style="margin-left:10px">Start service</button>`;
             } else if (svc.starting) {
                 html += `<span class="attr-item" style="margin-left:10px;color:var(--accent)"><span class="spinner"></span> starting…</span>`;
             } else {
@@ -5483,7 +5494,7 @@ function renderFullWikipediaHero() {
     } else if (present) {
         cta = `<span class="svc-badge svc-on">● Mirrored</span>`;
     } else if (_apiAvailable) {
-        cta = `<button class="kiwix-banner-btn" data-kind="content" data-id="${full.requestId}" onclick="triggerRequestFromEl(this)">Download all of Wikipedia (${full.size})</button>`;
+        cta = `<button class="kiwix-banner-btn" data-kind="content" data-id="${escAttr(full.requestId)}" onclick="triggerRequestFromEl(this)">Download all of Wikipedia (${full.size})</button>`;
     } else {
         cta = `<span class="svc-badge svc-off">Not mirrored</span>`;
     }
@@ -5612,7 +5623,7 @@ function renderContentDetail(contentId) {
         // Route through the per-item request path when we have a live-catalog id
         // (resolves the current dated build + auto-evicts to fit); else the legacy bulk target.
         if (item.requestId) {
-            html += `<button class="dl-action-btn" data-kind="content" data-id="${item.requestId}" onclick="triggerRequestFromEl(this)" style="margin-top:12px">Mirror (${item.size})</button>`;
+            html += `<button class="dl-action-btn" data-kind="content" data-id="${escAttr(item.requestId)}" onclick="triggerRequestFromEl(this)" style="margin-top:12px">Mirror (${item.size})</button>`;
         } else {
             html += `<button class="dl-action-btn" onclick="triggerDownload('content','${item.id}')" style="margin-top:12px">Mirror</button>`;
         }
@@ -6734,6 +6745,14 @@ async function triggerRequest(kind, id, btn) {
 function triggerRequestFromEl(btn) {
     triggerRequest(btn.getAttribute('data-kind'), btn.getAttribute('data-id'), btn);
 }
+// Community "Start"/"Restart" buttons carry the service id in a data-svc-id attribute and
+// invoke this CONSTANT handler (reads it via getAttribute) instead of interpolating the id
+// into an inline-JS string: a `'` in the id can't break out of a JS string that no longer
+// exists, and the value is attribute-escaped (escAttr) at render. Same pattern as
+// triggerRequestFromEl. (#121/#123)
+function startServiceFromEl(btn) {
+    startCommunityService(btn.getAttribute('data-svc-id'), btn);
+}
 
 // Bring up an enabled + mirrored community service, then poll until it answers.
 async function startCommunityService(id, btn) {
@@ -6840,13 +6859,13 @@ function loadCatalog(kind) {
 }
 function catalogCardHtml(kind, it) {
     const rk = kind === 'models' ? 'model' : 'content';
-    return `<div class="card catalog-card" data-search="${esc((it.name + ' ' + it.id + ' ' + it.category).toLowerCase())}">
+    return `<div class="card catalog-card" data-search="${escAttr((it.name + ' ' + it.id + ' ' + it.category).toLowerCase())}">
         <h3 style="font-size:0.92em;word-break:break-word">${esc(it.name)}</h3>
         <div class="card-meta">
             <span class="tag">${esc(it.category)}</span>
             <span>${formatBytes(it.bytes)}</span>
         </div>
-        <button class="dl-action-btn" data-kind="${rk}" data-id="${esc(it.id)}" onclick="triggerRequestFromEl(this)">Download</button>
+        <button class="dl-action-btn" data-kind="${rk}" data-id="${escAttr(it.id)}" onclick="triggerRequestFromEl(this)">Download</button>
     </div>`;
 }
 function renderCatalogItems(kind, items, term) {
@@ -6887,7 +6906,7 @@ function renderCommunity() {
             action = '<button class="dl-action-btn" disabled><span class="spinner"></span> Starting…</button>';
         } else if (s.startable) {
             badge = '<span class="svc-badge svc-off">○ Offline</span>';
-            action = `<button class="dl-action-btn" onclick="startCommunityService('${t.id}',this)">Start service</button>`;
+            action = `<button class="dl-action-btn" data-svc-id="${escAttr(t.id)}" onclick="startServiceFromEl(this)">Start service</button>`;
         } else if (_apiAvailable && s.mirrored === false) {
             badge = '<span class="svc-badge svc-off">○ Not mirrored</span>';
             action = `<span class="svc-hint">Mirror it: <code>scripts/tools/${t.id}.sh</code></span>`;
@@ -7349,7 +7368,7 @@ function renderProgressPanel() {
                           dl.status === 'cancelled' ? ' &#x2014;' : '';
         html += `<div class="dl-item">
             <div class="dl-item-header">
-                <span class="dl-item-type">${dl.type}${statusIcon}</span>
+                <span class="dl-item-type">${esc(dl.type)}${statusIcon}</span>
                 ${dl.status === 'running' ? `<button class="dl-cancel-btn" data-dl-act="cancel" data-id="${escAttr(id)}" onclick="dlMiniAction(this)">Cancel</button>` : ''}
             </div>
             <div class="dl-progress-bar"><div class="dl-progress-fill" style="width:${dl.progress}%"></div></div>

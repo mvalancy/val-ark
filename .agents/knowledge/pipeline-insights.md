@@ -102,3 +102,23 @@ report nonsense (e.g. a populated mirror returning `count:0`):
   `tests/screenshots/node_modules` → the main repo's install to run specs locally. Note the
   `.gitignore` `node_modules/` (trailing slash) does NOT ignore a *symlink* of that name — don't
   `git add -A`; commit explicit paths (or remove the symlink first).
+
+## Security/hardening PRs must PROVE the exact failure mode (learned on #121/#123)
+
+- **A hardening PR must demonstrate the SPECIFIC attack it claims to close — the exact vector,
+  not a harmless variant.** For an HTML-attribute escape, the proving payload is a `"` that breaks
+  OUT of the double-quoted attribute and injects a real `onmouseover=` handler (executable with no
+  `<>`); for an inline-JS `fn('${id}')` site it's a `'` / `');payload` that breaks out of the JS
+  string. `esc()` (text-context: escapes `< > &`, NOT quotes) neutralizes neither — a test that
+  only feeds `<img>` "passes" against vulnerable code and proves nothing. Each adversarial test
+  must **fail against the pre-fix code and pass after** (verify by temporarily reverting the site).
+- **Durable docs (`docs/knowledge/gotchas.md`, `.agents/`, code comments) must state ACCURATE
+  invariants.** The review once blocked a PR that baked a FALSE "now safe" guarantee into the
+  knowledge base (claimed `esc()` made a double-quoted attribute safe — it does not). A wrong
+  "safe" note is worse than none: the next agent trusts it and stops checking.
+- **Prefer `data-*` + a delegated/constant handler over interpolating data into markup or inline
+  JS.** `escAttr()` (quotes included) is correct for an attribute value, but a value going into an
+  inline-JS string needs a JS-string escaper too — so it's simpler and safer to carry the id in a
+  `data-*` attribute (escAttr-escaped at render) and read it via `getAttribute` in a constant
+  handler (`dlMiniAction`/`triggerRequestFromEl`/`reviewModFromEl`/`startServiceFromEl`), so it
+  never reaches a JS or HTML parser as code. When in doubt, don't interpolate.

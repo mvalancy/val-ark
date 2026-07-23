@@ -2,6 +2,28 @@
 ###############################################################################
 # Val Ark - Shared Download Library
 # Sourced by individual tool download scripts
+#
+# FUNCTION INDEX (grep a name to jump; see scripts/tools/AGENTS.md for shapes)
+#   Logging / util
+#     log / log_success / log_error / log_info / log_warn  timestamped output
+#     elapsed_since <epoch>            human-readable elapsed time
+#     ensure_dir <dir>                 mkdir -p (moves a file aside if one blocks)
+#   GitHub release lookup
+#     github_api_header                auth header if GITHUB_TOKEN set
+#     github_latest_tag REPO FALLBACK  latest release tag (falls back offline)
+#     github_asset_url REPO TAG PAT    first asset URL matching a grep pattern
+#   Download / extract
+#     download_file URL DEST           idempotent, size-verified, .part-resume,
+#                                      atomic-rename single-file download (retries)
+#     download_and_extract URL DEST LABEL STRIP  skip-if-extracted; tar/zip/AppImage
+#   Refresh gating (opt-in self-update via the weekly loop)
+#     version_gate  DIR VERSION        keep current-or-newer mirror, else clear stale
+#     version_stamp DIR VERSION        record VERSION in DIR/.version (never downgrades)
+#     _version_newer A B               true only if both version-shaped and A > B
+#   Source builds / hints
+#     clone_repo URL REF DEST          shallow clone (then create_source_tarball)
+#     create_source_tarball SRC LABEL VER  pack a checkout (excludes .git)
+#     write_install_hint DIR TOOL TEXT     INSTALL.txt for no-binary platforms
 ###############################################################################
 
 # Don't re-source if already loaded

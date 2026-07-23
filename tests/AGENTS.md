@@ -12,9 +12,11 @@ them into one hostable HTML report.
 |------------|---------|
 | `run-all.sh` | Orchestrator + node-free failure gate. Wipes `results/*.json`, resolves a node dir, then runs five stages: bash validators → Playwright → community-services e2e → VM matrix → unified report. |
 | `lib/results.sh` | Common result schema. `results_init` / `results_case` / `results_run` / `results_finish` — **source this in any new bash suite** so it emits `results/<suite>.json` and joins the report + both failure gates. |
+| `lib/md_link_check.py` | Offline internal-Markdown link + `#anchor` resolver (GitHub-slug compatible) behind `test-doc-links.sh` — keeps the `.md` hierarchy interconnected. |
+| `lib/secret_scan.py` + `lib/secrets-allowlist.txt` | Offline secret/private-host leak scanner behind `test-secrets.sh` (LAN IPs, private-TLD + bare URL hosts, tracked secret files); reviewed exceptions live in the allowlist. |
 | `report/generate.mjs` | Reads every common-schema `results/*.json` and renders ONE self-contained offline `results/report.html` (inline CSS/JS, failures-first, dark/light). Exits 1 if any case failed. |
 | `report/from-playwright.mjs` | Converts Playwright's JSON reporter output into the common schema (one file per spec, id `playwright-<spec>`) so it feeds `generate.mjs`. |
-| `test-*.sh` | Bash validators (deps, models, tls, tools, urls, moderation, loop-lock, path-containment, …). Auto-discovered by the `test-*.sh` glob; no registration. |
+| `test-*.sh` | Bash validators (deps, models, tls, tools, urls, moderation, loop-lock, path-containment, **doc-links**, **secrets**, …). Auto-discovered by the `test-*.sh` glob; no registration. |
 | `services/run.sh` | Community-services e2e (chat/mail/forum/paste) against a **live Ark** (`VALARK_URL`) — status shape, `/app/<id>/` proxy frames, account model, localhost-only sign-up. |
 | `vm/run.sh` | Host-side multipass fresh-Ubuntu matrix (default `22.04 24.04 26.04`); `git archive`s source into a VM, runs `provision.sh` inside, folds `STEP\|…` lines into report cases. Opt-in. |
 | `vm/provision.sh` | Runs **inside** the clean VM as a first-time user: unpack source → headless `setup.sh` → start `server.js` → smoke-test `/api/health`, `/`, `/bootstrap.sh`, metrics, `/api/setup/state`. |
@@ -53,6 +55,14 @@ them into one hostable HTML report.
   [`gotchas.md#grep-operative-not-comment-96`](../docs/knowledge/gotchas.md#grep-operative-not-comment-96).
 - **multipass is snap-confined** (VM matrix): stage transfers under a non-hidden repo path like
   `tests/results/`, never `/tmp` or a dotfile dir.
+- **`test-secrets.sh` failing = fix the leak, not the test.** It flags LAN IPs, private-TLD/bare URL
+  hosts, and tracked secret files (public repo — Prime Directive 1). If it's a genuine non-secret
+  (a doc example, a protocol constant, a test fixture), add ONE reviewed line to
+  `lib/secrets-allowlist.txt` — never broaden `secret_scan.py` to wave a class through. Public dotted
+  domains, `localhost`/loopback, and `$`/`{}`/`<>` placeholders already pass automatically.
+- **`test-doc-links.sh` is offline** — internal `.md` links + anchors only. A renamed heading breaks
+  every TOC/breadcrumb pointing at it; fix the link or restore the slug. External URL liveness stays
+  in `test-urls.sh`. Both guards also run as a **fail-fast CI step before the browser install** (#130).
 
 ## Related
 

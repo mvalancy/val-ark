@@ -29,7 +29,7 @@ NFS-shareable, offline-capable — scales to a disk of any size.
 
 </details>
 
-**Contents:** [Architecture](#architecture) · [Librarian](#self-filling-mirror-librarian) · [What's Included](#whats-included-45-tools) · [Community](#community--comms) · [Platforms](#platforms) · [Quick Start](#quick-start) · [Offline & P2P](#offline--p2p) · [Web Server](#web-server) · [Project Structure](#project-structure) · [Documentation map](#documentation-map) · [Testing](#testing) · [Releases](#releases)
+**Contents:** [Architecture](#architecture) · [Librarian](#self-filling-mirror-librarian) · [What's Included](#whats-included) · [Community](#community--comms) · [Platforms](#platforms) · [Quick Start](#quick-start) · [Offline & P2P](#offline--p2p) · [Web Server](#web-server) · [Project Structure](#project-structure) · [Documentation map](#documentation-map) · [Testing](#testing) · [Releases](#releases)
 
 ## Architecture
 
@@ -133,7 +133,12 @@ cp .env.example .env            # set VAL_ARK_DATA=/your/disk (git-ignored)
 Commands: `status | plan | fill | verify | evict | maintain | refresh`.
 See **[docs/LIBRARIAN.md](docs/LIBRARIAN.md)** for the full design.
 
-## What's Included (45 Tools)
+## What's Included
+
+Val Ark mirrors **50+ apps and tools** across four platforms (`scripts/tools/*.sh`),
+plus a value-per-byte **AI model** set and offline **content** — roughly **250 catalog
+items** in all, every one browsable and one-click installable from the web UI. The
+headline tools, by category:
 
 ### AI Inference
 llama.cpp, whisper.cpp, stable-diffusion.cpp, BitNet.cpp, Ollama, ONNX Runtime, Vosk, Piper TTS
@@ -313,7 +318,7 @@ val-ark/
 │   ├── monitor.sh            # Watch active downloads
 │   ├── screenshots.sh        # Capture screenshots & recordings
 │   ├── release.sh            # Create git release tags
-│   └── tools/                # Per-tool download scripts (45 tools)
+│   └── tools/                # Per-tool download scripts (50 tool scripts)
 ├── data/
 │   ├── installers.tsv        # OS / router / netboot install media catalog
 │   └── models-extra.tsv      # Diversity-expansion model catalog

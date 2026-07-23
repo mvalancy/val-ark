@@ -1,10 +1,26 @@
 # AI Model Inventory
 
+↑ [Docs](README.md) · [Repo root](../README.md)
+
 The flagship LLM/STT/TTS/VLM/image catalog (~500 GB) is curated by
 `scripts/download-models.sh`. A complementary **diversity catalog** of small,
 high-value models (embeddings, rerankers, tiny VLMs, OCR, depth, segmentation,
 detection, audio, time-series) lives in [`data/models-extra.tsv`](../data/models-extra.tsv)
 and is filled automatically by the [Librarian](LIBRARIAN.md).
+
+## Contents
+
+- [Where models live](#where-models-live)
+- [Quick Start](#quick-start)
+- [Category 1: LLM Models (GGUF for llama.cpp)](#category-1-llm-models-gguf-for-llamacpp---300gb)
+- [Category 2: TTS Models](#category-2-tts-models---15gb)
+- [Category 3: STT / ASR Models](#category-3-stt--asr-models---20gb)
+- [Category 4: Vision Language Models](#category-4-vision-language-models---40gb)
+- [Category 5: Image Generation](#category-5-image-generation---40gb)
+- [Category 6: NVIDIA Special](#category-6-nvidia-special---24gb)
+- [Diversity Catalog (Librarian)](#diversity-catalog-librarian)
+- [Usage with llama.cpp](#usage-with-llamacpp)
+- [Performance Tips for NVIDIA (Jetson Orin / Thor / GB10)](#performance-tips-for-nvidia-jetson-orin--thor--gb10)
 
 ## Where models live
 

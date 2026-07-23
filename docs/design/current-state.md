@@ -1,4 +1,4 @@
-# Val Ark — Current State (as of `VERSION` 0.1.14)
+# Val Ark — Current State (as of `VERSION` 0.1.17)
 
 > Snapshot of the **shipped** consumer appliance. It answers, directly, the questions this
 > redesign set out to solve: *Can a non-technical person commission it from a web UI? Is there
@@ -16,9 +16,10 @@ Part of the [design hierarchy](README.md).
 ## Where it started vs. where it is now
 
 The redesign began from a power-user / CLI baseline (mid-2026, pre-Phase-1). Phases 1–3 and 5
-have since shipped, Phase 6 and 7 shipped their core slices, and Phase 8 shipped its first slice.
+have since shipped, Phase 6 and 7 shipped their core slices (Phase 6 also shipped the notification
+center bell/inbox, #69 slice 1, in 0.1.16), and Phase 8 shipped its first slice.
 
-| | Baseline (pre-redesign) | Now (0.1.14) |
+| | Baseline (pre-redesign) | Now (0.1.17) |
 |---|---|---|
 | User | A Linux admin comfortable with `.env`, `ssh`, `bash` | A person who "barely knows what GitHub is" (CLI still available) |
 | Setup | Edit files + run scripts in a terminal | Browser (or console) first-boot wizard behind a claim token |
@@ -71,8 +72,14 @@ have since shipped, Phase 6 and 7 shipped their core slices, and Phase 8 shipped
   read from `/proc` + `os` by the zero-dep server) plus a **zero-dep on-disk history ring buffer**
   (`state/metrics-history.jsonl`) at `GET /api/status/metrics/history`, which drives inline
   sparklines on each tile. The planned Telegraf/InfluxDB retention stack was **descoped to an
-  opt-in Advanced/fleet upgrade** (issue #66); the offline notification center is the last open
-  Phase-6 slice (issue #69).
+  opt-in Advanced/fleet upgrade** (issue #66).
+- **Notification center, slice 1** (0.1.16, issue #69). A real bell/inbox in the shell:
+  `GET /api/status/notifications` (read-gated) aggregates recent `heal-events.jsonl` entries plus
+  the current warning/critical conditions (Safe Mode, disk almost full, failed verify checks,
+  missing assets) into one severity-tagged list; the nav bell shows an unread badge and a filtered
+  dropdown inbox. Dismiss is **client-side (localStorage)** this slice, so the endpoint stays
+  read-only. Routing digests into mail/board/chat, the frequency setting, the on-box LED, and
+  server-side cross-device dismiss remain open under #69.
 
 **Shared uploads are moderated, fail-closed (Phase 7, 0.1.9).**
 - On-device moderation screens content (`POST /api/moderation/check`), an admin **Safety card** +
@@ -122,8 +129,10 @@ have since shipped, Phase 6 and 7 shipped their core slices, and Phase 8 shipped
 - **Storage as a pool (Phase 4).** Still single-root (`valark-env.sh`). The SeaweedFS *service*
   exists (opt-in), but the pool descriptor (`state/storage.json`), add/remove-drive, and union
   mount are future work.
-- **Offline notification center (issue #69).** The last open Phase-6 slice — a bell/inbox routing
-  self-heal events into the box's own mail/board/chat.
+- **Notification center follow-ups (issue #69).** Slice 1 (the read-only bell/inbox) shipped in
+  0.1.16; still open under #69 are routing digests into the box's own mail/board/chat, the
+  Immediately / Daily / Never frequency setting, the on-box LED, and server-side (cross-device)
+  dismiss.
 - **Opt-in retention stack (issue #66).** Telegraf + InfluxDB (+ optional Grafana) for
   long-horizon retention and fleet rollup, grafted onto the same `metrics/history` endpoint —
   deferred, since native sparklines already cover the single-box case.

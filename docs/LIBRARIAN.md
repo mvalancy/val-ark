@@ -1,5 +1,7 @@
 # Librarian — scalable disk-fill, curation & self-healing
 
+↑ [Docs](README.md) · [Repo root](../README.md)
+
 The **Librarian** turns Val Ark into a self-filling, self-healing offline mirror.
 It fills a disk of *any* size from live catalogs, prioritizing diversity and
 value, and a 24/7 loop keeps everything current, intact, and verified.
@@ -105,8 +107,12 @@ where it left off; abandoned partials are garbage-collected by `verify` after
     real ZIM, a tiny LLM infers, the web API answers, and each configured remote
     mesh node (`VALARK_FLEET` in `.env`) is reachable and sees the shared content
     (plus a Playwright UI smoke when installed),
-12. health report (`state/health.json`) + a fleet coordination drop
-    (`state/coordination/`).
+12. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
+    snapshot) and append any genuine repairs to `state/heal-events.jsonl` (the feed
+    behind the Health page), plus a fleet coordination drop (`state/coordination/`).
+    This is **distinct from `state/health.json`**, which the librarian's own
+    `maintain` command writes (disk + per-category coverage); the loop invokes
+    `maintain` as part of steps 6/8/9 above, so both files land each cycle.
 
 Install it as a durable, reboot-surviving job:
 

@@ -50,7 +50,7 @@ internet**:
 - **Network floor:** public internet denied for writes; LAN/tailnet allowed; localhost/console
   trusted (already built: the LAN gate + rate limiter).
 - **Access model** the operator chooses (Open default) + two roles + optional 2FA.
-- **Encrypted transport:** the local CA + HTTPS, with a real trust guide ([the HTTPS guide]).
+- **Encrypted transport:** the local CA + HTTPS, with a real trust guide ([the HTTPS guide](../ENCRYPTION.md)).
 - **On-device content moderation** default-on for shared uploads.
 - **Offline by construction:** no phone-home, no telemetry, no cloud — the smallest possible
   attack surface. Fail-closed on un-owned/broken states.

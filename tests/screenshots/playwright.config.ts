@@ -2,6 +2,14 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './specs',
+  // These specs drive an async SPA (SSE / rAF-timed renders), so an occasional
+  // mistimed load shouldn't red the whole gate. Retry ON CI so a real regression
+  // still fails repeatably (it fails every attempt) while a transient flake
+  // self-heals; keep 0 locally for fast, honest feedback. `forbidOnly` stops a
+  // stray `.only` from silently green-lighting a partial run in CI.
+  // NOTE: retries is flake RESILIENCE, not a root-cause fix — see issue #132.
+  retries: process.env.CI ? 2 : 0,
+  forbidOnly: !!process.env.CI,
   // Test artifacts (failure screenshots, traces) go to a gitignored dir — NOT
   // docs/screenshots, which holds committed README images that Playwright would
   // otherwise wipe on every run (it clears outputDir at startup).

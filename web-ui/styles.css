@@ -1,3 +1,59 @@
+/* ==========================================================================
+   Section index (major section headers). Line numbers shift when you add or
+   remove rules above a section — refresh with:  grep -nE '^/\* ' web-ui/styles.css
+
+     88  Light Theme
+    117  Accessibility: Skip to content link
+    135  Accessibility: Focus states
+    154  Sticky Nav
+    199  Container
+    202  Breadcrumb
+    221  Hero
+    244  Search
+    296  Storage Bar
+    335  Cards Grid
+    389  Library sub-nav (segmented control)
+    430  Skeleton Loading Animation
+    473  Loading overlay for sections
+    505  Glossary tooltips
+    547  Goal cards (onboarding wizard)
+    613  Category Section
+    624  Detail Page
+    666  Detail Sections
+    706  Kiwix Banner
+    759  Embedded sub-app frame
+    782  TLS / trust-this-Ark banner
+    832  Fullscreen sub-app frame
+    852  Screenshot Gallery
+    879  Lightbox
+    920  Code Blocks
+    961  Tables
+    985  Variant table (model detail)
+   1013  Quick Start Cards
+   1046  Related links
+   1065  Testimonials
+   1097  Model Paths
+   1168  Toast
+   1187  Footer
+   1207  Mobile hamburger
+   1226  Responsive
+   1303  Disk Space Bar
+   1329  Theme Toggle
+   1371  Download Progress Panel
+   1446  Download Action Button
+   1469  Install Button Spinner
+   1481  Last Updated Label
+   1489  Scroll to Top Button
+   1519  Keyboard Help Modal
+   1602  Print Styles
+   1755  Catalog browse + one-click request + community hub
+   1783  Whole-category mirror button (models list)
+   1787  Full-Wikipedia hero
+   1790  Community service cards
+   1803  Aesthetic layer (engineering-brutalist)
+   1869  Notification center (#69)
+   ========================================================================== */
+
 :root {
     --bg-primary: #0a0e14;
     --bg-secondary: #131921;

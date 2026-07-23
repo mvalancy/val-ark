@@ -19,6 +19,7 @@ Where things go:
 | **Product/system architecture** | [`docs/design/`](../design/README.md) | on demand |
 | **Git / branch / PR / parallelization strategy** | [`workflow.md`](workflow.md) | on demand |
 | **Self‑guided agent governance, CI & trust model** | [`governance.md`](governance.md) | on demand |
+| **Agent operating procedures (skills + pipeline insights)** | [`.agents/`](../../.agents/README.md) | on demand |
 | **Operational gotchas & hard‑won fixes** | [`gotchas.md`](gotchas.md) | on demand |
 | **Significant decisions + progress log** | [`decisions.md`](decisions.md) | on demand |
 | **Host‑specific values (IPs, names, creds, paths)** | git‑ignored `.env` (shape in `.env.example`) | never in git/memory |
@@ -58,3 +59,7 @@ subagents or commands, un‑ignore just those paths — add to `.gitignore`:
 …and keep `.claude/settings.local.json` ignored. Then `.claude/agents/*.md` and
 `.claude/commands/*.md` become part of the repo. (Not done yet — this is the switch to flip
 if/when we author shared agents.)
+
+---
+
+↑ [Repo root](../../README.md) · [Doc map](../README.md)

@@ -11,6 +11,19 @@
 # - URL pre-validation pass (--validate flag)
 # - Per-download and total elapsed time tracking
 # - Failed downloads tracked for later retry
+#
+# CATEGORY INDEX (grep `CATEGORY n` / the function to jump)
+#   1  download_llm_models        LLM Models (GGUF)
+#   2  download_tts_models        Text-to-Speech
+#   3  download_stt_models        Speech-to-Text / ASR
+#   4  download_vision_models     Vision Language Models
+#   5  download_image_gen_models  Image Generation
+#   6  download_nvidia_special    NVIDIA Special Models
+#   7  download_extra_models      Additional Quality Models
+#
+# USAGE: ./download-models.sh [all|tier1|tier2|tier3|llm|tts|stt|vision|image|
+#        nvidia|extra|bitnet|validate]  (tiers = edge / workstation / large presets;
+#        run_session drives one or more category functions; never aborts on a failure)
 ###############################################################################
 
 # Only fail on pipe errors, NOT on individual command failures

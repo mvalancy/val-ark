@@ -508,6 +508,9 @@ EOF
 # When sourced (tests/tooling), expose the functions without dispatching a command.
 [ "${BASH_SOURCE[0]}" != "$0" ] && return 0
 
+# DISPATCH: command -> cmd_<name> (grep `cmd_status` etc. to jump to a handler).
+# status/plan/fill/verify/evict/maintain -> cmd_*; refresh -> catalog_refresh_zim;
+# catalog/request/pin/unpin/pins -> cmd_*. See the Commands block at the top of file.
 case "${1:-status}" in
     status)   cmd_status ;;
     plan)     shift; [ "$1" = "--budget" ] && cmd_plan "$2" || cmd_plan ;;

@@ -1,6 +1,24 @@
 #!/usr/bin/env node
 // Val Ark API Server - Zero dependency Node.js server
 // Serves web UI + provides status/control endpoints
+//
+// ── NAVIGATION (server.js section map) ───────────────────────────────────────
+// Sections are delimited by `// ====` banners. Ranges are 1-based and shift when
+// this header grows — re-grep `// ====` to confirm. Served surfaces: ~48 /api/…
+// routes (dispatched in Request Handling) · /app/<id>/ · /kiwix/ · /sources/ ·
+// /bootstrap.sh · /ca.crt.
+//   L1–167     Config & bootstrap — requires, ROOT, APP_VERSION, .env, listen ports
+//   L168–204   Input Validation — isAlphanumDash / isCatalogId (request-id allowlists)
+//   L205–222   Status Cache — invalidateCache + status/SSE memo
+//   L223–347   Download Manager — broadcastSSE / startDownload / cancelDownload (SSE)
+//   L348–526   Status Helpers (cached) — getDisk/Tools/Content/Models (/api/status/*)
+//   L527–976   Packages manifest — getPackages (/api/packages) + storage/catalog helpers
+//   L977–1573  Request Handling — auth/CORS helpers + handleAPI (~48 /api/… routes)
+//   L1574–2863 Static File Serving — serveStatic / serveArchive (Range) / pipeProxy
+//   L2864–2944 TLS / local-CA — cert/key, /ca.crt, serveBootstrap (/bootstrap.sh)
+//   L2945–3063 Server — handleRequest router + HTTP/HTTPS listen (PORT + EXTRA_PORTS)
+//   L3064–end  Kiwix Auto-Launch — scan content/zim, launch kiwix-serve, proxy /kiwix/
+// ─────────────────────────────────────────────────────────────────────────────
 
 const http = require('http');
 const https = require('https');

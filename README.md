@@ -29,6 +29,8 @@ NFS-shareable, offline-capable — scales to a disk of any size.
 
 </details>
 
+**Contents:** [Architecture](#architecture) · [Librarian](#self-filling-mirror-librarian) · [What's Included](#whats-included) · [Community](#community--comms) · [Platforms](#platforms) · [Quick Start](#quick-start) · [Offline & P2P](#offline--p2p) · [Web Server](#web-server) · [Project Structure](#project-structure) · [Documentation map](#documentation-map) · [Testing](#testing) · [Releases](#releases)
+
 ## Architecture
 
 ```mermaid
@@ -131,7 +133,12 @@ cp .env.example .env            # set VAL_ARK_DATA=/your/disk (git-ignored)
 Commands: `status | plan | fill | verify | evict | maintain | refresh`.
 See **[docs/LIBRARIAN.md](docs/LIBRARIAN.md)** for the full design.
 
-## What's Included (45 Tools)
+## What's Included
+
+Val Ark mirrors **50+ apps and tools** across four platforms (`scripts/tools/*.sh`),
+plus a value-per-byte **AI model** set and offline **content** — roughly **250 catalog
+items** in all, every one browsable and one-click installable from the web UI. The
+headline tools, by category:
 
 ### AI Inference
 llama.cpp, whisper.cpp, stable-diffusion.cpp, BitNet.cpp, Ollama, ONNX Runtime, Vosk, Piper TTS
@@ -311,7 +318,7 @@ val-ark/
 │   ├── monitor.sh            # Watch active downloads
 │   ├── screenshots.sh        # Capture screenshots & recordings
 │   ├── release.sh            # Create git release tags
-│   └── tools/                # Per-tool download scripts (45 tools)
+│   └── tools/                # Per-tool download scripts (50 tool scripts)
 ├── data/
 │   ├── installers.tsv        # OS / router / netboot install media catalog
 │   └── models-extra.tsv      # Diversity-expansion model catalog
@@ -327,19 +334,17 @@ val-ark/
 Downloaded `tools/`, `models/`, `content/`, `sources/`, and `assets/` live on the
 data root and are gitignored.
 
-## Documentation
+## Documentation map
 
-- [docs/README.md](docs/README.md) - Documentation index
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System diagrams
-- [docs/COMMUNITY.md](docs/COMMUNITY.md) - Offline community services (chat, mail, boards, files)
-- [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md) - Security audit & posture
-- [docs/LIBRARIAN.md](docs/LIBRARIAN.md) - Self-filling mirror engine design
-- [docs/TOOLS.md](docs/TOOLS.md) - Complete tools catalog (45 tools)
-- [docs/PLATFORMS.md](docs/PLATFORMS.md) - Platform-specific notes
-- [docs/ARM64-NAS.md](docs/ARM64-NAS.md) - ARM64 NAS appliances (chips such as the Rockchip RK3588): setup notes, gotchas & NPU angle
-- [docs/OFFLINE.md](docs/OFFLINE.md) - Offline and P2P guide
-- [docs/OFFLINE-GAPS.md](docs/OFFLINE-GAPS.md) - "Internet went off today" gap analysis & roadmap
-- [docs/MODEL_INVENTORY.md](docs/MODEL_INVENTORY.md) - Model details
+**[docs/README.md](docs/README.md) is the full documentation index** — every tracked doc,
+grouped, with a graph and a "start here" triage. Begin there. The four knowledge hubs:
+
+- [docs/README.md](docs/README.md) — the canonical whole-repo doc map
+- [docs/design/README.md](docs/design/README.md) — consumer-appliance architecture (scope-first)
+- [docs/knowledge/README.md](docs/knowledge/README.md) — the git-tracked shared brain (decisions, gotchas, workflow, governance)
+- [.agents/README.md](.agents/README.md) — the AI-agent operating manual (skills + pipeline knowledge)
+
+Governance: [CLAUDE.md](CLAUDE.md) · [AGENTS.md](AGENTS.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md)
 
 ## Testing
 
@@ -350,7 +355,7 @@ community-services e2e, and fresh-Ubuntu (22.04/24.04/26.04) setup VMs. See
 
 ```bash
 ./tests/run-all.sh                                   # all suites -> tests/results/report.html
-VALARK_URL=http://nas-5sgf:3000 ./tests/run-all.sh   # + community-services e2e vs a live Ark
+VALARK_URL=http://<ark-host>:3000 ./tests/run-all.sh   # + community-services e2e vs a live Ark
 VALARK_RUN_VM=1 ./tests/run-all.sh                   # + fresh-VM setup matrix (multipass + KVM)
 cd tests/results && python3 -m http.server 8099      # host the report offline
 ```

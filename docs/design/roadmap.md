@@ -4,10 +4,11 @@ Part of the [design hierarchy](README.md). Turns the design into a phased build.
 ships something a real owner can feel; later phases deepen. Ordered so the **safety net
 (recovery) lands before we gate anything**, per the research's #1 lesson.
 
-> **Status (as of `VERSION` 0.1.14).** The appliance is real and running. Phases 1–3 and 5
-> have shipped; Phase 6 and 7 shipped their core slices; Phase 8 shipped its first slice.
+> **Status (as of `VERSION` 0.1.17).** The appliance is real and running. Phases 1–3 and 5
+> have shipped; Phase 6 and 7 shipped their core slices (Phase 6 also shipped the notification
+> center bell/inbox, #69 slice 1, in 0.1.16); Phase 8 shipped its first slice.
 > Delivering releases are cited inline. This file is the **live** phase tracker;
-> [current-state.md](current-state.md) is the matching as-of-0.1.14 snapshot. Remaining scope
+> [current-state.md](current-state.md) is the matching as-of-0.1.17 snapshot. Remaining scope
 > is called out per phase with issue references — nothing below claims more than what is on
 > `main`.
 
@@ -93,8 +94,19 @@ below are the appliance around it.**
   each System tile gets an inline sparkline when the ring has history, falling back to a neutral
   "live-only" indicator only when it is empty. This replaced the planned Telegraf/InfluxDB
   dependency for the single-appliance case — see [`../knowledge/decisions.md`](../knowledge/decisions.md).
-- **[NEXT — offline notification center]** (issue #69, the last open slice of the now-closed #28)
-  a bell/inbox with persistent dismiss, routing self-heal events into the box's own mail/board/chat.
+- **[DONE — offline notification center, slice 1]** (0.1.16, issue #69, the last open slice of the
+  now-closed #28) a real bell/inbox in the shell. `GET /api/status/notifications` (read-gated, like
+  all `/api/status/*`) aggregates the read-only signals the box already writes — recent
+  `heal-events.jsonl` entries plus the current warning/critical conditions the health report knows
+  (Safe Mode, disk almost full, a failed functional-verify check, unresolved missing assets) — into
+  one severity-tagged list with stable ids, never throwing on a bare box. The nav gains a bell with
+  an unread badge and a dropdown inbox (All / Critical / Warning / Info / Dismissed filters); dismiss
+  is **client-side (localStorage)** this slice, so the endpoint stays read-only. See
+  [errors-selfheal.md](errors-selfheal.md) ("As built") and [`../knowledge/decisions.md`](../knowledge/decisions.md).
+- **[NEXT — notification routing + cross-device dismiss]** (still open under #69) route digests into
+  the box's own mail/board/chat, add the Immediately / Daily / Never frequency setting and the on-box
+  LED, and add **server-side (cross-device) dismiss** — held to the same adversarial bar as
+  `POST /api/maintenance/repair` once a dismiss write path is added.
 - **[DEFERRED — opt-in retention stack]** (issue #66) **Telegraf + InfluxDB** as mirrored services
   (Grafana optional/Advanced) for long-horizon retention + fleet rollup, grafted onto the *same*
   `GET /api/status/metrics/history` endpoint later under an allowlisted `?source=influx`. Native

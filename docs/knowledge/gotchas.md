@@ -3,6 +3,49 @@
 Non‑obvious things that cost real time. Format: **symptom → cause → fix.** Add to this when
 you hit (and solve) something the diff alone wouldn't explain. See [README](README.md).
 
+## Contents
+
+> When you append a new `## ` section below, add a matching row to the right group here.
+
+**Shell, platform & storage**
+- [Shell / ops](#shell--ops)
+- [Cross‑architecture (arm64 boxes: Jetson / Grace‑Blackwell / Rockchip)](#crossarchitecture-arm64-boxes-jetson--graceblackwell--rockchip-class)
+- [Storage / data root](#storage--data-root)
+
+**Downloads, mirroring & catalog**
+- [Downloads / mirroring](#downloads--mirroring)
+- [Catalog: an HTTP‑200 but ENTRY‑LESS feed is NOT "complete" (#95)](#catalog-an-http200-but-entryless-feed-is-not-complete-95)
+
+**First-run, commissioning & access (Phases 1–2)**
+- [First-run / bootstrap hand-off (#90)](#first-run--bootstrap-hand-off-90)
+- [Commissioning (Phase 1)](#commissioning-phase-1)
+- [Auth / recovery (Phase 2)](#auth--recovery-phase-2)
+- [Access control / sessions (Phase 2)](#access-control--sessions-phase-2)
+- [Recovery card / forgot-password (Phase 2)](#recovery-card--forgot-password-phase-2)
+- [Safe Mode (Phase 2)](#safe-mode-phase-2)
+
+**Health & moderation (Phases 6–7)**
+- [Health / self-heal (Phase 6)](#health--self-heal-phase-6)
+- [Content moderation (Phase 7)](#content-moderation-phase-7)
+
+**Community services**
+- [Community services / accounts](#community-services--accounts)
+
+**Web UI & server API**
+- [Web UI / a11y (#107)](#web-ui--a11y-107)
+- [Web UI: `esc()` is a TEXT escape — an attribute needs `escAttr()` (#121)](#web-ui-esc-is-a-text-escape--an-html-attribute-needs-escattr-121)
+- [Server path safety (#101)](#server-path-safety-101)
+- [Setup / start.sh serve port (#105)](#setup--startsh-serve-port-105)
+- [Packages manifest (`/api/packages`, #89)](#packages-manifest-apipackages-89)
+- [Ask assistant (`POST /api/ask`, #67)](#ask-assistant-post-apiask-67)
+
+**Tests, CI & releases**
+- [Test / VM harness](#test--vm-harness)
+- [Running Playwright from a git worktree (#69)](#running-playwright-from-a-git-worktree-69)
+- [Structural test asserts must skip the comment line (#96)](#structural-test-asserts-must-skip-the-comment-line-96)
+- [Git / releases](#git--releases)
+- [Benign, don't "fix"](#benign-dont-fix)
+
 ## Shell / ops
 
 - **`pkill -f "<pat>"` / `pgrep -f "<pat>"` kills your own command.** The shell running the

@@ -1,12 +1,23 @@
 # Val Ark - Architecture
 
-[Back to Docs](README.md) | [Back to Project Root](../README.md)
+↑ [Docs](README.md) · [Repo root](../README.md)
 
 Val Ark is an online-optional, local-first mirror of dev/AI tools, AI models, and
 offline content (ZIM via Kiwix), with a web UI. It fills a disk of *any* size from
 live catalogs and keeps everything intact and verified via a 24/7 self-healing loop.
 For the curation/fill engine see [LIBRARIAN.md](LIBRARIAN.md); for the disk layout
 and `.env` config see the same doc's "Where data lives" section.
+
+## Contents
+
+- [Architecture Overview](#architecture-overview)
+- [Fill Priority Flow](#fill-priority-flow)
+- [Self-Healing Loop](#self-healing-loop)
+- [Mesh Topology](#mesh-topology)
+- [Web Server](#web-server)
+- [Content Serving](#content-serving)
+- [Platforms](#platforms)
+- [Project Structure](#project-structure)
 
 ## Architecture Overview
 
@@ -182,7 +193,7 @@ flowchart TD
     FILL --> TOOLREF["6b. Weekly tool refresh<br/>mirrored apps to latest upstream"]
     TOOLREF --> FUNC["7. Functional verification<br/>verify.sh: tools run, kiwix serves,<br/>tiny LLM infers, fleet reachable"]
     FUNC --> UISMOKE["7b. UI smoke<br/>dynamic controls + back-to-ark nav"]
-    UISMOKE --> REPORT["8. Health report + coordination<br/>state/health.json"]
+    UISMOKE --> REPORT["8. Self-heal report + coordination<br/>state/selfheal.json + heal-events.jsonl"]
     REPORT --> DONE([cycle complete])
 ```
 

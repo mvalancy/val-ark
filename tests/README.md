@@ -42,7 +42,7 @@ graph TD
 tests/run-all.sh
 
 # Point the services e2e at a specific Ark (LAN or tailnet)
-VALARK_URL=http://nas-5sgf:3000 tests/run-all.sh
+VALARK_URL=http://<ark-host>:3000 tests/run-all.sh
 
 # Also run the fresh-VM matrix (slow — boots real VMs via multipass + KVM)
 VALARK_RUN_VM=1 tests/run-all.sh
@@ -81,7 +81,7 @@ tests/
 ```json
 {
   "suite": "services-e2e",
-  "title": "Community services (e2e @ http://nas-5sgf:3000)",
+  "title": "Community services (e2e @ http://<ark-host>:3000)",
   "generated": "2026-07-12 03:58:23 UTC",
   "summary": { "passed": 8, "failed": 0, "skipped": 1, "durationMs": 0 },
   "cases": [ { "name": "forum: /app/forum/ frame reachable", "status": "passed", "durationMs": 0, "detail": "" } ]

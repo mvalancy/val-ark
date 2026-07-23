@@ -15,6 +15,7 @@ offline content (ZIM via Kiwix), with a zero-dependency web UI. It fills a disk 
   off `dev`, parallel via worktrees). **Never push to `main`.** Every non-trivial job = an
   issue; branches/commits/PRs reference it; PRs need green `tests/run-all.sh`.
 - **[`docs/design/`](docs/design/README.md)** — the consumer-appliance architecture (scope-first).
+- **AI agents:** also read [`AGENTS.md`](AGENTS.md) (operating manual) and [`.agents/`](.agents/README.md) (skills + knowledge); [`docs/README.md`](docs/README.md) is the canonical doc map.
 - **Secrets/host values NEVER go in git or memory.** Host names, local IPs, creds, and host
   paths live ONLY in the git-ignored `.env` (keys/shape in the git-tracked
   [`.env.example`](.env.example)). Refer to machines by role; use placeholders. The repo is PUBLIC.

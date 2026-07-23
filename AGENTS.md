@@ -8,6 +8,20 @@ Val Ark is an **online-optional, local-first consumer appliance** that mirrors d
 models, and offline content, fills a disk of any size, and keeps itself healthy 24/7 with a
 zero-dependency web UI. Every change is judged against that vision.
 
+## Doc map — where everything lives
+
+[`docs/README.md`](docs/README.md) is the **canonical index of every doc** — start there. The
+four knowledge hubs:
+
+- [`docs/README.md`](docs/README.md) — the whole-repo doc map (grouped inventory + graph + triage)
+- [`docs/design/README.md`](docs/design/README.md) — consumer-appliance architecture (scope-first)
+- [`docs/knowledge/README.md`](docs/knowledge/README.md) — the shared brain (decisions · gotchas · workflow · governance)
+- [`.agents/README.md`](.agents/README.md) — this manual's skills + pipeline knowledge
+
+Every important folder also carries an `AGENTS.md` with local operating notes (`scripts`,
+`scripts/lib`, `scripts/services`, `scripts/tools`, `tests`, `tests/screenshots`, `web-ui`,
+`data`, `docs`, `docs/design`, `docs/knowledge`, `.github`). Add a `.md` → add it to the doc map.
+
 ## Prime directives (never violate)
 
 1. **The repo is PUBLIC.** Never commit, log, or write into any file — code, tests, docs, issues,
@@ -85,4 +99,5 @@ on. Cross-link to skills and to `docs/knowledge/` where relevant.
 - [ ] `tests/run-all.sh` (or the affected validators) green locally.
 - [ ] No secrets/host values anywhere in the diff (re-scanned).
 - [ ] Durable learnings baked into `docs/knowledge/` and/or `.agents/` in the same change.
+- [ ] If a `.md` was added/renamed, [`docs/README.md`](docs/README.md) (the canonical doc map) updated in the same change.
 - [ ] PR opened to `dev` (never `main`), references the issue, does not self-merge.

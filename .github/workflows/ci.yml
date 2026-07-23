@@ -26,6 +26,15 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
+      # Cheap, offline guards run FIRST (need only python3, preinstalled) so a
+      # broken doc link or a leaked host/secret fails in seconds — before the
+      # multi-minute Playwright browser install. Re-run inside run-all.sh too,
+      # so the HTML report still records them; the duplication is ~free. (#130)
+      - name: Fast guards — doc-link integrity + secret/host-leak scan
+        run: |
+          bash tests/test-doc-links.sh
+          bash tests/test-secrets.sh
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '20'

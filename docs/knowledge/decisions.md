@@ -11,6 +11,7 @@ later). See [README](README.md).
 
 | Date | Decision | Issue / Phase |
 |------|----------|---------------|
+| 2026‑07 | [CI guards: doc-link integrity + secret/host-leak scan](#202607--ci-guards-doc-link-integrity--secrethost-leak-scan-130) | #130 |
 | 2026‑07 | ["Ask Val Ark": an offline ask endpoint reusing the moderation runtime](#202607--ask-val-ark-slice-1-an-offline-ask-endpoint-that-reuses-the-moderation-runtime-phase-8-67) | Phase 8 · #67 |
 | 2026‑07 | [Four‑tab consumer nav: Home · Library · Activity · Settings](#202607--fourtab-consumer-nav-home--library--activity--settings-61--epic-91-slice-1) | #61 · epic #91 |
 | 2026‑07 | [Packages manifest: `/api/packages` = present inventory, not the catalog](#202607--packages-manifest-served-apipackages--present-inventory-not-the-catalog-89-slice-1) | #89 |
@@ -35,6 +36,19 @@ later). See [README](README.md).
 | 2026‑07 | [Notification center: bell/inbox slice 1](#202607--notification-center-bellinbox-slice-1-69) | #69 |
 
 ---
+
+## 2026‑07 — CI guards: doc-link integrity + secret/host-leak scan (#130)
+
+**Context:** the #129 doc-hierarchy cleanup surfaced two defect classes CI never caught — a real
+host name committed in `tests/README.md` (scrubbed in #129), and nothing verifying the `.md`
+internal links/anchors actually resolve. **Decision:** add two OFFLINE `test-*.sh` validators
+(`test-doc-links.sh` + `test-secrets.sh`, backed by `tests/lib/{md_link_check,secret_scan}.py` and a
+reviewed `tests/lib/secrets-allowlist.txt`) that gate in CI **and** locally, and run them as a
+fail-fast CI step BEFORE the Playwright browser install. **Why:** doc rot and secret leaks are cheap
+to catch mechanically and expensive to catch by eye (the #129 review had to hand-build a link
+resolver); a public repo must never ship a real host/IP/credential. The scan is a ratchet — it fails
+any NEW leak while allowlisting the handful of reviewed examples/constants/fixtures; public dotted
+domains, loopback, and `$`/`{}`/`<>` placeholders pass automatically.
 
 ## 2026‑07 — "Ask Val Ark" slice 1: an offline ask endpoint that reuses the moderation runtime (Phase 8, #67)
 

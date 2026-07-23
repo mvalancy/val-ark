@@ -4,6 +4,36 @@ Architecturally significant decisions and notable progress, newest first. Format
 **context → decision → why.** Append when you make a call worth remembering (or reversing
 later). See [README](README.md).
 
+## Index
+
+> Newest first, mirroring the body order. **Append new decisions at the top of the body and add a
+> matching row at the top of this table.**
+
+| Date | Decision | Issue / Phase |
+|------|----------|---------------|
+| 2026‑07 | ["Ask Val Ark": an offline ask endpoint reusing the moderation runtime](#202607--ask-val-ark-slice-1-an-offline-ask-endpoint-that-reuses-the-moderation-runtime-phase-8-67) | Phase 8 · #67 |
+| 2026‑07 | [Four‑tab consumer nav: Home · Library · Activity · Settings](#202607--fourtab-consumer-nav-home--library--activity--settings-61--epic-91-slice-1) | #61 · epic #91 |
+| 2026‑07 | [Packages manifest: `/api/packages` = present inventory, not the catalog](#202607--packages-manifest-served-apipackages--present-inventory-not-the-catalog-89-slice-1) | #89 |
+| 2026‑07 | [Release tags: unprefixed 0.x, minted by release.sh from VERSION](#202607--release-tags-unprefixed-0x-minted-by-releasesh-from-the-version-file-64) | #64 |
+| 2026‑07 | [Safety card ships without "restore"; review is remove/dismiss only](#202607--safety-card-ships-without-restore-review-is-removedismiss-only-phase-7-4n) | Phase 7 (4/n) |
+| 2026‑07 | [Moderation ENFORCEMENT is a post-store loop sweep](#202607--moderation-enforcement-is-a-post-store-loop-sweep-phase-7-3n) | Phase 7 (3/n) |
+| 2026‑07 | [Community chat is open (no-login) by default](#202607--community-chat-is-open-no-login-by-default) | — |
+| 2026‑07 | [Versioning re-baselined to honest pre‑1.0 (0.1.x)](#202607--versioning-re-baselined-to-honest-pre10-01x) | — |
+| 2026‑07 | [Reframe to a consumer appliance (scope‑first)](#202607--reframe-to-a-consumer-appliance-scopefirst) | — |
+| 2026‑07 | [Live host metrics, live-first](#202607--live-host-metrics-live-first-roadmap-phase-6-part-2--monitoring) | Phase 6 (pt 2) |
+| 2026‑07 | [On-device moderation: fail-closed decision core first](#202607--on-device-moderation-fail-closed-decision-core-first-phase-7) | Phase 7 |
+| 2026‑07 | [Metrics HISTORY is a zero-dep ring buffer](#202607--metrics-history-is-a-zero-dep-ring-buffer-phase-6b-part-2) | Phase 6b (pt 2) |
+| 2026‑07 | [Health & Repairs page](#202607--health--repairs-page-roadmap-phase-6-part-1--self-heal-ux) | Phase 6 (pt 1) |
+| 2026‑07 | [Download queue as the monitoring surface](#202607--download-queue-as-the-monitoring-surface-roadmap-phase-5-part-1) | Phase 5 (pt 1) |
+| 2026‑07 | [Access-mode enforcement + admin sessions](#202607--access-mode-enforcement--admin-sessions-roadmap-phase-2-depth) | Phase 2 depth |
+| 2026‑07 | [Consumer shell: Home status + Settings + Activity](#202607--consumer-shell-home-status--settings--activity-roadmap-phase-3-issue-12) | Phase 3 · #12 |
+| 2026‑07 | [First‑boot commissioning wizard](#202607--firstboot-commissioning-wizard-roadmap-phase-1-issue-11) | Phase 1 · #11 |
+| 2026‑07 | [Access identity + recovery foundation](#202607--access-identity--recovery-foundation-roadmap-phase-2-issue-10) | Phase 2 · #10 |
+| 2026‑07 | [First `dev → main` release (v1.1.0) + community sign‑ups](#202607--first-dev--main-release-v110--community-signups-pr-23) | PR #2/#3 |
+| 2026‑07 | [Feature branch: discover/request + self‑replication + tests](#202607--feature-branch-discoverrequest--selfreplication--tests-pr-1) | PR #1 |
+| — | [Earlier project facts (fleet, curation)](#earlier-project-facts-fleet-curation) | — |
+| 2026‑07 | [Notification center: bell/inbox slice 1](#202607--notification-center-bellinbox-slice-1-69) | #69 |
+
 ---
 
 ## 2026‑07 — "Ask Val Ark" slice 1: an offline ask endpoint that reuses the moderation runtime (Phase 8, #67)

@@ -35,12 +35,20 @@ The app works fully offline as a static file (`file://`). When served by
 [`scripts/server.js`](../scripts/server.js) (zero-dependency Node) it adds a
 JSON API and live data:
 
-| Endpoint | Purpose |
-|----------|---------|
-| `/api/status/{tools,models,content,kiwix,disk,all}` | Live install + disk status |
-| `/api/download/{tools,models,content,update,cancel}` | Trigger / cancel mirror jobs |
-| `/api/downloads/stream` | Server-Sent Events: live download progress |
-| `/api/health` | Server liveness |
+| Endpoint (family) | Purpose |
+|-------------------|---------|
+| `GET /api/status/{all,tools,models,content,kiwix,disk,health,metrics,metrics/history,notifications,services,moderation,ask,tls}` | Live status (read-gated) |
+| `GET /api/catalog/{content,models}` | Browse feed of not-yet-mirrored items |
+| `POST /api/request` | One-click mirror a single item (footprint-capped) |
+| `POST /api/service/start` | Start a community service |
+| `POST /api/ask` · `GET /api/status/ask` | Ask Val Ark — SSE answer from the on-box LLM |
+| `GET /api/packages` | On-disk app/tool inventory (Library ▸ Downloads) |
+| `GET /api/download/{tools,models,content,update,cancel}` · `/api/downloads/stream` | Trigger mirror jobs · SSE progress |
+| `POST /api/maintenance/repair` | Admin-only one-click self-heal |
+| `GET /api/health` | Server liveness |
+
+`scripts/server.js` is the authoritative endpoint list (see
+[`../scripts/AGENTS.md`](../scripts/AGENTS.md)) — this table is a representative subset.
 
 The server also auto-launches `kiwix-serve` for any complete `.zim` it finds
 in `content/zim`, so offline encyclopedias work without manual setup. Without
@@ -48,7 +56,10 @@ the server, the UI degrades gracefully (no live status, static data only).
 
 ## Data Model
 
-**TOOLS array** -- one entry per tool (43 tools across 6 categories):
+**TOOLS array** -- one entry per tool across the seven `TOOL_CATEGORIES` (see below).
+The catalog is the source of truth for the count: the `TOOLS` array here, mirrored by
+`TOOL_IDS` in [`../tests/screenshots/specs/web-ui.spec.ts`](../tests/screenshots/specs/web-ui.spec.ts),
+which the Playwright suite asserts card-for-card. Each entry carries:
 `id`, `name`, `category`, `icon`, `iconBg`, `logo`, `desc`, `platforms`,
 `downloads` (source/releases/binaries), and `details` (overview, features).
 Per-platform status for the aarch64 aliases (Thor, GB10) and OpenWRT is
@@ -69,6 +80,7 @@ base `jetson`/`ubuntu`/`mac`/`windows` status.
 | `ai-platform` | AI Platform |
 | `creative` | Creative & Engineering |
 | `media` | Media |
+| `community` | Community & Comms |
 | `infrastructure` | Infrastructure |
 | `dev-tools` | Dev Tools |
 
@@ -88,8 +100,13 @@ web-ui/
   logos/         -- SVG/PNG tool logos
   screenshots/   -- tool screenshots
   samples/       -- sample prompts / text used by detail pages
+  AGENTS.md      -- code-level navigation map (section -> line index)
   README.md      -- this file
 ```
+
+For a section-by-section map of `index.html` (which `render*` function lives where) and
+the two non-negotiable rules (zero-dependency; `escAttr()` for attribute values), see
+[`AGENTS.md`](AGENTS.md).
 
 ## Running
 
@@ -100,4 +117,4 @@ web-ui/
 
 ---
 
-[Back to Project Root](../README.md)
+[Repo root](../README.md) · [Navigation map](AGENTS.md) · [server.js](../scripts/server.js) · [Playwright specs](../tests/screenshots/AGENTS.md)

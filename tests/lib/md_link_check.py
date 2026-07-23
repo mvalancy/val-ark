@@ -3,9 +3,12 @@
 Val Ark — offline internal-Markdown link & anchor checker.
 
 Validates that the .md hierarchy is actually interconnected: every internal link
-`[text](target)` / image `![alt](target)` resolves to a real file (or directory),
-and every `#anchor` resolves to a real heading (GitHub-slug) or an explicit
-`<a name="...">` / `id="..."` in the target file.
+resolves to a real file (or directory), and every `#anchor` resolves to a real
+heading (GitHub-slug) or an explicit `<a name="...">` / `id="..."` in the target.
+Link forms covered: inline `[text](target)` / image `![alt](target)`,
+reference-style `[text][label]` with a defined `[label]: target` (an undefined
+label renders as literal text, so it is NOT treated as a link), and internal HTML
+`<a href="target">`. A `?query` on the path is ignored; the fragment still checks.
 
 Scope is deliberately repo-internal and OFFLINE — external http(s)/mailto/tel/
 protocol-relative links are ignored (URL reachability is a different concern; see
@@ -27,6 +30,13 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 INLINE_CODE_RE = re.compile(r"`[^`]*`")
 # [text](target)  and  ![alt](target) ; target stops at whitespace or ) .
 LINK_RE = re.compile(r"!?\[[^\]]*\]\(\s*(<[^>]+>|[^)\s]+)")
+# Reference-style links: a definition `[label]: target` and a use `[text][label]`
+# (collapsed `[text][]` -> label = text). Only uses with a DEFINED label are real
+# links (an undefined `[x][y]` renders as literal text on GitHub, not a broken link).
+REF_DEF_RE = re.compile(r"^\s{0,3}\[([^\]]+)\]:\s*(\S+)")
+REF_USE_RE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
+# Internal HTML links (external ones are skipped by EXTERNAL_RE downstream).
+HREF_RE = re.compile(r'<a\s[^>]*?href\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 HEADING_RE = re.compile(r"^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$")
 HTML_ANCHOR_RE = re.compile(r'(?:name|id)\s*=\s*["\']([^"\']+)["\']')
 TAG_RE = re.compile(r"<[^>]+>")
@@ -114,49 +124,56 @@ def tracked_md(root):
     return sorted(files)
 
 
+def resolve_one(target, src_path, base_dir, root, cache):
+    """Resolve one internal link target. Return a reason string if broken, else None."""
+    target = target.strip().lstrip("<").rstrip(">")
+    if not target or EXTERNAL_RE.match(target):
+        return None
+    tpath, frag = (target.split("#", 1) + [""])[:2] if "#" in target else (target, "")
+    tpath = tpath.split("?", 1)[0]      # drop ?query so real.md?x=1 still resolves
+    if tpath == "":
+        resolved = src_path             # same-file anchor
+    elif tpath.startswith("/"):
+        resolved = os.path.join(root, tpath.lstrip("/"))
+    else:
+        resolved = os.path.normpath(os.path.join(base_dir, tpath))
+    if tpath != "" and not os.path.exists(resolved):
+        return "path not found"
+    if frag and resolved.endswith(".md") and os.path.isfile(resolved):
+        if github_slug(frag) not in anchors_for(resolved, cache):
+            return ("anchor #%s not found in %s"
+                    % (frag, os.path.relpath(resolved, root)))
+    return None
+
+
 def check(root, files):
     cache = {}
     broken = []
     for path in files:
         try:
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                content = strip_code(fh.read())
+            content = strip_code(open(path, encoding="utf-8", errors="replace").read())
         except OSError as exc:
             broken.append((path, 0, "(unreadable)", str(exc)))
             continue
         base_dir = os.path.dirname(path)
+        # Pass 1: collect reference-link definitions for this file.
+        refdefs = {}
+        for line in content.splitlines():
+            m = REF_DEF_RE.match(line)
+            if m:
+                refdefs[m.group(1).strip().lower()] = m.group(2)
+        # Pass 2: resolve inline links, defined reference links, and <a href>.
         for lineno, line in enumerate(content.splitlines(), 1):
-            for target in LINK_RE.findall(line):
-                target = target.strip().lstrip("<").rstrip(">")
-                if not target or EXTERNAL_RE.match(target):
-                    continue
-                frag = ""
-                if "#" in target:
-                    tpath, frag = target.split("#", 1)
-                else:
-                    tpath = target
-                # Resolve the path component.
-                if tpath == "":
-                    resolved = path  # same-file anchor
-                elif tpath.startswith("/"):
-                    resolved = os.path.join(root, tpath.lstrip("/"))
-                else:
-                    resolved = os.path.normpath(os.path.join(base_dir, tpath))
-                if tpath != "" and not os.path.exists(resolved):
-                    broken.append((path, lineno, target, "path not found"))
-                    continue
-                # Anchor check only for markdown targets.
-                if frag and resolved.endswith(".md") and os.path.isfile(resolved):
-                    if github_slug_fragment(frag) not in anchors_for(resolved, cache):
-                        broken.append((path, lineno, target,
-                                       "anchor #%s not found in %s"
-                                       % (frag, os.path.relpath(resolved, root))))
+            targets = list(LINK_RE.findall(line)) + HREF_RE.findall(line)
+            for text, label in REF_USE_RE.findall(line):
+                key = (label.strip() or text.strip()).lower()
+                if key in refdefs:      # undefined label => literal text, not a link
+                    targets.append(refdefs[key])
+            for target in targets:
+                why = resolve_one(target, path, base_dir, root, cache)
+                if why:
+                    broken.append((path, lineno, target.strip().lstrip("<").rstrip(">"), why))
     return broken
-
-
-def github_slug_fragment(frag):
-    """A link fragment is already slug-shaped; normalize case + stray chars."""
-    return github_slug(frag)
 
 
 def main(argv):

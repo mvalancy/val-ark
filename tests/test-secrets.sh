@@ -4,8 +4,8 @@
 #
 # The repo is PUBLIC (Prime Directive 1). This gate fails the build if a real
 # host name, LAN/private IP, private-TLD host, or a tracked secret/key file
-# lands in git — the class of miss that let `nas-5sgf` sit committed in
-# tests/README.md. Fully OFFLINE. Reviewed exceptions live in
+# lands in git — the class of miss that let a real host name sit committed in a
+# tests/ README example (scrubbed in #129). Fully OFFLINE. Reviewed exceptions in
 # tests/lib/secrets-allowlist.txt. See tests/lib/secret_scan.py.
 ###############################################################################
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

@@ -40,7 +40,7 @@ later). See [README](README.md).
 ## 2026‑07 — CI guards: doc-link integrity + secret/host-leak scan (#130)
 
 **Context:** the #129 doc-hierarchy cleanup surfaced two defect classes CI never caught — a real
-host name (`nas-5sgf`) committed in `tests/README.md`, and nothing verifying the `.md` hierarchy's
+host name committed in `tests/README.md` (scrubbed in #129), and nothing verifying the `.md`
 internal links/anchors actually resolve. **Decision:** add two OFFLINE `test-*.sh` validators
 (`test-doc-links.sh` + `test-secrets.sh`, backed by `tests/lib/{md_link_check,secret_scan}.py` and a
 reviewed `tests/lib/secrets-allowlist.txt`) that gate in CI **and** locally, and run them as a

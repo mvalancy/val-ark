@@ -756,6 +756,13 @@ body {
 }
 .kiwix-banner-btn:hover { opacity: 0.95; transform: translateY(-1px); }
 
+@media (max-width: 640px) {
+    .kiwix-banner { flex-direction: column; align-items: stretch; }
+    .kiwix-banner-content { min-width: 0; }
+    .kiwix-banner-btn { white-space: normal; text-align: center; }
+}
+
+
 /* Embedded sub-app frame (Kiwix library today; chat/mail/forums as added).
    Lives below the fixed .top-nav, so the Val Ark header is always a way home. */
 .subapp {

@@ -68,7 +68,7 @@ for v in $VERSIONS; do
     fi
     results_case "[${v}] source transfer" pass 0
 
-    out="$(timeout 900 multipass exec "$name" -- bash ./provision.sh ./val-ark-src.tar.gz 2>&1)"
+    out="$(timeout 900 multipass exec "$name" -- bash ./provision.sh ./val-ark-src.tar.gz 2>&1)"; provision_rc=$?
     # Parse STEP|name|status|ms|detail lines into report cases.
     got_steps=0
     while IFS='|' read -r tag sname sstatus sms sdetail; do
@@ -77,6 +77,15 @@ for v in $VERSIONS; do
         results_case "[${v}] ${sname}" "$sstatus" "${sms:-0}" "$sdetail"
     done <<< "$out"
     [ "$got_steps" = 1 ] || results_case "[${v}] provision ran" fail 0 "no STEP output: $(printf '%s' "$out" | tail -2 | tr '\n' ' ' | cut -c1-200)"
+    # A timeout can leave valid passing STEP lines from an unfinished run.
+    # Require both process success and the provisioner's terminal marker.
+    if [ "$provision_rc" -ne 0 ]; then
+        results_case "[${v}] provision completed" fail 0 "provisioner exited $provision_rc (124 means timeout)"
+    elif ! grep -qx '### provision done' <<< "$out"; then
+        results_case "[${v}] provision completed" fail 0 "provisioner did not report completion"
+    else
+        results_case "[${v}] provision completed" pass 0
+    fi
 
     if [ "${VALARK_VM_KEEP:-0}" != "1" ]; then multipass delete --purge "$name" >/dev/null 2>&1; fi
 done

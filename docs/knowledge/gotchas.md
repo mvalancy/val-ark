@@ -41,6 +41,7 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 **Tests, CI & releases**
 - [Test / VM harness](#test--vm-harness)
+- [VM provisioning must finish](#vm-provisioning-must-finish)
 - [Browser runner failure evidence](#browser-runner-failure-evidence)
 - [Running Playwright from a git worktree (#69)](#running-playwright-from-a-git-worktree-69)
 - [Structural test asserts must skip the comment line (#96)](#structural-test-asserts-must-skip-the-comment-line-96)
@@ -806,3 +807,18 @@ with offline stubs, covering missing/malformed/empty reports, global errors, a n
 process with passing JSON, failed cases with exit zero, a successful run, and stale JSON.
 It fails against the pre-fix runner/converter and passes after the fix. The existing
 `bash tests/test-runner-exit.sh` still checks the separate node-free failure path.
+
+## VM provisioning must finish
+
+<a id="vm-provisioning-must-finish"></a>
+**Passing early steps do not prove a VM installation finished.** On 2026-10-23,
+`tests/test-vm-provision-exit.sh` reproduced a false green: a stub provisioner
+emitted one passing STEP then returned 124, but the original harness reported
+three passes and zero failures. `tests/vm/run.sh` had discarded the process exit
+status and accepted any STEP output. It now requires exit zero and the final
+`### provision done` marker, in addition to the existing per-step results.
+The offline regression covers no output, timeout, partial output with exit zero,
+a failed exit despite the marker, an explicit failed step, and complete success.
+All six cases pass after the fix. Completion verifies the provisioner's checks;
+it does not imply browser rendering, reboot persistence, or populated-mirror
+coverage. See issue #141.

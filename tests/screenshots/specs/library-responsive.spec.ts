@@ -12,11 +12,14 @@ for (const width of [320, 390, 768, 1440]) {
     await page.goto(BASE + '/#/content');
     const action = page.getByRole('button', { name: /Download all of Wikipedia/ });
     await expect(action).toBeVisible();
-    const box = await action.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+    // API/SSE updates replace the view asynchronously. Poll the complete geometry
+    // condition so a transient detached node cannot fail an otherwise valid layout.
+    await expect.poll(async () => {
+      const box = await action.boundingBox();
+      return box !== null && box.x >= 0 && box.x + box.width <= width + 1;
+    }).toBe(true);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(width + 1);
     // The compact tab strip may scroll internally; every destination stays usable.
     const downloads = page.getByRole('navigation', { name: 'Library sections' })
       .getByRole('link', { name: 'Downloads', exact: true });

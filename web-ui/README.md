@@ -5,6 +5,10 @@ is in a separate `styles.css`. No npm, no bundler -- open the file in a
 browser. Navigation uses hash-based routing (`window.location.hash`) with a
 `hashchange` listener that calls a central `router()` function.
 
+The notification inbox marks the active set seen when opened and when new data
+arrives while it remains open. Responses received after closing it stay unread.
+Seen and dismissed state are local to this browser (localStorage).
+
 ## Page Structure
 
 ```mermaid

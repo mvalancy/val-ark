@@ -33,6 +33,7 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 **Web UI & server API**
 - [Web UI / a11y (#107)](#web-ui--a11y-107)
+- [Notification response after opening the inbox](#notification-arrival-while-open)
 - [Web UI: `esc()` is a TEXT escape — an attribute needs `escAttr()` (#121)](#web-ui-esc-is-a-text-escape--an-html-attribute-needs-escattr-121)
 - [Server path safety (#101)](#server-path-safety-101)
 - [Setup / start.sh serve port (#105)](#setup--startsh-serve-port-105)
@@ -822,3 +823,25 @@ a failed exit despite the marker, an explicit failed step, and complete success.
 All six cases pass after the fix. Completion verifies the provisioner's checks;
 it does not imply browser rendering, reboot persistence, or populated-mirror
 coverage. See issue #141.
+
+
+<a id="notification-arrival-while-open"></a>
+## Notification response after opening the inbox
+
+**Symptom (2026-10-23):** opening the inbox before its first response arrived
+showed all notifications but left the unread badge visible. `openNotifPanel()`
+marked only the then-empty active set seen; the later `syncNotifUI()` rendered the
+response without applying the same policy.
+
+**Fix:** when a response refreshes an open, mounted inbox, mark its active set seen
+before updating the bell. Preserve the existing opening policy and localStorage
+persistence. A response arriving after the user closes the inbox must remain unread.
+This does not add server-side or cross-device read state.
+
+**Regression evidence:** `notifications.spec.ts` holds the initial intercepted response
+behind a promise, opens the empty inbox, then releases the response. The open-inbox
+case fails before the fix (badge remains visible) and passes afterward; a second
+case closes the inbox before release and proves its three notifications stay unread.
+The full notification spec passes all 12 tests, including dismissal persistence and
+attribute-injection defenses. Use controlled response ordering, not extra sleeps or
+retries, to test this race.

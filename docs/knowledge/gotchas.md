@@ -33,6 +33,8 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 **Web UI & server API**
 - [Web UI / a11y (#107)](#web-ui--a11y-107)
+- [Library hero on phone screens](#library-hero-on-phone-screens)
+
 - [Notification response after opening the inbox](#notification-arrival-while-open)
 - [Web UI: `esc()` is a TEXT escape — an attribute needs `escAttr()` (#121)](#web-ui-esc-is-a-text-escape--an-html-attribute-needs-escattr-121)
 - [Server path safety (#101)](#server-path-safety-101)
@@ -823,6 +825,18 @@ a failed exit despite the marker, an explicit failed step, and complete success.
 All six cases pass after the fix. Completion verifies the provisioner's checks;
 it does not imply browser rendering, reboot persistence, or populated-mirror
 coverage. See issue #141.
+
+## Library hero on phone screens
+
+<a id="library-hero-on-phone-screens"></a>
+The live Library's Wikipedia action can be longer than a phone's content width.
+On 2026-10-23, a 390px viewport produced a 501px document: the hero kept its text
+and non-wrapping action in one flex row. Stack the banner and allow action text
+to wrap below 640px; keep Library tabs scrollable within their own strip.
+`library-responsive.spec.ts` supplies an empty-library API response and checks
+action bounds, document width, and Downloads navigation at 320/390/768/1440px.
+The two phone cases failed before the fix. Do not hide page overflow to mask an
+unreachable action. See issue #143.
 
 
 <a id="notification-arrival-while-open"></a>

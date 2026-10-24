@@ -834,4 +834,7 @@ to wrap below 640px; keep Library tabs scrollable within their own strip.
 `library-responsive.spec.ts` supplies an empty-library API response and checks
 action bounds, document width, and Downloads navigation at 320/390/768/1440px.
 The two phone cases failed before the fix. Do not hide page overflow to mask an
-unreachable action. See issue #143.
+unreachable action. The API/SSE layer can replace the view after visibility is
+asserted; poll the complete bounding-box condition rather than assuming a later
+one-shot `boundingBox()` cannot return null. The full suite reproduced that
+detachment at 768px even though the layout was valid. See issue #143.

@@ -59,14 +59,28 @@ results_finish
 if [ "${VALARK_NO_PLAYWRIGHT:-0}" != "1" ] && [ -x "${TEST_DIR}/screenshots/node_modules/.bin/playwright" ]; then
     echo -e "\n${BOLD}Playwright (browser)${NC}"
     PW_JSON="${RESULTS_DIR}/.playwright.json"
+    PW_LOG="${RESULTS_DIR}/playwright.log"
+    rm -f "$PW_JSON"
     ( cd "${TEST_DIR}/screenshots" && PATH="${NODE_DIR}:$PATH" \
-        PLAYWRIGHT_JSON_OUTPUT_NAME="$PW_JSON" ./node_modules/.bin/playwright test --reporter=json >/dev/null 2>&1 )
-    if [ -s "$PW_JSON" ] && [ -n "$NODE_DIR" ]; then
-        "$NODE" "${TEST_DIR}/report/from-playwright.mjs" "$PW_JSON" "$RESULTS_DIR"
-        rm -f "$PW_JSON"
+        PLAYWRIGHT_JSON_OUTPUT_NAME="$PW_JSON" ./node_modules/.bin/playwright test --reporter=json >"$PW_LOG" 2>&1 )
+    pw_rc=$?
+    results_init "playwright-runner" "Playwright runner and report integrity"
+    if [ "$pw_rc" -eq 0 ]; then
+        results_case "Playwright process completed" pass 0
     else
-        echo -e "  ${YELLOW}playwright produced no JSON${NC}"
+        results_case "Playwright process completed" fail 0 "exit $pw_rc; see playwright.log"
     fi
+    if [ -s "$PW_JSON" ] && [ -n "$NODE_DIR" ]; then
+        if "$NODE" "${TEST_DIR}/report/from-playwright.mjs" "$PW_JSON" "$RESULTS_DIR"; then
+            results_case "Playwright report converted" pass 0
+        else
+            results_case "Playwright report converted" fail 0 "invalid, empty, or globally failed report; see Playwright results"
+        fi
+    else
+        results_case "Playwright report converted" fail 0 "Playwright produced no usable JSON report"
+    fi
+    results_finish
+
 else
     echo -e "\n  ${YELLOW}Playwright skipped${NC} (cd tests/screenshots && npm install, or VALARK_NO_PLAYWRIGHT=1)"
 fi

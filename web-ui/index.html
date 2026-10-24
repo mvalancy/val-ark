@@ -4051,6 +4051,11 @@ function _notifItems() { return (_notifData && Array.isArray(_notifData.items)) 
 function _notifActive() { const d = _notifIdSet(NOTIF_DISMISS_KEY); return _notifItems().filter(n => !d.has(n.id)); }
 // Unread = active AND not yet seen (opening the inbox marks the current set seen).
 function _notifUnread() { const s = _notifIdSet(NOTIF_SEEN_KEY); return _notifActive().filter(n => !s.has(n.id)); }
+function _markNotifSeen() {
+    const seen = _notifIdSet(NOTIF_SEEN_KEY);
+    for (const n of _notifActive()) seen.add(n.id);
+    _notifSaveIdSet(NOTIF_SEEN_KEY, seen);
+}
 
 function loadNotifications() {
     fetch('/api/status/notifications').then(r => r.ok ? r.json() : null).then(d => {
@@ -4165,9 +4170,7 @@ function openNotifPanel() {
     document.body.appendChild(panel);
     _notifOpen = true;
     // Opening the inbox marks the current active set as "seen" → clears the badge.
-    const seen = _notifIdSet(NOTIF_SEEN_KEY);
-    for (const n of _notifActive()) seen.add(n.id);
-    _notifSaveIdSet(NOTIF_SEEN_KEY, seen);
+    _markNotifSeen();
     _syncNotifBell();
     const bell = document.getElementById('notif-bell');
     if (bell) bell.setAttribute('aria-expanded', 'true');
@@ -4224,8 +4227,16 @@ function _syncNotifBell() {
     else { badge.textContent = ''; badge.hidden = true; bell.setAttribute('aria-label', 'Notifications'); }
 }
 function syncNotifUI() {
+    if (_notifOpen) {
+        const panel = document.getElementById('notif-panel');
+        if (panel) {
+            panel.innerHTML = renderNotifPanelBody();
+            // The first fetch (or a poll) can finish after the inbox opens.
+            // Apply the same seen policy to that newly presented active set.
+            _markNotifSeen();
+        }
+    }
     _syncNotifBell();
-    if (_notifOpen) { const panel = document.getElementById('notif-panel'); if (panel) panel.innerHTML = renderNotifPanelBody(); }
 }
 
 function _ago(iso) {

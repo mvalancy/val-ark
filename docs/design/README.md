@@ -12,7 +12,7 @@ This directory is the cohesive architecture for that redesign. It is written
 
 | Doc | Scope | Status |
 |-----|-------|--------|
-| [current-state.md](current-state.md) | As-of-0.1.14 snapshot of the shipped appliance + what's still open (answers "is there web setup / admin / recovery / access control?" — now yes) | ✅ |
+| [current-state.md](current-state.md) | As-of-0.1.17 snapshot of the shipped appliance + what's still open (answers "is there web setup / admin / recovery / access control?" — now yes) | ✅ |
 | [vision.md](vision.md) | Product vision, the person we build for ("Jordan"), simplicity principles | ✅ |
 | [commissioning.md](commissioning.md) | First-boot wizard — the exact screens, browser *and* plugged-in monitor, claim token | ✅ |
 | [admin-console.md](admin-console.md) | Home screen + the 4-tab admin/settings information architecture | ✅ |
@@ -39,3 +39,7 @@ Nextcloud, and consumer health apps.
 5. **Self-healing first.** Fix automatically what can be fixed; only ask the human for what truly needs a decision.
 6. **Recoverable by design.** There is always an obvious, safe way back in — even after a mistake, a lockout, or a bad config.
 7. **Offline and local-first.** Everything above works with no internet, on the LAN, on the box's own screen.
+
+---
+
+↑ [Repo root](../../README.md) · [Doc map](../README.md)

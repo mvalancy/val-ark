@@ -15,6 +15,22 @@
 #   ./update.sh assets       # Update logos/assets only
 #   ./update.sh check        # Check for new versions (dry run)
 #   ./update.sh paths        # Show model file paths for each platform
+#
+# SUBCOMMAND -> FUNCTION MAP (grep the function name to jump; `### ` phase banners
+# below mark each block — line numbers shift as this header grows, so grep by name)
+#   ollama            -> update_ollama        ### Ollama Installer Updates
+#   tools             -> update_tools         ### Tool Binary Updates
+#   sources           -> clone_sources        ### Source Repos (build-from-source)
+#   apps | apps-all   -> update_apps          ### App Downloads
+#                        (+ download_gh_binary, check_disk_space/require_disk_space
+#                           ### Disk Space Check)
+#   assets            -> update_assets        ### Asset Updates (logos, samples)
+#   check             -> check_versions       ### Version Check (dry run)
+#   paths             -> show_model_paths     ### Model File Paths Reference
+#   links             -> link_tools           ### Link AI engine binaries -> tools/web-ui
+#   disk              -> inline df/budget report
+#   cron              -> inline weekly-cron install
+#   all               -> ollama+tools+apps+sources+assets+links+check+paths
 ###############################################################################
 
 set -o pipefail

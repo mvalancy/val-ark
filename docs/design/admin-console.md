@@ -40,7 +40,7 @@ equivalent is noted only here for us, never shown to Jordan.
 | **Storage** | How much space, what's using it, free some up | disk & `VAL_ARK_DATA`, `VALARK_MAX_GB`, storage breakdown, evict/cleanup, add/replace disk |
 | **Downloads & Priorities** | Pick what matters; watch & control downloads | topic picker → curation weights, queue, active (SSE), pause/resume/cancel, "get more" catalog |
 | **Apps & Services** | Turn features on/off; manage app accounts | `VALARK_SERVICES` (chat/mail/forum/paste) start/stop + [registration](../COMMUNITY.md), AI/tools status + mirror |
-| **Network & Access** | The box's name/address; who can get in | hostname/mDNS, port 80, HTTPS/CA ([guide](../../web-ui)), Use Mode + admin ([access-identity.md](access-identity.md)) |
+| **Network & Access** | The box's name/address; who can get in | hostname/mDNS, port 80, HTTPS/CA ([guide](../ENCRYPTION.md)), Use Mode + admin ([access-identity.md](access-identity.md)) |
 | **Users** *(Accounts mode)* | Add people, set who's admin | accounts, roles, per-app access, audit line |
 | **Health** | Is everything running? Any alerts? | service uptime, disk/CPU/temp, the metrics stack, alert rules |
 | **Activity** | What happened, and any problems | plain event feed + advanced raw logs + one-click repairs ([errors-selfheal.md](errors-selfheal.md)) |

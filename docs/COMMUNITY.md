@@ -1,6 +1,6 @@
 # Val Ark - Community & Comms Layer
 
-[Back to Docs](README.md) | [Back to Project Root](../README.md)
+↑ [Docs](README.md) · [Repo root](../README.md)
 
 Val Ark is not only a knowledge bank — it is a place to *talk*. The community layer
 adds offline communication on top of the existing mirror so a single Val Ark box is
@@ -10,6 +10,14 @@ or send mail to a neighbor — all over the LAN/mesh with the internet unplugged
 everything else in Val Ark these services are mirrored for offline install, run
 LAN-bound on the Val Ark host, and live framed inside the same web shell as the rest
 of the dashboard.
+
+## Contents
+
+- [The Four Services](#the-four-services)
+- [Architecture](#architecture)
+- [Services](#services)
+- [Security Model](#security-model)
+- [Supervision & Configuration](#supervision--configuration)
 
 ## The Four Services
 

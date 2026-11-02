@@ -12,6 +12,17 @@ Synthesis of 8 research tracks (Synology/QNAP, TrueNAS/unRAID, Home Assistant, U
 
 The single hardest constraint that separates Val Ark from every product studied: **there is no cloud, no email reset, no phone-home.** Every path — setup, recovery, notifications, self-replication — must close entirely on the LAN or the physical box. Umbrel and CasaOS both fail their non-technical owners at exactly this point (SSH-and-delete-a-DB-file is the only password recovery). Val Ark must not.
 
+## Contents
+
+- [1. First-boot commissioning wizard](#1-first-boot-commissioning-wizard)
+- [2. Admin console information architecture](#2-admin-console-information-architecture)
+- [3. Access-control & identity (concrete recommendation)](#3-access-control--identity-concrete-recommendation)
+- [4. Recovery (forgot-password, lockout, factory-reset)](#4-recovery-forgot-password-lockout-factory-reset)
+- [5. Downloads & monitoring](#5-downloads--monitoring)
+- [6. Error & self-heal UX](#6-error--self-heal-ux)
+- [7. Simplicity principles (the top rules)](#7-simplicity-principles-the-top-rules)
+- [Sources studied](#sources-studied)
+
 ---
 
 ## 1. FIRST-BOOT COMMISSIONING WIZARD

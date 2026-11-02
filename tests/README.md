@@ -17,7 +17,7 @@ contract — add a suite by emitting a matching JSON file.
 
 | Suite | What it checks | Where |
 |-------|----------------|-------|
-| **Bash validators** | host deps, model inventory, TLS/local-CA, tool scripts, upstream mirror URLs | `tests/test-*.sh` |
+| **Bash validators** | host deps, model inventory, TLS/local-CA, tool scripts, upstream mirror URLs, **internal doc-link integrity**, **secret/host-leak scan** | `tests/test-*.sh` |
 | **Playwright** | web UI, server API + SSE, install icons, dynamic UI exercise (250+ parametrized) | `tests/screenshots/specs/*.spec.ts` |
 | **Community services e2e** | chat/mail/forum/paste status + `/app/<id>/` proxy frames, against a live Ark | `tests/services/run.sh` |
 | **Fresh-VM setup** | real setup + web-UI/API smoke on clean Ubuntu 22.04 / 24.04 / 26.04 | `tests/vm/{run,provision}.sh` |
@@ -42,7 +42,7 @@ graph TD
 tests/run-all.sh
 
 # Point the services e2e at a specific Ark (LAN or tailnet)
-VALARK_URL=http://nas-5sgf:3000 tests/run-all.sh
+VALARK_URL=http://<ark-host>:3000 tests/run-all.sh
 
 # Also run the fresh-VM matrix (slow — boots real VMs via multipass + KVM)
 VALARK_RUN_VM=1 tests/run-all.sh
@@ -81,7 +81,7 @@ tests/
 ```json
 {
   "suite": "services-e2e",
-  "title": "Community services (e2e @ http://nas-5sgf:3000)",
+  "title": "Community services (e2e @ http://<ark-host>:3000)",
   "generated": "2026-07-12 03:58:23 UTC",
   "summary": { "passed": 8, "failed": 0, "skipped": 1, "durationMs": 0 },
   "cases": [ { "name": "forum: /app/forum/ frame reachable", "status": "passed", "durationMs": 0, "detail": "" } ]

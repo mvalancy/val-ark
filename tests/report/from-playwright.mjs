@@ -13,6 +13,7 @@ const RESULTS_DIR = process.argv[3] || path.resolve(__dirname, '..', 'results');
 if (!IN) { console.error('usage: from-playwright.mjs <playwright.json> [resultsDir]'); process.exit(2); }
 
 const report = JSON.parse(fs.readFileSync(IN, 'utf8'));
+if (!Array.isArray(report.suites)) throw new Error('Playwright report has no suites array');
 const byFile = new Map();   // file -> { cases:[], passed, failed, skipped, durationMs }
 
 function bucket(file) {
@@ -44,7 +45,26 @@ function walk(suite, file) {
   }
   for (const child of suite.suites || []) walk(child, f);
 }
-for (const s of report.suites || []) walk(s, s.file);
+for (const s of report.suites) walk(s, s.file);
+
+// Startup/collection failures live at report.errors, outside individual tests.
+// Treat an empty run as a failure too: a valid JSON envelope is not test evidence.
+const globalErrors = report.errors || [];
+if (!Array.isArray(globalErrors)) throw new Error('Invalid Playwright errors array');
+const noTests = [...byFile.values()].every(b => b.cases.length === 0);
+if (noTests || globalErrors.length) {
+  const b = bucket('global-errors');
+  for (const err of globalErrors) {
+    b.cases.push({ name: 'Playwright global error', status: 'failed', durationMs: 0,
+      detail: String(err.message || err.value || 'Unspecified global error') });
+    b.failed++;
+  }
+  if (noTests) {
+    b.cases.push({ name: 'Playwright collected no test results', status: 'failed', durationMs: 0,
+      detail: 'The report contained no test cases; check startup and collection.' });
+    b.failed++;
+  }
+}
 
 const stamp = process.env.REPORT_STAMP || '';
 for (const [file, b] of byFile) {
@@ -59,3 +79,5 @@ for (const [file, b] of byFile) {
   fs.writeFileSync(path.join(RESULTS_DIR, id + '.json'), JSON.stringify(out, null, 2));
 }
 console.log(`from-playwright: wrote ${byFile.size} suite result file(s) to ${RESULTS_DIR}`);
+
+if (noTests || globalErrors.length) process.exitCode = 1;

@@ -11,6 +11,19 @@
 # - URL pre-validation pass (--validate flag)
 # - Per-download and total elapsed time tracking
 # - Failed downloads tracked for later retry
+#
+# CATEGORY INDEX (grep `CATEGORY n` / the function to jump)
+#   1  download_llm_models        LLM Models (GGUF)
+#   2  download_tts_models        Text-to-Speech
+#   3  download_stt_models        Speech-to-Text / ASR
+#   4  download_vision_models     Vision Language Models
+#   5  download_image_gen_models  Image Generation
+#   6  download_nvidia_special    NVIDIA Special Models
+#   7  download_extra_models      Additional Quality Models
+#
+# USAGE: ./download-models.sh [all|tier1|tier2|tier3|llm|tts|stt|vision|image|
+#        nvidia|extra|bitnet|validate]  (tiers = edge / workstation / large presets;
+#        run_session drives one or more category functions; never aborts on a failure)
 ###############################################################################
 
 # Only fail on pipe errors, NOT on individual command failures
@@ -121,15 +134,23 @@ hf_download_file() {
     while [ $attempt -le $MAX_RETRIES ]; do
         log_info "Downloading ${repo}/${filename} (attempt ${attempt}/${MAX_RETRIES})"
 
+        # Download into a .part and rename ONLY when wget succeeded: writing straight to the final
+        # name left a truncated model after a cancel/stall that the next run then skipped as
+        # "Already exists". The .part is resumable (wget -c) and is what the web UI measures.
+        local part="${dest_file}.part"
+        [ "${VALARK_JOB_MARKERS:-}" = "1" ] && printf '@@valark-dl\t0\t%s\t0\t%s\n' "$part" "${repo}/${filename}"
         local wget_output
         wget_output=$(wget -c --progress=dot:giga --timeout=60 --tries=1 \
             "$url" \
-            -O "$dest_file" 2>&1)
+            -O "$part" 2>&1)
         local wget_status=$?
 
         # Log wget output
         echo "$wget_output" | tail -5 >> "$LOG_FILE" 2>/dev/null || true
 
+        if [ $wget_status -eq 0 ] && [ -f "$part" ] && [ -s "$part" ]; then
+            mv -f "$part" "$dest_file"
+        fi
         if [ $wget_status -eq 0 ] && [ -f "$dest_file" ] && [ -s "$dest_file" ]; then
             local size=$(du -h "$dest_file" 2>/dev/null | cut -f1)
             log_success "Downloaded: ${filename} (${size}) in $(elapsed_since $dl_start)"
@@ -1442,3 +1463,12 @@ case "${1:-all}" in
         exit 1
         ;;
 esac
+_va_case_rc=$?
+
+# Truthful exit status: failures and NOTHING downloaded or already present => non-zero, so the
+# web UI reports the job as failed (with the ERROR lines above) instead of "complete". Otherwise keep
+# the status the chosen branch produced (e.g. `validate`).
+if [ "${DOWNLOAD_FAILED:-0}" -gt 0 ] && [ $(( ${DOWNLOAD_SUCCESS:-0} + ${DOWNLOAD_SKIPPED:-0} )) -eq 0 ]; then
+    exit 1
+fi
+exit "$_va_case_rc"

@@ -8,6 +8,10 @@ code gotchas, architecture decisions, git workflow — lives in
 [`../docs/knowledge/`](../docs/knowledge/README.md). When in doubt: "how do I run a release?" →
 here; "why does NodeBB burst-503?" → `docs/knowledge/`.
 
+The git strategy in [`workflow.md`](../docs/knowledge/workflow.md) and the trust / CI / governance
+model in [`governance.md`](../docs/knowledge/governance.md) are **implemented by the skills here** —
+those docs state the rules; these skills carry them out (branch → PR → Gate 1 → release → Gate 2).
+
 ## Skills (`skills/`)
 
 | Skill | Use it when |
@@ -29,3 +33,7 @@ here; "why does NodeBB burst-503?" → `docs/knowledge/`.
 1. Public repo → **never** write host names, IPs, creds, or host paths anywhere.
 2. Fail closed on safety; zero server deps; never push to `main`.
 3. Save every reusable trick here in the same change that taught it; dedupe and prune.
+
+---
+
+↑ [Repo root](../README.md) · [Doc map](../docs/README.md) · [Agent manual](../AGENTS.md) · [Knowledge base](../docs/knowledge/README.md)

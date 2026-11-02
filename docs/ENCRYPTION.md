@@ -1,5 +1,7 @@
 # Val Ark — Encryption & TLS
 
+↑ [Docs](README.md) · [Repo root](../README.md)
+
 Val Ark is an offline LAN appliance, so there is no public Certificate Authority
 and no internet to reach Let's Encrypt. To still get encrypted connections, Val
 Ark runs its **own tiny local Certificate Authority** and issues itself a server

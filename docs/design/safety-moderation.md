@@ -5,6 +5,16 @@ shared content appropriate (protect kids, prevent abuse). Val Ark's advantage: b
 the **UniFi UT2 / RK3588 have an on-board AI accelerator (NPU)** — so moderation runs
 **locally, privately, by default**, with no cloud and no data leaving the box.
 
+> **As shipped (0.1.9, Phase 7).** This page is the design *intent*. The moderation that actually
+> shipped keeps the fail-closed, on-device, private posture below, but runs on **llama.cpp** rather
+> than the originally-planned ONNX-on-NPU head: text is classified by **Llama-Guard-3-8B** and images
+> by a mirrored **tiny VLM** (SmolVLM / moondream2) via **`llama-mtmd-cli`** — see the decision core
+> `scripts/lib/moderation.sh` (a stub is injectable with `VALARK_MODERATION_CMD`). A dedicated NSFW
+> ONNX classifier remains a possible later add. Where this doc says "ONNX / NPU" below, read it as the
+> design goal, not the current runtime. Rationale and scope are logged in
+> [`../knowledge/decisions.md`](../knowledge/decisions.md) (the "On-device moderation" and "Moderation
+> ENFORCEMENT" entries); the shipped surfaces are tracked in [roadmap.md](roadmap.md) Phase 7.
+
 ## Principle
 
 > **Screen shared uploads on the box, with the box's own AI, on by default — privately.**

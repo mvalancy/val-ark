@@ -1,5 +1,7 @@
 # Val Ark - Platform Notes
 
+↑ [Docs](README.md) · [Repo root](../README.md)
+
 Per-platform setup and acceleration notes. See [ARCHITECTURE.md](ARCHITECTURE.md)
 for the system overview, [LIBRARIAN.md](LIBRARIAN.md) for the catalog/fill engine,
 and [OFFLINE.md](OFFLINE.md) for sync and offline serving.

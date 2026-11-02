@@ -3,6 +3,54 @@
 Non‑obvious things that cost real time. Format: **symptom → cause → fix.** Add to this when
 you hit (and solve) something the diff alone wouldn't explain. See [README](README.md).
 
+## Contents
+
+> When you append a new `## ` section below, add a matching row to the right group here.
+
+**Shell, platform & storage**
+- [Shell / ops](#shell--ops)
+- [Cross‑architecture (arm64 boxes: Jetson / Grace‑Blackwell / Rockchip)](#crossarchitecture-arm64-boxes-jetson--graceblackwell--rockchip-class)
+- [Storage / data root](#storage--data-root)
+
+**Downloads, mirroring & catalog**
+- [Downloads / mirroring](#downloads--mirroring)
+- [Catalog: an HTTP‑200 but ENTRY‑LESS feed is NOT "complete" (#95)](#catalog-an-http200-but-entryless-feed-is-not-complete-95)
+
+**First-run, commissioning & access (Phases 1–2)**
+- [First-run / bootstrap hand-off (#90)](#first-run--bootstrap-hand-off-90)
+- [Commissioning (Phase 1)](#commissioning-phase-1)
+- [Auth / recovery (Phase 2)](#auth--recovery-phase-2)
+- [Access control / sessions (Phase 2)](#access-control--sessions-phase-2)
+- [Recovery card / forgot-password (Phase 2)](#recovery-card--forgot-password-phase-2)
+- [Safe Mode (Phase 2)](#safe-mode-phase-2)
+
+**Health & moderation (Phases 6–7)**
+- [Health / self-heal (Phase 6)](#health--self-heal-phase-6)
+- [Content moderation (Phase 7)](#content-moderation-phase-7)
+
+**Community services**
+- [Community services / accounts](#community-services--accounts)
+
+**Web UI & server API**
+- [Web UI / a11y (#107)](#web-ui--a11y-107)
+- [Library hero on phone screens](#library-hero-on-phone-screens)
+
+- [Notification response after opening the inbox](#notification-arrival-while-open)
+- [Web UI: `esc()` is a TEXT escape — an attribute needs `escAttr()` (#121)](#web-ui-esc-is-a-text-escape--an-html-attribute-needs-escattr-121)
+- [Server path safety (#101)](#server-path-safety-101)
+- [Setup / start.sh serve port (#105)](#setup--startsh-serve-port-105)
+- [Packages manifest (`/api/packages`, #89)](#packages-manifest-apipackages-89)
+- [Ask assistant (`POST /api/ask`, #67)](#ask-assistant-post-apiask-67)
+
+**Tests, CI & releases**
+- [Test / VM harness](#test--vm-harness)
+- [VM provisioning must finish](#vm-provisioning-must-finish)
+- [Browser runner failure evidence](#browser-runner-failure-evidence)
+- [Running Playwright from a git worktree (#69)](#running-playwright-from-a-git-worktree-69)
+- [Structural test asserts must skip the comment line (#96)](#structural-test-asserts-must-skip-the-comment-line-96)
+- [Git / releases](#git--releases)
+- [Benign, don't "fix"](#benign-dont-fix)
+
 ## Shell / ops
 
 - **`pkill -f "<pat>"` / `pgrep -f "<pat>"` kills your own command.** The shell running the
@@ -89,6 +137,48 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   come from local TSVs, not the OPDS feed, so **refresh only when the CONTENT bucket is requested**
   (`content` | `all`). Lesson: a "browse" endpoint must never synchronously pay a live multi‑fetch a
   warm cache normally hides — reproduce cache‑miss timing the way CI (empty state) hits it.
+
+- **"Mirroring… ✓ complete" with the badge still *Not Mirrored* — the piper‑tts "fake download"
+  (and a job layer that could not tell success from failure).** Reproduced on the aarch64 NAS and
+  locally. *Cause 1:* `piper` (also `onnxruntime`, `vosk`, `syncthing`, `btop`, `ollama`, …) ships a
+  tarball with ONE wrapper dir; `download_and_extract` unpacks it as‑is (`tools/<plat>/piper/piper/…`)
+  and the status scan only looked at the top level → contentType `empty` → "Not Mirrored" forever;
+  re‑clicking Mirror printed "Already extracted — skipping" and "complete" in ~1 s, so the button
+  looked like it faked a download. **Fix:** `scripts/lib/tool-scan.js` `scanToolDir` descends through
+  wrapper dirs (depth ≤ 3, ≤ 400 stats — never the 45k‑file walk the shallow scan avoids; hidden dirs
+  such as `.dist/` are never entered). *Cause 2 (the class):* a job was `exit 0 ⇒ "complete"` — but the
+  tool scripts end with `log_success "… download complete"` whatever happened, so a GitHub rate limit,
+  a 404, a missing aarch64 asset or a dead network all exited 0; progress was a `Progress: N%` regex
+  (stuck at 0 for a single tool); failures carried no reason, vanished from the UI after 8 s and
+  "Retry" restarted `<type> all`; a cancelled job was overwritten to "failed"; a busy lock exited 0.
+  **Contract now** (`scripts/lib/jobs.js`, read its header): exactly one honest terminal state —
+  `complete` only if exit 0 **and** the post‑job verify passed (per‑platform state + `.dist` archive
+  integrity; "nothing mirrored" ⇒ `failed` with the script's own reason; a platform with no upstream
+  asset ⇒ `complete` + a named warning), `failed` (with `error` + log tail), `cancelled`, `deferred`
+  (exit **75** = busy/not‑done, never success), `queued`. The bar is **real bytes**: scripts announce
+  `@@valark-dl\t<total>\t<part>\t<sparse>\t<label>` (only when `VALARK_JOB_MARKERS=1`) and the server
+  stats that file; no size ⇒ indeterminate bar, never an invented percent. A watchdog
+  (`VALARK_JOB_STALL_SEC`, default 900) kills a job as `Stalled` only when there is NO output, NO
+  growth of the announced file AND no I/O or CPU in the job's process group (`/proc`: a quiet
+  `wget`‑inside‑`$(…)`, `hf download` or multi‑GB extract is alive; a hung `sleep`/dead socket is not). Jobs persist to
+  `state/jobs.json`; a restart marks in‑flight ones failed ("interrupted") and stops their leftover
+  process group (by the recorded pid, after checking its cmdline still names the job script). The UI re‑syncs from
+  `GET /api/status/downloads` on load, on every SSE `init` (which carries the snapshot), on focus /
+  back‑online and every 3 s while a job is active, and keeps a failure on screen until Dismiss.
+  **Rules for tool scripts:** `log_error` for anything that means a file is missing (it feeds the exit
+  status via the opt‑in `VALARK_STRICT_EXIT=1` that `run_tool` sets: errors + nothing mirrored ⇒ exit 1,
+  partial ⇒ exit 0 + `PARTIAL:`); never `log_success "complete"` unconditionally on a path that can
+  fail; `download_file` fails fast on HTTP 404/410/401/403/429 (no 5×back‑off) and names the status,
+  zero‑byte replies are rejected; `github_asset_url` reports API errors (rate limit ⇒ "set
+  `GITHUB_TOKEN`") and "release has no asset for this arch" instead of returning nothing silently;
+  `clone_repo` runs with `GIT_TERMINAL_PROMPT=0` and surfaces git's reason. Regression:
+  `tests/test-mirror-honesty.sh` (shim `curl`/`git`, stub tool scripts, real server) and
+  `tests/screenshots/specs/mirror-jobs-ui.spec.ts`; the suite fails on the pre‑fix tree
+  (`VALARK_TEST_SCRIPTS_SRC=<old checkout> VALARK_TEST_PARTS=B`). Test knobs: `VALARK_DL_RETRIES`,
+  `VALARK_DL_RETRY_DELAY`, `VALARK_DL_SPEED_TIME`, `VALARK_JOB_STALL_SEC`, `VALARK_JOB_POLL_MS`,
+  `VALARK_TEST_PATH_PREPEND` (puts a shim dir first on the job's PATH). The librarian's aria2 now runs
+  with `--file-allocation=none` so allocated blocks == bytes received (the default prealloc made the
+  `.part` full‑length from byte 0, i.e. a fake 100 %).
 
 ## Storage / data root
 
@@ -740,3 +830,77 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   `test-loop-lock.sh` §6/§6b drive the REAL `_va_start_web`/`ensure_services` spawns (fake long‑lived
   daemon, hold `loop.lock` on fd 8 like `run_locked`, then assert a fresh `flock -n` acquires it) so
   an fd‑8 leak into a detached daemon fails the test regardless of source formatting.
+
+
+<a id="browser-runner-failure-evidence"></a>
+## Browser runner failure evidence
+
+**Symptom (2026-10-23):** `tests/run-all.sh` could report green after Playwright
+failed before executing tests, or exited nonzero alongside an otherwise passing JSON report.
+The runner discarded the process status; the converter ignored top-level `errors`.
+Missing, malformed, and empty JSON could therefore remove the browser tier from the gate.
+
+**Rule:** preserve process failure as its own common-schema case, require a usable report
+with test cases, and convert global collection/teardown errors into failed cases too.
+Remove the prior hidden JSON before launching so stale evidence cannot rescue a new run.
+`tests/results/playwright.log` retains startup diagnostics; the raw reporter JSON remains
+available until the next browser run. Explicitly skipped browser runs remain opt-in skips;
+these checks do not prove coverage of unexecuted browser or hardware cases.
+
+**Evidence:** `bash tests/test-playwright-runner.sh` drives the actual runner and converters
+with offline stubs, covering missing/malformed/empty reports, global errors, a nonzero
+process with passing JSON, failed cases with exit zero, a successful run, and stale JSON.
+It fails against the pre-fix runner/converter and passes after the fix. The existing
+`bash tests/test-runner-exit.sh` still checks the separate node-free failure path.
+
+## VM provisioning must finish
+
+<a id="vm-provisioning-must-finish"></a>
+**Passing early steps do not prove a VM installation finished.** On 2026-10-23,
+`tests/test-vm-provision-exit.sh` reproduced a false green: a stub provisioner
+emitted one passing STEP then returned 124, but the original harness reported
+three passes and zero failures. `tests/vm/run.sh` had discarded the process exit
+status and accepted any STEP output. It now requires exit zero and the final
+`### provision done` marker, in addition to the existing per-step results.
+The offline regression covers no output, timeout, partial output with exit zero,
+a failed exit despite the marker, an explicit failed step, and complete success.
+All six cases pass after the fix. Completion verifies the provisioner's checks;
+it does not imply browser rendering, reboot persistence, or populated-mirror
+coverage. See issue #141.
+
+## Library hero on phone screens
+
+<a id="library-hero-on-phone-screens"></a>
+The live Library's Wikipedia action can be longer than a phone's content width.
+On 2026-10-23, a 390px viewport produced a 501px document: the hero kept its text
+and non-wrapping action in one flex row. Stack the banner and allow action text
+to wrap below 640px; keep Library tabs scrollable within their own strip.
+`library-responsive.spec.ts` supplies an empty-library API response and checks
+action bounds, document width, and Downloads navigation at 320/390/768/1440px.
+The two phone cases failed before the fix. Do not hide page overflow to mask an
+unreachable action. The API/SSE layer can replace the view after visibility is
+asserted; poll the complete bounding-box condition rather than assuming a later
+one-shot `boundingBox()` cannot return null. The full suite reproduced that
+detachment at 768px even though the layout was valid. See issue #143.
+
+
+<a id="notification-arrival-while-open"></a>
+## Notification response after opening the inbox
+
+**Symptom (2026-10-23):** opening the inbox before its first response arrived
+showed all notifications but left the unread badge visible. `openNotifPanel()`
+marked only the then-empty active set seen; the later `syncNotifUI()` rendered the
+response without applying the same policy.
+
+**Fix:** when a response refreshes an open, mounted inbox, mark its active set seen
+before updating the bell. Preserve the existing opening policy and localStorage
+persistence. A response arriving after the user closes the inbox must remain unread.
+This does not add server-side or cross-device read state.
+
+**Regression evidence:** `notifications.spec.ts` holds the initial intercepted response
+behind a promise, opens the empty inbox, then releases the response. The open-inbox
+case fails before the fix (badge remains visible) and passes afterward; a second
+case closes the inbox before release and proves its three notifications stay unread.
+The full notification spec passes all 12 tests, including dismissal persistence and
+attribute-injection defenses. Use controlled response ordering, not extra sleeps or
+retries, to test this race.

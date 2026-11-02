@@ -11,8 +11,10 @@
 #   - lock FREE: acquire succeeds (rc 0) in both bulk and single modes
 #   - lock HELD, bulk (`all`): yields immediately (-n) → rc 1, then `all` exits 75
 #     so the loop's tool_refresh retries instead of stamping "done"
-#   - lock HELD, single (a request): waits VALARK_TOOL_LOCK_WAIT then queues → rc 1,
-#     and the single-tool run exits 0 (pinned; the running mirror completes it)
+#   - lock HELD, single (a request): waits VALARK_TOOL_LOCK_WAIT then defers → rc 1,
+#     and the single-tool run exits 75 (EX_TEMPFAIL): THIS run mirrored nothing, so it
+#     must not report success (the tool is pinned; the loop's pin-refill fetches it, and
+#     the web UI shows the job as "deferred" instead of a green "complete")
 #   - contention never lets a second run reach run_all/run_tool (no double-writer)
 ###############################################################################
 PASS=0; FAIL=0
@@ -62,9 +64,9 @@ out=$(env "${COMMON[@]}" bash "$DL" all 2>&1); rc=$?
 [ "$rc" = 75 ] && pass || fail "download-tools.sh all under contention must exit 75 (got $rc)"
 echo "$out" | grep -q 'Tool Downloader' && fail "run_all must NOT start under contention (banner appeared)" || pass
 echo "$out" | grep -qi 'skipping this bulk refresh' && pass || fail "bulk contention must log the skip (got: $(echo "$out" | tail -1))"
-# 3b: single tool under contention → exit 0 (queued), run_tool never reached
+# 3b: single tool under contention → exit 75 (deferred), run_tool never reached
 out=$(env "${COMMON[@]}" VALARK_TOOL_LOCK_WAIT=1 bash "$DL" btop 2>&1); rc=$?
-[ "$rc" = 0 ] && pass || fail "a single-tool request under contention must exit 0/queued (got $rc)"
+[ "$rc" = 75 ] && pass || fail "a single-tool request under contention must exit 75/deferred, not claim success (got $rc)"
 echo "$out" | grep -qi 'queued' && pass || fail "single contention must report 'queued'"
 echo "$out" | grep -q 'Tool: btop' && fail "run_tool must NOT start under contention" || pass
 
@@ -80,8 +82,8 @@ echo "$disp" | awk '/^    all\)/,/;;/' | grep -q 'exit 75' && pass \
     || fail "the all) arm must exit 75 on contention so tool_refresh retries"
 echo "$disp" | awk '/^    \*\)/,/;;/' | grep -q 'acquire_tools_lock single' && pass \
     || fail "the single-tool arm must acquire the single lock"
-echo "$disp" | awk '/^    \*\)/,/;;/' | grep -q 'exit 0' && pass \
-    || fail "the single-tool arm must exit 0 (queued) on contention"
+echo "$disp" | awk '/^    \*\)/,/;;/' | grep -q 'exit 75' && pass \
+    || fail "the single-tool arm must exit 75 (deferred) on contention"
 
 echo "tool-lock: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

@@ -61,7 +61,7 @@ Jordan sees this as one plain-language screen: **"Who can use Val Ark?"** → *E
 ## Threat model (kept honest, in plain terms)
 
 - This protects against **casual access on the network** and **accidental changes**, and it makes **recovery safe**. It is a home/community appliance, not a bank.
-- Val Ark is explicitly **not** exposed to the public internet; HTTPS via the local CA (see the HTTPS guide) encrypts LAN traffic. Data at rest is not hidden from whoever physically holds the box — which is the correct model for a device you own.
+- Val Ark is explicitly **not** exposed to the public internet; HTTPS via the local CA (see the [HTTPS guide](../ENCRYPTION.md)) encrypts LAN traffic. Data at rest is not hidden from whoever physically holds the box — which is the correct model for a device you own.
 
 ## Defaults we ship
 

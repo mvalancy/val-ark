@@ -15,6 +15,7 @@ offline content (ZIM via Kiwix), with a zero-dependency web UI. It fills a disk 
   off `dev`, parallel via worktrees). **Never push to `main`.** Every non-trivial job = an
   issue; branches/commits/PRs reference it; PRs need green `tests/run-all.sh`.
 - **[`docs/design/`](docs/design/README.md)** — the consumer-appliance architecture (scope-first).
+- **AI agents:** also read [`AGENTS.md`](AGENTS.md) (operating manual) and [`.agents/`](.agents/README.md) (skills + knowledge); [`docs/README.md`](docs/README.md) is the canonical doc map.
 - **Secrets/host values NEVER go in git or memory.** Host names, local IPs, creds, and host
   paths live ONLY in the git-ignored `.env` (keys/shape in the git-tracked
   [`.env.example`](.env.example)). Refer to machines by role; use placeholders. The repo is PUBLIC.
@@ -48,6 +49,7 @@ Every tool integration touches these files. Complete ALL steps before considerin
 - [ ] `web-ui/logos/<name>.svg` -- Logo (SVG preferred)
 - [ ] `web-ui/screenshots/<name>-1.png` -- At least one screenshot
 - [ ] `tests/screenshots/specs/web-ui.spec.ts` -- Add to TOOL_IDS array
+- [ ] Failures are honest: `log_error` whenever a platform's file is missing/failed (the exit status and the web UI's Mirror result are derived from it — see [gotchas](docs/knowledge/gotchas.md#downloads--mirroring), "Mirroring… ✓ complete"); never end on an unconditional `log_success "… complete"` over a path that can fail
 - [ ] Run tests: `npx playwright test` (all must pass)
 - [ ] Verify URLs: `curl -sI -o /dev/null -w "%{http_code}" <url>` for each platform
 

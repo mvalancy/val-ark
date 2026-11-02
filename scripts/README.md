@@ -59,9 +59,11 @@ mount one shared mirror — see [Platforms](../docs/PLATFORMS.md).
 | `librarian.sh` | Scalable, diversity-first disk-fill + curation engine (see below) |
 | `loop.sh` | 24/7 self-healing + verification cycle; installs a cron driver |
 | `verify.sh` | Functional checks: tools run, kiwix serves, LLM infers, fleet reachable |
+| `valark` | Admin & recovery CLI (Phase-2 safety net): set/verify the admin passcode, use-mode, `claim`, `reset --tier1\|--tier2` — every reset touches only `<state>`, never content/models |
 | `download-tools.sh` | Orchestrates tool downloads via `scripts/tools/*.sh` |
 | `download-models.sh` | Curated AI model downloads to `<root>/models/` (resumable, never aborts) |
 | `download-zims.sh` | Direct ZIM content downloads for Kiwix |
+| `mirror-self.sh` | Self-replication: package the codebase (git bundle + tarball + VERSION) under `<data>/sources/val-ark/`, served at `/sources/` + `/bootstrap.sh` |
 | `server.js` | Zero-dependency Node.js server: web UI + JSON API + SSE; auto-serves Kiwix |
 | `audit-tools.sh` | Report mirrored vs. missing tool binaries per platform |
 | `monitor.sh` | Watch active downloads and disk usage |
@@ -72,7 +74,8 @@ mount one shared mirror — see [Platforms](../docs/PLATFORMS.md).
 | `optimize-images.py` | Compress/resize web-ui screenshots and logos |
 | `uninstall.sh` | Remove Val Ark config (leaves models and tools intact) |
 
-Shared library under `lib/`:
+Shared library under `lib/` — sourced/required building blocks, not entry points
+(full contract in [`lib/AGENTS.md`](lib/AGENTS.md)):
 
 | File | Purpose |
 |------|---------|
@@ -80,6 +83,12 @@ Shared library under `lib/`:
 | `lib/catalog.sh` | Unify live ZIM + model + installer download candidates |
 | `lib/kiwix_catalog.py` | Fetch the live Kiwix OPDS feed → TSV (no stale dates ever) |
 | `lib/planner.py` | Order candidates into a diversity-first download plan |
+| `lib/catalog-parse.js` | Parse `librarian.sh catalog` TSV into the web browse feed (ZIM language filter narrows output only, #57) |
+| `lib/moderation.sh` | Fail-closed on-device moderation decision core (allow/block/hold) — screens bytes, prints one JSON verdict |
+| `lib/mod-sweep.sh` | Loop enforcement: screen files already stored on the box, quarantine anything not cleanly allowed |
+| `lib/auth.js` | Admin identity: one scrypt passcode + HMAC sessions; shared by `server.js` and the `valark` CLI |
+| `lib/commission.js` | First-boot claim/commissioning + config store (profile/use-mode/recovery/moderation); shared by `server.js` and `valark` |
+| `lib/tls.sh` | Offline local certificate authority (CA + server leaf) for LAN HTTPS with no internet |
 
 ## Librarian (`librarian.sh`)
 
@@ -130,9 +139,9 @@ inference on a model served over NFS.
 
 ## Tool Scripts (`scripts/tools/`)
 
-There are **43** self-contained tool download scripts (e.g. `llama-cpp.sh`, `piper.sh`,
-`ffmpeg.sh`). Each sources `_common.sh` for shared helpers (logging, retrying
-downloads, platform detection, GitHub release lookup) and defines a
+There are **50** self-contained tool download scripts (e.g. `llama-cpp.sh`, `piper.sh`,
+`ffmpeg.sh`) plus the shared `_common.sh`. Each sources `_common.sh` for shared helpers
+(logging, retrying downloads, platform detection, GitHub release lookup) and defines a
 `download_<tool>()` function. `download-tools.sh` discovers them automatically:
 
 ```bash
@@ -157,6 +166,15 @@ status/inventory, and auto-launches `kiwix-serve` for any complete `.zim` in
 `node scripts/server.js 8080`. The loop and verify scripts read the same port from
 `VALARK_WEB_PORT` (`.env`).
 
+## Community services (`scripts/services/`)
+
+Offline LAN comms — `chat.sh` (ngIRCd + The Lounge), `mail.sh` (maddy + alps),
+`forum.sh` (NodeBB + Redis), `paste.sh` (MicroBin), plus the `seaweedfs.sh` storage
+backend. Each is a `start|stop|status` runner bound to a fixed `127.0.0.1` port,
+same-origin reverse-proxied by `server.js` at `/app/<id>/`, enabled via
+`VALARK_SERVICES` in `.env` and kept up by the loop. See
+[`services/AGENTS.md`](services/AGENTS.md) and [`docs/COMMUNITY.md`](../docs/COMMUNITY.md).
+
 ---
 
-[Back to Project Root](../README.md) | [Tool Scripts](tools/README.md) | [Architecture](../docs/ARCHITECTURE.md)
+[Back to Project Root](../README.md) · [scripts/AGENTS.md](AGENTS.md) · [Tool Scripts](tools/README.md) · [Architecture](../docs/ARCHITECTURE.md) · [Gotchas](../docs/knowledge/gotchas.md) · [Agent guide](../AGENTS.md)

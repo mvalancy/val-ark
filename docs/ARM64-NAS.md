@@ -1,5 +1,7 @@
 # Val Ark on ARM64 NAS appliances (chips such as the Rockchip RK3588)
 
+↑ [Docs](README.md) · [Repo root](../README.md)
+
 Setup notes, gotchas, and fixes from bringing Val Ark up on off-the-shelf ARM64
 NAS appliances — boxes built on chips such as the Rockchip **RK3588** (aarch64,
 Cortex-A55 ×8) running a Debian-derived vendor OS, often with an on-board **NPU**

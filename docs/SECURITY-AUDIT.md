@@ -1,5 +1,7 @@
 # Val Ark Security Audit
 
+↑ [Docs](README.md) · [Repo root](../README.md)
+
 **Audit date:** 2026-06-06 (point-in-time record — findings and line numbers reflect
 the tree as scanned; see the dated addendum at the end for what changed since).
 **Scope:** Public GitHub repo, web server / reverse proxy (`scripts/server.js`),
@@ -11,6 +13,14 @@ Methodology: a 6-dimension sweep (secrets, proxy, scripts, runtime, web UI, netw
 with adversarial verification — every finding below was independently reproduced via
 `grep` / `git`-history search / `stat` / `ss -tlnp` / live `curl` probes. False
 positives were removed.
+
+## Contents
+
+- [Executive Summary](#executive-summary)
+- [Findings by Severity](#findings-by-severity)
+- [Verified Good (confirmed working)](#verified-good-confirmed-working)
+- [Completeness Critic — What the sweep did NOT cover](#completeness-critic--what-the-sweep-did-not-cover)
+- [Addendum — 2026-07-10 (status update)](#addendum--2026-07-10-status-update-the-report-above-is-the-unedited-record)
 
 ---
 
@@ -63,6 +73,10 @@ fixes and most live entirely outside the repo.
 ---
 
 ## Findings by Severity
+
+> **Line numbers frozen 2026-06-06.** The file:line references in the tables below are the
+> point-in-time record from the audit sweep and are **not kept in sync** as the code moves. For
+> what has since been fixed or changed, see the [Addendum](#addendum--2026-07-10-status-update-the-report-above-is-the-unedited-record) — do not treat a line number here as current.
 
 Legend — **Auto-fix safe?** = the change can be applied without breaking a running
 service or a committed file. "No" generally means it needs an operator-coordinated

@@ -50,6 +50,45 @@ test.describe('Notification center — bell/inbox (#69 slice 1)', () => {
     await expect(page.locator('#notif-badge')).toBeHidden();
   });
 
+  for (const closeBeforeArrival of [false, true]) {
+    test(`notifications arriving after opening are ${closeBeforeArrival ? 'unread if closed again' : 'seen while still open'}`, async ({ page }) => {
+      // Hold the initial response until after the user opens the empty inbox.
+      // This forces the real race without relying on machine speed or sleeps.
+      let releaseResponse!: () => void;
+      let requestStarted!: () => void;
+      const responseGate = new Promise<void>(resolve => { releaseResponse = resolve; });
+      const requestGate = new Promise<void>(resolve => { requestStarted = resolve; });
+      await page.route('**/api/status/notifications', async route => {
+        requestStarted();
+        await responseGate;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: ITEMS }) });
+      });
+      await page.goto(BASE_URL + '/#/', { waitUntil: 'load' });
+      await requestGate;
+      await page.locator('#notif-bell').click();
+      await expect(page.locator('#notif-panel')).toBeVisible();
+      await expect(page.locator('#notif-panel .notif-item')).toHaveCount(0);
+      if (closeBeforeArrival) {
+        await page.keyboard.press('Escape');
+        await expect(page.locator('#notif-panel')).toHaveCount(0);
+      }
+      releaseResponse();
+      if (closeBeforeArrival) {
+        await expect(page.locator('#notif-badge')).toHaveText('3');
+        expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ark-notif-seen') || '[]'))).toEqual([]);
+      } else {
+        await expect(page.locator('#notif-panel .notif-item')).toHaveCount(3);
+        await expect(page.locator('#notif-badge')).toBeHidden();
+        expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ark-notif-seen') || '[]'))).toEqual(ITEMS.map(item => item.id));
+        // Seen state persists rather than merely hiding the badge for this render.
+        await page.reload({ waitUntil: 'load' });
+        await page.locator('#notif-bell').click();
+        await expect(page.locator('#notif-panel .notif-item')).toHaveCount(3);
+        await expect(page.locator('#notif-badge')).toBeHidden();
+      }
+    });
+  }
+
   test('a filter chip narrows the list', async ({ page }) => {
     await stubNotifications(page);
     await page.goto(BASE_URL + '/#/', { waitUntil: 'load' });

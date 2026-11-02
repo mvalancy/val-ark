@@ -1412,7 +1412,7 @@ test.describe('Val Ark - Consumer Shell (Home status + Settings + Activity)', ()
     await expect(failed).toContainText('Failed');
     await expect(failed).not.toContainText('retries automatically');
     await expect(failed.locator('.dl-mini')).toHaveText('Retry');
-    const fns = await page.evaluate(() => [typeof (window as any).renderDownloadCard, typeof (window as any).loadDownloads, typeof (window as any).retryDownload]);
+    const fns = await page.evaluate(() => [typeof (window as any).renderDownloadCard, typeof (window as any).loadDownloads, typeof (window as any).retryJob]);
     expect(fns).toEqual(['function', 'function', 'function']);
   });
 

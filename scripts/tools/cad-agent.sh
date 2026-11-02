@@ -286,12 +286,17 @@ _cadagent_write_install() {
     cat > "${dest}/install.sh" <<EOF
 #!/bin/bash
 # Set up cad-agent ${ver} from this Val Ark mirror alone (no network).
-#   bash install.sh ENV_DIR [extras]      default extras: ${CADAGENT_EXTRAS}
+#   bash install.sh ENV_DIR            everything mirrored for this platform
+#   bash install.sh ENV_DIR cad,sim    only these extras (pip resolves cad-agent[...])
+# The default installs requirements.txt (core + extras ${CADAGENT_EXTRAS}, minus
+# what this platform has no wheel for) and then cad-agent with --no-deps, because
+# cad-agent's fea extra names pypardiso (MKL, x86_64-only) with no platform marker.
 # Python: \$PYTHON, else Val Ark's python-standalone next to this dir, else python3 (>= 3.10).
 set -e
 HERE="\$(cd "\$(dirname "\$0")" && pwd)"
 ENV_DIR="\${1:?usage: install.sh ENV_DIR [extras]}"
-EXTRAS="\${2:-${CADAGENT_EXTRAS}}"
+EXTRAS="\${2:-}"
+PIP=("\$ENV_DIR/bin/python" -m pip install -q --no-index --disable-pip-version-check --find-links "\$HERE/wheelhouse")
 if [ -f "\$HERE/conda/explicit.txt" ]; then
     # aarch64: gmsh and pyamg come from the mirrored conda-forge set
     MR="\$(mktemp -d)"
@@ -303,7 +308,12 @@ else
     [ -n "\$PY" ] || { [ -x "\$HERE/../python-standalone/bin/python3" ] && PY="\$HERE/../python-standalone/bin/python3"; }
     "\${PY:-python3}" -m venv "\$ENV_DIR"
 fi
-"\$ENV_DIR/bin/python" -m pip install -q --no-index --find-links "\$HERE/wheelhouse" "cad-agent[\$EXTRAS]==${ver}"
+if [ -n "\$EXTRAS" ]; then
+    "\${PIP[@]}" "cad-agent[\$EXTRAS]==${ver}"
+else
+    "\${PIP[@]}" -r "\$HERE/requirements.txt"
+    "\${PIP[@]}" --no-deps "cad-agent==${ver}"
+fi
 "\$ENV_DIR/bin/cad-agent" --help >/dev/null
 echo "cad-agent ${ver} ready: \$ENV_DIR/bin/cad-agent"
 if [ -d "\$HERE/openfoam" ] && command -v docker >/dev/null 2>&1; then
@@ -321,11 +331,13 @@ Everything here installs WITHOUT internet:
 
   Linux / macOS:   bash install.sh ~/cad-agent-env
   Windows:         py -3.12 -m venv %USERPROFILE%\\cad-agent-env
-                   %USERPROFILE%\\cad-agent-env\\Scripts\\pip install --no-index --find-links wheelhouse "cad-agent[${CADAGENT_EXTRAS}]==${ver}"
+                   %USERPROFILE%\\cad-agent-env\\Scripts\\pip install --no-index --find-links wheelhouse -r requirements.txt
+                   %USERPROFILE%\\cad-agent-env\\Scripts\\pip install --no-index --find-links wheelhouse --no-deps cad-agent==${ver}
 
 Source (clone with history, from Val Ark's sources/cad-agent/):
   git clone sources/cad-agent/cad-agent.bundle cad-agent && cd cad-agent && git checkout v${ver}
-  pip install --no-index --find-links <this dir>/wheelhouse -e ".[cad,fea]"
+  pip install --no-index --find-links <this dir>/wheelhouse -r <this dir>/requirements.txt
+  pip install --no-index --find-links <this dir>/wheelhouse --no-deps -e .
 
 CFD (OpenFOAM, run by cad-agent in Docker):
   ${foam}
@@ -353,6 +365,11 @@ download_cad_agent() {
         [ "$(cat "$d/.version" 2>/dev/null)" = "$ver" ] && ls "$d"/wheelhouse/cad_agent-*.whl >/dev/null 2>&1 || stale=1
     done
     if [ "$stale" = 0 ] && [ -s "${SOURCES_DIR}/cad-agent/cad-agent.bundle" ]; then
+        # Regenerate the (cheap) install docs so generator fixes reach existing mirrors.
+        for plat in $CADAGENT_PLATFORMS; do
+            local img; img=$(grep -ho '"image": "[^"]*"' "${TOOLS_DIR}/${plat}/cad-agent"/openfoam/*.json 2>/dev/null | head -1 | cut -d'"' -f4)
+            _cadagent_write_install "$plat" "$ver" "${img:-$OPENFOAM_FALLBACK_IMAGE}"
+        done
         log_info "cad-agent ${ver}: already current on ${CADAGENT_PLATFORMS// /, } - skipping"
         DOWNLOAD_SKIPPED=$((DOWNLOAD_SKIPPED + 1)); return 0
     fi

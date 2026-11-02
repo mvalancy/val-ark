@@ -103,6 +103,8 @@ TD="$VAL_ARK_DATA/val-ark/tools"
 bash -n "$TD/linux-arm64/cad-agent/install.sh" 2>/dev/null && grep -q 'micromamba" create' "$TD/linux-arm64/cad-agent/install.sh" && pass || fail "linux-arm64 install.sh must parse and use the conda set"
 bash -n "$TD/linux-x86_64/cad-agent/install.sh" 2>/dev/null && grep -q -- '--no-index' "$TD/linux-x86_64/cad-agent/install.sh" && pass || fail "install.sh must install with pip --no-index"
 grep -q 'cad-agent\[$EXTRAS\]==9.9.9' "$TD/linux-x86_64/cad-agent/install.sh" && pass || fail "install.sh must pin the mirrored cad-agent version"
+grep -q -- '-r "$HERE/requirements.txt"' "$TD/linux-x86_64/cad-agent/install.sh" && grep -q -- '--no-deps "cad-agent==9.9.9"' "$TD/linux-x86_64/cad-agent/install.sh" \
+    && pass || fail "default install.sh must use the platform-filtered requirements.txt + cad-agent --no-deps (fea names x86-only pypardiso)"
 
 # --- 5. oci_pull against a local fake registry -------------------------------------
 REG="$T/reg"; mkdir -p "$REG"

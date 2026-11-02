@@ -157,9 +157,12 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   asset ⇒ `complete` + a named warning), `failed` (with `error` + log tail), `cancelled`, `deferred`
   (exit **75** = busy/not‑done, never success), `queued`. The bar is **real bytes**: scripts announce
   `@@valark-dl\t<total>\t<part>\t<sparse>\t<label>` (only when `VALARK_JOB_MARKERS=1`) and the server
-  stats that file; no size ⇒ indeterminate bar, never an invented percent. A no‑output‑and‑no‑byte‑growth
-  watchdog (`VALARK_JOB_STALL_SEC`, default 900) kills a hung job as `Stalled`. Jobs persist to
-  `state/jobs.json`; a restart marks in‑flight ones failed ("interrupted"). The UI re‑syncs from
+  stats that file; no size ⇒ indeterminate bar, never an invented percent. A watchdog
+  (`VALARK_JOB_STALL_SEC`, default 900) kills a job as `Stalled` only when there is NO output, NO
+  growth of the announced file AND no I/O or CPU in the job's process group (`/proc`: a quiet
+  `wget`‑inside‑`$(…)`, `hf download` or multi‑GB extract is alive; a hung `sleep`/dead socket is not). Jobs persist to
+  `state/jobs.json`; a restart marks in‑flight ones failed ("interrupted") and stops their leftover
+  process group (by the recorded pid, after checking its cmdline still names the job script). The UI re‑syncs from
   `GET /api/status/downloads` on load, on every SSE `init` (which carries the snapshot), on focus /
   back‑online and every 3 s while a job is active, and keeps a failure on screen until Dismiss.
   **Rules for tool scripts:** `log_error` for anything that means a file is missing (it feeds the exit

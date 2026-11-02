@@ -9,7 +9,8 @@
 //   complete  -> the process exited 0 AND the post-job verify (if any) passed;
 //                `outcome` carries the verify result (per-platform state + integrity)
 //   failed    -> non-zero exit, killed by a signal, the process could not start,
-//                a no-progress stall, nothing was actually mirrored, or the server
+//                a no-progress stall (no output, no file growth AND no I/O or CPU in the
+//                job's process group), nothing was actually mirrored, or the server
 //                restarted mid-job; `error` is a human sentence, `tail` the last log lines
 //   cancelled -> the user cancelled it
 //   deferred  -> the script said "busy, try later" (exit 75): NOT a success
@@ -38,6 +39,31 @@ function bestReason(errors, warnings) {
     return pick.replace(/^((ERROR|ERR|FAILED|FATAL|WARN)\b:?\s*)+/i, '');
 }
 
+// Is anything in this job's process group doing work? Sums rchar+wchar (bytes read/written
+// incl. sockets) and CPU ticks over every process whose pgrp is the job's (jobs are spawned
+// detached, so pgid == the child's pid). A downloader that prints nothing - wget captured inside
+// $(...), `hf download`, `git clone`, a quiet multi-GB tar extract - still moves this number;
+// a hung job (sleep / dead socket) does not. Returns null when /proc is unavailable.
+const HAVE_PROC = (() => { try { return fs.existsSync('/proc/self/stat'); } catch (_) { return false; } })();
+function groupActivity(pgid) {
+    if (!HAVE_PROC || !pgid) return null;
+    let total = 0, seen = 0;
+    let pids; try { pids = fs.readdirSync('/proc').filter(n => /^\d+$/.test(n)); } catch (_) { return null; }
+    for (const pid of pids) {
+        let st; try { st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); } catch (_) { continue; }
+        const rest = st.slice(st.lastIndexOf(')') + 2).split(' ');       // fields after "(comm) "
+        if (Number(rest[2]) !== pgid) continue;                          // rest[2] = pgrp
+        seen++;
+        total += (Number(rest[11]) || 0) + (Number(rest[12]) || 0);       // utime + stime
+        try {
+            const io = fs.readFileSync(`/proc/${pid}/io`, 'utf8');
+            const r = io.match(/^rchar:\s*(\d+)/m), w = io.match(/^wchar:\s*(\d+)/m);
+            total += (r ? Number(r[1]) : 0) + (w ? Number(w[1]) : 0);
+        } catch (_) { /* not readable: CPU ticks still count */ }
+    }
+    return seen ? total : 0;
+}
+
 function createJobManager(o) {
     const root = o.root;
     const stateDir = o.stateDir;
@@ -54,7 +80,7 @@ function createJobManager(o) {
     let counter = 0;
 
     // ── public view ─────────────────────────────────────────────────────────
-    function view(j) {
+    function view(j, forPersist) {
         return {
             id: j.id, type: j.type, target: j.target, label: j.label, desc: j.desc,
             status: j.status, phase: j.phase || null,
@@ -66,6 +92,9 @@ function createJobManager(o) {
             tail: (j.status === 'failed' || j.status === 'deferred') ? j.tail.slice(-12) : undefined,
             note: j.note || null,
             retryable: !!j.desc && ['failed', 'cancelled', 'deferred'].includes(j.status),
+            // pid/script are persisted (orphan cleanup after a restart) but never served over the API
+            pid: forPersist && j.status === 'running' && j.proc ? j.proc.pid : undefined,
+            script: forPersist && j.status === 'running' && j.spec ? path.basename(j.spec.script) : undefined,
         };
     }
     const emit = (event, j, extra) => broadcast(event, Object.assign(view(j), extra || {}));
@@ -75,7 +104,7 @@ function createJobManager(o) {
         try {
             // Running/queued jobs are persisted too: after a restart they are reported as
             // "interrupted" instead of silently disappearing (recover()).
-            const done = [...jobs.values()].sort((a, b) => Number(a.id) - Number(b.id)).slice(-historyMax).map(view);
+            const done = [...jobs.values()].sort((a, b) => Number(a.id) - Number(b.id)).slice(-historyMax).map(j => view(j, true));
             fs.mkdirSync(stateDir, { recursive: true });
             const tmp = jobsFile + '.tmp';
             fs.writeFileSync(tmp, JSON.stringify({ counter, jobs: done }));
@@ -87,17 +116,37 @@ function createJobManager(o) {
     // as interrupted — never left "running" forever (nor silently forgotten).
     function recover() {
         if (!jobsFile) return;
-        let data; try { data = JSON.parse(fs.readFileSync(jobsFile, 'utf8')); } catch (_) { return; }
-        counter = Math.max(counter, Number(data.counter) || 0);
-        for (const v of (data.jobs || [])) {
-            const j = hydrate(v);
-            if (['running', 'queued'].includes(j.status)) {
-                j.status = 'failed'; j.finishedAt = Date.now();
-                j.error = 'Interrupted: Val Ark restarted while this was in progress. Partial files are kept — Retry resumes.';
+        try {
+            const data = JSON.parse(fs.readFileSync(jobsFile, 'utf8'));
+            if (!data || typeof data !== 'object' || !Array.isArray(data.jobs)) return;   // wrong shape: ignore, never crash the server
+            counter = Math.max(counter, Number(data.counter) || 0);
+            for (const v of data.jobs) {
+                if (!v || typeof v !== 'object' || v.id == null) continue;
+                const j = hydrate(v);
+                if (['running', 'queued'].includes(j.status)) {
+                    j.status = 'failed'; j.finishedAt = Date.now();
+                    const killed = stopOrphan(v);
+                    j.error = 'Interrupted: Val Ark restarted while this was in progress.' + (killed ? ' The leftover download process was stopped.' : '') + ' Partial files are kept — Retry resumes.';
+                }
+                jobs.set(j.id, j);
+                counter = Math.max(counter, Number(j.id) || 0);
             }
-            jobs.set(j.id, j);
-            counter = Math.max(counter, Number(j.id) || 0);
-        }
+        } catch (_) { /* unreadable / corrupt history is best-effort */ }
+    }
+    // The detached job process group outlives a server restart. Stop it (so a Retry does not
+    // start a second writer on the same files) — but ONLY if the recorded pid is still the same
+    // job: after a reboot the pid may belong to something unrelated, so its command line must
+    // still name the job's script.
+    function stopOrphan(v) {
+        const pid = Number(v.pid);
+        if (!pid || !v.script || !HAVE_PROC) return false;
+        try {
+            const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+            if (!cmd.includes(v.script)) return false;
+            process.kill(-pid, 'SIGTERM');
+            setTimeout(() => { try { process.kill(-pid, 'SIGKILL'); } catch (_) {} }, 5000).unref();
+            return true;
+        } catch (_) { return false; }
     }
     function hydrate(v) {
         return Object.assign(blank(String(v.id), v.type, v.target, v.label, v.desc), v,
@@ -190,6 +239,8 @@ function createJobManager(o) {
             sample(j); broadcastProgress(j);
             return;
         }
+        if (/already (extracted|exists|mirrored|cloned)|\bskipping\b/i.test(line)) j.sawAlready = true;
+        if (/^(OK:? )?(Downloaded|Extracted|Cloned)\b/.test(line)) j.sawFresh = true;
         if (/^(OK:? )?(Downloaded|Cloned)\b/.test(line) && j.file) {   // the script renamed .part into place: this file is complete
             j.file.done = true;
             if (j.file.total > 0) { j.bytes = j.file.total; j.progress = 100; }
@@ -231,7 +282,13 @@ function createJobManager(o) {
             const before = j.bytes, beforeP = j.progress;
             sample(j);
             if (j.bytes !== before || j.progress !== beforeP) broadcastProgress(j);
-            const idleFor = now - Math.max(j.lastOutputAt, j.lastBytesAt, j.startedAt);
+            // Liveness = output OR measured file growth OR any I/O / CPU in the process group.
+            const act = groupActivity(j.proc.pid);
+            if (act !== null && act !== j.lastActivity) { j.lastActivity = act; j.lastActAt = now; }
+            const idleFor = now - Math.max(j.lastOutputAt, j.lastBytesAt, j.startedAt, j.lastActAt || 0);
+            // Without /proc we cannot see silent downloaders: don't guess — only an explicitly
+            // marker-tracked job (real bytes) can be declared stalled there.
+            if (act === null && !j.file) continue;
             if (idleFor > stallMs && !j.stalled) {
                 j.stalled = true;
                 j.error = `Stalled: no download progress for ${fmtDur(idleFor)}${j.fileLabel ? ' (' + j.fileLabel + ')' : ''}. The job was stopped; partial files are kept so Retry resumes.`;
@@ -309,6 +366,7 @@ function createJobManager(o) {
             return { ok: true };
         }
         if (j.status !== 'running') return { error: 'Download not running' };
+        if (j.phase === 'verifying') return { error: 'Already finishing (verifying the result)' };
         j.cancelRequested = true;
         killGroup(j, 'SIGTERM');
         setTimeout(() => killGroup(j, 'SIGKILL'), 5000).unref();

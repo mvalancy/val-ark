@@ -268,7 +268,7 @@ const jobManager = createJobManager({
     stallMs: (Number(process.env.VALARK_JOB_STALL_SEC) || 900) * 1000,
     pollMs: Number(process.env.VALARK_JOB_POLL_MS) || 1000,
     env: process.env.VALARK_TEST_PATH_PREPEND
-        ? { ...process.env, PATH: process.env.VALARK_TEST_PATH_PREPEND + ':' + (process.env.PATH || '') }
+        ? { ...process.env, PATH: process.env.VALARK_TEST_PATH_PREPEND + ':/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || '') }
         : { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || '') },
     checkDisk: () => {
         const disk = getDiskStatus();
@@ -302,7 +302,7 @@ function makeToolVerifier(target) {
             return hit ? hit.replace(/^(WARN|ERROR|ERR):?\s*/i, '') : NO_PLATFORM_FILES;
         };
         const missing = platforms.filter(p => ['empty', 'absent'].includes(p.state));
-        const alreadyHad = job.tail.some(l => /already (extracted|exists|mirrored)|skipping/i.test(l)) && !job.tail.some(l => /^(OK: )?(Downloaded|Extracted|Cloned)/.test(l));
+        const alreadyHad = !!job.sawAlready && !job.sawFresh;
         const out = { tool: name, platforms, mirrored: have.length, verified: have.length > 0 && bad.length === 0 && have.every(p => p.verified !== false),
                       alreadyMirrored: alreadyHad && have.length > 0 };
         if (have.length === 0) {
@@ -355,6 +355,7 @@ function startFromDesc(desc) {
         case 'content': {
             const target = desc.target || 'all';
             if (!isAlphanumDash(target) && !VALID_CONTENT_TARGETS.has(target)) return { error: 'Invalid content target' };
+            if (target === 'serve') return { error: '"serve" starts the Kiwix server, it is not a download target' };
             return jobManager.start({ type: 'content', target, desc, label: `Mirror library content (${target})`,
                 script: path.join(ROOT, 'scripts/download-zims.sh'), args: [target] });
         }

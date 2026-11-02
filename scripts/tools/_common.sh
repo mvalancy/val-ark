@@ -87,7 +87,10 @@ log() {
 }
 log_success() { log "${GREEN}OK${NC}: $*"; }
 _VA_ERRORS=0
-log_error()   { _VA_ERRORS=$((_VA_ERRORS + 1)); log "${RED}ERROR${NC}: $*"; }
+# log_error is often called inside $(...) (github_asset_url): a plain counter would die with the
+# subshell, so every error also appends one byte to a per-run file that the exit trap reads.
+_VA_ERR_FILE="$(mktemp "${TMPDIR:-/tmp}/valark-errs.XXXXXX" 2>/dev/null || true)"
+log_error()   { _VA_ERRORS=$((_VA_ERRORS + 1)); [ -n "$_VA_ERR_FILE" ] && printf x >> "$_VA_ERR_FILE" 2>/dev/null; log "${RED}ERROR${NC}: $*"; }
 log_info()    { log "${BLUE}INFO${NC}: $*"; }
 log_warn()    { log "${YELLOW}WARN${NC}: $*"; }
 
@@ -100,13 +103,19 @@ log_warn()    { log "${YELLOW}WARN${NC}: $*"; }
 # missing per platform — but is announced here so the log says it.
 _va_strict_exit() {
     local rc=$?
+    local nerr="${_VA_ERRORS:-0}" fcount=0
+    if [ -n "${_VA_ERR_FILE:-}" ] && [ -f "$_VA_ERR_FILE" ]; then
+        fcount=$(wc -c < "$_VA_ERR_FILE" 2>/dev/null | tr -d ' ')
+        [ "${fcount:-0}" -gt "$nerr" ] 2>/dev/null && nerr="$fcount"
+        rm -f "${_VA_ERR_FILE:?}" 2>/dev/null
+    fi
     [ "${VALARK_STRICT_EXIT:-0}" = "1" ] || return $rc
-    if [ "$rc" -eq 0 ] && [ "${_VA_ERRORS:-0}" -gt 0 ]; then
+    if [ "$rc" -eq 0 ] && [ "$nerr" -gt 0 ]; then
         if [ $(( ${DOWNLOAD_SUCCESS:-0} + ${DOWNLOAD_SKIPPED:-0} )) -eq 0 ]; then
-            echo "FAILED: ${_VA_ERRORS} error(s) and nothing was mirrored" >&2
+            echo "FAILED: ${nerr} error(s) and nothing was mirrored" >&2
             exit 1
         fi
-        echo "WARN: PARTIAL: ${_VA_ERRORS} error(s); ${DOWNLOAD_SUCCESS:-0} item(s) mirrored, ${DOWNLOAD_SKIPPED:-0} already present" >&2
+        echo "WARN: PARTIAL: ${nerr} error(s); ${DOWNLOAD_SUCCESS:-0} item(s) mirrored, ${DOWNLOAD_SKIPPED:-0} already present" >&2
     fi
     return $rc
 }
@@ -202,8 +211,7 @@ github_asset_url() {
     fi
     local apierr; apierr=$(_github_api_error "$body")
     if [ -n "$apierr" ]; then
-        # Say it once per script run (every platform would repeat the identical line).
-        if [ "${_VA_GH_ERR_SHOWN:-}" != "$apierr" ]; then log_error "${apierr} (${repo} ${tag})" >&2; _VA_GH_ERR_SHOWN="$apierr"; fi
+        log_error "${apierr} (${repo} ${tag})" >&2
         return 0
     fi
     local url
@@ -307,6 +315,7 @@ download_file() {
                 404|410) why="HTTP ${code} - not found upstream (the file was moved or removed)"; break ;;
                 401|403) why="HTTP ${code} - access denied / authentication required for this source"; break ;;
                 429)     why="HTTP 429 - rate limited by the source"; break ;;
+                408)     why="HTTP 408 - the source timed out" ;;
                 4??)     why="HTTP ${code} from the source"; break ;;
                 5??)     why="HTTP ${code} - the source is having trouble" ;;
             esac
@@ -327,7 +336,8 @@ download_file() {
 # HTTP status of a URL without downloading it (1-byte range GET: some CDNs reject HEAD).
 # "000" = no HTTP response at all (DNS/connect/timeout).
 _http_probe() {
-    curl -sL -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 20 -r 0-0 "$1" 2>/dev/null || echo 000
+    local c; c=$(curl -sL -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 20 -r 0-0 "$1" 2>/dev/null)
+    echo "${c:-000}"     # curl itself prints 000 when there was no response (and exits non-zero)
 }
 
 # --- Version gating (shared convention — use these, don't hand-roll) ----------

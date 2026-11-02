@@ -197,7 +197,7 @@ cmd_download() {
             ok=$((ok + 1))
         else
             local code why="curl exit ${rc}"
-            code=$(curl -sL -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 20 -r 0-0 "$ZIM_URL" 2>/dev/null || echo 000)
+            code=$(curl -sL -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 20 -r 0-0 "$ZIM_URL" 2>/dev/null); code="${code:-000}"
             case "$code" in
                 404|410) why="HTTP ${code}: not found upstream (the file was moved or removed)" ;;
                 401|403) why="HTTP ${code}: access denied / authentication required" ;;

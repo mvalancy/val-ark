@@ -104,7 +104,7 @@ tool_present() {
 # One human sentence for WHY a URL can't be fetched (used in failure messages so the web
 # UI shows a reason instead of a bare "failed"). Echoes nothing when the URL answers.
 http_reason() {
-    local code; code=$(curl -sL -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 20 -r 0-0 "$1" 2>/dev/null || echo 000)
+    local code; code=$(curl -sL -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 20 -r 0-0 "$1" 2>/dev/null); code="${code:-000}"
     case "$code" in
         2??|3??) return 0 ;;
         404|410) echo "HTTP ${code}: not found upstream (the file was moved or removed)" ;;

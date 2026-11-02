@@ -153,6 +153,25 @@ VAL_ARK_DATA="$T/a" FORCE_COLOR=0 bash "$T/a/allfail.sh" >/dev/null 2>&1; [ $? =
 
 fi
 
+# A8. strict exit must also see errors logged inside $(...) (github_asset_url runs in a subshell, so a
+#     plain counter died with it and a rate-limited run exited 0 = "complete")
+echo ratelimit > "$SHIM/mode"
+mk_tool rl 'u=$(github_asset_url rhasspy/piper 2023.11.14-2 linux_aarch64.tar.gz); [ -n "$u" ] || log_warn "No linux-arm64 asset found"; log_success "Demo download complete"'
+PATH="$SHIM:$PATH" VAL_ARK_DATA="$T/a" VALARK_STRICT_EXIT=1 FORCE_COLOR=0 bash "$T/a/rl.sh" >/dev/null 2>&1; [ $? = 1 ] && pass || fail "A8 a rate-limited run (error logged in a subshell) must exit 1 under strict mode"
+
+# A9. no HTTP response at all reads "000" (curl prints 000 AND exits non-zero: '|| echo 000' made it 000000)
+SHIM9="$T/shim9"; mkdir -p "$SHIM9"; printf '#!/bin/bash\nprintf 000; exit 7\n' > "$SHIM9/curl"; chmod +x "$SHIM9/curl"
+P9="$(PATH="$SHIM9:$PATH" VAL_ARK_DATA="$T/a" bash -c 'source "'"$SRC"'/scripts/tools/_common.sh"; _http_probe https://example.invalid/x' 2>/dev/null)"
+[ "$P9" = 000 ] && pass || fail "A9 _http_probe must say 000 when there was no response (got '$P9')"
+
+# A10. structural (operative lines only): the model downloader must write a .part and rename it,
+#      never wget straight into the final name (a cancelled/stalled download left a truncated model
+#      that the next run skipped as "Already exists"); and its exit status must stay truthful.
+MD="$SRC/scripts/download-models.sh"
+grep -v '^[[:space:]]*#' "$MD" | grep -q -- '-O "\$dest_file"' && fail "A10 hf_download_file must not wget -O the final file name" || pass
+grep -v '^[[:space:]]*#' "$MD" | grep -q -- '-O "\$part"' && pass || fail "A10 hf_download_file must download into <file>.part"
+grep -v '^[[:space:]]*#' "$MD" | grep -q 'exit "\$_va_case_rc"' && pass || fail "A10 download-models.sh must keep the dispatched branch's exit status"
+
 ###############################################################################
 # PART B — the server job layer, end to end, in a temp copy of scripts/
 ###############################################################################
@@ -183,6 +202,16 @@ tool_stub zzslow 'd="${TOOLS_DIR}/linux-x86_64/zzslow"; mkdir -p "$d"; part="$d/
 printf "@@valark-dl\t4194304\t%s\t0\tzzslow linux-x86_64\n" "$part"
 for i in 1 2 3 4; do head -c 1048576 /dev/zero >> "$part"; echo "INFO: chunk $i"; sleep 1.2; done
 mv "$part" "$d/zzslow.bin"; head -c 120000 /dev/urandom > "$d/zzslow"; log_success "Downloaded: zzslow linux-x86_64"'
+
+# a valid archive whose `tar -t` listing is > 1 MiB (used to be reported "corrupt": execFile's stdout buffer)
+tool_stub zzbig 'd="${TOOLS_DIR}/linux-x86_64/zzbig"; mkdir -p "$d/zzbig" "$d/.dist"; head -c 120000 /dev/urandom > "$d/zzbig/zzbig"
+( cd "$d/zzbig" && seq -f "file_with_a_rather_long_name_to_inflate_the_tar_listing_%06g.txt" 1 25000 | xargs touch )
+( cd "$d" && tar -czf .dist/zzbig.tar.gz zzbig ); log_success "Extracted: zzbig"'
+# only a leftover partial download: must NOT read as mirrored / verified
+tool_stub zzpart 'd="${TOOLS_DIR}/linux-x86_64/zzpart"; mkdir -p "$d"; head -c 200000 /dev/urandom > "$d/.tmp_zzpart.tar.gz.part"; log_warn "download interrupted"; log_success "zzpart download complete"'
+# SILENT but busy for longer than the stall limit (3 s): a quiet downloader/extractor is alive, not stalled
+tool_stub zzquiet 'd="${TOOLS_DIR}/linux-x86_64/zzquiet"; mkdir -p "$d/zzquiet"; end=$((SECONDS+6)); while [ $SECONDS -lt $end ]; do :; done
+head -c 120000 /dev/urandom > "$d/zzquiet/zzquiet"; log_success "Extracted: zzquiet"'
 
 PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 B="http://127.0.0.1:$PORT"
@@ -299,15 +328,37 @@ grep -q '^event: init' "$T/sse.txt" && grep -q '"jobs":{' "$T/sse.txt" && grep -
 id=$(post /api/download/content '{"target":"no-such-zim"}' | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))'); st=$(wait_job "$id" 20)
 [ "$st" = failed ] && job "$id" "['error']" | grep -q 'Unknown content target' && pass || fail "B13b an unknown content id must fail visibly (got $st: $(job "$id" "['error']"))"
 
+# B13c. big archive listing (> 1 MiB) must verify (execFile maxBuffer used to turn it into "corrupt")
+id=$(start_tool zzbig); st=$(wait_job "$id" 40)
+[ "$st" = complete ] && [ "$(job "$id" "['outcome']['platforms'][1]['verified']")" = True ] && pass || fail "B13c a valid archive with a huge listing must verify (got $st: $(job "$id" "['error']"))"
+# B13d. a leftover .part is not "mirrored" (and not "verified")
+id=$(start_tool zzpart); st=$(wait_job "$id" 20)
+[ "$st" = failed ] && job "$id" "['error']" | grep -qi 'nothing was mirrored' && pass || fail "B13d a platform holding only a .part must count as NOT mirrored (got $st: $(job "$id" "['outcome']"))"
+# B13e. silent but busy > stall limit is alive, not 'Stalled' (activity of the process group counts)
+id=$(start_tool zzquiet); st=$(wait_job "$id" 30)
+[ "$st" = complete ] && pass || fail "B13e a quiet-but-working job must not be killed as stalled (got $st: $(job "$id" "['error']"))"
+
 # B14. server restart mid-job: history survives, the interrupted job is reported FAILED (not 'running' forever)
-id=$(start_tool zzstall); sleep 0.6
+id=$(start_tool zzstall); sleep 1.0
+OPID="$(python3 -c 'import json; d=json.load(open("'"$R"'/state/jobs.json")); print([j for j in d["jobs"] if j["id"]=="'"$id"'"][0].get("pid",""))' 2>/dev/null)"
 kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null
 # the job's process group would be orphaned; the new server must still report it honestly
 start_server && pass || fail "B14 server restart failed"
 st="$(job "$id" "['status']")"
 [ "$st" = failed ] && job "$id" "['error']" | grep -qi 'restarted' && pass || fail "B14 a job interrupted by a restart must be 'failed: ... restarted' (got $st: $(job "$id" "['error']"))"
 [ "$(job "$b" "['status']")" = complete ] && pass || fail "B14 finished-job history must survive a restart (job $b: $(job "$b" "['status']"))"
-pkill_orphans() { :; }   # (the orphaned zzstall sleeps 60s and exits on its own; we never pkill by pattern)
+# the job's process group survived the restart; the new server must have stopped it (by the pid it
+# recorded, after checking the cmdline still names the job) so a Retry cannot start a second writer
+gone=0; for i in $(seq 1 40); do kill -0 "$OPID" 2>/dev/null || { gone=1; break; }; sleep 0.25; done
+[ -n "$OPID" ] && [ "$gone" = 1 ] && pass || fail "B14 the orphaned job process (pid '$OPID') must be stopped after a restart"
+job "$id" "['error']" | grep -qi 'leftover download process was stopped' && pass || fail "B14 the interrupted-job message must say the leftover process was stopped (got: $(job "$id" "['error']"))"
+
+# B17. a jobs.json with the wrong shape must never stop the server from booting
+for bad in 'null' '{"jobs":{"a":1}}' '[1,2]' '{"jobs":[null,5,{"id":"9","status":"running"}]}'; do
+    kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null
+    printf '%s' "$bad" > "$R/state/jobs.json"
+    start_server && pass || fail "B17 server must boot with jobs.json = $bad (see $T/srv.log)"
+done
 
 fi
 

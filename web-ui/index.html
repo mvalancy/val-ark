@@ -4036,6 +4036,7 @@ function dlMiniAction(el) {
 let _dlPollTimer = null;
 function _applyJob(j) {
     if (!j || j.id == null) return;
+    if (j.type === 'tools' && j.target) delete _mirrorStartErr[j.target];   // a real job supersedes a stale "could not start"
     const prev = _activeDownloads.get(String(j.id)) || {};
     _activeDownloads.set(String(j.id), { ...prev, ...j, id: String(j.id), startedAt: j.startedAt || prev.startedAt || Date.now() });
 }
@@ -4045,11 +4046,21 @@ function _syncJobs(snapshot, authoritative) {
     jobsChanged();
 }
 // Merge the server's full download objects into the map. Returns true when the API answered.
-async function loadDownloads() {
+let _dlLoadSeq = 0, _dlLoadInflight = null;
+function loadDownloads() {
+    // One request in flight at a time (SSE can fire a burst of events), and a response that was
+    // overtaken by a newer request is ignored so it cannot delete a job that just started.
+    if (_dlLoadInflight) return _dlLoadInflight;
+    _dlLoadInflight = _loadDownloadsOnce().finally(() => { _dlLoadInflight = null; });
+    return _dlLoadInflight;
+}
+async function _loadDownloadsOnce() {
+    const seq = ++_dlLoadSeq;
     try {
         const r = await fetch('/api/status/downloads');
         if (!r.ok) return false;
         const data = await r.json();
+        if (seq !== _dlLoadSeq) return true;
         const wasActive = [..._activeDownloads.values()].filter(d => d.status === 'running' || d.status === 'queued').map(d => d.id);
         _syncJobs(data, true);
         // A job we thought was running finished while we weren't listening: refresh the

@@ -15,7 +15,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
+const { spawn } = require('child_process');
 
 function readdirSafe(dir) {
     try { return fs.readdirSync(dir); }
@@ -52,6 +52,9 @@ function shallowDirInfo(dirPath) {
                 const fullPath = path.join(dirPath, entry);
                 const s = fs.statSync(fullPath);
                 if (s.isFile()) {
+                    // An in-progress / leftover partial is not mirrored content (it made a
+                    // half-downloaded tool read as "Mirrored" and "verified").
+                    if (/^\.tmp_|\.part$|\.aria2$/.test(entry)) continue;
                     size += s.size;
                     fileCount++;
                     const isTxt = entry.endsWith('.txt') || entry.endsWith('.md');
@@ -164,6 +167,7 @@ function scanToolDir(dirPath, opts) {
                     next.push(full);
                 } else if (st.isFile()) {
                     if (dir === dirPath) continue;          // top level was already counted
+                    if (/^\.tmp_|\.part$|\.aria2$/.test(entry)) continue;
                     files++; size += st.size;
                     if (st.mtimeMs > newest) newest = st.mtimeMs;
                     if (SOURCE_MARKERS.includes(entry)) isSource = true;
@@ -192,12 +196,15 @@ function scanToolDir(dirPath, opts) {
 // server's event loop must not stall on a big archive) and bounded: archives bigger
 // than maxBytes are reported as "not deep-checked", never silently passed.
 function _run(cmd, args, timeoutMs) {
+    // spawn with stdio ignored: execFile buffers stdout (maxBuffer 1 MiB) and `tar -t` of a big
+    // archive lists far more than that, which used to surface as "corrupt or truncated".
     return new Promise((resolve) => {
-        execFile(cmd, args, { timeout: timeoutMs, stdio: 'ignore' }, (err) => {
-            if (!err) return resolve({ status: 0 });
-            if (err.code === 'ENOENT') return resolve({ missing: true });
-            resolve({ status: typeof err.code === 'number' ? err.code : 1 });
-        });
+        let child, timer, done = false;
+        const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve(r); };
+        try { child = spawn(cmd, args, { stdio: 'ignore' }); } catch (_) { return finish({ missing: true }); }
+        timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} finish({ status: 124 }); }, timeoutMs);
+        child.on('error', (err) => finish(err && err.code === 'ENOENT' ? { missing: true } : { status: 1 }));
+        child.on('close', (code) => finish({ status: code === null ? 1 : code }));
     });
 }
 async function testArchive(file, maxBytes) {

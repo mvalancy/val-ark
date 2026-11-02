@@ -685,7 +685,7 @@ function computePackages() {
                 kind: 'app',
                 platform,
                 version: isDir ? _versionMarker(full) : null,
-                size: isDir ? (scan.size || _shallowSize(full)) : st.size,
+                size: isDir ? ((scan.scanned === 'wrapped' && scan.size) ? scan.size : _shallowSize(full)) : st.size,
                 desc: `App for ${platform}`,
                 url: `/api/archive/tools/${encodeURIComponent(platform)}/${encodeURIComponent(entry)}`,
             });

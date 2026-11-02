@@ -46,7 +46,7 @@ Zero-dep Node HTTP(S) server, ~3.4k lines. Sections are marked by `// ====` bann
 | 1–149 | Config & bootstrap | requires (incl. `./lib/catalog-parse`), `ROOT`, `APP_VERSION` (repo-root `VERSION`), `.env` parse, listen ports, `resolveDataRoot`, `safeModeState`, `boxCommissioned`. |
 | 150–186 | Input Validation | `isAlphanumDash`, `isCatalogId` — allowlist guards for request ids (no client data reaches a shell). |
 | 187–204 | Status Cache | `invalidateCache` + the SSE/status memo. |
-| 205–329 | Download Manager | `broadcastSSE`, `startDownload`, `cancelDownload` — spawn librarian/download scripts, stream progress over SSE. |
+| 205–329 | Download Manager | `broadcastSSE`, `jobManager` (`lib/jobs.js`), `startFromDesc`, `cancelDownload`, `retryDownload` — spawn librarian/download scripts as honest jobs (real-byte progress, verified result or visible failure), stream over SSE. |
 | 330–508 | Status Helpers (cached) | `getDiskStatus` / `getToolsStatus` / `getContentStatus` / `getModelsStatus` — data behind `/api/status/*`. |
 | 509–958 | Packages manifest | `computePackages`/`getPackages` (`/api/packages` — what THIS box can hand out) + storage/catalog helpers. |
 | 959–1555 | Request Handling | body/CORS/auth helpers (`isLocalhost`, `isAdmin`, `isReadGated`, `readAllowed`, `rateLimitOk`) + **`handleAPI`** — the ~48 `/api/…` routes: `status/*`, `catalog/*`, `request`, `download/*`, `service/*`, `auth/*`, `setup/*`, `moderation/*`, `maintenance/repair`, `ask`, `health`, `packages`. |

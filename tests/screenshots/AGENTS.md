@@ -19,6 +19,7 @@ when a UI behavior or an API contract the UI depends on needs browser-level cove
 | `specs/health.spec.ts` | Health/self-heal page (`/#/health`) + settings; needs `/api/status/health`. Live `:3001`. |
 | `specs/metrics.spec.ts` | Metrics tiles + history ring buffer (zero-dep live gauges; no telegraf/grafana). Live `:3001`. |
 | `specs/packages.spec.ts` | Packages page (`/#/packages`) direct-download list on an empty mirror. Live `:3001`. |
+| `specs/mirror-jobs-ui.spec.ts` | Mirror/clone buttons show the TRUTH (stubbed `**/api/status/downloads`, SSE aborted): failure + reason + working Retry, start errors visible, real-byte vs indeterminate bar, API-poll convergence, deferred ≠ success. Pairs with `tests/test-mirror-honesty.sh` (server side). Live `:3001`. |
 | `specs/ui-exercise.spec.ts` | Broad click-through / link-crawl of routes. Live `:3001` (override with `VALARK_TEST_URL`). |
 | `playwright.config.ts` | `testDir: ./specs`, chromium-only, dark colorScheme; `webServer` spawns `server.js` on **:3001**. |
 | `package.json` / `package-lock.json` | `@playwright/test` dependency (run `npm install` once). |

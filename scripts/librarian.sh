@@ -101,6 +101,20 @@ tool_present() {
         -exec sh -c '[ -n "$(ls -A "$1" 2>/dev/null)" ] && echo "$1"' _ {} \; | head -1)" ]
 }
 
+# One human sentence for WHY a URL can't be fetched (used in failure messages so the web
+# UI shows a reason instead of a bare "failed"). Echoes nothing when the URL answers.
+http_reason() {
+    local code; code=$(curl -sL -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 20 -r 0-0 "$1" 2>/dev/null); code="${code:-000}"
+    case "$code" in
+        2??|3??) return 0 ;;
+        404|410) echo "HTTP ${code}: not found upstream (the file was moved or removed)" ;;
+        401|403) echo "HTTP ${code}: access denied / authentication required for this source" ;;
+        429)     echo "HTTP 429: rate limited by the source" ;;
+        000)     echo "no response from the source (offline, DNS or timeout)" ;;
+        *)       echo "HTTP ${code} from the source" ;;
+    esac
+}
+
 # --- download one candidate (rugged; never aborts) -------------------------
 CURL_OPTS=(-fL --connect-timeout 30 --retry 5 --retry-delay 15 --retry-all-errors
            -A "val-ark-librarian/1.0" --progress-bar)
@@ -116,8 +130,12 @@ download_one() {
             # if aria2 is absent or fails — but NEVER let curl resume an
             # aria2-owned partial (see below).
             command -v aria2c >/dev/null 2>&1 && have_aria2=1
+            # Web-UI progress: name the file being written so the job's bar is real bytes
+            # (sparse=1 for aria2: --file-allocation=none keeps unwritten ranges as holes, so
+            # allocated blocks == bytes actually received, not the preallocated full size).
+            [ "${VALARK_JOB_MARKERS:-}" = "1" ] && printf '@@valark-dl\t%s\t%s\t%s\t%s\n' "${bytes:-0}" "$tmp" "$have_aria2" "$id"
             if [ "$have_aria2" -eq 1 ]; then
-                aria2c -x8 -s8 -j1 --max-tries=5 --retry-wait=15 --continue=true \
+                aria2c -x8 -s8 -j1 --max-tries=5 --retry-wait=15 --continue=true --file-allocation=none \
                     --auto-file-renaming=false --allow-overwrite=true --content-disposition=false \
                     --console-log-level=warn --summary-interval=0 \
                     -d "$(dirname "$dest")" -o "$(basename "$tmp")" "$url" >>"$LL_LOG" 2>&1 && got=0
@@ -169,6 +187,7 @@ download_one() {
             mkdir -p "$dest" 2>/dev/null
             local fn; fn="$(basename "$url")"
             local tmp="${dest}/${fn}.part"
+            [ "${VALARK_JOB_MARKERS:-}" = "1" ] && printf '@@valark-dl\t%s\t%s\t0\t%s\n' "${bytes:-0}" "$tmp" "$id"
             if curl "${CURL_OPTS[@]}" -C - -o "$tmp" "$url" 2>>"$LL_LOG"; then
                 local sz; sz=$(stat -c%s "$tmp" 2>/dev/null || echo 0)
                 [ "$sz" -gt 0 ] || { rm -f "$tmp"; return 1; }
@@ -388,8 +407,11 @@ cmd_request() {
             pin_add tool "$id"
             if tool_present "$id"; then ok "tool already mirrored: $id"; return 0; fi
             log "request: mirroring tool ${CYAN}${id}${NC}"
-            if bash "${_LIB%/lib}/download-tools.sh" "$id"; then ok "tool mirrored: $id"; return 0
-            else err "tool mirror failed: $id"; return 1; fi ;;
+            bash "${_LIB%/lib}/download-tools.sh" "$id"; local trc=$?
+            if [ "$trc" -eq 0 ]; then ok "tool mirrored: $id"; return 0
+            elif [ "$trc" -eq 75 ]; then
+                warn "another tool mirror is running; ${id} is pinned and will be fetched automatically (not mirrored by this run)"; return 75
+            else err "tool mirror failed: $id (exit ${trc})"; return 1; fi ;;
         content|model) : ;;
         *) err "unknown request kind: $kind (content|model|tool)"; return 1 ;;
     esac
@@ -410,8 +432,8 @@ cmd_request() {
     # loop's pin-refill step will fetch it — report success (queued), not failure.
     exec 9>"${STATE_DIR}/fill.lock"
     if ! flock -w 8 9; then
-        ok "queued: ${c_id} is pinned; it will be fetched automatically on the next cycle"
-        return 0
+        warn "busy: another fill holds the lock; ${c_id} is pinned and will be fetched automatically on the next cycle (NOT downloaded by this run)"
+        return 75
     fi
 
     # Cap-aware room-making: need = item + 1GiB slack (same as cmd_fill's guard).
@@ -433,7 +455,8 @@ cmd_request() {
     if download_one "$c_id" "$c_bucket" "$c_cat" "$c_value" "$c_bytes" "$c_source" "$c_url" "$c_dest" "$c_extra"; then
         ok "requested item ready: $c_id"; return 0
     fi
-    err "download failed: $c_id (pinned; the loop will retry)"
+    local why=""; case "$c_source" in zim|url|hf-file) why="$(http_reason "$c_url")" ;; esac
+    err "download failed: $c_id${why:+ - $why} (pinned; the loop will retry)"
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$c_id" "$c_bucket" "$c_cat" "$c_value" "$c_bytes" "$c_source" "$c_url" "$c_dest" "$c_extra" >> "$FAILED"
     return 1
 }

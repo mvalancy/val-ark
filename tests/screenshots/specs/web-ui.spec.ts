@@ -1407,9 +1407,12 @@ test.describe('Val Ark - Consumer Shell (Home status + Settings + Activity)', ()
     await expect(running).toContainText('40%');
     await expect(running).toContainText('left');                       // ETA
     const failed = page.locator('.dl-card:has-text("AI models")');
-    await expect(failed).toContainText('retries automatically');       // Retry-not-error framing
+    // A failure is shown as a FAILURE (the old "Interrupted — retries automatically" copy
+    // promised a retry nothing performed — part of the owner's "fake download, no error" bug).
+    await expect(failed).toContainText('Failed');
+    await expect(failed).not.toContainText('retries automatically');
     await expect(failed.locator('.dl-mini')).toHaveText('Retry');
-    const fns = await page.evaluate(() => [typeof (window as any).renderDownloadCard, typeof (window as any).loadDownloads, typeof (window as any).retryDownload]);
+    const fns = await page.evaluate(() => [typeof (window as any).renderDownloadCard, typeof (window as any).loadDownloads, typeof (window as any).retryJob]);
     expect(fns).toEqual(['function', 'function', 'function']);
   });
 

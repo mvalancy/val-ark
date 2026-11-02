@@ -49,6 +49,7 @@ Every tool integration touches these files. Complete ALL steps before considerin
 - [ ] `web-ui/logos/<name>.svg` -- Logo (SVG preferred)
 - [ ] `web-ui/screenshots/<name>-1.png` -- At least one screenshot
 - [ ] `tests/screenshots/specs/web-ui.spec.ts` -- Add to TOOL_IDS array
+- [ ] Failures are honest: `log_error` whenever a platform's file is missing/failed (the exit status and the web UI's Mirror result are derived from it — see [gotchas](docs/knowledge/gotchas.md#downloads--mirroring), "Mirroring… ✓ complete"); never end on an unconditional `log_success "… complete"` over a path that can fail
 - [ ] Run tests: `npx playwright test` (all must pass)
 - [ ] Verify URLs: `curl -sI -o /dev/null -w "%{http_code}" <url>` for each platform
 

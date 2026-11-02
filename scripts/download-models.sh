@@ -1455,3 +1455,9 @@ case "${1:-all}" in
         exit 1
         ;;
 esac
+
+# Truthful exit status: failures and NOTHING downloaded or already present => non-zero, so the
+# web UI reports the job as failed (with the ERROR lines above) instead of "complete".
+if [ "${DOWNLOAD_FAILED:-0}" -gt 0 ] && [ $(( ${DOWNLOAD_SUCCESS:-0} + ${DOWNLOAD_SKIPPED:-0} )) -eq 0 ]; then
+    exit 1
+fi

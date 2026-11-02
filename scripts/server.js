@@ -10,7 +10,7 @@
 //   L1–167     Config & bootstrap — requires, ROOT, APP_VERSION, .env, listen ports
 //   L168–204   Input Validation — isAlphanumDash / isCatalogId (request-id allowlists)
 //   L205–222   Status Cache — invalidateCache + status/SSE memo
-//   L223–347   Download Manager — broadcastSSE / startDownload / cancelDownload (SSE)
+//   L223–347   Download Manager — broadcastSSE + jobManager (lib/jobs.js) / startFromDesc / cancel / retry (SSE)
 //   L348–526   Status Helpers (cached) — getDisk/Tools/Content/Models (/api/status/*)
 //   L527–976   Packages manifest — getPackages (/api/packages) + storage/catalog helpers
 //   L977–1573  Request Handling — auth/CORS helpers + handleAPI (~48 /api/… routes)
@@ -27,6 +27,8 @@ const fs = require('fs');
 const path = require('path');
 const { execSync, execFile, execFileSync, spawn, spawnSync } = require('child_process');
 const { parseCatalogTSV } = require('./lib/catalog-parse');
+const { createJobManager, bestReason } = require('./lib/jobs');
+const { shallowDirInfo, scanToolDir, verifyToolMirror } = require('./lib/tool-scan');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -223,9 +225,7 @@ function invalidateCache() {
 // =============================================================================
 // Download Manager
 // =============================================================================
-const downloads = new Map();
 const sseClients = new Set();
-let downloadCounter = 0;
 
 const MAX_SSE_CONNECTIONS = 50;
 // One peer opening 50 EventSource streams (or a laptop that sleeps and leaves them dangling
@@ -257,92 +257,134 @@ setInterval(() => {
     for (const res of sseClients) { try { res.write(': ping\n\n'); } catch (_) { try { res.destroy(); } catch (_) {} } }
 }, SSE_HEARTBEAT_MS).unref();
 
-function startDownload(type, scriptPath, args = []) {
-    // Reject duplicate concurrent downloads of same type
-    for (const [, d] of downloads) {
-        if (d.type === type && d.status === 'running') {
-            return { error: `Download "${type}" is already running` };
+// Job manager (scripts/lib/jobs.js): honest, re-syncable download/mirror jobs — real byte
+// progress, a reason for every failure, a no-progress watchdog, post-mirror verification,
+// restart recovery. See that file's header for the state contract the web UI relies on.
+const DOWNLOAD_ALIASES = { llama: 'llama-cpp', whisper: 'whisper-cpp', sd: 'sd-cpp', onnx: 'onnxruntime' };
+const jobManager = createJobManager({
+    root: ROOT,
+    stateDir: STATE_DIR,
+    broadcast: broadcastSSE,
+    stallMs: (Number(process.env.VALARK_JOB_STALL_SEC) || 900) * 1000,
+    pollMs: Number(process.env.VALARK_JOB_POLL_MS) || 1000,
+    env: process.env.VALARK_TEST_PATH_PREPEND
+        ? { ...process.env, PATH: process.env.VALARK_TEST_PATH_PREPEND + ':' + (process.env.PATH || '') }
+        : { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || '') },
+    checkDisk: () => {
+        const disk = getDiskStatus();
+        return disk.available < 1024 * 1024 * 1024 ? 'Insufficient disk space (less than 1 GB free)' : null;
+    },
+    onFinish: () => invalidateCache(),
+});
+
+// Post-mirror verification for one tool: what is REALLY on disk per platform (wrapper-aware
+// scan) + archive integrity. A job that exited 0 but mirrored nothing is a failure, not a
+// success; platforms without an upstream asset are surfaced as warnings with the script's
+// own reason (e.g. "No linux-arm64 asset found for ...").
+const NO_PLATFORM_FILES = 'no files were mirrored for this platform';
+function makeToolVerifier(target) {
+    const name = DOWNLOAD_ALIASES[target] || target;
+    return async (job) => {
+        const toolsDir = path.join(ROOT, 'tools');
+        const platforms = await verifyToolMirror(toolsDir, name);
+        const have = platforms.filter(p => ['mirrored', 'source', 'hint'].includes(p.state));
+        const bad = platforms.filter(p => p.verified === false);
+        const PLAT_RE = {
+            'linux-arm64': /linux[-_ ]?(arm64|aarch64)|aarch64[-_ ]?(unknown[-_ ])?linux|arm64[-_ ]?linux/i,
+            'linux-x86_64': /linux[-_ ]?(x86[_-]?64|amd64|x64)|x86_64[-_ ]?(unknown[-_ ])?linux/i,
+            'macos-arm64': /macos|darwin|osx|apple/i,
+            'windows-x64': /windows|win64|win-x64|\.exe/i,
+        };
+        const reasonFor = (plat) => {
+            const re = PLAT_RE[plat.platform];
+            const hit = re && [...job.errors, ...job.warnings].reverse().find(l => re.test(l));
+            return hit ? hit.replace(/^(WARN|ERROR|ERR):?\s*/i, '') : NO_PLATFORM_FILES;
+        };
+        const missing = platforms.filter(p => ['empty', 'absent'].includes(p.state));
+        const alreadyHad = job.tail.some(l => /already (extracted|exists|mirrored)|skipping/i.test(l)) && !job.tail.some(l => /^(OK: )?(Downloaded|Extracted|Cloned)/.test(l));
+        const out = { tool: name, platforms, mirrored: have.length, verified: have.length > 0 && bad.length === 0 && have.every(p => p.verified !== false),
+                      alreadyMirrored: alreadyHad && have.length > 0 };
+        if (have.length === 0) {
+            return { ...out, ok: false, error: `Finished, but nothing was mirrored for ${name}. ` + (bestReason(job.errors, job.warnings) || 'The source returned no usable files.') };
         }
-    }
-
-    // Check disk space
-    const disk = getDiskStatus();
-    if (disk.available < 1024 * 1024 * 1024) {
-        return { error: 'Insufficient disk space (less than 1 GB free)' };
-    }
-
-    const id = String(++downloadCounter);
-    const proc = spawn('/usr/bin/bash', [scriptPath, ...args], {
-        cwd: ROOT,
-        env: { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || ''), FORCE_COLOR: '0' },
-    });
-
-    const download = {
-        id,
-        type,
-        pid: proc.pid,
-        status: 'running',
-        progress: 0,
-        lastLine: '',
-        startedAt: Date.now(),
+        if (bad.length) {
+            return { ...out, ok: false, error: `Verification failed for ${bad.map(p => p.platform + ' (' + (p.detail || 'corrupt') + ')').join(', ')}. Retry re-downloads it.` };
+        }
+        // An 'empty' dir is a failed platform; an 'absent' one is only worth a warning if the
+        // script itself said something about it (e.g. "no linux-arm64 asset published").
+        const warnings = missing.map(p => {
+            const r = reasonFor(p);
+            return (p.state === 'absent' && r === NO_PLATFORM_FILES) ? null : `${p.platform}: ${r}`;
+        }).filter(Boolean);
+        const sz = have.reduce((n, p) => n + (p.size || 0), 0);
+        const summary = (out.alreadyMirrored ? 'Already mirrored — nothing new to download. ' : 'Mirrored ') +
+            have.map(p => p.platform).join(', ') + ` (${(sz / 1048576).toFixed(1)} MB)` +
+            (out.verified ? ', verified' : ', size-checked');
+        return { ...out, ok: true, warnings, summary };
     };
-    downloads.set(id, download);
-    broadcastSSE('start', { id, type });
+}
 
-    const handleOutput = (chunk) => {
-        const lines = chunk.toString().split('\n').filter(l => l.trim());
-        for (const raw of lines) {
-            // Strip ANSI escape codes and timestamp prefixes
-            const line = raw.replace(/\x1b\[[0-9;]*m/g, '').replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, '');
-            download.lastLine = line.slice(0, 200);
-            // Only match orchestrator progress "Progress: N%" not curl's per-file "11.3%"
-            const pctMatch = line.match(/Progress:\s*(\d+)%/);
-            if (pctMatch) {
-                download.progress = Math.min(100, parseInt(pctMatch[1], 10));
+// Start a job from a small, JSON-serialisable descriptor — the same path serves the
+// POST endpoints AND "Retry" (the descriptor is stored on the job), so a retry restarts
+// EXACTLY what failed, not a guessed "all".
+function startFromDesc(desc) {
+    switch (desc.kind) {
+        case 'tools': {
+            const target = desc.target || 'all';
+            if (!isAlphanumDash(target) || !VALID_TOOL_TARGETS.has(target)) {
+                return { error: 'Invalid target. Use: ' + [...VALID_TOOL_TARGETS].slice(0, 5).join(', ') + '...' };
             }
-            broadcastSSE('progress', {
-                id, type,
-                progress: download.progress,
-                line: download.lastLine,
-            });
+            return jobManager.start({ type: 'tools', target, desc, label: target === 'all' ? 'Mirror all tools' : `Mirror ${target}`,
+                script: path.join(ROOT, 'scripts/download-tools.sh'), args: [target],
+                verify: target === 'all' ? null : makeToolVerifier(target) });
         }
-    };
-
-    proc.stdout.on('data', handleOutput);
-    proc.stderr.on('data', handleOutput);
-
-    proc.on('close', (code) => {
-        download.status = code === 0 ? 'complete' : 'failed';
-        download.exitCode = code;
-        download.finishedAt = Date.now();
-        invalidateCache();
-        broadcastSSE('complete', { id, type, status: download.status, exitCode: code });
-    });
-
-    proc.on('error', (err) => {
-        download.status = 'failed';
-        download.lastLine = err.message;
-        broadcastSSE('complete', { id, type, status: 'failed', error: err.message });
-    });
-
-    return { id, type, pid: proc.pid };
+        case 'models': {
+            const tier = desc.target || 'all';
+            if (!VALID_MODEL_TIERS.has(tier)) return { error: 'Invalid tier. Use: all, tier1, tier2, tier3' };
+            return jobManager.start({ type: 'models', target: tier, desc, label: `Mirror models (${tier})`,
+                script: path.join(ROOT, 'scripts/download-models.sh'), args: [tier] });
+        }
+        case 'content': {
+            const target = desc.target || 'all';
+            if (!isAlphanumDash(target) && !VALID_CONTENT_TARGETS.has(target)) return { error: 'Invalid content target' };
+            return jobManager.start({ type: 'content', target, desc, label: `Mirror library content (${target})`,
+                script: path.join(ROOT, 'scripts/download-zims.sh'), args: [target] });
+        }
+        case 'update': {
+            const target = desc.target || 'all';
+            if (!isAlphanumDash(target)) return { error: 'Invalid update target' };
+            return jobManager.start({ type: 'update', target, desc, label: 'Update',
+                script: path.join(ROOT, 'scripts/update.sh'), args: [target] });
+        }
+        case 'request': {
+            const { rkind, target } = desc;
+            if (!VALID_REQUEST_KINDS.has(rkind)) return { error: 'Invalid kind. Use: content, model, tool' };
+            if (rkind === 'tool') {
+                if (!isAlphanumDash(target) || !VALID_TOOL_TARGETS.has(target)) return { error: 'Unknown tool: ' + String(target).slice(0, 40) };
+            } else if (!isCatalogId(target)) return { error: 'Invalid item id' };
+            return jobManager.start({ type: 'request', target: `${rkind}:${target}`, desc, label: `Request ${rkind} ${target}`,
+                script: path.join(ROOT, 'scripts/librarian.sh'), args: ['request', rkind, target],
+                verify: rkind === 'tool' ? makeToolVerifier(target) : null });
+        }
+    }
+    return { error: 'Unknown download kind' };
 }
 
 function cancelDownload(id) {
-    if (!id || typeof id !== 'string' || !/^\d+$/.test(id)) {
-        return { error: 'Invalid download ID' };
-    }
-    const d = downloads.get(id);
-    if (!d) return { error: 'Download not found' };
-    if (d.status !== 'running') return { error: 'Download not running' };
-    try {
-        process.kill(d.pid, 'SIGTERM');
-        d.status = 'cancelled';
-        broadcastSSE('complete', { id, type: d.type, status: 'cancelled' });
-        return { ok: true };
-    } catch (e) {
-        return { error: e.message };
-    }
+    if (!id || typeof id !== 'string' || !/^\d+$/.test(id)) return { error: 'Invalid download ID' };
+    return jobManager.cancel(id);
+}
+function retryDownload(id) {
+    if (!id || typeof id !== 'string' || !/^\d+$/.test(id)) return { error: 'Invalid download ID' };
+    const j = jobManager.get(id);
+    if (!j) return { error: 'Download not found' };
+    if (!j.desc) return { error: 'This job cannot be retried (no record of what it was).' };
+    if (!['failed', 'cancelled', 'deferred'].includes(j.status)) return { error: 'Only a failed, cancelled or deferred job can be retried' };
+    return startFromDesc(j.desc);
+}
+function dismissDownload(id) {
+    if (!id || typeof id !== 'string' || !/^\d+$/.test(id)) return { error: 'Invalid download ID' };
+    return jobManager.dismiss(id);
 }
 
 // =============================================================================
@@ -403,7 +445,7 @@ function getToolsStatus() {
                 if (!tools[entry]) tools[entry] = {};
                 if (stat.isDirectory()) {
                     // Shallow scan: only stat top-level dir, don't recurse 45k files
-                    const dirInfo = shallowDirInfo(fullPath);
+                    const dirInfo = scanToolDir(fullPath);
                     tools[entry][platform] = dirInfo;
                 } else {
                     tools[entry][platform] = {
@@ -862,113 +904,6 @@ function getCatalog(kind) {
     return { items: c.data || [], count: (c.data || []).length, computing: !c.data };
 }
 
-// Shallow directory info: stat immediate children only, not recursive
-function shallowDirInfo(dirPath) {
-    let size = 0;
-    let newest = 0;
-    let fileCount = 0;
-    let hasBinary = false; // Has real binary (>50KB non-txt/non-src file)
-    let isSource = false;  // Has source code indicators
-    let hasInstallHint = false; // Has INSTALL.txt
-    const MIN_BINARY_SIZE = 50000; // 50KB threshold for "real" binary
-
-    // Source code indicators
-    const SOURCE_MARKERS = ['CMakeLists.txt', 'setup.py', 'Cargo.toml', 'go.mod', '.git'];
-    // Makefile alone doesn't mean source - many packages include prebuilt + Makefile for install
-
-    try {
-        const stat = fs.statSync(dirPath);
-        newest = stat.mtimeMs;
-        const entries = readdirSafe(dirPath);
-
-        // Check for INSTALL.txt hint
-        if (entries.includes('INSTALL.txt')) {
-            hasInstallHint = true;
-        }
-
-        // First pass: look for binaries (including in bin/ subdirectory)
-        for (const entry of entries) {
-            try {
-                const fullPath = path.join(dirPath, entry);
-                const s = fs.statSync(fullPath);
-                if (s.isFile()) {
-                    size += s.size;
-                    fileCount++;
-                    const isTxt = entry.endsWith('.txt') || entry.endsWith('.md');
-                    const isSrc = entry.endsWith('.c') || entry.endsWith('.cpp') || entry.endsWith('.h') || entry.endsWith('.py') || entry.endsWith('.rs') || entry.endsWith('.go');
-                    if (!isTxt && !isSrc && s.size > MIN_BINARY_SIZE) {
-                        hasBinary = true;
-                    }
-                } else if (s.isDirectory()) {
-                    // Check common binary directories
-                    if (entry === 'bin' || entry === 'lib' || entry === 'Release' || entry === 'Debug') {
-                        const subEntries = readdirSafe(fullPath);
-                        for (const sub of subEntries.slice(0, 20)) {
-                            try {
-                                const subStat = fs.statSync(path.join(fullPath, sub));
-                                if (subStat.isFile() && subStat.size > MIN_BINARY_SIZE) {
-                                    hasBinary = true;
-                                    break;
-                                }
-                            } catch (e) {}
-                        }
-                    }
-                }
-                if (s.mtimeMs > newest) newest = s.mtimeMs;
-            } catch (e) {}
-        }
-
-        // Second pass: check for source markers (only if no binaries found)
-        if (!hasBinary) {
-            for (const marker of SOURCE_MARKERS) {
-                if (entries.includes(marker)) {
-                    isSource = true;
-                    break;
-                }
-            }
-            // Check subdirs for source markers too
-            if (!isSource) {
-                for (const entry of entries) {
-                    try {
-                        const s = fs.statSync(path.join(dirPath, entry));
-                        if (s.isDirectory()) {
-                            const subEntries = readdirSafe(path.join(dirPath, entry));
-                            for (const marker of SOURCE_MARKERS) {
-                                if (subEntries.includes(marker)) {
-                                    isSource = true;
-                                    break;
-                                }
-                            }
-                        }
-                    } catch (e) {}
-                    if (isSource) break;
-                }
-            }
-        }
-    } catch (e) {}
-
-    // Determine content type - binary takes priority over source
-    let contentType = 'empty';
-    if (hasBinary) {
-        contentType = 'binary';
-    } else if (isSource) {
-        contentType = 'source';
-    } else if (hasInstallHint) {
-        contentType = 'hint';
-    } else if (fileCount > 0) {
-        contentType = 'unknown';
-    }
-
-    return {
-        size,
-        lastModified: new Date(newest).toISOString(),
-        files: fileCount,
-        contentType,
-        // Legacy field for backward compat
-        installHint: contentType === 'hint'
-    };
-}
-
 function readdirSafe(dir) {
     try { return fs.readdirSync(dir); }
     catch { return []; }
@@ -1231,13 +1166,10 @@ function handleAPI(req, res, urlPath) {
                     models: getModelsStatus(),
                     kiwix: kiwixStatus,
                 });
-            case '/api/status/downloads': {
-                const active = {};
-                for (const [id, d] of downloads) {
-                    active[id] = { ...d, pid: undefined };
-                }
-                return sendJSON(res, req, active);
-            }
+            case '/api/status/downloads':
+                // Every live + recent job (incl. failures with their reason). The UI re-syncs
+                // from this on page load, on SSE (re)connect, and while any job is active.
+                return sendJSON(res, req, jobManager.snapshot());
             case '/api/status/health':
                 // Self-heal detail for the Health page: the loop's selfheal.json snapshot
                 // (space, verify tallies, link/asset counts, this-cycle repairs), the
@@ -1344,7 +1276,7 @@ function handleAPI(req, res, urlPath) {
                     ...(corsOrigin ? { 'Access-Control-Allow-Origin': corsOrigin } : {}),
                     ...SECURITY_HEADERS,
                 });
-                res.write(`event: init\ndata: ${JSON.stringify({ connected: true })}\n\n`);
+                res.write(`event: init\ndata: ${JSON.stringify({ connected: true, jobs: jobManager.snapshot() })}\n\n`);
                 sseClients.add(res);
                 sseByIp.set(sseIp, (sseByIp.get(sseIp) || 0) + 1);
                 req.on('close', () => {
@@ -1451,71 +1383,33 @@ function handleAPI(req, res, urlPath) {
                     // "use" action (NOT ADMIN_ONLY_POSTS): open on the LAN in Open mode, admin
                     // in Passworded/Accounts (the gate above already enforced that). Fail-soft.
                     return handleAsk(req, res, body);
-                case '/api/download/tools': {
-                    const target = body.target || 'all';
-                    if (!isAlphanumDash(target) || !VALID_TOOL_TARGETS.has(target)) {
-                        result = { error: 'Invalid target. Use: ' + [...VALID_TOOL_TARGETS].slice(0, 5).join(', ') + '...' };
-                    } else {
-                        result = startDownload('tools',
-                            path.join(ROOT, 'scripts/download-tools.sh'), [target]);
-                    }
+                case '/api/download/tools':
+                    result = startFromDesc({ kind: 'tools', target: body.target || 'all' });
                     break;
-                }
-                case '/api/download/models': {
-                    const tier = body.tier || 'all';
-                    if (!VALID_MODEL_TIERS.has(tier)) {
-                        result = { error: 'Invalid tier. Use: all, tier1, tier2, tier3' };
-                    } else {
-                        result = startDownload('models',
-                            path.join(ROOT, 'scripts/download-models.sh'), [tier]);
-                    }
+                case '/api/download/models':
+                    result = startFromDesc({ kind: 'models', target: body.tier || 'all' });
                     break;
-                }
-                case '/api/download/content': {
-                    const target = body.target || 'all';
-                    if (!isAlphanumDash(target) && !VALID_CONTENT_TARGETS.has(target)) {
-                        result = { error: 'Invalid content target' };
-                    } else {
-                        result = startDownload('content',
-                            path.join(ROOT, 'scripts/download-zims.sh'), [target]);
-                    }
+                case '/api/download/content':
+                    result = startFromDesc({ kind: 'content', target: body.target || 'all' });
                     break;
-                }
-                case '/api/download/update': {
-                    const target = body.target || 'all';
-                    if (!isAlphanumDash(target)) {
-                        result = { error: 'Invalid update target' };
-                    } else {
-                        result = startDownload('update',
-                            path.join(ROOT, 'scripts/update.sh'), [target]);
-                    }
+                case '/api/download/update':
+                    result = startFromDesc({ kind: 'update', target: body.target || 'all' });
                     break;
-                }
                 case '/api/download/cancel':
                     result = cancelDownload(body.id);
                     break;
-                case '/api/request': {
+                case '/api/download/retry':
+                    // Restart EXACTLY what failed/was cancelled (the job keeps its descriptor).
+                    result = retryDownload(body.id);
+                    break;
+                case '/api/download/dismiss':
+                    result = dismissDownload(body.id);
+                    break;
+                case '/api/request':
                     // One-click per-item request: pin + fetch a specific catalog item,
                     // auto-evicting lowest-priority unpinned content to fit the cap.
-                    const kind = body.kind;
-                    const id = body.id;
-                    if (!VALID_REQUEST_KINDS.has(kind)) {
-                        result = { error: 'Invalid kind. Use: content, model, tool' };
-                    } else if (kind === 'tool') {
-                        if (!isAlphanumDash(id) || !VALID_TOOL_TARGETS.has(id)) {
-                            result = { error: 'Unknown tool: ' + String(id).slice(0, 40) };
-                        } else {
-                            result = startDownload('request',
-                                path.join(ROOT, 'scripts/librarian.sh'), ['request', 'tool', id]);
-                        }
-                    } else if (!isCatalogId(id)) {
-                        result = { error: 'Invalid item id' };
-                    } else {
-                        result = startDownload('request',
-                            path.join(ROOT, 'scripts/librarian.sh'), ['request', kind, id]);
-                    }
+                    result = startFromDesc({ kind: 'request', rkind: body.kind, target: body.id });
                     break;
-                }
                 case '/api/setup/commission':
                     // First-boot setup. Fail-closed on the claim token from the LAN;
                     // the box/localhost is trusted and may commission without one.

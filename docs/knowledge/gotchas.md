@@ -138,6 +138,45 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   (`content` | `all`). Lesson: a "browse" endpoint must never synchronously pay a live multi‑fetch a
   warm cache normally hides — reproduce cache‑miss timing the way CI (empty state) hits it.
 
+- **"Mirroring… ✓ complete" with the badge still *Not Mirrored* — the piper‑tts "fake download"
+  (and a job layer that could not tell success from failure).** Reproduced on the aarch64 NAS and
+  locally. *Cause 1:* `piper` (also `onnxruntime`, `vosk`, `syncthing`, `btop`, `ollama`, …) ships a
+  tarball with ONE wrapper dir; `download_and_extract` unpacks it as‑is (`tools/<plat>/piper/piper/…`)
+  and the status scan only looked at the top level → contentType `empty` → "Not Mirrored" forever;
+  re‑clicking Mirror printed "Already extracted — skipping" and "complete" in ~1 s, so the button
+  looked like it faked a download. **Fix:** `scripts/lib/tool-scan.js` `scanToolDir` descends through
+  wrapper dirs (depth ≤ 3, ≤ 400 stats — never the 45k‑file walk the shallow scan avoids; hidden dirs
+  such as `.dist/` are never entered). *Cause 2 (the class):* a job was `exit 0 ⇒ "complete"` — but the
+  tool scripts end with `log_success "… download complete"` whatever happened, so a GitHub rate limit,
+  a 404, a missing aarch64 asset or a dead network all exited 0; progress was a `Progress: N%` regex
+  (stuck at 0 for a single tool); failures carried no reason, vanished from the UI after 8 s and
+  "Retry" restarted `<type> all`; a cancelled job was overwritten to "failed"; a busy lock exited 0.
+  **Contract now** (`scripts/lib/jobs.js`, read its header): exactly one honest terminal state —
+  `complete` only if exit 0 **and** the post‑job verify passed (per‑platform state + `.dist` archive
+  integrity; "nothing mirrored" ⇒ `failed` with the script's own reason; a platform with no upstream
+  asset ⇒ `complete` + a named warning), `failed` (with `error` + log tail), `cancelled`, `deferred`
+  (exit **75** = busy/not‑done, never success), `queued`. The bar is **real bytes**: scripts announce
+  `@@valark-dl\t<total>\t<part>\t<sparse>\t<label>` (only when `VALARK_JOB_MARKERS=1`) and the server
+  stats that file; no size ⇒ indeterminate bar, never an invented percent. A no‑output‑and‑no‑byte‑growth
+  watchdog (`VALARK_JOB_STALL_SEC`, default 900) kills a hung job as `Stalled`. Jobs persist to
+  `state/jobs.json`; a restart marks in‑flight ones failed ("interrupted"). The UI re‑syncs from
+  `GET /api/status/downloads` on load, on every SSE `init` (which carries the snapshot), on focus /
+  back‑online and every 3 s while a job is active, and keeps a failure on screen until Dismiss.
+  **Rules for tool scripts:** `log_error` for anything that means a file is missing (it feeds the exit
+  status via the opt‑in `VALARK_STRICT_EXIT=1` that `run_tool` sets: errors + nothing mirrored ⇒ exit 1,
+  partial ⇒ exit 0 + `PARTIAL:`); never `log_success "complete"` unconditionally on a path that can
+  fail; `download_file` fails fast on HTTP 404/410/401/403/429 (no 5×back‑off) and names the status,
+  zero‑byte replies are rejected; `github_asset_url` reports API errors (rate limit ⇒ "set
+  `GITHUB_TOKEN`") and "release has no asset for this arch" instead of returning nothing silently;
+  `clone_repo` runs with `GIT_TERMINAL_PROMPT=0` and surfaces git's reason. Regression:
+  `tests/test-mirror-honesty.sh` (shim `curl`/`git`, stub tool scripts, real server) and
+  `tests/screenshots/specs/mirror-jobs-ui.spec.ts`; the suite fails on the pre‑fix tree
+  (`VALARK_TEST_SCRIPTS_SRC=<old checkout> VALARK_TEST_PARTS=B`). Test knobs: `VALARK_DL_RETRIES`,
+  `VALARK_DL_RETRY_DELAY`, `VALARK_DL_SPEED_TIME`, `VALARK_JOB_STALL_SEC`, `VALARK_JOB_POLL_MS`,
+  `VALARK_TEST_PATH_PREPEND` (puts a shim dir first on the job's PATH). The librarian's aria2 now runs
+  with `--file-allocation=none` so allocated blocks == bytes received (the default prealloc made the
+  `.part` full‑length from byte 0, i.e. a fake 100 %).
+
 ## Storage / data root
 
 - **`VAL_ARK_DATA` autodetect can pick the wrong mount** (once landed on a backup target that

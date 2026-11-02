@@ -19,6 +19,8 @@ user-facing command — these are libraries the entry points in [`scripts/`](../
 | `mod-sweep.sh` | CLI (bash) | Loop **enforcement** point: screens files already *stored* on the box and **quarantines** anything not cleanly allowed into a review queue. |
 | `auth.js` | required + CLI (JS) | Admin identity: one salted-scrypt passcode in `<state>/auth.json` + stateless HMAC sessions + use-mode. Shared by `server.js` and the `valark` CLI. |
 | `commission.js` | required + CLI (JS) | First-boot claim/commissioning + config store (name/profile/use-mode/recovery/moderation) in `<state>/settings.json`. Shared by `server.js` and `valark`. Depends on `auth.js`. |
+| `jobs.js` | required (JS module) | **Download/mirror job manager** behind `/api/status/downloads` + SSE: real-byte progress (from `@@valark-dl` markers), honest terminal states (`complete`/`failed`/`cancelled`/`deferred`/`queued`), post-job verify hook, no-progress watchdog, persistence to `state/jobs.json`, restart recovery. Pure + unit-testable. Contract in its header; tests in `tests/test-mirror-honesty.sh`. |
+| `tool-scan.js` | required (JS module) | Mirrored-tool directory scan that sees through wrapper dirs (`scanToolDir` — the piper-tts "Not Mirrored" fix), `shallowDirInfo` (models), and `verifyToolMirror` (per-platform state + `.dist` archive integrity). Zero-dep. |
 | `tls.sh` | sourced + CLI (bash) | Offline, zero-config **local CA** — a long-lived Val Ark CA + short-lived server leaf covering every name/IP the box answers to, for LAN HTTPS with no internet. |
 
 ## How to work here

@@ -96,11 +96,18 @@ test.describe('Val Ark - Install vs Download', () => {
     const btnCount = await mirrorBtn.count();
 
     if (btnCount > 0) {
-      const onclick = await mirrorBtn.getAttribute('onclick');
-      // Should call triggerDownload('tools', 'vosk') not triggerDownload('update', ...)
-      expect(onclick).toContain("triggerDownload('tools'");
-      expect(onclick).toContain("'vosk'");
-      expect(onclick).not.toContain("'update'");
+      // The button carries its target in data-mirror-target and calls the CONSTANT handler
+      // mirrorFromEl(this) (no id is interpolated into inline JS), which POSTs the *tools*
+      // endpoint — never the 'update' one. Assert the contract, not the markup of an old inline onclick.
+      expect(await mirrorBtn.getAttribute('data-mirror-target')).toBe('vosk');
+      expect(await mirrorBtn.getAttribute('onclick')).toContain('mirrorFromEl(this)');
+      const reqPromise = page.waitForRequest((r) => r.url().includes('/api/download/') && r.method() === 'POST');
+      await page.route('**/api/download/**', (route) =>
+        route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'stubbed' }) }));
+      await mirrorBtn.click();
+      const req = await reqPromise;
+      expect(req.url()).toContain('/api/download/tools');
+      expect(req.postDataJSON()).toEqual({ target: 'vosk' });
     }
     // If button doesn't exist, tool is already mirrored - that's OK
   });

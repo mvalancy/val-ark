@@ -736,6 +736,72 @@ const TOOLS = [
         }
     },
     {
+        id: 'cad-agent', name: 'cad-agent', category: 'creative', icon: 'A', iconBg: '#1f6f8b', logo: 'logos/cad-agent.svg', downloadTarget: 'cad-agent',
+        desc: 'CAD design verification toolkit - CadQuery, FEA, CFD and slicing, with an offline Python wheelhouse',
+        size: '~1.5 GB per Linux platform (wheelhouse + OpenFOAM image)',
+        screenshots: ['screenshots/cad-agent-1.png', 'screenshots/cad-agent-2.png'],
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://github.com/Valpatel/cad-agent',
+            releases: 'https://github.com/Valpatel/cad-agent/releases',
+            binaries: {
+                'jetson': 'tools/linux-arm64/cad-agent/install.sh',
+                'ubuntu': 'tools/linux-x86_64/cad-agent/install.sh',
+                'mac': 'tools/macos-arm64/cad-agent/install.sh',
+                'windows': 'tools/windows-x64/cad-agent/INSTALL.txt'
+            }
+        },
+        details: {
+            overview: 'cad-agent turns CAD models into verified, reviewable engineering evidence: it builds parts with CadQuery, meshes and solves them for stiffness and strength (gmsh + scikit-fem), writes OpenFOAM conjugate-heat-transfer cases for airflow and cooling, runs topology optimisation, slices with Bambu Studio for real filament grams, and checks KiCad ERC/DRC reports, then publishes it all as a static review site.\n\nVal Ark mirrors the whole working set, not just the source: a per-platform Python wheelhouse with every dependency of the core package and all extras (CadQuery/OCP, VTK, PyVista, gmsh, MuJoCo, Optuna and more), cad-agent\'s own wheel, a git bundle you can clone with full history, and the OpenFOAM container image its CFD runs in, as a docker load archive for arm64 and amd64. On aarch64, gmsh and pyamg (no PyPI wheels) come from a mirrored conda-forge set with a static micromamba.\n\ninstall.sh in each platform folder builds a complete cad-agent environment with no internet at all: pip install --no-index from the wheelhouse.',
+            features: [
+                'Offline Python wheelhouse for CPython 3.12: core + cad, fea, sim, robot, site, explore, dev extras',
+                'linux-arm64 and linux-x86_64 (glibc 2.31+), macOS arm64 and Windows x64',
+                'aarch64 FEA: gmsh + pyamg from a mirrored conda-forge set (static micromamba included)',
+                'OpenFOAM v2512 container image as a docker load archive (amd64 + arm64)',
+                'Git bundle with every tag: git clone straight from the mirror',
+                'install.sh builds a working environment with pip --no-index',
+                'Pairs with the mirrored KiCad (kicad-cli), Bambu Studio, ffmpeg and python-standalone'
+            ],
+            cli: [
+                {cmd: 'bash tools/linux-arm64/cad-agent/install.sh ~/cad-agent-env', desc: 'Build a full cad-agent environment from the mirror alone'},
+                {cmd: 'git clone sources/cad-agent/cad-agent.bundle cad-agent', desc: 'Clone the source with full history from the mirror'},
+                {cmd: 'pip install --no-index --find-links tools/linux-x86_64/cad-agent/wheelhouse "cad-agent[cad,fea]"', desc: 'Install from the wheelhouse into an existing venv'},
+                {cmd: 'docker load -i tools/linux-arm64/cad-agent/openfoam/*.tar', desc: 'Load the OpenFOAM image cad-agent runs CFD in'},
+                {cmd: 'cad-agent --help', desc: 'List the verification, report and simulation commands'}
+            ]
+        }
+    },
+    {
+        id: 'bambu-studio', name: 'Bambu Studio', category: 'creative', icon: 'B', iconBg: '#00ae42', logo: 'logos/bambu-studio.png', downloadTarget: 'bambu-studio',
+        desc: '3D-printing slicer with a command line - real filament grams and print time for cad-agent',
+        size: '~230 MB (AppImage)',
+        screenshots: ['screenshots/bambu-studio-1.png'],
+        platforms: { ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        downloads: {
+            source: 'https://github.com/bambulab/BambuStudio',
+            releases: 'https://github.com/bambulab/BambuStudio/releases',
+            binaries: {
+                'ubuntu': 'tools/linux-x86_64/bambu-studio/BambuStudio.AppImage',
+                'mac': 'tools/macos-arm64/bambu-studio/BambuStudio.dmg',
+                'windows': 'tools/windows-x64/bambu-studio/BambuStudio-Setup.exe'
+            }
+        },
+        details: {
+            overview: 'Bambu Studio is an open-source slicer (a PrusaSlicer descendant) that turns 3D models into printer toolpaths, with project-based workflows, multi-plate 3MF projects and calibrated profiles for Bambu Lab printers.\n\nIts command line slices headlessly and reports filament used and print time, which is how cad-agent measures what a part really costs to print instead of trusting the CAD volume. The Linux build is x86_64 only; Bambu Lab publishes no aarch64 binary.',
+            features: [
+                'Headless command-line slicing (--slice, --export-3mf)',
+                'Filament grams and print time per plate from the sliced 3MF',
+                'Calibrated system profiles for Bambu Lab printers and filaments',
+                'Multi-plate 3MF projects, tree supports, variable layer height',
+                'x86_64 AppImage, macOS dmg and Windows installer mirrored'
+            ],
+            cli: [
+                {cmd: './BambuStudio.AppImage --help', desc: 'Show the command-line options'},
+                {cmd: './BambuStudio.AppImage --slice 0 --export-3mf out.3mf model.3mf', desc: 'Slice every plate of a project headlessly'}
+            ]
+        }
+    },
+    {
         id: 'godot', name: 'Godot Engine', category: 'creative', icon: 'G', iconBg: '#478cbf', logo: 'logos/godot.svg', downloadTarget: 'godot',
         desc: 'Open-source game engine with GDScript/C# - headless mode for procedural generation and simulation',
         size: '~50 MB (editor), ~700 MB (with export templates)',
@@ -2231,6 +2297,8 @@ const TOOL_META = {
     'blender': { maker: 'Blender Foundation', website: 'https://www.blender.org', license: 'GPL-2.0+', licenseUrl: 'https://www.blender.org/about/license/' },
     'freecad': { maker: 'FreeCAD Community', website: 'https://www.freecad.org', license: 'LGPL-2.1+', licenseUrl: 'https://github.com/FreeCAD/FreeCAD/blob/main/LICENSE' },
     'kicad': { maker: 'KiCad Project', website: 'https://www.kicad.org', license: 'GPL-3.0+', licenseUrl: 'https://www.kicad.org/about/licenses/' },
+    'cad-agent': { maker: 'Valpatel', website: 'https://github.com/Valpatel/cad-agent', license: 'MIT', licenseUrl: 'https://github.com/Valpatel/cad-agent/blob/main/LICENSE' },
+    'bambu-studio': { maker: 'Bambu Lab', website: 'https://bambulab.com/en/download/studio', license: 'AGPL-3.0', licenseUrl: 'https://github.com/bambulab/BambuStudio/blob/master/LICENSE' },
     'godot': { maker: 'Godot Engine', website: 'https://godotengine.org', license: 'MIT', licenseUrl: 'https://github.com/godotengine/godot/blob/master/LICENSE.txt' },
     'vlc': { maker: 'VideoLAN', website: 'https://www.videolan.org', license: 'GPL-2.0+', licenseUrl: 'https://www.videolan.org/legal.html' },
     'n8n': { maker: 'n8n GmbH', website: 'https://n8n.io', license: 'Sustainable Use', licenseUrl: 'https://github.com/n8n-io/n8n/blob/master/LICENSE.md' },

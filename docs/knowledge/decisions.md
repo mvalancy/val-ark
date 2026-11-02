@@ -11,6 +11,7 @@ later). See [README](README.md).
 
 | Date | Decision | Issue / Phase |
 |------|----------|---------------|
+| 2026‑11 | [Python wheelhouses + container archives as tool artifacts](#202611--python-wheelhouses--container-archives-as-tool-artifacts-149) | #149 |
 | 2026‑07 | [CI guards: doc-link integrity + secret/host-leak scan](#202607--ci-guards-doc-link-integrity--secrethost-leak-scan-130) | #130 |
 | 2026‑07 | ["Ask Val Ark": an offline ask endpoint reusing the moderation runtime](#202607--ask-val-ark-slice-1-an-offline-ask-endpoint-that-reuses-the-moderation-runtime-phase-8-67) | Phase 8 · #67 |
 | 2026‑07 | [Four‑tab consumer nav: Home · Library · Activity · Settings](#202607--fourtab-consumer-nav-home--library--activity--settings-61--epic-91-slice-1) | #61 · epic #91 |
@@ -36,6 +37,22 @@ later). See [README](README.md).
 | 2026‑07 | [Notification center: bell/inbox slice 1](#202607--notification-center-bellinbox-slice-1-69) | #69 |
 
 ---
+
+## 2026‑11 — Python wheelhouses + container archives as tool artifacts (#149)
+- **Context:** cad-agent (CAD/FEA/CFD toolkit) needs ~100 Python wheels, an OpenFOAM container
+  image, and on aarch64 two libraries PyPI has no wheel for (gmsh, pyamg). The catalog only knew
+  binaries, archives, source clones and install hints; a full PyPI mirror is rejected (42 TB).
+- **Decision:** one tool entry, `scripts/tools/cad-agent.sh`, is the whole bundle. A per-platform
+  **wheelhouse** (`pip download --platform … --only-binary=:all:` from a throwaway venv, so one host
+  fills every platform and nothing is installed on the box) covers the core package and every
+  extra; linux-arm64 adds a **conda-forge explicit set + static micromamba** for gmsh/pyamg; the
+  OpenFOAM image is a **`docker load` archive** pulled by the new stdlib `scripts/lib/oci_pull.py`.
+  `install.sh` per platform builds the environment with `pip --no-index`; `verify.sh` installs the
+  core package offline each cycle. Wheels target CPython 3.12 (the mirrored python-standalone) and
+  glibc ≤ 2.31 (`VALARK_CADAGENT_GLIBC`), the oldest fleet host.
+- **Why:** curated, per-project wheelhouses are small (≈0.5–1 GB per platform) and prove an offline
+  install end to end, where a generic PyPI cache would not. A new cad-agent release replaces only
+  the wheelhouse; the image (digest stamp) and conda packages (md5) are kept.
 
 ## 2026‑07 — CI guards: doc-link integrity + secret/host-leak scan (#130)
 

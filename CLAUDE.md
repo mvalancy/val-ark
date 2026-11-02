@@ -186,6 +186,7 @@ Add the tool ID to the `TOOL_IDS` array (the spec iterates it per tool and asser
 | `version_stamp DIR VERSION` | After success: record VERSION in DIR's `.version` marker (never downgrades) |
 | `clone_repo URL REF DEST` | Shallow git clone |
 | `create_source_tarball SRC_DIR LABEL VERSION` | Pack a checked-out dir into a `.tar.gz` (excludes `.git`) |
+| `scripts/lib/oci_pull.py IMAGE --platform os/arch --out X.tar` | Mirror one platform of a container image as a `docker load` archive (stdlib Python; see `scripts/tools/cad-agent.sh`) |
 | `write_install_hint DIR TOOL INSTRUCTIONS` | Write INSTALL.txt for non-binary tools |
 | `ensure_dir PATH` | mkdir -p with safety |
 

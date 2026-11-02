@@ -46,6 +46,8 @@ MICROMAMBA_PINNED="2.10.0-0"
 # linux-arm64: requirements PyPI has no aarch64 wheel for, taken from conda-forge.
 CONDA_ARM64_SPECS="python-gmsh pyamg"
 CONDA_ARM64_SKIP_PIP="gmsh pyamg"
+# conda packages that are not Python distributions despite a PyPI namesake.
+CONDA_PIN_IGNORE="tzdata python"
 # MKL (pypardiso's dependency) exists for x86_64 only.
 X86_ONLY_PIP="pypardiso"
 # Skip any single artifact bigger than this (bytes); the NAS fills over WiFi.
@@ -106,6 +108,29 @@ for r in deps + more:
     seen.add(r)
     out.append(r)
 print("\n".join(out))
+PY
+}
+
+# Conda's gmsh pulls Python packages the wheelhouse also carries (vtk, numpy,
+# scipy, pillow ...). pip cannot replace a conda-installed package (no RECORD),
+# and cadquery-ocp pins vtk exactly, so every overlap whose version differs is
+# re-solved pinned to the wheelhouse's version. $1 wheelhouse, $2 solve JSON;
+# prints "name=version" lines.
+cadagent_conda_pins() {
+    python3 - "$1" "$2" "$CONDA_PIN_IGNORE" <<'PY'
+import json, os, sys
+wh, solve, ignore = sys.argv[1], sys.argv[2], set(sys.argv[3].split())
+norm = lambda n: n.lower().replace("_", "-")
+wheels = {}
+for f in os.listdir(wh):
+    if f.endswith(".whl"):
+        n, v = f.split("-")[:2]
+        wheels[norm(n)] = v
+acts = json.load(open(solve)).get("actions", {})
+for p in acts.get("FETCH") or acts.get("LINK") or []:
+    n = norm(p["name"])
+    if n in wheels and n not in ignore and wheels[n] != p["version"]:
+        print("%s=%s" % (p["name"], wheels[n]))
 PY
 }
 
@@ -209,6 +234,17 @@ _cadagent_micromamba() {   # $1 = micromamba platform (linux-64|linux-aarch64), 
     download_file "https://github.com/${MICROMAMBA_REPO}/releases/download/${tag}/micromamba-${mplat}" "$out" "micromamba ${mplat}" && chmod +x "$out"
 }
 
+_cadagent_conda_solve() {   # $1 micromamba  $2 work dir  $3 extra pins
+    # Solve against the target's glibc floor, not the mirror host's.
+    # shellcheck disable=SC2086
+    if ! CONDA_OVERRIDE_GLIBC="2.${CADAGENT_GLIBC}" "$1" create -q -y --dry-run --json \
+            -r "$2/mamba" -p "$2/mamba/envs/solve" --platform linux-aarch64 \
+            -c conda-forge --override-channels "python=${CADAGENT_PY}" $CONDA_ARM64_SPECS $3 \
+            > "$2/conda-solve.json" 2> "$2/conda-solve.err"; then
+        log_error "cad-agent: conda solve failed: $(tail -1 "$2/conda-solve.err")"; return 1
+    fi
+}
+
 # linux-arm64: conda-forge packages for what PyPI has no aarch64 wheel for.
 _cadagent_conda_arm64() {
     local work="$1" dest="${TOOLS_DIR}/linux-arm64/cad-agent/conda"
@@ -218,12 +254,11 @@ _cadagent_conda_arm64() {
     if [ "$hp" = linux-arm64 ]; then cp -f "$dest/micromamba" "$host_mm"
     else _cadagent_micromamba linux-64 "$host_mm" || return 1; fi
     log_info "cad-agent linux-arm64: solving conda-forge python=${CADAGENT_PY} ${CONDA_ARM64_SPECS}"
-    # Solve against the target's glibc floor, not the mirror host's.
-    if ! CONDA_OVERRIDE_GLIBC="2.${CADAGENT_GLIBC}" "$host_mm" create -q -y --dry-run --json \
-            -r "$work/mamba" -p "$work/mamba/envs/solve" --platform linux-aarch64 \
-            -c conda-forge --override-channels "python=${CADAGENT_PY}" $CONDA_ARM64_SPECS \
-            > "$work/conda-solve.json" 2> "$work/conda-solve.err"; then
-        log_error "cad-agent: conda solve failed: $(tail -1 "$work/conda-solve.err")"; return 1
+    _cadagent_conda_solve "$host_mm" "$work" "" || return 1
+    local pins; pins=$(cadagent_conda_pins "${TOOLS_DIR}/linux-arm64/cad-agent/wheelhouse" "$work/conda-solve.json" | tr '\n' ' ')
+    if [ -n "$pins" ]; then
+        log_info "cad-agent linux-arm64: re-solving with the wheelhouse's versions: ${pins}"
+        _cadagent_conda_solve "$host_mm" "$work" "$pins" || return 1
     fi
     local url md5 size fn n=0 bad=0
     { echo "# cad-agent linux-arm64 conda-forge set (micromamba explicit spec; install.sh makes the paths absolute)"

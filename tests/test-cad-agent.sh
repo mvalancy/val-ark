@@ -96,6 +96,17 @@ echo "IMAGE = 'example/foam:1234'" > "$T/src/src/cadagent/simulation/cfd.py"
 [ "$(bash -c 'source "$1"; cadagent_openfoam_image "$2"' _ "$SH" "$T/src" 2>/dev/null)" = "example/foam:1234" ] && pass || fail "the OpenFOAM image must be read from cad-agent's IMAGE constant"
 [ "$(bash -c 'source "$1"; cadagent_openfoam_image "$2"' _ "$SH" "$T/nowhere" 2>/dev/null)" = "opencfd/openfoam-default:2512" ] && pass || fail "a missing source must fall back to the pinned image"
 
+mkdir -p "$T/wh"; touch "$T/wh/vtk-9.6.2-cp312-cp312-manylinux_2_28_aarch64.whl" "$T/wh/numpy-2.5.4-cp312-cp312-manylinux_2_28_aarch64.whl" \
+    "$T/wh/tzdata-2026.6-py2.py3-none-any.whl" "$T/wh/Pillow-13.0.0-cp312-cp312-manylinux_2_28_aarch64.whl"
+cat > "$T/solve-pins.json" <<'EOF'
+{"actions": {"FETCH": [
+  {"name": "vtk", "version": "9.7.0", "url": "u", "fn": "f1"}, {"name": "numpy", "version": "2.5.4", "url": "u", "fn": "f2"},
+  {"name": "tzdata", "version": "2026e", "url": "u", "fn": "f3"}, {"name": "pillow", "version": "12.0.0", "url": "u", "fn": "f4"},
+  {"name": "gmsh", "version": "4.15.2", "url": "u", "fn": "f5"}]}}
+EOF
+P=$(bash -c 'source "$1"; cadagent_conda_pins "$2" "$3"' _ "$SH" "$T/wh" "$T/solve-pins.json" 2>/dev/null | tr '\n' ' ')
+[ "$P" = "vtk=9.6.2 pillow=13.0.0 " ] && pass || fail "conda must be re-pinned to the wheelhouse where versions differ, ignoring tzdata (got: $P)"
+
 # --- 4. install.sh is generated and parses (both branches) -------------------------
 bash -c 'source "$1"; mkdir -p "$TOOLS_DIR/linux-arm64/cad-agent/conda" "$TOOLS_DIR/linux-x86_64/cad-agent"
          _cadagent_write_install linux-arm64 9.9.9 x/y:1; _cadagent_write_install linux-x86_64 9.9.9 x/y:1' _ "$SH" >/dev/null 2>&1

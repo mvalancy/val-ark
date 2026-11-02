@@ -55,7 +55,8 @@ later). See [README](README.md).
   gmsh to a pip env fails, conda's numpy needs `GLIBCXX_3.4.29` after a pip wheel already bound
   the host's libstdc++, and conda's pyexpat then meets the host's libexpat. So the env is conda's
   Python (its own libexpat) with gmsh, pyamg and the numeric stack (numpy/scipy, mujoco, numba …)
-  from conda, and a `.pth` preloads the env's libstdc++ before any manylinux wheel loads.
+  from conda, and a `.pth` preloads the env's libstdc++, libexpat and zlib before any manylinux wheel loads (the
+  wheels' system GL/X11 chain otherwise binds the host's older libexpat first and breaks pyexpat).
 - **…but the CAD kernel stays on PyPI.** conda-forge's `ocp` 7.9.3.1 binds OCCT static methods
   without the `_s` suffix (`TopoDS.Solid`, not `TopoDS.Solid_s`); cad-agent calls the PyPI form, and
   ~180 of its tests failed on the NAS with a conda OCP. So cadquery, cadquery-ocp, vtk and pyvista

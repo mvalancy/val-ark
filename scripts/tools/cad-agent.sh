@@ -45,8 +45,8 @@ MICROMAMBA_REPO="mamba-org/micromamba-releases"
 MICROMAMBA_PINNED="2.10.0-0"
 # linux-arm64: PyPI has no aarch64 wheel for gmsh or pyamg, so the arm64 install
 # is a conda-forge environment: conda's Python (its own libexpat), gmsh, pyamg and
-# the numeric stack; install.sh preloads the env's libstdc++ so manylinux wheels
-# never bind the host's older one (GLIBCXX_3.4.29 on glibc-2.31 hosts).
+# the numeric stack; install.sh preloads the env's libstdc++/libexpat/zlib so
+# manylinux wheels never bind the host's older ones (glibc-2.31 hosts).
 # The CAD kernel stays on PyPI's wheels: conda-forge's `ocp` binds OCCT static
 # methods without the `_s` suffix (TopoDS.Solid, not TopoDS.Solid_s) that
 # cad-agent calls, and PyPI's cadquery-ocp links PyPI's vtk. So conda must not
@@ -374,10 +374,12 @@ if [ -f "\$HERE/conda/explicit.txt" ]; then
     trap 'rm -rf "\${MR:?}"' EXIT
     { echo "@EXPLICIT"; grep -v '^[#@]' "\$HERE/conda/explicit.txt" | sed "s#^#file://\$HERE/conda/pkgs/#"; } > "\$MR/explicit.txt"
     "\$HERE/conda/micromamba" create -q -y -r "\$MR" -p "\$ENV_DIR" --offline -f "\$MR/explicit.txt"
-    # Load the env's own C++/GCC runtimes before any extension module, so a pip
-    # wheel never binds the host's older libstdc++ ahead of conda's.
+    # Load the env's own runtimes before any extension module. A manylinux wheel
+    # resolves libstdc++ (and, through the host's GL/X11 stack, libexpat and
+    # zlib) by soname; whichever copy loads first wins for the process, and the
+    # host's older one breaks conda's numpy (GLIBCXX_3.4.29) and pyexpat.
     SP="\$("\$ENV_DIR/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
-    echo 'import ctypes, os, sys; [ctypes.CDLL(os.path.join(sys.prefix, "lib", n), mode=ctypes.RTLD_GLOBAL) for n in ("libgcc_s.so.1", "libstdc++.so.6") if os.path.exists(os.path.join(sys.prefix, "lib", n))]' > "\$SP/00-valark-conda-runtime.pth"
+    echo 'import ctypes, os, sys; [ctypes.CDLL(os.path.join(sys.prefix, "lib", n), mode=ctypes.RTLD_GLOBAL) for n in ("libgcc_s.so.1", "libstdc++.so.6", "libz.so.1", "libexpat.so.1") if os.path.exists(os.path.join(sys.prefix, "lib", n))]' > "\$SP/00-valark-conda-runtime.pth"
     CONDA_ENV=1
 else
     PY="\${PYTHON:-}"

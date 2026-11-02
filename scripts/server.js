@@ -281,6 +281,7 @@ const jobManager = createJobManager({
 // scan) + archive integrity. A job that exited 0 but mirrored nothing is a failure, not a
 // success; platforms without an upstream asset are surfaced as warnings with the script's
 // own reason (e.g. "No linux-arm64 asset found for ...").
+const formatMB = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(1) + ' MB';
 const NO_PLATFORM_FILES = 'no files were mirrored for this platform';
 function makeToolVerifier(target) {
     const name = DOWNLOAD_ALIASES[target] || target;
@@ -305,7 +306,7 @@ function makeToolVerifier(target) {
         const out = { tool: name, platforms, mirrored: have.length, verified: have.length > 0 && bad.length === 0 && have.every(p => p.verified !== false),
                       alreadyMirrored: alreadyHad && have.length > 0 };
         if (have.length === 0) {
-            return { ...out, ok: false, error: `Finished, but nothing was mirrored for ${name}. ` + (bestReason(job.errors, job.warnings) || 'The source returned no usable files.') };
+            return { ...out, ok: false, error: `Finished, but nothing was mirrored for ${name}. ` + (bestReason(job.errors, job.warnings) || 'The source returned no usable files.') + (job.errors.length > 1 ? ` (+${job.errors.length - 1} more error${job.errors.length > 2 ? 's' : ''} in the log below)` : '') };
         }
         if (bad.length) {
             return { ...out, ok: false, error: `Verification failed for ${bad.map(p => p.platform + ' (' + (p.detail || 'corrupt') + ')').join(', ')}. Retry re-downloads it.` };
@@ -316,10 +317,17 @@ function makeToolVerifier(target) {
             const r = reasonFor(p);
             return (p.state === 'absent' && r === NO_PLATFORM_FILES) ? null : `${p.platform}: ${r}`;
         }).filter(Boolean);
-        const sz = have.reduce((n, p) => n + (p.size || 0), 0);
-        const summary = (out.alreadyMirrored ? 'Already mirrored — nothing new to download. ' : 'Mirrored ') +
-            have.map(p => p.platform).join(', ') + ` (${(sz / 1048576).toFixed(1)} MB)` +
-            (out.verified ? ', verified' : ', size-checked');
+        // Real bytes on disk (incl. the kept upstream archive copies under .dist/), measured with
+        // du — the scan's own size only counts what it visited and would understate.
+        const real = have.filter(p => p.state !== 'hint');
+        let sz = 0;
+        for (const p of real) { p.diskBytes = await duAsync(path.join(toolsDir, p.platform, name)); sz += p.diskBytes; }
+        const hintOnly = have.filter(p => p.state === 'hint').map(p => p.platform);
+        const summary = (out.alreadyMirrored ? 'Already mirrored — nothing new to download. ' : (real.length ? 'Mirrored ' : 'Install guide only for ')) +
+            (real.length ? real.map(p => p.platform).join(', ') : hintOnly.join(', ')) +
+            (real.length ? ` (${formatMB(sz)} on disk)` : '') +
+            (real.length ? (out.verified ? ', verified' : ', size-checked') : '') +
+            (real.length && hintOnly.length ? `; install guide only for ${hintOnly.join(', ')}` : '');
         return { ...out, ok: true, warnings, summary };
     };
 }
@@ -362,7 +370,7 @@ function startFromDesc(desc) {
             if (rkind === 'tool') {
                 if (!isAlphanumDash(target) || !VALID_TOOL_TARGETS.has(target)) return { error: 'Unknown tool: ' + String(target).slice(0, 40) };
             } else if (!isCatalogId(target)) return { error: 'Invalid item id' };
-            return jobManager.start({ type: 'request', target: `${rkind}:${target}`, desc, label: `Request ${rkind} ${target}`,
+            return jobManager.start({ type: 'request', target: `${rkind}:${target}`, desc, label: `Request ${rkind} ${String(target).replace(/^(model|zim|content|inst|tool):/, '')}`,
                 script: path.join(ROOT, 'scripts/librarian.sh'), args: ['request', rkind, target],
                 verify: rkind === 'tool' ? makeToolVerifier(target) : null });
         }
@@ -667,13 +675,17 @@ function computePackages() {
             let st; try { st = fs.statSync(full); } catch (_) { continue; }
             const isDir = st.isDirectory();
             if (_pkgInProgress(entry, full, isDir)) continue;       // #89: not a ready package (.part / mid-extraction)
+            // Wrapper-aware size (piper/piper/..., onnxruntime-linux-x64-1.2x/...: the shallow sum read 0 B)
+            // and no "package" for a platform that only holds an INSTALL.txt guide (not a downloadable app).
+            const scan = isDir ? scanToolDir(full) : null;
+            if (scan && scan.contentType === 'hint') continue;
             packages.push({
                 id: `app:${platform}:${entry}`,
                 name: entry,
                 kind: 'app',
                 platform,
                 version: isDir ? _versionMarker(full) : null,
-                size: isDir ? _shallowSize(full) : st.size,
+                size: isDir ? (scan.size || _shallowSize(full)) : st.size,
                 desc: `App for ${platform}`,
                 url: `/api/archive/tools/${encodeURIComponent(platform)}/${encodeURIComponent(entry)}`,
             });

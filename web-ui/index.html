@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
-<a href="#main-content" class="skip-link">Skip to main content</a>
+<a href="#main-content" class="skip-link" onclick="event.preventDefault();var m=document.getElementById('main-content')||document.querySelector('main,[role=main]');if(m){m.setAttribute('tabindex','-1');m.focus();m.scrollIntoView();}">Skip to main content</a>
 
 <div id="app-root"></div>
 <div class="copied-toast" id="copiedToast">Copied to clipboard!</div>
@@ -605,10 +605,10 @@ const TOOLS = [
             source: 'https://github.com/ollama/ollama',
             releases: 'https://github.com/ollama/ollama/releases',
             binaries: {
-                'ubuntu': 'assets/ollama/latest/ollama-linux-amd64',
-                'jetson': 'assets/ollama/latest/ollama-linux-arm64',
-                'mac': 'assets/ollama/latest/Ollama-darwin.zip',
-                'windows': 'assets/ollama/latest/OllamaSetup.exe'
+                'ubuntu': 'tools/linux-x86_64/ollama/bin/ollama',
+                'jetson': 'tools/linux-arm64/ollama/bin/ollama',
+                'mac': 'tools/macos-arm64/ollama/ollama',
+                'windows': 'tools/windows-x64/ollama/ollama.exe'
             }
         }
     },
@@ -2344,7 +2344,32 @@ async function checkInstalledTools() {
     scheduleRender();
 }
 
+// Raw per-platform scan of the mirror (dir name -> platform dir -> {contentType,...}) from
+// /api/status/tools. Used to render honest Download buttons: a platform that is not mirrored
+// must not offer a live-looking link that 404s.
+let _toolsRaw = null;
+
+// One honest per-platform download control, derived from what the status API says is really
+// mirrored (no live-looking link that 404s). Unknown state (no API / static preview) keeps the
+// link + HEAD probe. `label` overrides the link text for non-standard pages (Ollama).
+function platDlBtn(dlName, dir, o) {
+    o = o || {};
+    const archive = `/api/archive/tools/${dir}/${dlName}`;
+    const info = (_apiAvailable && _toolsRaw) ? ((_toolsRaw[dlName] || {})[dir] || null) : undefined;
+    const ct = info === undefined ? null : (info ? (info.contentType || (info.files > 0 ? 'unknown' : 'empty')) : 'absent');
+    if (ct === 'absent' || ct === 'empty') {
+        return `<span class="download-btn dl-plat dl-missing" data-plat="${dir}" role="link" aria-disabled="true" title="Not mirrored on this Ark yet">Not mirrored yet</span>
+            <p style="font-size:0.78em;color:var(--text-muted);margin-top:6px">${o.canMirror ? 'Use <b>Mirror</b> on this page to fetch it.' : 'No mirror script for this tool yet.'}</p>`;
+    }
+    if (ct === 'hint') {
+        return `<a href="${archive}" class="download-btn dl-plat" data-plat="${dir}" data-known="1" onclick="handleDownload(event,'${archive}')">&#x2193; Install guide</a>
+            <p style="font-size:0.78em;color:var(--text-muted);margin-top:6px">No prebuilt binary is mirrored for this platform — the download is the install instructions.</p>`;
+    }
+    return `<a href="${archive}" class="download-btn dl-plat" data-plat="${dir}"${ct ? ' data-known="1"' : ''} onclick="handleDownload(event,'${archive}')">${o.label || (o.build ? '&#x2193; Download source' : '&#x2193; Download')}</a>
+        ${o.build ? '<p style="font-size:0.78em;color:var(--text-muted);margin-top:6px">Source tarball — build with CMake / make.</p>' : ''}`;
+}
 function checkInstalledToolsFromAPI(toolsData) {
+    _toolsRaw = toolsData;
     // Map server tool directory names to TOOLS ids
     const toolDirMap = {};
     for (const t of TOOLS) {
@@ -3257,7 +3282,7 @@ function showDownloadError(path, el) {
     if (!existing) {
         existing = document.createElement('div');
         existing.className = 'dl-missing-msg';
-        existing.innerHTML = `<strong>File not yet available:</strong> <code>${esc(path)}</code><br>Run <code>./update.sh</code> (tools) or <code>./download-all-models.sh</code> (models) to populate downloads.`;
+        existing.innerHTML = `<strong>File not yet available:</strong> <code>${esc(path)}</code><br>It is not mirrored on this Ark yet. Use the <b>Mirror</b> button on this page (tools), or <code>scripts/download-models.sh</code> (models), to fetch it.`;
         msg.appendChild(existing);
         setTimeout(() => existing.remove(), 8000);
     }
@@ -3268,6 +3293,7 @@ function checkDownloads() {
     document.querySelectorAll('a[download]').forEach(a => {
         const href = a.getAttribute('href');
         if (!href || href.startsWith('#')) return;
+        if (a.hasAttribute('data-known')) return;   // state came from /api/status/tools — no probe, no 404 in the console
         fetch(href, {method: 'HEAD'}).then(r => {
             if (r.ok) {
                 a.classList.add('dl-available');
@@ -3446,6 +3472,8 @@ function router() {
         else if (route === '/packages') loadPackages();
         else if (route === '/health') startHealthLive();
     }
+
+    ensureCatalogs();
 
     // Check download link availability after render
     setTimeout(checkDownloads, 100);
@@ -5240,10 +5268,10 @@ function renderToolDetail(toolId) {
                 const dir = PLAT_DIR[pk];
                 const archive = `/api/archive/tools/${dir}/${dlName}`;
                 const build = tool.platforms[pk] === 'build';
+                const btn = platDlBtn(dlName, dir, { build, canMirror: !!tool.downloadTarget });
                 html += `<div class="path-card">
                     <h4>${PLAT_LABEL[pk] || pk}</h4>
-                    <a href="${archive}" class="download-btn dl-plat" data-plat="${dir}" onclick="handleDownload(event,'${archive}')">${build ? '&#x2193; Download source' : '&#x2193; Download'}</a>
-                    ${build ? '<p style="font-size:0.78em;color:var(--text-muted);margin-top:6px">Source tarball — build with CMake / make.</p>' : ''}
+                    ${btn}
                 </div>`;
             });
             html += '</div>';
@@ -5989,8 +6017,9 @@ function renderQuickStart() {
         <div class="paths-grid" style="margin-top:12px">`;
     Object.values(PLATFORMS).forEach(p => {
         const gpuNote = p.gpu.startsWith('none') ? p.gpu : `${p.gpu} acceleration`;
-        html += `<div class="path-card" style="cursor:pointer" onclick="setPlatform('${p.id}');window.location.hash='#/quickstart'">
-            <h4>${p.fullLabel}</h4>
+        const sel = p.id === currentPlatform;
+        html += `<div class="path-card${sel ? ' selected' : ''}" role="button" tabindex="0" aria-pressed="${sel}" style="cursor:pointer;${sel ? 'border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);' : ''}" onclick="setPlatform('${p.id}');window.location.hash='#/quickstart'" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">
+            <h4>${p.fullLabel}${sel ? ' ✓' : ''}</h4>
             <p style="font-size:0.82em">${gpuNote}</p>
         </div>`;
     });
@@ -6431,14 +6460,20 @@ function renderOllama() {
         </ul>
     </div>`;
 
-    // Installation
+    // Installation — served from the REAL mirror (tools/<platform>/ollama via /api/archive), with
+    // a Mirror button + live status like every other tool (this page used to link to a stale
+    // assets/ollama/latest/* path that never existed => four dead Download buttons).
+    const OLLAMA_DIR = { ubuntu: 'linux-x86_64', jetson: 'linux-arm64', mac: 'macos-arm64', windows: 'windows-x64' };
     html += `<div class="detail-section"><h3>Installation</h3>`;
+    if (_apiAvailable) {
+        html += `<div style="margin-bottom:14px"><button class="dl-action-btn" id="install-btn-ollama" data-mirror-target="ollama" onclick="mirrorFromEl(this)">Mirror Ollama to this Ark</button>${mirrorStatusHtml('ollama')}</div>`;
+    }
     html += '<div class="paths-grid">';
     Object.entries(installers).forEach(([platId, inst]) => {
         const isActive = platId === currentPlatform;
         html += `<div class="path-card" style="${isActive ? 'border-color:var(--accent);' : ''}">
             <h4>${inst.label}${isActive ? ' (current)' : ''}</h4>
-            <a href="${inst.downloadPath}" download class="download-btn" onclick="handleDownload(event,'${inst.downloadPath}')">${inst.downloadLabel}</a>
+            ${platDlBtn('ollama', OLLAMA_DIR[platId], { canMirror: _apiAvailable, label: '&#x2193; Download for ' + esc(inst.label) })}
             <p style="margin:8px 0 0;font-size:0.8em;color:var(--text-secondary)">Install: <code>${esc(inst.installCmd)}</code></p>
             <p style="margin:4px 0 0;font-size:0.8em;color:var(--text-secondary)">${inst.notes}</p>
         </div>`;
@@ -6688,8 +6723,29 @@ function renderAppFrame(opts) {
                 <a class="subapp-btn" href="${src}" target="_blank" rel="noopener" title="Open in a new tab">Open &#x2197;</a>
             </div>
         </div>
-        <iframe id="${id}" class="subapp-frame" src="${src}" title="${title}" loading="lazy"></iframe>
+        <iframe id="${id}" class="subapp-frame" src="${src}" title="${title}" loading="lazy" onload="appFrameCheck('${id}')"></iframe>
     </div>`;
+}
+// A sub-app whose upstream answers 401/403 renders a BLANK iframe (the browser shows the empty
+// error body). Probe the frame's URL and say what is going on instead of leaving it blank.
+function appFrameCheck(id) {
+    const f = document.getElementById(id);
+    if (!f) return;
+    const src = f.getAttribute('src');
+    fetch(src, { method: 'HEAD' }).then((r) => {
+        const wrap = document.getElementById(id + '-wrap');
+        if (!wrap) return;
+        let note = wrap.querySelector('.subapp-note');
+        if (r.status === 401 || r.status === 403) {
+            if (!note) {
+                note = document.createElement('div');
+                note.className = 'subapp-note';
+                note.setAttribute('role', 'status');
+                note.textContent = 'This service answered HTTP ' + r.status + ' — it needs a sign-in (or is restricted). Use “Open ↗” to sign in in a new tab.';
+                wrap.querySelector('.subapp-bar').after(note);
+            }
+        } else if (note) note.remove();
+    }).catch(() => {});
 }
 function reloadFrame(id) { const f = document.getElementById(id); if (f) f.src = f.src; }
 function toggleFrameFullscreen(id) {
@@ -6901,6 +6957,9 @@ async function triggerDownload(type, target) {
 // cap. Progress + the final result come from the same job sync as triggerDownload.
 async function triggerRequest(kind, id, btn) {
     if (!_apiAvailable) { uiToast('The Val Ark API is not reachable from this page.', 'error'); return; }
+    // A request for the complete English Wikipedia is ~124 GB: say so before starting it (the model
+    // "Mirror all" buttons already confirm; this one did not).
+    if (/wikipedia_en_all_maxi/.test(String(id)) && !confirm('Mirror the complete English Wikipedia (~124 GB)? This runs in the background and needs a lot of free space.')) return;
     if (_diskData && _diskData.available < 1024 * 1024 * 1024) {
         // The librarian will still try to evict to fit, but warn on a truly full disk.
         if (!confirm('Very little free space. The librarian will evict lower-priority content to make room. Continue?')) return;
@@ -7024,20 +7083,38 @@ function renderCatalogSection(kind, title, blurb) {
         <div id="catalog-${kind}-more" class="catalog-more"></div>
     </div>`;
 }
+// The catalog mount only exists once the API is known to be up, and the page re-renders
+// asynchronously (after /api/status/all, SSE, job events). Loading "once per navigation"
+// left a direct URL / reload of #/models or #/content stuck on "Loading the live
+// catalog…" forever (the first render had no mount; the re-render with a mount never
+// asked). ensureCatalogs() runs after EVERY render and is idempotent.
+const _catalogBusy = { content: false, models: false };
+function ensureCatalogs() {
+    for (const kind of ['content', 'models']) {
+        const mount = document.getElementById('catalog-' + kind);
+        if (!mount) continue;
+        if (_catalogData[kind]) { if (mount.querySelector('.catalog-loading')) renderCatalogItems(kind, _catalogData[kind], ''); }
+        else if (!_catalogBusy[kind]) loadCatalog(kind);
+    }
+}
 function loadCatalog(kind) {
     const mount = document.getElementById('catalog-' + kind);
     if (!mount) return;
     if (_catalogData[kind]) { renderCatalogItems(kind, _catalogData[kind], ''); return; }
     if (!_apiAvailable) { mount.innerHTML = '<div class="catalog-loading">Catalog needs the Val Ark server (open this page from the Ark).</div>'; return; }
+    if (_catalogBusy[kind]) return;
+    _catalogBusy[kind] = true;
+    const put = (html) => { const m = document.getElementById('catalog-' + kind); if (m) m.innerHTML = html; };
     fetch('/api/catalog/' + kind).then(r => r.json()).then(d => {
         if ((!d.items || !d.items.length) && d.computing) {
-            mount.innerHTML = '<div class="catalog-loading">Building the catalog from the live index… this takes a moment.</div>';
-            setTimeout(() => { _catalogData[kind] = null; loadCatalog(kind); }, 4000);
+            put('<div class="catalog-loading">Building the catalog from the live index… this takes a moment.</div>');
+            setTimeout(() => { _catalogBusy[kind] = false; _catalogData[kind] = null; loadCatalog(kind); }, 4000);
             return;
         }
+        _catalogBusy[kind] = false;
         _catalogData[kind] = d.items || [];
         renderCatalogItems(kind, _catalogData[kind], '');
-    }).catch(() => { mount.innerHTML = '<div class="catalog-loading">Catalog unavailable (offline?).</div>'; });
+    }).catch(() => { _catalogBusy[kind] = false; put('<div class="catalog-loading">Catalog unavailable (offline?).</div>'); });
 }
 function catalogCardHtml(kind, it) {
     const rk = kind === 'models' ? 'model' : 'content';

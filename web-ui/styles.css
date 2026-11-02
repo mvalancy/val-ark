@@ -2078,3 +2078,7 @@ h1, h2, h3 { letter-spacing: -0.015em; }
 .va-toast-x{background:none;border:none;color:var(--text-muted);font-size:1.2rem;line-height:1;cursor:pointer}
 .ms-ic.spinner{display:inline-block;box-sizing:border-box;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:dl-spin .8s linear infinite}
 @media(prefers-reduced-motion:reduce){.ms-ic.spinner{animation:none}}
+span.download-btn.dl-missing{cursor:not-allowed;opacity:.55;border-style:dashed}
+.subapp-note{margin:8px 0;padding:.6rem .8rem;border:1px solid #e6a817;border-radius:8px;background:rgba(230,168,23,.1);font-size:.9rem}
+/* Wide data tables scroll inside their own box instead of widening the page (Quickstart overflowed 390px phones) */
+.perf-table{display:block;max-width:100%;overflow-x:auto}

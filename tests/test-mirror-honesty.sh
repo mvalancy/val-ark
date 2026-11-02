@@ -277,7 +277,10 @@ rid="$(jget "$T/r.json" "d.get('id','')")"
 [ -n "$rid" ] && [ "$rid" != "$failid" ] && pass || fail "B11 retry must start a new job (got: $(cat "$T/r.json"))"
 wait_job "$rid" 20 >/dev/null
 [ "$(job "$rid" "['target']")" = zzfail ] && pass || fail "B11 retry must re-run the SAME target (got target=$(job "$rid" "['target']"))"
-post /api/download/retry '{"id":"1"}' | grep -q 'error' && pass || fail "B11 retrying a COMPLETE job must be refused"
+[ -z "$(job "$failid" "['status']")" ] && pass || fail "B11 the superseded failed job must disappear when its retry starts (no stale failed card beside the new run)"
+cid=$(start_tool zzwrapped); wait_job "$cid" 20 >/dev/null
+post /api/download/retry "{\"id\":\"$cid\"}" > "$T/r2.json"
+grep -q 'error' "$T/r2.json" && pass || fail "B11 retrying a job that is not failed/cancelled/deferred must be refused (got: $(cat "$T/r2.json"))"
 
 # B12. same target twice = attach to the running job; a different target queues (no scary error)
 a=$(start_tool zzslow); sleep 0.3; a2=$(start_tool zzslow)
@@ -288,7 +291,7 @@ wait_job "$a" 25 >/dev/null; st=$(wait_job "$b" 25)
 [ "$st" = complete ] && pass || fail "B12 the queued job must run after the first finishes (got $st)"
 
 # B13. SSE: a (re)connecting client gets the FULL job snapshot, so a dropped stream re-syncs
-curl -sN --max-time 2 "$B/api/downloads/stream" 2>/dev/null | head -c 4000 > "$T/sse.txt"
+curl -sN --max-time 2 "$B/api/downloads/stream" 2>/dev/null | head -c 60000 > "$T/sse.txt"
 grep -q '^event: init' "$T/sse.txt" && grep -q '"jobs":{' "$T/sse.txt" && grep -q 'zzwrapped' "$T/sse.txt" && pass || fail "B13 SSE init must carry the job snapshot (got: $(head -c 200 "$T/sse.txt"))"
 
 # B13b. Library "Mirror" on an unknown/typo'd content id must FAIL with its reason — it used to be
@@ -303,7 +306,7 @@ kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null
 start_server && pass || fail "B14 server restart failed"
 st="$(job "$id" "['status']")"
 [ "$st" = failed ] && job "$id" "['error']" | grep -qi 'restarted' && pass || fail "B14 a job interrupted by a restart must be 'failed: ... restarted' (got $st: $(job "$id" "['error']"))"
-[ "$(job "1" "['status']")" = complete ] && pass || fail "B14 finished-job history must survive a restart"
+[ "$(job "$b" "['status']")" = complete ] && pass || fail "B14 finished-job history must survive a restart (job $b: $(job "$b" "['status']"))"
 pkill_orphans() { :; }   # (the orphaned zzstall sleeps 60s and exits on its own; we never pkill by pattern)
 
 fi

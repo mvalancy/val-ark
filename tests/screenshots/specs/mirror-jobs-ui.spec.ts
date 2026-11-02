@@ -141,4 +141,65 @@ test.describe('Mirror jobs — honest UI', () => {
     await expect(card.locator('[data-dl-act="retry"]')).toHaveText('Retry');
     await expect(card.locator('[data-dl-act="dismiss"]')).toHaveText('Dismiss');
   });
+
+  test('Download buttons follow the real mirror state: not-mirrored platforms are disabled, no 404 probe', async ({ page }) => {
+    await stubJobs(page, { jobs: {} });
+    // piper: x86_64 really mirrored; arm64 empty; mac only an INSTALL.txt guide; windows absent
+    await page.route('**/api/status/all', async (route) => {
+      const r = await route.fetch(); const j = await r.json();
+      j.tools = { piper: {
+        'linux-x86_64': { contentType: 'binary', files: 4, size: 5000000, lastModified: new Date().toISOString() },
+        'linux-arm64': { contentType: 'empty', files: 0, size: 0, lastModified: new Date().toISOString() },
+        'macos-arm64': { contentType: 'hint', files: 1, size: 168, lastModified: new Date().toISOString() },
+      } };
+      route.fulfill({ response: r, json: j });
+    });
+    const heads: string[] = [];
+    page.on('request', (rq) => { if (rq.method() === 'HEAD' && rq.url().includes('/api/archive/tools/')) heads.push(rq.url()); });
+    await toolPage(page);
+    await expect(page.locator('a.dl-plat[data-plat="linux-x86_64"]')).toHaveText(/Download/);
+    await expect(page.locator('span.dl-missing[data-plat="linux-arm64"]')).toHaveText('Not mirrored yet');
+    await expect(page.locator('span.dl-missing[data-plat="windows-x64"]')).toHaveText('Not mirrored yet');
+    await expect(page.locator('a.dl-plat[data-plat="macos-arm64"]')).toHaveText(/Install guide/);   // hint-only is labelled honestly
+    await page.waitForTimeout(800);                                                                    // checkDownloads() runs 100ms after render
+    expect(heads, 'known-state links must not be HEAD-probed (that is what spammed 404s in the console)').toEqual([]);
+  });
+
+  test('cold load of #/content shows the catalog (it used to stick on "Loading the live catalog…")', async ({ page }) => {
+    await stubJobs(page, { jobs: {} });
+    await page.route('**/api/catalog/content', (route) => route.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify({ items: [{ id: 'zim:demo_en_all', name: 'Demo ZIM', category: 'test', bytes: 1000 }], count: 1, computing: false }) }));
+    await page.goto(`${BASE_URL}/#/content`, { waitUntil: 'domcontentloaded' });   // direct URL = cold load, no hash navigation
+    await expect(page.locator('#catalog-content .catalog-card')).toHaveCount(1, { timeout: 10000 });
+    await expect(page.locator('#catalog-content')).not.toContainText('Loading the live catalog');
+  });
+
+  test('skip link focuses the main content instead of re-routing to Home', async ({ page }) => {
+    await stubJobs(page, { jobs: {} });
+    await page.goto(`${BASE_URL}/#/activity`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('h1')).toHaveText('Activity', { timeout: 8000 });
+    await page.locator('a.skip-link').focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/#\/activity$/);
+    await expect(page.locator('h1')).toHaveText('Activity');
+  });
+
+  test('Ollama has a Mirror button and no dead assets/ollama links', async ({ page }) => {
+    await stubJobs(page, { jobs: {} });
+    await page.goto(`${BASE_URL}/#/tools/ollama`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('button[data-mirror-target="ollama"]').first()).toBeVisible({ timeout: 8000 });
+    await expect(page.locator('a[href*="assets/ollama"]')).toHaveCount(0);
+  });
+
+  test('Dismiss removes the job from the server list and the strip', async ({ page }) => {
+    const table = { jobs: { '7': job({ status: 'complete', progress: 100, finishedAt: Date.now(), outcome: { summary: 'Mirrored linux-x86_64 (1.0 MB on disk), verified', ok: true } }) } };
+    await stubJobs(page, table);
+    let body: any = null;
+    await page.route('**/api/download/dismiss', (route) => { body = route.request().postDataJSON(); delete table.jobs['7']; route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }); });
+    await toolPage(page);
+    await expect(strip(page)).toContainText('verified', { timeout: 8000 });
+    await strip(page).getByRole('button', { name: 'Dismiss' }).click();
+    await expect.poll(() => body).toEqual({ id: '7' });
+    await expect(strip(page)).toBeEmpty();
+  });
 });

@@ -35,7 +35,7 @@ const CURL_BAR = /^[#=>\s-]*(\d+(?:\.\d+)?)%\s*$/;
 function bestReason(errors, warnings) {
     const strong = (errors || []).find(l => /rate limit|HTTP [45]\d\d|denied|authentication|unreachable|not found upstream|no response|zero-byte|Stalled|No space/i.test(l));
     const pick = strong || (errors || [])[(errors || []).length - 1] || (warnings || [])[(warnings || []).length - 1] || '';
-    return pick.replace(/^(ERROR|ERR|FAILED|FATAL|WARN)\b:?\s*/i, '');
+    return pick.replace(/^((ERROR|ERR|FAILED|FATAL|WARN)\b:?\s*)+/i, '');
 }
 
 function createJobManager(o) {
@@ -123,6 +123,12 @@ function createJobManager(o) {
         }
         const dErr = checkDisk();
         if (dErr) return { error: dErr };
+        // A new run of the same thing supersedes the old finished ones (a Retry must not leave
+        // the stale failed card beside the new result, and Dismiss must not resurrect an
+        // older run's strip).
+        for (const [oid, o] of jobs) {
+            if (!['running', 'queued'].includes(o.status) && o.type === spec.type && o.target === (spec.target || null)) jobs.delete(oid);
+        }
         const id = String(++counter);
         const j = blank(id, spec.type, spec.target, spec.label, spec.desc);
         j.spec = spec;
@@ -260,7 +266,8 @@ function createJobManager(o) {
         else if (r.code !== 0) {
             status = 'failed';
             const why = bestReason(j.errors, j.warnings);
-            error = why ? `${why} (exit code ${r.code})` : `Exited with code ${r.code}.` + lastReason(j);
+            const more = j.errors.length > 1 ? ` (+${j.errors.length - 1} more error${j.errors.length > 2 ? 's' : ''} in the log below)` : '';
+            error = why ? why + more : `Exited with code ${r.code}.` + lastReason(j);
         }
         else { status = 'complete'; }
 

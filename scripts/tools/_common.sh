@@ -536,7 +536,7 @@ clone_repo() {
             local why; why=$(printf '%s' "$gout" | grep -iE 'fatal|error|denied|not found|could not' | tail -1)
             case "$why" in
                 *"terminal prompts disabled"*|*"Authentication failed"*|*"could not read Username"*) why="authentication required for ${url}" ;;
-                *"not found"*|*"Repository not found"*) why="repository not found (HTTP 404): ${url}" ;;
+                *"not found"*) why="repository not found (HTTP 404): ${url}" ;;
             esac
             log_error "Clone failed: ${label}: ${why:-git clone failed} "
             DOWNLOAD_FAILED=$((DOWNLOAD_FAILED + 1))

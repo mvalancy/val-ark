@@ -96,22 +96,42 @@ echo "IMAGE = 'example/foam:1234'" > "$T/src/src/cadagent/simulation/cfd.py"
 [ "$(bash -c 'source "$1"; cadagent_openfoam_image "$2"' _ "$SH" "$T/src" 2>/dev/null)" = "example/foam:1234" ] && pass || fail "the OpenFOAM image must be read from cad-agent's IMAGE constant"
 [ "$(bash -c 'source "$1"; cadagent_openfoam_image "$2"' _ "$SH" "$T/nowhere" 2>/dev/null)" = "opencfd/openfoam-default:2512" ] && pass || fail "a missing source must fall back to the pinned image"
 
-mkdir -p "$T/wh"; touch "$T/wh/vtk-9.6.2-cp312-cp312-manylinux_2_28_aarch64.whl" "$T/wh/numpy-2.5.4-cp312-cp312-manylinux_2_28_aarch64.whl" \
-    "$T/wh/tzdata-2026.6-py2.py3-none-any.whl" "$T/wh/Pillow-13.0.0-cp312-cp312-manylinux_2_28_aarch64.whl"
-cat > "$T/solve-pins.json" <<'EOF'
-{"actions": {"FETCH": [
-  {"name": "vtk", "version": "9.7.0", "url": "u", "fn": "f1"}, {"name": "numpy", "version": "2.5.4", "url": "u", "fn": "f2"},
-  {"name": "tzdata", "version": "2026e", "url": "u", "fn": "f3"}, {"name": "pillow", "version": "12.0.0", "url": "u", "fn": "f4"},
-  {"name": "gmsh", "version": "4.15.2", "url": "u", "fn": "f5"}]}}
+mkwhl() {  # $1 dir  $2 file name  $3.. Requires-Dist lines
+    python3 - "$@" <<'PY'
+import os, sys, zipfile
+d, f, reqs = sys.argv[1], sys.argv[2], sys.argv[3:]
+n, v = f.split("-")[:2]
+os.makedirs(d, exist_ok=True)
+with zipfile.ZipFile(os.path.join(d, f), "w") as z:
+    z.writestr("%s-%s.dist-info/METADATA" % (n, v), "Name: %s\nVersion: %s\n" % (n, v) + "".join("Requires-Dist: %s\n" % r for r in reqs))
+PY
+}
+mkwhl "$T/wh" cadquery-2.8.0-py3-none-any.whl "cadquery-ocp==7.9.3" "ezdxf"
+mkwhl "$T/wh" cadquery_ocp-7.9.3-cp312-cp312-manylinux_2_31_aarch64.whl "vtk==9.6.2"
+mkwhl "$T/wh" vtk-9.6.2-cp312-cp312-manylinux_2_28_aarch64.whl
+mkwhl "$T/wh" ezdxf-1.4-py3-none-any.whl
+mkwhl "$T/wh" manifold3d-3.5-cp312-cp312-manylinux_2_28_aarch64.whl "numpy>=1.26"
+mkwhl "$T/wh" numpy-2.5.4-cp312-cp312-manylinux_2_28_aarch64.whl
+mkwhl "$T/wh" optuna-5.0-py3-none-any.whl "sqlalchemy>=1.4" "colorlog; extra == 'dev'"
+mkwhl "$T/wh" SQLAlchemy-2.1-cp312-cp312-manylinux_2_28_aarch64.whl "greenlet; platform_machine == 'aarch64'"
+mkwhl "$T/wh" Matplotlib-3.10-cp312-cp312-manylinux_2_28_aarch64.whl
+printf '%s\n' "cadquery>=2.8" "manifold3d>=2.4" "optuna>=3.4" "matplotlib>=3.7" "numpy" > "$T/wh-reqs.txt"
+cat > "$T/solve-rem.json" <<'EOF'
+{"actions": {"FETCH": [{"name": "cadquery", "version": "2.8.0"}, {"name": "ocp", "version": "7.9.3.1"},
+  {"name": "vtk", "version": "9.6.1"}, {"name": "numpy", "version": "2.5.4"}, {"name": "matplotlib-base", "version": "3.10"},
+  {"name": "python-gmsh", "version": "4.15.2"}]}}
 EOF
-P=$(bash -c 'source "$1"; cadagent_conda_pins "$2" "$3"' _ "$SH" "$T/wh" "$T/solve-pins.json" 2>/dev/null | tr '\n' ' ')
-[ "$P" = "vtk=9.6.2 pillow=13.0.0 " ] && pass || fail "conda must be re-pinned to the wheelhouse where versions differ, ignoring tzdata (got: $P)"
+R=$(bash -c 'source "$1"; cadagent_pip_remainder "$2" "$3" "$4"' _ "$SH" "$T/wh" "$T/solve-rem.json" "$T/wh-reqs.txt" 2>/dev/null | tr '\n' ' ')
+[ "$R" = "SQLAlchemy-2.1-cp312-cp312-manylinux_2_28_aarch64.whl manifold3d-3.5-cp312-cp312-manylinux_2_28_aarch64.whl optuna-5.0-py3-none-any.whl " ] && pass \
+    || fail "pip must add only what conda lacks (+ its deps), honouring aliases (ocp, matplotlib-base) and skipping extras (got: $R)"
+case "$R" in *cadquery_ocp*|*vtk-*|*ezdxf*) fail "a conda-provided package's wheel deps must not be pip-installed" ;; *) pass ;; esac
 
 # --- 4. install.sh is generated and parses (both branches) -------------------------
 bash -c 'source "$1"; mkdir -p "$TOOLS_DIR/linux-arm64/cad-agent/conda" "$TOOLS_DIR/linux-x86_64/cad-agent"
          _cadagent_write_install linux-arm64 9.9.9 x/y:1; _cadagent_write_install linux-x86_64 9.9.9 x/y:1' _ "$SH" >/dev/null 2>&1
 TD="$VAL_ARK_DATA/val-ark/tools"
 bash -n "$TD/linux-arm64/cad-agent/install.sh" 2>/dev/null && grep -q 'micromamba" create' "$TD/linux-arm64/cad-agent/install.sh" && pass || fail "linux-arm64 install.sh must parse and use the conda set"
+grep -q 'conda/pip-wheels.txt' "$TD/linux-arm64/cad-agent/install.sh" && grep -q '00-valark-conda-runtime.pth' "$TD/linux-arm64/cad-agent/install.sh" && pass || fail "arm64 install.sh must add only the pip remainder and preload the env's C++ runtime"
 bash -n "$TD/linux-x86_64/cad-agent/install.sh" 2>/dev/null && grep -q -- '--no-index' "$TD/linux-x86_64/cad-agent/install.sh" && pass || fail "install.sh must install with pip --no-index"
 grep -q 'cad-agent\[$EXTRAS\]==9.9.9' "$TD/linux-x86_64/cad-agent/install.sh" && pass || fail "install.sh must pin the mirrored cad-agent version"
 grep -q -- '-r "$HERE/requirements.txt"' "$TD/linux-x86_64/cad-agent/install.sh" && grep -q -- '--no-deps "cad-agent==9.9.9"' "$TD/linux-x86_64/cad-agent/install.sh" \

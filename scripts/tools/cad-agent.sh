@@ -43,14 +43,16 @@ CADAGENT_PLATFORMS="${VALARK_CADAGENT_PLATFORMS:-linux-arm64 linux-x86_64 macos-
 OPENFOAM_FALLBACK_IMAGE="opencfd/openfoam-default:2512"
 MICROMAMBA_REPO="mamba-org/micromamba-releases"
 MICROMAMBA_PINNED="2.10.0-0"
-# linux-arm64: requirements PyPI has no aarch64 wheel for, taken from conda-forge.
-# occt's novtk build keeps conda from bringing its own VTK: cadquery-ocp's wheel
-# links the pip vtk wheel's libraries, and a conda vtk in the same env breaks
-# `import OCP` (libvtkWrappingPythonCore3.12.so not found).
-CONDA_ARM64_SPECS="python-gmsh pyamg occt=*=novtk*"
+# linux-arm64: PyPI has no aarch64 wheel for gmsh or pyamg, so the arm64 install
+# is a conda-forge environment. Every package with native code that conda-forge
+# has comes from conda, so the process loads ONE consistent set of C/C++
+# runtimes (mixing conda's libstdc++/libexpat with manylinux wheels that bind
+# the host's older ones fails on glibc-2.31 hosts: GLIBCXX_3.4.29 not found,
+# pyexpat undefined symbols). pip then adds only the rest from the wheelhouse.
+CONDA_ARM64_SPECS="python-gmsh pyamg cadquery vtk trimesh matplotlib-base pillow scikit-fem rtree pyvista imageio imageio-ffmpeg scipy mujoco numba numpy pyyaml"
 CONDA_ARM64_SKIP_PIP="gmsh pyamg"
-# conda packages that are not Python distributions despite a PyPI namesake.
-CONDA_PIN_IGNORE="tzdata python"
+# PyPI names conda-forge spells differently.
+CONDA_PIP_ALIASES="python-gmsh:gmsh matplotlib-base:matplotlib ocp:cadquery-ocp"
 # MKL (pypardiso's dependency) exists for x86_64 only.
 X86_ONLY_PIP="pypardiso"
 # Skip any single artifact bigger than this (bytes); the NAS fills over WiFi.
@@ -114,26 +116,36 @@ print("\n".join(out))
 PY
 }
 
-# Conda's gmsh pulls Python packages the wheelhouse also carries (vtk, numpy,
-# scipy, pillow ...). pip cannot replace a conda-installed package (no RECORD),
-# and cadquery-ocp pins vtk exactly, so every overlap whose version differs is
-# re-solved pinned to the wheelhouse's version. $1 wheelhouse, $2 solve JSON;
-# prints "name=version" lines.
-cadagent_conda_pins() {
-    python3 - "$1" "$2" "$CONDA_PIN_IGNORE" <<'PY'
-import json, os, sys
-wh, solve, ignore = sys.argv[1], sys.argv[2], set(sys.argv[3].split())
-norm = lambda n: n.lower().replace("_", "-")
-wheels = {}
-for f in os.listdir(wh):
-    if f.endswith(".whl"):
-        n, v = f.split("-")[:2]
-        wheels[norm(n)] = v
+# The wheels pip must add on top of the conda env: the requirements (and their
+# dependencies, followed through the wheels' own METADATA) that conda does not
+# provide. A dependency whose wheel is absent was excluded by pip's markers for
+# this platform. $1 wheelhouse, $2 solve JSON, $3 requirements.txt; prints wheel
+# file names. cad-agent itself is installed separately (--no-deps).
+cadagent_pip_remainder() {
+    python3 - "$1" "$2" "$3" "$CONDA_PIP_ALIASES" <<'PY'
+import json, os, re, sys, zipfile
+wh, solve, reqs, aliases = sys.argv[1:5]
+norm = lambda n: re.sub(r"[-_.]+", "-", n).lower()
+alias = dict(a.split(":") for a in aliases.split())
 acts = json.load(open(solve)).get("actions", {})
+conda = set()
 for p in acts.get("FETCH") or acts.get("LINK") or []:
-    n = norm(p["name"])
-    if n in wheels and n not in ignore and wheels[n] != p["version"]:
-        print("%s=%s" % (p["name"], wheels[n]))
+    conda.add(norm(p["name"])); conda.add(norm(alias.get(p["name"], p["name"])))
+wheels = {norm(f.split("-")[0]): f for f in os.listdir(wh) if f.endswith(".whl")}
+name_of = lambda r: norm(re.split(r"[\s<>=!~;\[(]", r.strip(), maxsplit=1)[0])
+todo = [name_of(l) for l in open(reqs) if l.strip() and not l.startswith("#")]
+seen, out = set(), []
+while todo:
+    n = todo.pop()
+    if n in seen or n in conda or n == "cad-agent" or n not in wheels:
+        continue
+    seen.add(n); out.append(wheels[n])
+    with zipfile.ZipFile(os.path.join(wh, wheels[n])) as z:
+        meta = next(x for x in z.namelist() if x.endswith(".dist-info/METADATA"))
+        for line in z.read(meta).decode("utf-8", "replace").splitlines():
+            if line.startswith("Requires-Dist:") and "extra ==" not in line:
+                todo.append(name_of(line.split(":", 1)[1]))
+print("\n".join(sorted(out)))
 PY
 }
 
@@ -237,19 +249,20 @@ _cadagent_micromamba() {   # $1 = micromamba platform (linux-64|linux-aarch64), 
     download_file "https://github.com/${MICROMAMBA_REPO}/releases/download/${tag}/micromamba-${mplat}" "$out" "micromamba ${mplat}" && chmod +x "$out"
 }
 
-_cadagent_conda_solve() {   # $1 micromamba  $2 work dir  $3 extra pins
-    local -; set -f             # specs carry '*' (build-string globs), never filenames
+_cadagent_conda_solve() {   # $1 micromamba  $2 work dir
+    local -; set -f             # a spec may carry '*' (build-string globs), never filenames
     # Solve against the target's glibc floor, not the mirror host's.
     # shellcheck disable=SC2086
     if ! CONDA_OVERRIDE_GLIBC="2.${CADAGENT_GLIBC}" "$1" create -q -y --dry-run --json \
             -r "$2/mamba" -p "$2/mamba/envs/solve" --platform linux-aarch64 \
-            -c conda-forge --override-channels "python=${CADAGENT_PY}" $CONDA_ARM64_SPECS $3 \
+            -c conda-forge --override-channels "python=${CADAGENT_PY}" $CONDA_ARM64_SPECS \
             > "$2/conda-solve.json" 2> "$2/conda-solve.err"; then
         log_error "cad-agent: conda solve failed: $(tail -1 "$2/conda-solve.err")"; return 1
     fi
 }
 
-# linux-arm64: conda-forge packages for what PyPI has no aarch64 wheel for.
+# linux-arm64: the conda-forge environment (see CONDA_ARM64_SPECS) + the list of
+# wheels pip adds on top. Needs the platform's wheelhouse first.
 _cadagent_conda_arm64() {
     local work="$1" dest="${TOOLS_DIR}/linux-arm64/cad-agent/conda"
     local host_mm="$work/micromamba-host" hp; hp=$(_cadagent_host_plat)
@@ -258,12 +271,7 @@ _cadagent_conda_arm64() {
     if [ "$hp" = linux-arm64 ]; then cp -f "$dest/micromamba" "$host_mm"
     else _cadagent_micromamba linux-64 "$host_mm" || return 1; fi
     log_info "cad-agent linux-arm64: solving conda-forge python=${CADAGENT_PY} ${CONDA_ARM64_SPECS}"
-    _cadagent_conda_solve "$host_mm" "$work" "" || return 1
-    local pins; pins=$(cadagent_conda_pins "${TOOLS_DIR}/linux-arm64/cad-agent/wheelhouse" "$work/conda-solve.json" | tr '\n' ' ')
-    if [ -n "$pins" ]; then
-        log_info "cad-agent linux-arm64: re-solving with the wheelhouse's versions: ${pins}"
-        _cadagent_conda_solve "$host_mm" "$work" "$pins" || return 1
-    fi
+    _cadagent_conda_solve "$host_mm" "$work" || return 1
     local url md5 size fn n=0 bad=0
     { echo "# cad-agent linux-arm64 conda-forge set (micromamba explicit spec; install.sh makes the paths absolute)"
       echo "@EXPLICIT"; } > "$dest/explicit.txt.part"
@@ -286,7 +294,9 @@ _cadagent_conda_arm64() {
         [ -f "$f" ] || continue
         grep -qF "$(basename "$f")#" "$dest/explicit.txt" || rm -f "${f:?}"
     done
-    log_success "cad-agent linux-arm64: conda set ${n} packages ($(du -sh "$dest" | cut -f1))"
+    local base="${TOOLS_DIR}/linux-arm64/cad-agent"
+    cadagent_pip_remainder "$base/wheelhouse" "$work/conda-solve.json" "$base/requirements.txt" > "$dest/pip-wheels.txt" || return 1
+    log_success "cad-agent linux-arm64: conda set ${n} packages ($(du -sh "$dest" | cut -f1)) + $(wc -l < "$dest/pip-wheels.txt") wheels from the wheelhouse"
 }
 
 _cadagent_openfoam() {
@@ -342,12 +352,22 @@ if [ -f "\$HERE/conda/explicit.txt" ]; then
     { echo "@EXPLICIT"; grep -v '^[#@]' "\$HERE/conda/explicit.txt" | sed "s#^#file://\$HERE/conda/pkgs/#"; } > "\$MR/explicit.txt"
     "\$HERE/conda/micromamba" create -q -y -r "\$MR" -p "\$ENV_DIR" --offline -f "\$MR/explicit.txt"
     rm -rf "\${MR:?}"
+    # Load the env's own C++/GCC runtimes before any extension module, so a pip
+    # wheel never binds the host's older libstdc++ ahead of conda's.
+    SP="\$("\$ENV_DIR/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+    echo 'import ctypes, os, sys; [ctypes.CDLL(os.path.join(sys.prefix, "lib", n), mode=ctypes.RTLD_GLOBAL) for n in ("libgcc_s.so.1", "libstdc++.so.6") if os.path.exists(os.path.join(sys.prefix, "lib", n))]' > "\$SP/00-valark-conda-runtime.pth"
+    CONDA_ENV=1
 else
     PY="\${PYTHON:-}"
     [ -n "\$PY" ] || { [ -x "\$HERE/../python-standalone/bin/python3" ] && PY="\$HERE/../python-standalone/bin/python3"; }
     "\${PY:-python3}" -m venv "\$ENV_DIR"
 fi
-if [ -n "\$EXTRAS" ]; then
+if [ -n "\${CONDA_ENV:-}" ]; then
+    # conda provides every native package it has; pip adds only the rest.
+    mapfile -t W < <(sed "s#^#\$HERE/wheelhouse/#" "\$HERE/conda/pip-wheels.txt")
+    [ "\${#W[@]}" = 0 ] || "\${PIP[@]}" --no-deps "\${W[@]}"
+    "\${PIP[@]}" --no-deps "cad-agent==${ver}"
+elif [ -n "\$EXTRAS" ]; then
     "\${PIP[@]}" "cad-agent[\$EXTRAS]==${ver}"
 else
     "\${PIP[@]}" -r "\$HERE/requirements.txt"

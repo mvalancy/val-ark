@@ -738,7 +738,7 @@ const TOOLS = [
     {
         id: 'cad-agent', name: 'cad-agent', category: 'creative', icon: 'A', iconBg: '#1f6f8b', logo: 'logos/cad-agent.svg', downloadTarget: 'cad-agent',
         desc: 'CAD design verification toolkit - CadQuery, FEA, CFD and slicing, with an offline Python wheelhouse',
-        size: '~1.5 GB per Linux platform (wheelhouse + OpenFOAM image)',
+        size: '~1.4 GB (x86_64), ~1.6 GB (arm64 with conda set), ~0.5 GB (mac / windows)',
         screenshots: ['screenshots/cad-agent-1.png', 'screenshots/cad-agent-2.png'],
         platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
@@ -752,11 +752,11 @@ const TOOLS = [
             }
         },
         details: {
-            overview: 'cad-agent turns CAD models into verified, reviewable engineering evidence: it builds parts with CadQuery, meshes and solves them for stiffness and strength (gmsh + scikit-fem), writes OpenFOAM conjugate-heat-transfer cases for airflow and cooling, runs topology optimisation, slices with Bambu Studio for real filament grams, and checks KiCad ERC/DRC reports, then publishes it all as a static review site.\n\nVal Ark mirrors the whole working set, not just the source: a per-platform Python wheelhouse with every dependency of the core package and all extras (CadQuery/OCP, VTK, PyVista, gmsh, MuJoCo, Optuna and more), cad-agent\'s own wheel, a git bundle you can clone with full history, and the OpenFOAM container image its CFD runs in, as a docker load archive for arm64 and amd64. On aarch64, gmsh and pyamg (no PyPI wheels) come from a mirrored conda-forge set with a static micromamba.\n\ninstall.sh in each platform folder builds a complete cad-agent environment with no internet at all: pip install --no-index from the wheelhouse.',
+            overview: 'cad-agent turns CAD models into verified, reviewable engineering evidence: it builds parts with CadQuery, meshes and solves them for stiffness and strength (gmsh + scikit-fem), writes OpenFOAM conjugate-heat-transfer cases for airflow and cooling, runs topology optimisation, slices with Bambu Studio for real filament grams, and checks KiCad ERC/DRC reports, then publishes it all as a static review site.\n\nVal Ark mirrors the whole working set, not just the source: a per-platform Python wheelhouse with every dependency of the core package and all extras (CadQuery/OCP, VTK, PyVista, gmsh, MuJoCo, Optuna and more), cad-agent\'s own wheel, a git bundle you can clone with full history, and the OpenFOAM container image its CFD runs in, as a docker load archive for arm64 and amd64. On aarch64, where PyPI has no gmsh or pyamg wheels, install.sh builds a conda-forge environment from a mirrored package set with a static micromamba, and pip adds the rest from the wheelhouse.\n\ninstall.sh in each platform folder builds a complete cad-agent environment with no internet at all: pip install --no-index from the wheelhouse.',
             features: [
                 'Offline Python wheelhouse for CPython 3.12: core + cad, fea, sim, robot, site, explore, dev extras',
                 'linux-arm64 and linux-x86_64 (glibc 2.31+), macOS arm64 and Windows x64',
-                'aarch64 FEA: gmsh + pyamg from a mirrored conda-forge set (static micromamba included)',
+                'aarch64 FEA: a mirrored conda-forge environment (gmsh, pyamg, CadQuery, VTK) with a static micromamba',
                 'OpenFOAM v2512 container image as a docker load archive (amd64 + arm64)',
                 'Git bundle with every tag: git clone straight from the mirror',
                 'install.sh builds a working environment with pip --no-index',

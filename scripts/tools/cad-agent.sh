@@ -10,10 +10,10 @@
 #   tools/<platform>/cad-agent/   wheelhouse/      every Python dependency of the
 #                                                  core package and ALL extras,
 #                                                  plus cad-agent's own wheel
-#                                 conda/           linux-arm64 only: gmsh + pyamg
-#                                                  (no aarch64 wheels on PyPI)
-#                                                  as conda-forge packages with a
-#                                                  static micromamba
+#                                 conda/           linux-arm64 only: a conda-forge
+#                                                  environment (PyPI has no aarch64
+#                                                  gmsh/pyamg) + static micromamba
+#                                                  + pip-wheels.txt (what pip adds)
 #                                 openfoam/        linux only: the OpenFOAM image
 #                                                  cad-agent's CFD runs in, as a
 #                                                  `docker load` archive
@@ -348,10 +348,13 @@ EXTRAS="\${2:-}"
 PIP=("\$ENV_DIR/bin/python" -m pip install -q --no-index --disable-pip-version-check --find-links "\$HERE/wheelhouse")
 if [ -f "\$HERE/conda/explicit.txt" ]; then
     # aarch64: gmsh and pyamg come from the mirrored conda-forge set
-    MR="\$(mktemp -d)"
+    # micromamba unpacks every package (~3 GB) into its cache: keep that beside
+    # ENV_DIR (same filesystem, so it hard-links) - never in a RAM-backed /tmp.
+    mkdir -p "\$(dirname "\$ENV_DIR")"
+    MR="\$(mktemp -d "\${ENV_DIR%/}.mamba.XXXXXX")"
+    trap 'rm -rf "\${MR:?}"' EXIT
     { echo "@EXPLICIT"; grep -v '^[#@]' "\$HERE/conda/explicit.txt" | sed "s#^#file://\$HERE/conda/pkgs/#"; } > "\$MR/explicit.txt"
     "\$HERE/conda/micromamba" create -q -y -r "\$MR" -p "\$ENV_DIR" --offline -f "\$MR/explicit.txt"
-    rm -rf "\${MR:?}"
     # Load the env's own C++/GCC runtimes before any extension module, so a pip
     # wheel never binds the host's older libstdc++ ahead of conda's.
     SP="\$("\$ENV_DIR/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"

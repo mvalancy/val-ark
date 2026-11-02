@@ -61,7 +61,7 @@ GPU-accelerated tools (`llama-cpp`, `whisper-cpp`, `sd-cpp`, `bitnet`) ship preb
 | `bambu-studio.sh` | Bambu Studio (slicer) | linux-x86_64, macos-arm64, windows-x64; linux-arm64 (hint) |
 | `blender.sh` | Blender | linux-x86_64, linux-arm64, macos-arm64, windows-x64 |
 | `btop.sh` | btop | linux-arm64, linux-x86_64, macos-arm64 |
-| `cad-agent.sh` | cad-agent bundle: git bundle + per-platform Python wheelhouse + OpenFOAM image (+ conda-forge gmsh/pyamg on arm64) | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
+| `cad-agent.sh` | cad-agent bundle: git bundle + per-platform Python wheelhouse + OpenFOAM image (+ a conda-forge environment on arm64, where PyPI has no gmsh/pyamg wheels) | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |
 | `calibre.sh` | Calibre | linux-x86_64, linux-arm64, macos-arm64, windows-x64 |
 | `chat.sh` | IRC chat (ngIRCd + The Lounge) | all (source) |
 | `claude-code.sh` | Claude Code | linux-arm64, linux-x86_64, macos-arm64, windows-x64 |

@@ -45,11 +45,21 @@ later). See [README](README.md).
 - **Decision:** one tool entry, `scripts/tools/cad-agent.sh`, is the whole bundle. A per-platform
   **wheelhouse** (`pip download --platform … --only-binary=:all:` from a throwaway venv, so one host
   fills every platform and nothing is installed on the box) covers the core package and every
-  extra; linux-arm64 adds a **conda-forge explicit set + static micromamba** for gmsh/pyamg; the
+  extra; linux-arm64 adds a **conda-forge explicit set + static micromamba**, because PyPI has no
+  aarch64 gmsh/pyamg; the
   OpenFOAM image is a **`docker load` archive** pulled by the new stdlib `scripts/lib/oci_pull.py`.
   `install.sh` per platform builds the environment with `pip --no-index`; `verify.sh` installs the
   core package offline each cycle. Wheels target CPython 3.12 (the mirrored python-standalone) and
   glibc ≤ 2.31 (`VALARK_CADAGENT_GLIBC`), the oldest fleet host.
+- **arm64 is conda-native, not a mix.** Measured on the NAS (glibc 2.31): adding just conda's
+  gmsh to a pip env fails, conda's numpy needs `GLIBCXX_3.4.29` after a pip wheel already bound
+  the host's libstdc++, and conda's pyexpat then meets the host's libexpat. So every native package
+  conda-forge has (cadquery/ocp, vtk, gmsh, pyamg, mujoco, numpy/scipy, pyvista, numba …) comes from
+  conda; pip adds only what conda lacks plus its wheel deps (`conda/pip-wheels.txt`, followed through
+  wheel METADATA), and a `.pth` preloads the env's libstdc++ for the few pip-native wheels.
+- **cad-agent's `fea` extra cannot resolve off x86_64** (pypardiso→MKL, no marker; reported upstream
+  as Valpatel/cad-agent#285), so `install.sh` installs the platform-filtered `requirements.txt` and
+  then cad-agent `--no-deps`.
 - **Why:** curated, per-project wheelhouses are small (≈0.5–1 GB per platform) and prove an offline
   install end to end, where a generic PyPI cache would not. A new cad-agent release replaces only
   the wheelhouse; the image (digest stamp) and conda packages (md5) are kept.

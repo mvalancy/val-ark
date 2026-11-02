@@ -131,6 +131,7 @@ bash -c 'source "$1"; mkdir -p "$TOOLS_DIR/linux-arm64/cad-agent/conda" "$TOOLS_
          _cadagent_write_install linux-arm64 9.9.9 x/y:1; _cadagent_write_install linux-x86_64 9.9.9 x/y:1' _ "$SH" >/dev/null 2>&1
 TD="$VAL_ARK_DATA/val-ark/tools"
 bash -n "$TD/linux-arm64/cad-agent/install.sh" 2>/dev/null && grep -q 'micromamba" create' "$TD/linux-arm64/cad-agent/install.sh" && pass || fail "linux-arm64 install.sh must parse and use the conda set"
+grep -q 'mktemp -d "${ENV_DIR%/}.mamba' "$TD/linux-arm64/cad-agent/install.sh" && pass || fail "arm64 install.sh must keep micromamba's cache beside the env, not in /tmp (tmpfs on the NAS)"
 grep -q 'conda/pip-wheels.txt' "$TD/linux-arm64/cad-agent/install.sh" && grep -q '00-valark-conda-runtime.pth' "$TD/linux-arm64/cad-agent/install.sh" && pass || fail "arm64 install.sh must add only the pip remainder and preload the env's C++ runtime"
 bash -n "$TD/linux-x86_64/cad-agent/install.sh" 2>/dev/null && grep -q -- '--no-index' "$TD/linux-x86_64/cad-agent/install.sh" && pass || fail "install.sh must install with pip --no-index"
 grep -q 'cad-agent\[$EXTRAS\]==9.9.9' "$TD/linux-x86_64/cad-agent/install.sh" && pass || fail "install.sh must pin the mirrored cad-agent version"

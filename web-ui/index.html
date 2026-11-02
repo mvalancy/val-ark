@@ -4046,21 +4046,25 @@ function _syncJobs(snapshot, authoritative) {
     jobsChanged();
 }
 // Merge the server's full download objects into the map. Returns true when the API answered.
-let _dlLoadSeq = 0, _dlLoadInflight = null;
+let _dlLoadInflight = null, _dlLoadAgain = false;
 function loadDownloads() {
-    // One request in flight at a time (SSE can fire a burst of events), and a response that was
-    // overtaken by a newer request is ignored so it cannot delete a job that just started.
-    if (_dlLoadInflight) return _dlLoadInflight;
-    _dlLoadInflight = _loadDownloadsOnce().finally(() => { _dlLoadInflight = null; });
+    // One request in flight (SSE can fire a burst of events). A call made while one is in flight
+    // schedules ONE more load after it finishes: the in-flight reply may predate the caller's POST
+    // (it would delete the job that was just started), so the caller must wait for a fresh one.
+    if (_dlLoadInflight) { _dlLoadAgain = true; return _dlLoadInflight; }
+    _dlLoadInflight = _loadDownloadsOnce().then(async (ok) => {
+        while (_dlLoadAgain) { _dlLoadAgain = false; ok = await _loadDownloadsOnce(); }
+        return ok;
+    }).finally(() => { _dlLoadInflight = null; _dlLoadAgain = false; });
     return _dlLoadInflight;
 }
 async function _loadDownloadsOnce() {
-    const seq = ++_dlLoadSeq;
     try {
-        const r = await fetch('/api/status/downloads');
+        // 10 s cap: a hung fetch (sleeping laptop, half-open TCP) must not hold the single slot forever
+        const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 10000);
+        let r; try { r = await fetch('/api/status/downloads', { signal: ctl.signal }); } finally { clearTimeout(to); }
         if (!r.ok) return false;
         const data = await r.json();
-        if (seq !== _dlLoadSeq) return true;
         const wasActive = [..._activeDownloads.values()].filter(d => d.status === 'running' || d.status === 'queued').map(d => d.id);
         _syncJobs(data, true);
         // A job we thought was running finished while we weren't listening: refresh the

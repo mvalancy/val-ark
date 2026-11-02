@@ -95,6 +95,8 @@ function createJobManager(o) {
             // pid/script are persisted (orphan cleanup after a restart) but never served over the API
             pid: forPersist && j.status === 'running' && j.proc ? j.proc.pid : undefined,
             script: forPersist && j.status === 'running' && j.spec ? path.basename(j.spec.script) : undefined,
+            pstart: forPersist && j.status === 'running' && j.proc ? (j.pstart || (j.pstart = procStart(j.proc.pid))) : undefined,
+            server: forPersist ? process.pid : undefined,
         };
     }
     const emit = (event, j, extra) => broadcast(event, Object.assign(view(j), extra || {}));
@@ -137,9 +139,17 @@ function createJobManager(o) {
     // start a second writer on the same files) — but ONLY if the recorded pid is still the same
     // job: after a reboot the pid may belong to something unrelated, so its command line must
     // still name the job's script.
+    function procStart(pid) {            // /proc/<pid>/stat field 22 (starttime): identifies THIS process, not a recycled pid
+        try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return st.slice(st.lastIndexOf(')') + 2).split(' ')[19] || null; } catch (_) { return null; }
+    }
+    function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }
     function stopOrphan(v) {
         const pid = Number(v.pid);
         if (!pid || !v.script || !HAVE_PROC) return false;
+        // Another server sharing this state dir may still own the job: never touch it while that
+        // server is alive, and only stop a process whose start time matches what was recorded.
+        if (v.server && Number(v.server) !== process.pid && pidAlive(Number(v.server))) return false;
+        if (!v.pstart || procStart(pid) !== String(v.pstart)) return false;
         try {
             const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
             if (!cmd.includes(v.script)) return false;

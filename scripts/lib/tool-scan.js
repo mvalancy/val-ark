@@ -218,6 +218,7 @@ async function testArchive(file, maxBytes) {
     else if (/\.gz$/i.test(file)) r = await _run('gzip', ['-t', file], 600000);
     else return { ok: true, reason: 'size > 0' };     // AppImage / raw binary: non-empty is all we can assert
     if (r.missing) return { ok: null, reason: 'no checker available' };
+    if (r.status === 124) return { ok: null, reason: 'integrity check timed out' };
     return r.status === 0 ? { ok: true } : { ok: false, reason: 'archive is corrupt or truncated' };
 }
 

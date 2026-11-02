@@ -44,7 +44,10 @@ OPENFOAM_FALLBACK_IMAGE="opencfd/openfoam-default:2512"
 MICROMAMBA_REPO="mamba-org/micromamba-releases"
 MICROMAMBA_PINNED="2.10.0-0"
 # linux-arm64: requirements PyPI has no aarch64 wheel for, taken from conda-forge.
-CONDA_ARM64_SPECS="python-gmsh pyamg"
+# occt's novtk build keeps conda from bringing its own VTK: cadquery-ocp's wheel
+# links the pip vtk wheel's libraries, and a conda vtk in the same env breaks
+# `import OCP` (libvtkWrappingPythonCore3.12.so not found).
+CONDA_ARM64_SPECS="python-gmsh pyamg occt=*=novtk*"
 CONDA_ARM64_SKIP_PIP="gmsh pyamg"
 # conda packages that are not Python distributions despite a PyPI namesake.
 CONDA_PIN_IGNORE="tzdata python"
@@ -235,6 +238,7 @@ _cadagent_micromamba() {   # $1 = micromamba platform (linux-64|linux-aarch64), 
 }
 
 _cadagent_conda_solve() {   # $1 micromamba  $2 work dir  $3 extra pins
+    local -; set -f             # specs carry '*' (build-string globs), never filenames
     # Solve against the target's glibc floor, not the mirror host's.
     # shellcheck disable=SC2086
     if ! CONDA_OVERRIDE_GLIBC="2.${CADAGENT_GLIBC}" "$1" create -q -y --dry-run --json \

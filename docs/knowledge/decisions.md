@@ -53,10 +53,15 @@ later). See [README](README.md).
   glibc ≤ 2.31 (`VALARK_CADAGENT_GLIBC`), the oldest fleet host.
 - **arm64 is conda-native, not a mix.** Measured on the NAS (glibc 2.31): adding just conda's
   gmsh to a pip env fails, conda's numpy needs `GLIBCXX_3.4.29` after a pip wheel already bound
-  the host's libstdc++, and conda's pyexpat then meets the host's libexpat. So every native package
-  conda-forge has (cadquery/ocp, vtk, gmsh, pyamg, mujoco, numpy/scipy, pyvista, numba …) comes from
-  conda; pip adds only what conda lacks plus its wheel deps (`conda/pip-wheels.txt`, followed through
-  wheel METADATA), and a `.pth` preloads the env's libstdc++ for the few pip-native wheels.
+  the host's libstdc++, and conda's pyexpat then meets the host's libexpat. So the env is conda's
+  Python (its own libexpat) with gmsh, pyamg and the numeric stack (numpy/scipy, mujoco, numba …)
+  from conda, and a `.pth` preloads the env's libstdc++ before any manylinux wheel loads.
+- **…but the CAD kernel stays on PyPI.** conda-forge's `ocp` 7.9.3.1 binds OCCT static methods
+  without the `_s` suffix (`TopoDS.Solid`, not `TopoDS.Solid_s`); cad-agent calls the PyPI form, and
+  ~180 of its tests failed on the NAS with a conda OCP. So cadquery, cadquery-ocp, vtk and pyvista
+  come from the wheelhouse, `occt` is pinned to its no-VTK build (gmsh needs it), and the fill fails
+  if the solve ever pulls `ocp`/`vtk`/`cadquery`/`pyvista` (`CONDA_ARM64_FORBID`). pip adds what
+  conda lacks plus its wheel deps (`conda/pip-wheels.txt`, followed through wheel METADATA).
 - **cad-agent's `fea` extra cannot resolve off x86_64** (pypardiso→MKL, no marker; reported upstream
   as Valpatel/cad-agent#285), so `install.sh` installs the platform-filtered `requirements.txt` and
   then cad-agent `--no-deps`.

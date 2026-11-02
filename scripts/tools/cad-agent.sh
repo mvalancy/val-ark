@@ -44,15 +44,18 @@ OPENFOAM_FALLBACK_IMAGE="opencfd/openfoam-default:2512"
 MICROMAMBA_REPO="mamba-org/micromamba-releases"
 MICROMAMBA_PINNED="2.10.0-0"
 # linux-arm64: PyPI has no aarch64 wheel for gmsh or pyamg, so the arm64 install
-# is a conda-forge environment. Every package with native code that conda-forge
-# has comes from conda, so the process loads ONE consistent set of C/C++
-# runtimes (mixing conda's libstdc++/libexpat with manylinux wheels that bind
-# the host's older ones fails on glibc-2.31 hosts: GLIBCXX_3.4.29 not found,
-# pyexpat undefined symbols). pip then adds only the rest from the wheelhouse.
-CONDA_ARM64_SPECS="python-gmsh pyamg cadquery vtk trimesh matplotlib-base pillow scikit-fem rtree pyvista imageio imageio-ffmpeg scipy mujoco numba numpy pyyaml"
+# is a conda-forge environment: conda's Python (its own libexpat), gmsh, pyamg and
+# the numeric stack; install.sh preloads the env's libstdc++ so manylinux wheels
+# never bind the host's older one (GLIBCXX_3.4.29 on glibc-2.31 hosts).
+# The CAD kernel stays on PyPI's wheels: conda-forge's `ocp` binds OCCT static
+# methods without the `_s` suffix (TopoDS.Solid, not TopoDS.Solid_s) that
+# cad-agent calls, and PyPI's cadquery-ocp links PyPI's vtk. So conda must not
+# bring ocp/vtk/cadquery/pyvista; `occt` is pinned to its no-VTK build for gmsh.
+CONDA_ARM64_SPECS="python-gmsh pyamg occt=*=novtk* trimesh matplotlib-base pillow scikit-fem rtree imageio imageio-ffmpeg scipy mujoco numba numpy pyyaml"
 CONDA_ARM64_SKIP_PIP="gmsh pyamg"
+CONDA_ARM64_FORBID="ocp vtk vtk-base cadquery pyvista"
 # PyPI names conda-forge spells differently.
-CONDA_PIP_ALIASES="python-gmsh:gmsh matplotlib-base:matplotlib ocp:cadquery-ocp"
+CONDA_PIP_ALIASES="python-gmsh:gmsh matplotlib-base:matplotlib"
 # MKL (pypardiso's dependency) exists for x86_64 only.
 X86_ONLY_PIP="pypardiso"
 # Skip any single artifact bigger than this (bytes); the NAS fills over WiFi.
@@ -158,6 +161,16 @@ acts = d.get("actions", {})
 for p in acts.get("FETCH") or acts.get("LINK") or []:
     print(p["url"], p.get("md5", ""), p.get("size", 0), p["fn"])
 ' "$1"
+}
+
+# Packages in the solve JSON ($1) that CONDA_ARM64_FORBID keeps out of conda.
+cadagent_conda_forbidden() {
+    python3 -c '
+import json, sys
+acts = json.load(open(sys.argv[1])).get("actions", {})
+names = {p.get("name", "") for p in acts.get("FETCH") or acts.get("LINK") or []}
+print(" ".join(sorted(names & set(sys.argv[2].split()))))
+' "$1" "$CONDA_ARM64_FORBID"
 }
 
 # The OpenFOAM image cad-agent's CFD module runs (its IMAGE constant).
@@ -272,6 +285,12 @@ _cadagent_conda_arm64() {
     else _cadagent_micromamba linux-64 "$host_mm" || return 1; fi
     log_info "cad-agent linux-arm64: solving conda-forge python=${CADAGENT_PY} ${CONDA_ARM64_SPECS}"
     _cadagent_conda_solve "$host_mm" "$work" || return 1
+    local forbidden
+    forbidden=$(cadagent_conda_forbidden "$work/conda-solve.json") || { log_error "cad-agent: cannot read the conda solve"; return 1; }
+    if [ -n "$forbidden" ]; then
+        log_error "cad-agent: the conda solve pulled ${forbidden} (must come from the wheelhouse: cad-agent needs PyPI's OCP API)"
+        return 1
+    fi
     local url md5 size fn n=0 bad=0
     { echo "# cad-agent linux-arm64 conda-forge set (micromamba explicit spec; install.sh makes the paths absolute)"
       echo "@EXPLICIT"; } > "$dest/explicit.txt.part"

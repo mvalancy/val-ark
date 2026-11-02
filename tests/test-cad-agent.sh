@@ -91,6 +91,19 @@ EOF
 L=$(bash -c 'source "$1"; cadagent_conda_fetch_list "$2"' _ "$SH" "$T/solve.json" 2>/dev/null)
 [ "$(printf '%s\n' "$L" | wc -l)" = 2 ] && printf '%s\n' "$L" | head -1 | grep -q "gmsh-4.15.2-h_11.conda aa 10 gmsh-4.15.2-h_11.conda" && pass \
     || fail "conda fetch list must be 'url md5 size fn' per package"
+[ -z "$(bash -c 'source "$1"; cadagent_conda_forbidden "$2"' _ "$SH" "$T/solve.json" 2>/dev/null)" ] && pass \
+    || fail "a gmsh-only solve must not be reported as pulling a forbidden package"
+cat > "$T/solve-bad.json" <<'EOF'
+{"actions": {"FETCH": [
+  {"url": "u", "md5": "aa", "size": 1, "fn": "ocp-7.9.3.1-py312_4.conda", "name": "ocp"},
+  {"url": "u", "md5": "bb", "size": 1, "fn": "vtk-base-9.6.1-py312_4.conda", "name": "vtk-base"},
+  {"url": "u", "md5": "cc", "size": 1, "fn": "numpy-2.5.4-py312_0.conda", "name": "numpy"}
+]}}
+EOF
+[ "$(bash -c 'source "$1"; cadagent_conda_forbidden "$2"' _ "$SH" "$T/solve-bad.json" 2>/dev/null)" = "ocp vtk-base" ] && pass \
+    || fail "a solve that pulls conda's ocp/vtk must be caught (cad-agent needs PyPI's OCP API)"
+grep -q 'cadquery' <<<"$(bash -c 'source "$1"; echo "$CONDA_ARM64_SPECS"' _ "$SH")" \
+    && fail "conda specs must not ask for cadquery (it brings conda's OCP)" || pass
 mkdir -p "$T/src/src/cadagent/simulation"
 echo "IMAGE = 'example/foam:1234'" > "$T/src/src/cadagent/simulation/cfd.py"
 [ "$(bash -c 'source "$1"; cadagent_openfoam_image "$2"' _ "$SH" "$T/src" 2>/dev/null)" = "example/foam:1234" ] && pass || fail "the OpenFOAM image must be read from cad-agent's IMAGE constant"

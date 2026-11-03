@@ -11,6 +11,7 @@ later). See [README](README.md).
 
 | Date | Decision | Issue / Phase |
 |------|----------|---------------|
+| 2026‑11 | [Python wheelhouses + container archives as tool artifacts](#202611--python-wheelhouses--container-archives-as-tool-artifacts-149) | #149 |
 | 2026‑07 | [CI guards: doc-link integrity + secret/host-leak scan](#202607--ci-guards-doc-link-integrity--secrethost-leak-scan-130) | #130 |
 | 2026‑07 | ["Ask Val Ark": an offline ask endpoint reusing the moderation runtime](#202607--ask-val-ark-slice-1-an-offline-ask-endpoint-that-reuses-the-moderation-runtime-phase-8-67) | Phase 8 · #67 |
 | 2026‑07 | [Four‑tab consumer nav: Home · Library · Activity · Settings](#202607--fourtab-consumer-nav-home--library--activity--settings-61--epic-91-slice-1) | #61 · epic #91 |
@@ -36,6 +37,38 @@ later). See [README](README.md).
 | 2026‑07 | [Notification center: bell/inbox slice 1](#202607--notification-center-bellinbox-slice-1-69) | #69 |
 
 ---
+
+## 2026‑11 — Python wheelhouses + container archives as tool artifacts (#149)
+- **Context:** cad-agent (CAD/FEA/CFD toolkit) needs ~100 Python wheels, an OpenFOAM container
+  image, and on aarch64 two libraries PyPI has no wheel for (gmsh, pyamg). The catalog only knew
+  binaries, archives, source clones and install hints; a full PyPI mirror is rejected (42 TB).
+- **Decision:** one tool entry, `scripts/tools/cad-agent.sh`, is the whole bundle. A per-platform
+  **wheelhouse** (`pip download --platform … --only-binary=:all:` from a throwaway venv, so one host
+  fills every platform and nothing is installed on the box) covers the core package and every
+  extra; linux-arm64 adds a **conda-forge explicit set + static micromamba**, because PyPI has no
+  aarch64 gmsh/pyamg; the
+  OpenFOAM image is a **`docker load` archive** pulled by the new stdlib `scripts/lib/oci_pull.py`.
+  `install.sh` per platform builds the environment with `pip --no-index`; `verify.sh` installs the
+  core package offline each cycle. Wheels target CPython 3.12 (the mirrored python-standalone) and
+  glibc ≤ 2.31 (`VALARK_CADAGENT_GLIBC`), the oldest fleet host.
+- **arm64 is conda-native, not a mix.** Measured on the NAS (glibc 2.31): adding just conda's
+  gmsh to a pip env fails, conda's numpy needs `GLIBCXX_3.4.29` after a pip wheel already bound
+  the host's libstdc++, and conda's pyexpat then meets the host's libexpat. So the env is conda's
+  Python (its own libexpat) with gmsh, pyamg and the numeric stack (numpy/scipy, mujoco, numba …)
+  from conda, and a `.pth` preloads the env's libstdc++, libexpat and zlib before any manylinux wheel loads (the
+  wheels' system GL/X11 chain otherwise binds the host's older libexpat first and breaks pyexpat).
+- **…but the CAD kernel stays on PyPI.** conda-forge's `ocp` 7.9.3.1 binds OCCT static methods
+  without the `_s` suffix (`TopoDS.Solid`, not `TopoDS.Solid_s`); cad-agent calls the PyPI form, and
+  ~180 of its tests failed on the NAS with a conda OCP. So cadquery, cadquery-ocp, vtk and pyvista
+  come from the wheelhouse, `occt` is pinned to its no-VTK build (gmsh needs it), and the fill fails
+  if the solve ever pulls `ocp`/`vtk`/`cadquery`/`pyvista` (`CONDA_ARM64_FORBID`). pip adds what
+  conda lacks plus its wheel deps (`conda/pip-wheels.txt`, followed through wheel METADATA).
+- **cad-agent's `fea` extra cannot resolve off x86_64** (pypardiso→MKL, no marker; reported upstream
+  as Valpatel/cad-agent#285), so `install.sh` installs the platform-filtered `requirements.txt` and
+  then cad-agent `--no-deps`.
+- **Why:** curated, per-project wheelhouses are small (≈0.5–1 GB per platform) and prove an offline
+  install end to end, where a generic PyPI cache would not. A new cad-agent release replaces only
+  the wheelhouse; the image (digest stamp) and conda packages (md5) are kept.
 
 ## 2026‑07 — CI guards: doc-link integrity + secret/host-leak scan (#130)
 

@@ -140,9 +140,9 @@ run_all() {
         vosk btop helix sqlite kiwix mqtt-explorer tailscale syncthing redis postgresql
         # Larger tools
         piper onnxruntime dev-cli miniforge python-standalone influxdb
-        ollama vscodium godot freecad
+        ollama vscodium godot freecad bambu-studio
         # Largest tools last
-        sd-cpp whisper-cpp llama-cpp ffmpeg blender
+        sd-cpp whisper-cpp llama-cpp ffmpeg blender cad-agent
     )
 
     # Add any tools not in the ordered list

@@ -10,6 +10,9 @@ creds, or host paths.**
   real release surface; a GitHub merge of a dev-based branch into main falsely reports CONFLICTING.
   Fix by re-parenting the release tree onto main's tip with `git commit-tree` (see
   [`../skills/release.md`](../skills/release.md)). This is the single most important release trick.
+- **Back-merge `main` into `dev` after every release** (release skill step 8, a merge commit
+  with `dev`'s tree). Without it the squash commits pile up on `main` only and `dev` reads as
+  "N behind" even though nothing is missing: the two-dot diff is empty.
 - **VERSION is the tag source of truth** (served at `/api/health`). Bump it on dev *before* cutting
   the release, or `release.sh` refuses ("tag already exists"). Tags are unprefixed (`0.1.10`).
 - **Freeze the release on `release/<ver>` before merging held PRs to dev** — otherwise an open

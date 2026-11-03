@@ -39,7 +39,21 @@ commits into one, so the branches share content but diverge by SHA. Consequences
 7. **Tag `main`'s tip** unprefixed and push: `git tag -a <ver> <main-sha> -m "Release <ver>"` then
    `git push origin <ver>`. The release workflow (`.github/workflows/release.yml`) fires on the
    tag and builds the release artifacts.
-8. **Post-release:** open follow-up tickets for the Gate-2 non-blocking notes; verify on real
+8. **Back-merge `main` into `dev`** so `dev` contains the new release commit and every earlier
+   one. The trees are already identical, so the merge has `dev`'s tree and both tips as parents:
+   ```sh
+   git fetch origin
+   test "$(git rev-parse origin/main^{tree})" = "$(git rev-parse origin/dev^{tree})"   # must hold
+   M=$(git commit-tree "$(git rev-parse origin/dev^{tree})" -p origin/dev -p origin/main \
+         -m "Merge main (release <ver>) back into dev")
+   git push origin "$M:refs/heads/chore/sync-main-<ver>"
+   ```
+   Open `chore/sync-main-<ver> → dev` and land it with a **merge commit** (`gh pr merge --merge`;
+   a squash would drop the second parent, which is the point). Afterwards `git rev-list --count
+   origin/dev..origin/main` is 0, the merge-base is the release, and the next release PR from `dev`
+   is mergeable without the step-3 re-parent. Skipping this is how `dev` drifted to "95 ahead,
+   33 behind" (cleaned up in #156).
+9. **Post-release:** open follow-up tickets for the Gate-2 non-blocking notes; verify on real
    hardware anything CI could only stub (e.g. moderation with the real llama.cpp binaries).
 
 ## Gotchas
@@ -57,4 +71,5 @@ commits into one, so the branches share content but diverge by SHA. Consequences
 - [ ] Gate-2 review release-ready + CI green
 - [ ] Squash-merged; single Release commit; main linear
 - [ ] Tag pushed; release workflow fired
+- [ ] `main` back-merged into `dev` (merge commit); `origin/dev..origin/main` is empty
 - [ ] Follow-up tickets + real-box verification queued

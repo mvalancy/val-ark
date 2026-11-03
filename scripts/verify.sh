@@ -49,6 +49,34 @@ native_tools_dir() {
     esac
 }
 
+verify_cad_agent() {
+    local td="$1" dir="$1/cad-agent" py="" v wheel
+    wheel=$(ls "$dir"/wheelhouse/cad_agent-*.whl 2>/dev/null | head -1)
+    [ -n "$wheel" ] || return 0              # not mirrored here: nothing to check
+    # The wheels target the mirrored python-standalone's CPython (cp312).
+    for v in "$td/python-standalone/bin/python3" "$(command -v python3 2>/dev/null)"; do
+        [ -n "$v" ] && [ -x "$v" ] || continue
+        if "$v" -c 'import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)' 2>/dev/null; then py="$v"; break; fi
+    done
+    [ -n "$py" ] || { skip "cad-agent: no CPython 3.12 (python-standalone) to test the wheelhouse with"; return 0; }
+    local t; t=$(mktemp -d "${TMPDIR:-/tmp}/valark-verify-cad.XXXXXX") || return 0
+    if PYTHONDONTWRITEBYTECODE=1 timeout 300 "$py" -m venv "$t/venv" >/dev/null 2>&1 && \
+       timeout 300 "$t/venv/bin/python" -m pip install -q --no-index --disable-pip-version-check \
+           --find-links "$dir/wheelhouse" "$wheel" >/dev/null 2>&1 && \
+       timeout 60 "$t/venv/bin/cad-agent" --help >/dev/null 2>&1; then
+        chk "tool runs: cad-agent (offline wheelhouse install, $(basename "$wheel" | cut -d- -f2))"
+    else
+        bad "tool present but won't run: cad-agent (offline install from $dir/wheelhouse failed)"
+    fi
+    rm -rf "${t:?}"
+    local img
+    for img in "$dir"/openfoam/*.tar; do
+        [ -f "$img" ] || continue
+        if tar --occurrence=1 -tf "$img" manifest.json >/dev/null 2>&1; then chk "tool present: cad-agent OpenFOAM image $(basename "$img")"
+        else bad "tool present but won't run: cad-agent OpenFOAM image is not a docker archive ($(basename "$img"))"; fi
+    done
+}
+
 verify_local() {
     echo "── local functional checks ──"
     local td; td=$(native_tools_dir)
@@ -70,6 +98,11 @@ verify_local() {
         fi
     done
     [ "$any_tool" = 0 ] && skip "no native tool binaries in $td yet"
+
+    # 1b) cad-agent's mirrored wheelhouse installs OFFLINE (pip --no-index) into a
+    # throwaway venv and the CLI runs. Core package only: the full extras set is
+    # what install.sh proves; it is too heavy for every loop cycle.
+    verify_cad_agent "$td"
 
     # 2) kiwix serves a real ZIM (start on a test port, curl, stop)
     local kbin="$td/kiwix/kiwix-serve"

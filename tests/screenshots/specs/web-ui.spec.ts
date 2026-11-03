@@ -9,7 +9,7 @@ const WEB_UI = path.resolve(__dirname, '../../../web-ui/index.html');
 const TOOL_IDS = [
   'llama-cpp', 'whisper-cpp', 'piper-tts', 'sd-cpp', 'ffmpeg',
   'onnxruntime', 'vosk', 'bitnet', 'ollama', 'blender',
-  'freecad', 'kicad', 'godot', 'vlc', 'n8n',
+  'freecad', 'kicad', 'cad-agent', 'bambu-studio', 'godot', 'vlc', 'n8n',
   'influxdb', 'grafana', 'milvus', 'comfyui', 'seaweedfs', 'syncthing', 'coolify',
   'kiwix', 'tailscale', 'mosquitto', 'mqtt-explorer', 'redis',
   'chat', 'mail', 'forum', 'paste',
@@ -551,7 +551,7 @@ const PACKAGE_MANAGED_TOOLS = ['vlc', 'n8n', 'milvus', 'coolify', 'claude-code',
 // Tools mirrored as SOURCE, an INSTALLER, or an install hint rather than a
 // ready-to-run binary (the user builds/installs them) — verified by artifact
 // presence, not by a binary path.
-const SOURCE_HINT_TOOLS = ['mosquitto', 'postgresql', 'miniforge', 'kicad'];
+const SOURCE_HINT_TOOLS = ['mosquitto', 'postgresql', 'miniforge', 'kicad', 'cad-agent', 'bambu-studio'];
 
 const PLATFORM_DIRS = ['linux-x86_64', 'linux-arm64', 'macos-arm64', 'windows-x64'];
 

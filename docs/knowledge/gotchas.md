@@ -180,6 +180,21 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   with `--file-allocation=none` so allocated blocks == bytes received (the default prealloc made the
   `.part` full‑length from byte 0, i.e. a fake 100 %).
 
+- **A top‑level `INSTALL.txt` turns a whole mirror into "Install guide only" (#149).**
+  `tool-scan.js` treats `tools/<plat>/<tool>/INSTALL.txt` as the `write_install_hint` marker and
+  stops there, never looking into subdirectories. So a tool that ships real files *and* a how‑to
+  (cad-agent: a 1.4 GB `wheelhouse/` + `install.sh`) must name its doc something else
+  (`OFFLINE-INSTALL.txt`), and write it only once the platform is complete. A doc written for a
+  failed platform makes the failure look like a finished mirror.
+  Regression: `tests/test-cad-agent.sh` §4b.
+- **Registry pulls (`scripts/lib/oci_pull.py`): never trust a digest as a path, and expect expiry.**
+  Digests from a registry are validated as `sha256:<64 hex>` before they name a file (a crafted
+  `sha256:../../x` otherwise reads and deletes outside the blob dir). A `.part` that already
+  holds every declared byte is verified, not Range‑requested, because a Range request for it gets
+  HTTP 416 on every rerun. A 401 mid‑pull means re‑authenticate (Docker Hub tokens last ~300 s).
+  `Authorization` is dropped on a redirect to another host (the blob CDN), and a blob is never
+  stored past its declared size.
+
 ## Storage / data root
 
 - **`VAL_ARK_DATA` autodetect can pick the wrong mount** (once landed on a backup target that

@@ -127,13 +127,29 @@ cmd_list() {
 }
 
 cmd_download() {
+    # Optional filter: a catalog id downloads just that ZIM; none/"all" = every entry. An
+    # unknown id is an ERROR - it used to be ignored, so "Mirror" on one item silently
+    # started the whole catalog (incl. the 111 GB full Wikipedia).
+    local want="${1:-all}"
+    case "$want" in
+        all|wikipedia|"") want="" ;;
+        *)
+            local known=0 e
+            for e in "${ZIM_CATALOG[@]}"; do [ "${e%%|*}" = "$want" ] && known=1; done
+            if [ "$known" -ne 1 ]; then
+                log_err "Unknown content target: ${want} (known: $(for e in "${ZIM_CATALOG[@]}"; do printf '%s ' "${e%%|*}"; done))"
+                return 1
+            fi ;;
+    esac
     mkdir -p "$ZIM_DIR"
     local disk_free=$(check_disk_space)
     log_info "Disk free: ${disk_free} GB"
     echo ""
 
+    local ok=0 failed=0 skipped=0
     for entry in "${ZIM_CATALOG[@]}"; do
         parse_entry "$entry"
+        [ -n "$want" ] && [ "$ZIM_ID" != "$want" ] && continue
         local filepath="${ZIM_DIR}/${ZIM_FILE}"
 
         # Skip if already complete
@@ -143,6 +159,7 @@ cmd_download() {
             local threshold=$(echo "$expected_bytes * 0.99" | bc 2>/dev/null || echo 0)
             if [ "$(echo "$actual_bytes >= ${threshold%.*}" | bc 2>/dev/null || echo 0)" = "1" ]; then
                 log_ok "Already have: ${ZIM_ID} (${ZIM_SIZE_GB} GB)"
+                skipped=$((skipped + 1))
                 continue
             fi
         fi
@@ -152,7 +169,8 @@ cmd_download() {
         needed_gb=$((needed_gb + 5))  # 5GB buffer
         disk_free=$(check_disk_space)
         if [ "$disk_free" -lt "$needed_gb" ]; then
-            log_warn "Skipping ${ZIM_ID}: needs ~${ZIM_SIZE_GB}GB, only ${disk_free}GB free"
+            log_err "Cannot download ${ZIM_ID}: needs ~${ZIM_SIZE_GB}GB, only ${disk_free}GB free"
+            failed=$((failed + 1))
             continue
         fi
 
@@ -160,22 +178,49 @@ cmd_download() {
         log_info "  ${ZIM_DESC}"
         log_info "  URL: ${ZIM_URL}"
 
-        # Download with resume support
-        curl -L --continue-at - \
+        # Download with resume support into a .part and rename ONLY when it succeeded: the old
+        # `curl -L -o <final>` (no -f) saved a 404/403 HTML error page AS the ZIM and reported it
+        # downloaded. -f makes HTTP errors fail; the stall guard aborts a dead transfer.
+        local part="${filepath}.part"
+        [ "${VALARK_JOB_MARKERS:-}" = "1" ] && printf '@@valark-dl\t%s\t%s\t0\t%s\n' "$(echo "${ZIM_SIZE_GB} * 1073741824 / 1" | bc 2>/dev/null || echo 0)" "$part" "$ZIM_ID"
+        curl -fL --continue-at - \
+            --connect-timeout 30 --speed-limit 1024 --speed-time "${VALARK_DL_SPEED_TIME:-120}" \
             --progress-bar \
-            -o "$filepath" \
+            -o "$part" \
             "$ZIM_URL"
+        local rc=$?
 
-        if [ $? -eq 0 ] && [ -f "$filepath" ]; then
+        if [ $rc -eq 0 ] && [ -s "$part" ]; then
+            mv -f "$part" "$filepath"
             local final_size=$(get_file_size_gb "$filepath")
             log_ok "${ZIM_ID}: ${final_size} GB downloaded"
+            ok=$((ok + 1))
         else
-            log_err "Failed to download ${ZIM_ID}"
+            local code why="curl exit ${rc}"
+            code=$(curl -sL -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 20 -r 0-0 "$ZIM_URL" 2>/dev/null); code="${code:-000}"
+            case "$code" in
+                404|410) why="HTTP ${code}: not found upstream (the file was moved or removed)" ;;
+                401|403) why="HTTP ${code}: access denied / authentication required" ;;
+                429)     why="HTTP 429: rate limited by the source" ;;
+                000)     why="no response from the source (offline, DNS or timeout)" ;;
+                [45]??)  why="HTTP ${code} from the source" ;;
+            esac
+            [ $rc -eq 0 ] && why="zero-byte response"
+            log_err "Failed to download ${ZIM_ID}: ${why}"
+            failed=$((failed + 1))
         fi
         echo ""
     done
 
     echo ""
+    log_info "Results: ${ok} downloaded | ${skipped} already present | ${failed} failed"
+    if [ "$failed" -gt 0 ]; then
+        # Nothing usable came out of it => non-zero, so the web UI reports a FAILED job with the
+        # reason above instead of "Download complete".
+        [ $(( ok + skipped )) -eq 0 ] && return 1
+        log_warn "Some content failed (see above); the rest is mirrored."
+        return 0
+    fi
     log_info "Download complete. Run './download-zims.sh serve' to start Kiwix server."
 }
 
@@ -255,5 +300,5 @@ case "${1:-}" in
         echo "  status    Show download progress"
         echo "  help      Show this help"
         ;;
-    *)      cmd_download ;;
+    *)      cmd_download "${1:-}" ;;
 esac

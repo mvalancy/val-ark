@@ -147,7 +147,10 @@ test.describe('Val Ark API Server', () => {
         setTimeout(() => { es.close(); resolve(null); }, 5000);
       });
     });
-    expect(result).toEqual({ connected: true });
+    // init carries the full job snapshot so a (re)connecting page re-syncs instead of trusting
+    // events it may have missed.
+    expect(result).toMatchObject({ connected: true });
+    expect(typeof (result as any).jobs).toBe('object');
   });
 
   test('POST /api/download/tools rejects invalid target (input validation)', async ({ request }) => {

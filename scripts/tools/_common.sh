@@ -42,8 +42,8 @@ if [ -f "${PROJECT_ROOT}/scripts/lib/valark-env.sh" ]; then
 fi
 TOOLS_DIR="${TOOLS_DIR:-${PROJECT_ROOT}/tools}"
 LOG_DIR="${LOG_DIR:-${TOOLS_DIR}/.logs}"
-MAX_RETRIES=5
-RETRY_DELAY=15
+MAX_RETRIES="${VALARK_DL_RETRIES:-5}"
+RETRY_DELAY="${VALARK_DL_RETRY_DELAY:-15}"
 
 # Fresh CA bundle: some appliances (e.g. the UT2/RK3588 NAS) ship a stale system
 # CA store that fails TLS to newer download hosts (download.kde.org, curl.se, ...).
@@ -86,9 +86,40 @@ log() {
     return 0   # a script whose last line is log_success must not exit 1 when LOG_FILE is unset
 }
 log_success() { log "${GREEN}OK${NC}: $*"; }
-log_error()   { log "${RED}ERROR${NC}: $*"; }
+_VA_ERRORS=0
+# log_error is often called inside $(...) (github_asset_url): a plain counter would die with the
+# subshell, so every error also appends one byte to a per-run file that the exit trap reads.
+_VA_ERR_FILE="$(mktemp "${TMPDIR:-/tmp}/valark-errs.XXXXXX" 2>/dev/null || true)"
+log_error()   { _VA_ERRORS=$((_VA_ERRORS + 1)); [ -n "$_VA_ERR_FILE" ] && printf x >> "$_VA_ERR_FILE" 2>/dev/null; log "${RED}ERROR${NC}: $*"; }
 log_info()    { log "${BLUE}INFO${NC}: $*"; }
 log_warn()    { log "${YELLOW}WARN${NC}: $*"; }
+
+# Truthful exit status for a tool script (opt-in: download-tools.sh run_tool sets
+# VALARK_STRICT_EXIT=1). The scripts end with `log_success "... download complete"` whatever
+# happened, so a run where EVERY fetch failed (GitHub rate limit, 404, no network, wrong
+# arch) exited 0 and the web UI reported "complete". Now: errors were logged and NOTHING
+# was downloaded/extracted/skipped-as-present => exit 1. A partial result (some platforms
+# fine, some without an upstream asset) stays exit 0 — the job verifier lists what is
+# missing per platform — but is announced here so the log says it.
+_va_strict_exit() {
+    local rc=$?
+    local nerr="${_VA_ERRORS:-0}" fcount=0
+    if [ -n "${_VA_ERR_FILE:-}" ] && [ -f "$_VA_ERR_FILE" ]; then
+        fcount=$(wc -c < "$_VA_ERR_FILE" 2>/dev/null | tr -d ' ')
+        [ "${fcount:-0}" -gt "$nerr" ] 2>/dev/null && nerr="$fcount"
+        rm -f "${_VA_ERR_FILE:?}" 2>/dev/null
+    fi
+    [ "${VALARK_STRICT_EXIT:-0}" = "1" ] || return $rc
+    if [ "$rc" -eq 0 ] && [ "$nerr" -gt 0 ]; then
+        if [ $(( ${DOWNLOAD_SUCCESS:-0} + ${DOWNLOAD_SKIPPED:-0} )) -eq 0 ]; then
+            echo "FAILED: ${nerr} error(s) and nothing was mirrored" >&2
+            exit 1
+        fi
+        echo "WARN: PARTIAL: ${nerr} error(s); ${DOWNLOAD_SUCCESS:-0} item(s) mirrored, ${DOWNLOAD_SKIPPED:-0} already present" >&2
+    fi
+    return $rc
+}
+trap _va_strict_exit EXIT
 
 # Human-readable elapsed time since an epoch start (used by orchestrators).
 elapsed_since() {
@@ -144,17 +175,52 @@ github_latest_tag() {
     fi
 }
 
+# Turn a GitHub API JSON error body into one human sentence (empty = not an API error).
+# The body is what GitHub sends with a 403/404/401: {"message":"API rate limit exceeded..."}.
+_github_api_error() {
+    local body="$1" msg
+    case "$body" in *'"assets"'*|*'"tag_name"'*) return 0 ;; esac
+    msg=$(printf '%s' "$body" | grep -o '"message": *"[^"]*"' | head -1 | sed 's/"message": *"\(.*\)"/\1/')
+    [ -n "$msg" ] || return 0
+    case "$msg" in
+        *"rate limit"*) echo "GitHub API rate limit exceeded (unauthenticated: 60 requests/hour per IP). Set GITHUB_TOKEN in .env to raise it to 5000/hour, or retry later." ;;
+        "Bad credentials"*) echo "GitHub rejected the configured GITHUB_TOKEN (Bad credentials) - fix or remove it." ;;
+        "Not Found"*) echo "GitHub: release or repository not found (HTTP 404)." ;;
+        *) echo "GitHub API error: ${msg:0:160}" ;;
+    esac
+}
+
 # Find asset download URL matching a pattern in a release
 # Usage: github_asset_url "repo" "tag" "grep-pattern"
+# Prints the URL (or nothing). A failure is never silent: an API error (rate limit,
+# bad token, 404, unreachable) is logged as an ERROR with the reason, and "the release
+# exists but has no asset matching this pattern" (e.g. no aarch64 build) is logged as a
+# WARN - both to stderr, since stdout is the captured URL.
 github_asset_url() {
     local repo="$1"
     local tag="$2"
     local pattern="$3"
     local api_url="https://api.github.com/repos/${repo}/releases/tags/${tag}"
 
-    curl -sS --connect-timeout 5 --max-time 10 -H "$(github_api_header)" "$api_url" 2>/dev/null \
-        | grep "browser_download_url" | grep -i "$pattern" | head -1 \
-        | sed 's/.*"browser_download_url": *"\([^"]*\)".*/\1/'
+    local body rc
+    body=$(curl -sS --connect-timeout 5 --max-time 10 -H "$(github_api_header)" "$api_url" 2>/dev/null)
+    rc=$?
+    if [ -z "$body" ]; then
+        log_error "GitHub API unreachable for ${repo} (network/DNS/timeout, curl exit ${rc}) - cannot look up '${pattern}'" >&2
+        return 0
+    fi
+    local apierr; apierr=$(_github_api_error "$body")
+    if [ -n "$apierr" ]; then
+        log_error "${apierr} (${repo} ${tag})" >&2
+        return 0
+    fi
+    local url
+    url=$(printf '%s' "$body" | grep "browser_download_url" | grep -i "$pattern" | head -1 \
+        | sed 's/.*"browser_download_url": *"\([^"]*\)".*/\1/')
+    if [ -z "$url" ]; then
+        log_warn "${repo} ${tag} has no release asset matching '${pattern}' (no build published for this platform/arch)" >&2
+    fi
+    echo "$url"
 }
 
 ###############################################################################
@@ -175,7 +241,7 @@ download_file() {
     # left by older versions of this function, and to verify completions.
     local expected=""
     if command -v curl >/dev/null 2>&1; then
-        expected=$(curl -fsIL --connect-timeout 20 "$url" 2>/dev/null | tr -d '\r' \
+        expected=$(curl -fsIL --connect-timeout 20 --max-time 60 "$url" 2>/dev/null | tr -d '\r' \
                    | awk 'tolower($1)=="content-length:"{n=$2} END{print n}')
     fi
 
@@ -199,17 +265,23 @@ download_file() {
     # retries and runs. Stall detection (<1KB/s for 2min) instead of a hard
     # --max-time, which killed legitimate multi-GB downloads on slow links.
     local part="${dest_path}.part"
+    local why="network error or timeout"
     while [ $attempt -le $MAX_RETRIES ]; do
         log_info "Downloading ${label} (attempt ${attempt}/${MAX_RETRIES})"
+        # Tell the web UI which file is being written (and how big it should end up) so its
+        # progress bar is the REAL bytes of this file - never a guessed percent. Only emitted
+        # when the web server spawned us (VALARK_JOB_MARKERS=1); tab-separated:
+        #   @@valark-dl <total-bytes|0> <part-path> <sparse 0|1> <label>
+        [ "${VALARK_JOB_MARKERS:-}" = "1" ] && printf '@@valark-dl\t%s\t%s\t0\t%s\n' "${expected:-0}" "$part" "$label"
 
         local status=1
         if command -v curl >/dev/null 2>&1; then
             curl -fL --progress-bar --connect-timeout 30 \
-                --speed-limit 1024 --speed-time 120 \
+                --speed-limit 1024 --speed-time "${VALARK_DL_SPEED_TIME:-120}" \
                 -C - -o "$part" "$url" 2>&1
             status=$?
-            # 33: server can't resume this URL — restart the transfer fresh
-            [ $status -eq 33 ] && rm -f "$part" 2>/dev/null
+            # 33: server can't resume this URL - restart the transfer fresh
+            [ $status -eq 33 ] && rm -f "${part:?}" 2>/dev/null
         elif command -v wget >/dev/null 2>&1; then
             wget --progress=dot:mega --timeout=60 --tries=1 -c \
                 "$url" -O "$part" 2>&1
@@ -220,8 +292,9 @@ download_file() {
             local got
             got=$(stat -c%s "$part" 2>/dev/null || echo 0)
             if [ -n "$expected" ] && [ "$got" != "$expected" ]; then
-                log_warn "${label}: got ${got}B, expected ${expected}B - retrying"
-                rm -f "$part" 2>/dev/null
+                why="size mismatch: got ${got} bytes, upstream says ${expected}"
+                log_warn "${label}: ${why} - retrying"
+                rm -f "${part:?}" 2>/dev/null
             else
                 mv -f "$part" "$dest_path"
                 local size=$(du -h "$dest_path" 2>/dev/null | cut -f1)
@@ -229,6 +302,23 @@ download_file() {
                 DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
                 return 0
             fi
+        elif [ $status -eq 0 ]; then
+            why="zero-byte response (the server returned an empty file)"
+            log_warn "${label}: ${why}"
+            rm -f "${part:?}" 2>/dev/null
+        else
+            why="download failed (curl exit ${status})"
+            # A 4xx will not fix itself: don't burn 5 attempts x minutes of back-off on it.
+            local code
+            code=$(_http_probe "$url")
+            case "$code" in
+                404|410) why="HTTP ${code} - not found upstream (the file was moved or removed)"; break ;;
+                401|403) why="HTTP ${code} - access denied / authentication required for this source"; break ;;
+                429)     why="HTTP 429 - rate limited by the source"; break ;;
+                408)     why="HTTP 408 - the source timed out" ;;
+                4??)     why="HTTP ${code} from the source"; break ;;
+                5??)     why="HTTP ${code} - the source is having trouble" ;;
+            esac
         fi
         attempt=$((attempt + 1))
         if [ $attempt -le $MAX_RETRIES ]; then
@@ -238,9 +328,16 @@ download_file() {
         fi
     done
 
-    log_error "FAILED: ${label}"
+    log_error "FAILED: ${label}: ${why} (${url})"
     DOWNLOAD_FAILED=$((DOWNLOAD_FAILED + 1))
     return 1
+}
+
+# HTTP status of a URL without downloading it (1-byte range GET: some CDNs reject HEAD).
+# "000" = no HTTP response at all (DNS/connect/timeout).
+_http_probe() {
+    local c; c=$(curl -sL -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 20 -r 0-0 "$1" 2>/dev/null)
+    echo "${c:-000}"     # curl itself prints 000 when there was no response (and exits non-zero)
 }
 
 # --- Version gating (shared convention — use these, don't hand-roll) ----------
@@ -430,18 +527,28 @@ clone_repo() {
     ensure_dir "$(dirname "$dest")"
     log_info "Cloning ${label} (ref: ${ref})"
 
-    if git clone --depth 1 --branch "$ref" "$url" "$dest" 2>/dev/null; then
+    # GIT_TERMINAL_PROMPT=0: a repo that wants credentials must FAIL (and say so), never sit
+    # forever at an invisible username prompt - that is a stalled job with no error.
+    # stderr is captured so the failure reason (auth required / not found / network) reaches
+    # the log, and so the web UI, instead of being thrown away.
+    local gout
+    if gout=$(GIT_TERMINAL_PROMPT=0 git clone --depth 1 --branch "$ref" "$url" "$dest" 2>&1); then
         log_success "Cloned: ${label}"
         DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
         create_source_tarball "$dest" "$label" "$ref"
     else
         # Try without --branch for default branch
-        if git clone --depth 1 "$url" "$dest" 2>/dev/null; then
+        if gout=$(GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$url" "$dest" 2>&1); then
             log_success "Cloned: ${label} (default branch)"
             DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
             create_source_tarball "$dest" "$label" "$ref"
         else
-            log_error "Clone failed: ${label}"
+            local why; why=$(printf '%s' "$gout" | grep -iE 'fatal|error|denied|not found|could not' | tail -1)
+            case "$why" in
+                *"terminal prompts disabled"*|*"Authentication failed"*|*"could not read Username"*) why="authentication required for ${url}" ;;
+                *"not found"*) why="repository not found (HTTP 404): ${url}" ;;
+            esac
+            log_error "Clone failed: ${label}: ${why:-git clone failed} "
             DOWNLOAD_FAILED=$((DOWNLOAD_FAILED + 1))
             return 1
         fi

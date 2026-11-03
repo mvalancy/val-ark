@@ -26,6 +26,13 @@ mkdir -p "$T/tools/linux-x86_64/helix" "$T/models/llm/qwen2.5" \
 # App: a tool dir with a binary + a .version marker.
 head -c 400000 /dev/zero > "$T/tools/linux-x86_64/helix/hx"
 printf 'v25.01\n' > "$T/tools/linux-x86_64/helix/.version"
+# App in a WRAPPER dir (piper/onnxruntime/vosk style: tools/<plat>/<tool>/<tool>/<files>) — the old
+# shallow size read 0 B for it (and the status scan called it "empty": the piper-tts bug).
+mkdir -p "$T/tools/linux-arm64/wrapped/wrapped/bin"
+head -c 300000 /dev/zero > "$T/tools/linux-arm64/wrapped/wrapped/bin/wrapped"
+# A platform that holds only an INSTALL.txt guide is not a downloadable app.
+mkdir -p "$T/tools/macos-arm64/guideonly"
+echo "install it yourself" > "$T/tools/macos-arm64/guideonly/INSTALL.txt"
 # Model: a multi-file dir AND a single .gguf file.
 head -c 1200000 /dev/zero > "$T/models/llm/qwen2.5/model.gguf"
 head -c 500000  /dev/zero > "$T/models/llm/tiny.gguf"
@@ -116,6 +123,8 @@ echo "$PK" | BUNDLE_SHA="$BUNDLE_SHA" "$NODE" -e '
       // #89: a top-level single .gguf under the model root IS surfaced (flat layout).
       topLevelGguf: topModel && topModel.kind==="model" && topModel.size===800000
                     && topModel.url==="/api/archive/models/toplevel.gguf",
+      wrapped:    by("app:linux-arm64:wrapped") && by("app:linux-arm64:wrapped").size>=300000,
+      noGuideOnly: !by("app:macos-arm64:guideonly"),
       noPart:     !P.some(p=>String(p.name).includes(".part")),
       // #89: no in-progress entry is advertised — no *.part row (partial single-file),
       // no .tmp_* leak, and neither mid-extraction dir (holding only a .tmp_* temp).

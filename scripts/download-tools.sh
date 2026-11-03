@@ -94,8 +94,9 @@ run_tool() {
     log "Tool: ${name}"
     log "──────────────────────────────────────────"
 
-    # Run the tool script (it sources _common.sh itself)
-    bash "$script"
+    # Run the tool script (it sources _common.sh itself). VALARK_STRICT_EXIT=1 makes its
+    # exit status truthful: a run where every fetch failed exits 1 instead of "complete".
+    VALARK_STRICT_EXIT=1 bash "$script"
     local status=$?
 
     if [ $status -ne 0 ]; then
@@ -248,7 +249,9 @@ show_usage() {
 # and the "already extracted" file-count check too, which a per-.part lock would
 # not. Single-tool runs WAIT briefly then report "queued" (the tool is already
 # pinned, and a running bulk mirrors it anyway); the bulk `all` refresh yields
-# immediately (-n) so the loop retries it on a later tick.
+# immediately (-n) so the loop retries it on a later tick. Both exit 75 (EX_TEMPFAIL):
+# "I did NOT mirror this, I was busy" is not a success, and the web UI shows it as
+# deferred instead of a green "complete" that mirrored nothing.
 TOOLS_LOCK_FD=7
 acquire_tools_lock() {
     local mode="$1" sdir="${STATE_DIR:-${TOOLS_DIR}/.state}"
@@ -290,10 +293,10 @@ case "${1:-all}" in
     *)
         target=$(resolve_target "$1")
         if tool_exists "$target"; then
-            # Single-tool request: wait briefly for an in-flight mirror, else queue.
-            # exit 0 (success) — the tool is pinned before we get here (librarian
-            # request) and the running mirror will complete it.
-            acquire_tools_lock single || exit 0
+            # Single-tool request: wait briefly for an in-flight mirror, else defer (75).
+            # The librarian pins the tool before we get here, so the loop's pin-refill
+            # fetches it; the caller must still be told that THIS run mirrored nothing.
+            acquire_tools_lock single || exit 75
             run_tool "$target"
         else
             echo -e "${RED}Unknown tool:${NC} $1"

@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
-<a href="#main-content" class="skip-link">Skip to main content</a>
+<a href="#main-content" class="skip-link" onclick="event.preventDefault();var m=document.getElementById('main-content')||document.querySelector('main,[role=main]');if(m){m.setAttribute('tabindex','-1');m.focus();m.scrollIntoView();}">Skip to main content</a>
 
 <div id="app-root"></div>
 <div class="copied-toast" id="copiedToast">Copied to clipboard!</div>
@@ -605,10 +605,10 @@ const TOOLS = [
             source: 'https://github.com/ollama/ollama',
             releases: 'https://github.com/ollama/ollama/releases',
             binaries: {
-                'ubuntu': 'assets/ollama/latest/ollama-linux-amd64',
-                'jetson': 'assets/ollama/latest/ollama-linux-arm64',
-                'mac': 'assets/ollama/latest/Ollama-darwin.zip',
-                'windows': 'assets/ollama/latest/OllamaSetup.exe'
+                'ubuntu': 'tools/linux-x86_64/ollama/bin/ollama',
+                'jetson': 'tools/linux-arm64/ollama/bin/ollama',
+                'mac': 'tools/macos-arm64/ollama/ollama',
+                'windows': 'tools/windows-x64/ollama/ollama.exe'
             }
         }
     },
@@ -2412,7 +2412,32 @@ async function checkInstalledTools() {
     scheduleRender();
 }
 
+// Raw per-platform scan of the mirror (dir name -> platform dir -> {contentType,...}) from
+// /api/status/tools. Used to render honest Download buttons: a platform that is not mirrored
+// must not offer a live-looking link that 404s.
+let _toolsRaw = null;
+
+// One honest per-platform download control, derived from what the status API says is really
+// mirrored (no live-looking link that 404s). Unknown state (no API / static preview) keeps the
+// link + HEAD probe. `label` overrides the link text for non-standard pages (Ollama).
+function platDlBtn(dlName, dir, o) {
+    o = o || {};
+    const archive = `/api/archive/tools/${dir}/${dlName}`;
+    const info = (_apiAvailable && _toolsRaw) ? ((_toolsRaw[dlName] || {})[dir] || null) : undefined;
+    const ct = info === undefined ? null : (info ? (info.contentType || (info.files > 0 ? 'unknown' : 'empty')) : 'absent');
+    if (ct === 'absent' || ct === 'empty') {
+        return `<span class="download-btn dl-plat dl-missing" data-plat="${dir}" role="link" aria-disabled="true" title="Not mirrored on this Ark yet">Not mirrored yet</span>
+            <p style="font-size:0.78em;color:var(--text-muted);margin-top:6px">${o.canMirror ? 'Use <b>Mirror</b> on this page to fetch it.' : 'No mirror script for this tool yet.'}</p>`;
+    }
+    if (ct === 'hint') {
+        return `<a href="${archive}" class="download-btn dl-plat" data-plat="${dir}" data-known="1" onclick="handleDownload(event,'${archive}')">&#x2193; Install guide</a>
+            <p style="font-size:0.78em;color:var(--text-muted);margin-top:6px">No prebuilt binary is mirrored for this platform — the download is the install instructions.</p>`;
+    }
+    return `<a href="${archive}" class="download-btn dl-plat" data-plat="${dir}"${ct ? ' data-known="1"' : ''} onclick="handleDownload(event,'${archive}')">${o.label || (o.build ? '&#x2193; Download source' : '&#x2193; Download')}</a>
+        ${o.build ? '<p style="font-size:0.78em;color:var(--text-muted);margin-top:6px">Source tarball — build with CMake / make.</p>' : ''}`;
+}
 function checkInstalledToolsFromAPI(toolsData) {
+    _toolsRaw = toolsData;
     // Map server tool directory names to TOOLS ids
     const toolDirMap = {};
     for (const t of TOOLS) {
@@ -3325,7 +3350,7 @@ function showDownloadError(path, el) {
     if (!existing) {
         existing = document.createElement('div');
         existing.className = 'dl-missing-msg';
-        existing.innerHTML = `<strong>File not yet available:</strong> <code>${esc(path)}</code><br>Run <code>./update.sh</code> (tools) or <code>./download-all-models.sh</code> (models) to populate downloads.`;
+        existing.innerHTML = `<strong>File not yet available:</strong> <code>${esc(path)}</code><br>It is not mirrored on this Ark yet. Use the <b>Mirror</b> button on this page (tools), or <code>scripts/download-models.sh</code> (models), to fetch it.`;
         msg.appendChild(existing);
         setTimeout(() => existing.remove(), 8000);
     }
@@ -3336,6 +3361,7 @@ function checkDownloads() {
     document.querySelectorAll('a[download]').forEach(a => {
         const href = a.getAttribute('href');
         if (!href || href.startsWith('#')) return;
+        if (a.hasAttribute('data-known')) return;   // state came from /api/status/tools — no probe, no 404 in the console
         fetch(href, {method: 'HEAD'}).then(r => {
             if (r.ok) {
                 a.classList.add('dl-available');
@@ -3483,6 +3509,10 @@ function router() {
 
     html += renderFooter();
     app.innerHTML = html;
+    // Mirror buttons / request buttons follow the latest job for their item (set on every render,
+    // not only on job events — a reload or a re-render must not show a stale "Mirror" label
+    // next to a failure strip).
+    try { updateMirrorEls(); } catch (_) {}
     // '#/route#anchor' links jump to their section after render; plain routes reset to top.
     const anchorEl = getAnchor() && document.getElementById(getAnchor());
     if (anchorEl) anchorEl.scrollIntoView(); else window.scrollTo(0, 0);
@@ -3510,6 +3540,8 @@ function router() {
         else if (route === '/packages') loadPackages();
         else if (route === '/health') startHealthLive();
     }
+
+    ensureCatalogs();
 
     // Check download link availability after render
     setTimeout(checkDownloads, 100);
@@ -3647,7 +3679,10 @@ function computeHealth() {
     else if (_storageData && _storageData.disk && _storageData.disk.total) diskPct = _storageData.disk.used / _storageData.disk.total * 100;
     let down = 0;
     if (_servicesStatus) for (const id in _servicesStatus) { const s = _servicesStatus[id]; if (s.enabled && s.mirrored && !s.running && !s.starting) down++; }
+    let failedJobs = 0;
+    try { for (const d of _activeDownloads.values()) if (d.status === 'failed') failedJobs++; } catch (_) {}
     if (diskPct >= 97) return { level: 'attention', text: 'Storage is almost full — free up some space.' };
+    if (failedJobs > 0) return { level: 'attention', text: failedJobs + (failedJobs > 1 ? ' downloads' : ' download') + ' failed — see Activity for the reason and Retry.' };
     if (down > 0) return { level: 'attention', text: down + (down > 1 ? ' services need' : ' service needs') + ' a restart.' };
     if (active > 0) return { level: 'working', text: 'Downloading — ' + active + ' in progress. Keeps working offline.' };
     return { level: 'good', text: "All good — everything's running and offline-ready." };
@@ -3972,33 +4007,54 @@ function renderPackages() {
     return html;
 }
 function renderDownloadCard(d) {
-    const pct = Math.max(0, Math.min(100, d.progress || 0));
     const running = d.status === 'running';
     const st = _dlStatus(d);
     const eta = running ? _dlEta(d) : '';
-    return `<div class="dl-card" data-id="${escAttr(d.id)}">
+    const known = d.progress != null;
+    const pct = known ? Math.max(0, Math.min(100, d.progress)) : 0;
+    return `<div class="dl-card" data-id="${escAttr(d.id)}" data-status="${escAttr(d.status)}">
         <div class="dl-card-top"><span class="dl-card-name">${esc(_dlLabel(d))}</span><span class="dl-pill dl-${st.cls}">${esc(st.label)}</span></div>
-        <div class="dl-card-bar"><span class="dl-card-fill${running ? ' anim' : ''}" style="width:${pct}%"></span></div>
+        <div class="dl-card-bar"><span class="dl-card-fill${running ? ' anim' : ''}${running && !known ? ' indet' : ''}" style="width:${running && !known ? 100 : pct}%"></span></div>
         <div class="dl-card-meta">
-            <span class="dl-card-pct">${running ? pct + '%' : ''}${eta ? ' · ' + esc(eta) : ''}</span>
-            <span class="dl-card-line">${esc((d.lastLine || '').toString().slice(0, 72))}</span>
-            <span class="dl-card-act">${running ? `<button class="dl-mini" data-dl-act="cancel" data-id="${escAttr(d.id)}" onclick="dlMiniAction(this)">Cancel</button>`
-                : (d.status === 'failed' ? `<button class="dl-mini" data-dl-act="retry" data-type="${escAttr(d.type)}" onclick="dlMiniAction(this)">Retry</button>` : '')}</span>
+            <span class="dl-card-pct">${running && known ? pct + '%' : ''}${eta ? ' · ' + esc(eta) : ''}${running ? esc(_dlBytes(d)) : ''}</span>
+            <span class="dl-card-line">${esc(_dlDetail(d).slice(0, 110))}</span>
+            <span class="dl-card-act">${running || d.status === 'queued' ? `<button class="dl-mini" data-dl-act="cancel" data-id="${escAttr(d.id)}" onclick="dlMiniAction(this)">Cancel</button>`
+                : ((d.status === 'failed' || d.status === 'cancelled' || d.status === 'deferred') ? `<button class="dl-mini" data-dl-act="retry" data-id="${escAttr(d.id)}" onclick="dlMiniAction(this)">Retry</button><button class="dl-dismiss" data-dl-act="dismiss" data-id="${escAttr(d.id)}" onclick="dlMiniAction(this)">Dismiss</button>` : '')}</span>
         </div>
+        ${d.status === 'failed' && d.error ? `<div class="dl-card-err" role="alert">${esc(d.error)}</div>` : ''}
+        ${d.status === 'complete' && d.outcome && d.outcome.summary ? `<div class="dl-card-ok">${esc(d.outcome.summary)}</div>` : ''}
+        ${(d.warnings && d.warnings.length && d.status !== 'running') ? `<div class="dl-card-warn">${d.warnings.slice(-4).map(w => esc(w)).join('<br>')}</div>` : ''}
     </div>`;
 }
 function _dlLabel(d) {
+    if (d.label) return d.label;
     return ({ tools: 'Software & tools', models: 'AI models', content: 'Library content', request: 'Requested item', update: 'Update' })[d.type] || (d.type || 'Download');
 }
 function _dlStatus(d) {
     if (d.status === 'running') return { cls: 'run', label: 'Downloading' };
-    if (d.status === 'complete') return { cls: 'done', label: 'Done' };
+    if (d.status === 'queued') return { cls: 'cancel', label: 'Queued' };
+    if (d.status === 'complete') return { cls: 'done', label: (d.warnings && d.warnings.length) ? 'Done, with notes' : 'Done' };
     if (d.status === 'cancelled') return { cls: 'cancel', label: 'Cancelled' };
-    return { cls: 'retry', label: 'Interrupted — retries automatically' };   // reassure, don't alarm
+    if (d.status === 'deferred') return { cls: 'retry', label: 'Not started — busy' };
+    return { cls: 'fail', label: 'Failed' };   // never dress a failure up as "will retry automatically"
+}
+// Real bytes only: "12.3 MB of 24.8 MB" when the size is known, "12.3 MB so far" when it is not.
+function _dlBytes(d) {
+    if (d.bytes == null || d.bytes <= 0) return '';
+    return (d.total ? ' · ' + formatBytes(d.bytes) + ' of ' + formatBytes(d.total) : ' · ' + formatBytes(d.bytes) + ' so far');
+}
+function _dlDetail(d) {
+    if (d.status === 'failed') return d.error || d.lastLine || 'Failed';
+    if (d.status === 'deferred') return d.note || 'Another mirror is busy. Retry in a moment.';
+    if (d.status === 'queued') return d.note || 'Queued';
+    if (d.status === 'cancelled') return 'Cancelled';
+    if (d.status === 'complete') return (d.outcome && d.outcome.summary) || d.lastLine || 'Done';
+    const f = d.file ? d.file + (d.overall != null ? ' · overall ' + d.overall + '%' : '') : '';
+    return f || d.lastLine || 'Starting...';
 }
 function _dlEta(d) {
-    const p = d.progress || 0;
-    if (!d.startedAt || p <= 0 || p >= 100) return '';
+    const p = d.progress;
+    if (!d.startedAt || p == null || p <= 0 || p >= 100) return '';
     const remain = (Date.now() - d.startedAt) * (100 - p) / p;
     return _fmtDuration(remain) + ' left';
 }
@@ -4008,32 +4064,192 @@ function _fmtDuration(ms) {
     const m = Math.round(s / 60);
     return m < 60 ? m + 'm' : Math.round(m / 60) + 'h ' + (m % 60) + 'm';
 }
-function retryDownload(type) {
-    triggerDownload(['tools', 'models', 'content', 'update'].includes(type) ? type : 'content', 'all');
+// Retry restarts EXACTLY the job that failed (the server keeps what it was) — the old
+// version restarted "<type> all", i.e. a failed single-tool mirror re-ran every tool.
+async function retryJob(id) {
+    try {
+        const r = await fetch('/api/download/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+        const j = await r.json();
+        if (j.error) { uiToast(j.error, 'error'); return j; }
+        await loadDownloads();
+        return j;
+    } catch (e) { uiToast('Could not reach the Ark to retry: ' + e.message, 'error'); return { error: e.message }; }
 }
-// dl-card mini buttons carry their id/type in data-* attributes and invoke a CONSTANT
-// handler (dlMiniAction(this), which reads them via getAttribute) — no id/type reaches an
-// inline-JS parser. But that alone is NOT enough: the id/type is still interpolated into a
+async function dismissJob(id) {
+    try {
+        await fetch('/api/download/dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    } catch (_) {}
+    _activeDownloads.delete(id);
+    jobsChanged();
+}
+// dl-card mini buttons carry their id in a data-* attribute and invoke a CONSTANT
+// handler (dlMiniAction(this), which reads it via getAttribute) — no id reaches an
+// inline-JS parser. But that alone is NOT enough: the id is still interpolated into a
 // double-quoted attribute, so it MUST be attribute-escaped (escAttr, quotes included) or a
 // `"` in the value would break out and inject a real event-handler attribute. esc()
 // (text-context, no quote escaping) is insufficient for an attribute. (#121)
 function dlMiniAction(el) {
     const act = el.getAttribute('data-dl-act');
-    if (act === 'cancel') cancelDownload(el.getAttribute('data-id'));
-    else if (act === 'retry') retryDownload(el.getAttribute('data-type'));
+    const id = el.getAttribute('data-id');
+    if (act === 'cancel') cancelDownload(id);
+    else if (act === 'retry') retryJob(id);
+    else if (act === 'dismiss') dismissJob(id);
 }
-// Merge the server's full download objects (with startedAt) into the SSE-built map.
-async function loadDownloads() {
+// ── Job sync ────────────────────────────────────────────────────────────────
+// The server is the single source of truth (GET /api/status/downloads). The page merges
+// SSE events for liveness but re-syncs the FULL state from the API on load, on every SSE
+// (re)connect, on tab focus / back-online, and every 3s while any job is active — so a
+// dropped stream, a sleeping laptop or a proxy that buffers SSE can never leave the UI
+// showing a stale "Mirroring…" (or worse, a job that silently finished or failed).
+let _dlPollTimer = null;
+function _applyJob(j) {
+    if (!j || j.id == null) return;
+    if (j.type === 'tools' && j.target) delete _mirrorStartErr[j.target];   // a real job supersedes a stale "could not start"
+    const prev = _activeDownloads.get(String(j.id)) || {};
+    _activeDownloads.set(String(j.id), { ...prev, ...j, id: String(j.id), startedAt: j.startedAt || prev.startedAt || Date.now() });
+}
+function _syncJobs(snapshot, authoritative) {
+    for (const id in snapshot) _applyJob(snapshot[id]);
+    if (authoritative) for (const id of [..._activeDownloads.keys()]) if (!snapshot[id]) _activeDownloads.delete(id);
+    jobsChanged();
+}
+// Merge the server's full download objects into the map. Returns true when the API answered.
+let _dlLoadInflight = null, _dlLoadAgain = false;
+function loadDownloads() {
+    // One request in flight (SSE can fire a burst of events). A call made while one is in flight
+    // schedules ONE more load after it finishes: the in-flight reply may predate the caller's POST
+    // (it would delete the job that was just started), so the caller must wait for a fresh one.
+    if (_dlLoadInflight) { _dlLoadAgain = true; return _dlLoadInflight; }
+    _dlLoadInflight = _loadDownloadsOnce().then(async (ok) => {
+        while (_dlLoadAgain) { _dlLoadAgain = false; ok = await _loadDownloadsOnce(); }
+        return ok;
+    }).finally(() => { _dlLoadInflight = null; _dlLoadAgain = false; });
+    return _dlLoadInflight;
+}
+async function _loadDownloadsOnce() {
     try {
-        const r = await fetch('/api/status/downloads');
-        if (!r.ok) return;
+        // 10 s cap: a hung fetch (sleeping laptop, half-open TCP) must not hold the single slot forever
+        const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 10000);
+        let r; try { r = await fetch('/api/status/downloads', { signal: ctl.signal }); } finally { clearTimeout(to); }
+        if (!r.ok) return false;
         const data = await r.json();
-        for (const id in data) _activeDownloads.set(id, { ...(_activeDownloads.get(id) || {}), ...data[id], id });
-        if (getRoute() === '/activity') scheduleRender();
-    } catch (_) {}
+        const wasActive = [..._activeDownloads.values()].filter(d => d.status === 'running' || d.status === 'queued').map(d => d.id);
+        _syncJobs(data, true);
+        // A job we thought was running finished while we weren't listening: refresh the
+        // mirrored/not-mirrored badges now (the SSE "complete" event was missed).
+        if (wasActive.some(id => { const d = _activeDownloads.get(id); return d && d.status === 'complete'; })) initFromAPI();
+        return true;
+    } catch (_) { return false; }
 }
+function _anyJobActive() { for (const d of _activeDownloads.values()) if (d.status === 'running' || d.status === 'queued') return true; return false; }
+function _ensureJobPoll() {
+    if (_anyJobActive() && !_dlPollTimer) _dlPollTimer = setInterval(loadDownloads, 3000);
+    else if (!_anyJobActive() && _dlPollTimer) { clearInterval(_dlPollTimer); _dlPollTimer = null; }
+}
+function jobsChanged() {
+    renderProgressPanel(); _activityLive(); updateMirrorEls(); _ensureJobPoll();
+}
+window.addEventListener('online', () => { loadDownloads(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadDownloads(); });
 // Re-render the Activity queue when it's the current view (SSE-driven, rAF-debounced).
 function _activityLive() { if (getRoute() === '/activity') scheduleRender(); }
+
+// Non-blocking, screen-reader-announced message (replaces alert(): a failure to START
+// a download is now visible, dismissible and never blocks the page).
+function uiToast(msg, kind) {
+    let t = document.getElementById('va-toast');
+    if (!t) { t = document.createElement('div'); t.id = 'va-toast'; t.className = 'va-toast'; t.setAttribute('role', 'alert'); document.body.appendChild(t); }
+    t.className = 'va-toast show ' + (kind || 'info');
+    t.textContent = '';
+    const span = document.createElement('span'); span.textContent = msg; t.appendChild(span);
+    const x = document.createElement('button'); x.type = 'button'; x.className = 'va-toast-x'; x.setAttribute('aria-label', 'Dismiss'); x.textContent = '×';
+    x.onclick = () => t.classList.remove('show'); t.appendChild(x);
+    clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), kind === 'error' ? 15000 : 4000);
+}
+
+// ── Per-tool mirror controls ────────────────────────────────────────────────
+// A tool page's Mirror button + status strip are DERIVED from the latest job for that
+// tool, so they always match the server: spinner only while it truly runs, the failure
+// reason + Retry when it failed, the verified result when it finished.
+function _latestJob(match) {
+    let best = null;
+    for (const d of _activeDownloads.values()) {
+        if (!match(d)) continue;
+        if (!best || Number(d.id) > Number(best.id)) best = d;
+    }
+    return best;
+}
+function _toolJob(target) { return _latestJob(d => (d.type === 'tools' && d.target === target) || (d.type === 'request' && d.target === 'tool:' + target)); }
+function _mirrorStrip(target) {
+    const j = _toolJob(target);
+    if (_mirrorStartErr[target]) {
+        return `<div class="ms-row ms-fail"><span class="ms-ic" aria-hidden="true">✗</span><span class="ms-txt"><b>Could not start:</b> ${esc(_mirrorStartErr[target])}</span></div>`;
+    }
+    if (!j) return '';
+    const known = j.progress != null;
+    if (j.status === 'running' || j.status === 'queued') {
+        const q = j.status === 'queued';
+        return `<div class="ms-row ms-run"><span class="ms-ic spinner" aria-hidden="true"></span><span class="ms-txt">${q ? 'Queued — ' + esc(j.note || 'waiting for another mirror') : 'Mirroring… ' + esc(_dlDetail(j).slice(0, 90))}${known ? ' <b>' + j.progress + '%</b>' : ''}${esc(_dlBytes(j))}</span>
+            <span class="ms-bar"><span class="${known ? '' : 'indet '}ms-fill" style="width:${known ? j.progress : 100}%"></span></span>
+            <button class="dl-mini" data-dl-act="cancel" data-id="${escAttr(j.id)}" onclick="dlMiniAction(this)">Cancel</button></div>`;
+    }
+    if (j.status === 'complete') {
+        const w = (j.warnings || []).slice(-4);
+        return `<div class="ms-row ms-ok"><span class="ms-ic" aria-hidden="true">✓</span><span class="ms-txt"><b>${esc((j.outcome && j.outcome.summary) || 'Done')}</b></span>
+            <button class="dl-dismiss" data-dl-act="dismiss" data-id="${escAttr(j.id)}" onclick="dlMiniAction(this)">Dismiss</button></div>
+            ${w.length ? `<div class="ms-warn">⚠ ${w.map(esc).join('<br>⚠ ')}</div>` : ''}`;
+    }
+    if (j.status === 'cancelled') {
+        return `<div class="ms-row ms-fail"><span class="ms-ic" aria-hidden="true">—</span><span class="ms-txt">Cancelled.</span><button class="dl-mini" data-dl-act="retry" data-id="${escAttr(j.id)}" onclick="dlMiniAction(this)">Retry</button></div>`;
+    }
+    const why = j.status === 'deferred' ? (j.note || 'Another mirror is busy.') : (j.error || 'The job failed.');
+    const tail = (j.tail || []).slice(-6).map(esc).join('\n');
+    return `<div class="ms-row ms-fail"><span class="ms-ic" aria-hidden="true">${j.status === 'deferred' ? '…' : '✗'}</span><span class="ms-txt"><b>${j.status === 'deferred' ? 'Not started:' : 'Failed:'}</b> ${esc(why)}</span>
+        <button class="dl-mini" data-dl-act="retry" data-id="${escAttr(j.id)}" onclick="dlMiniAction(this)">Retry</button><button class="dl-dismiss" data-dl-act="dismiss" data-id="${escAttr(j.id)}" onclick="dlMiniAction(this)">Dismiss</button></div>
+        ${tail ? `<details class="ms-log"><summary>Last log lines</summary><pre>${tail}</pre></details>` : ''}`;
+}
+const _mirrorStartErr = {};
+function mirrorStatusHtml(target) {
+    return `<div class="mirror-status" data-mirror-status="${escAttr(target)}" role="status" aria-live="polite">${_mirrorStrip(target)}</div>`;
+}
+// Refresh every Mirror button + status strip on the current page in place.
+function updateMirrorEls() {
+    document.querySelectorAll('[data-mirror-status]').forEach(el => {
+        const html = _mirrorStrip(el.getAttribute('data-mirror-status'));
+        if (el._last !== html) { el.innerHTML = html; el._last = html; }
+    });
+    document.querySelectorAll('button[data-mirror-target]').forEach(btn => {
+        const t = btn.getAttribute('data-mirror-target');
+        const j = _toolJob(t);
+        if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+        if (j && (j.status === 'running' || j.status === 'queued')) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> ' + (j.status === 'queued' ? 'Queued…' : 'Mirroring…');
+        } else {
+            btn.disabled = false;
+            btn.textContent = (j && (j.status === 'failed' || j.status === 'deferred')) ? 'Retry mirror' : btn.dataset.label;
+        }
+    });
+    document.querySelectorAll('button[data-kind][data-id]').forEach(btn => {
+        const j = _latestJob(d => d.type === 'request' && d.target === btn.getAttribute('data-kind') + ':' + btn.getAttribute('data-id'));
+        if (!j) return;
+        if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+        if (j.status === 'running' || j.status === 'queued') { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> ' + (j.progress != null ? j.progress + '%' : 'Downloading…'); }
+        else if (j.status === 'complete') { btn.disabled = true; btn.textContent = 'Mirrored ✓'; }
+        else { btn.disabled = false; btn.textContent = 'Failed — retry'; btn.title = j.error || j.note || ''; }
+    });
+}
+function mirrorFromEl(btn) { startMirror(btn.getAttribute('data-mirror-target'), btn); }
+async function startMirror(target, btn) {
+    delete _mirrorStartErr[target];
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Starting…'; }
+    const r = await triggerDownload('tools', target);
+    if (!r.ok && !r.id) {
+        _mirrorStartErr[target] = r.error || 'unknown error';
+    }
+    await loadDownloads();      // adopt the job now even if the SSE stream is down
+    updateMirrorEls();
+}
 
 // =============================================================================
 // HEALTH & REPAIRS  (Phase 6 — monitoring & self-heal UX)
@@ -5069,8 +5285,8 @@ function renderToolDetail(toolId) {
     const toolCat = TOOL_CATEGORIES[tool.category];
     if (toolCat) {
         const dlBtn = (INSTALLED_TOOLS[tool.id] === 'missing' && _apiAvailable && tool.downloadTarget)
-            ? `<button class="dl-action-btn" id="install-btn-${tool.id}" onclick="this.disabled=true;this.innerHTML='<span class=\\'spinner\\'></span> Mirroring...';triggerDownload('tools','${tool.downloadTarget}')" style="margin-left:10px">Mirror</button>` : '';
-        html += `<div style="margin-bottom:16px"><span class="tag" style="background:var(--accent-dim);color:var(--accent);font-size:0.85em;padding:4px 12px">${toolCat.label}</span>${tool.size ? `<span class="tag" style="background:var(--purple-dim);color:var(--purple);font-size:0.85em;padding:4px 12px;margin-left:6px">${tool.size}</span>` : ''}${getInstallBadge(tool.id)}${dlBtn}</div>`;
+            ? `<button class="dl-action-btn" id="install-btn-${tool.id}" data-mirror-target="${escAttr(tool.downloadTarget)}" onclick="mirrorFromEl(this)" style="margin-left:10px">Mirror</button>` : '';
+        html += `<div style="margin-bottom:16px"><span class="tag" style="background:var(--accent-dim);color:var(--accent);font-size:0.85em;padding:4px 12px">${toolCat.label}</span>${tool.size ? `<span class="tag" style="background:var(--purple-dim);color:var(--purple);font-size:0.85em;padding:4px 12px;margin-left:6px">${tool.size}</span>` : ''}${getInstallBadge(tool.id)}${dlBtn}</div>${dlBtn && tool.downloadTarget ? mirrorStatusHtml(tool.downloadTarget) : ''}`;
     }
 
     // Launch button for hosted sub-apps (community services framed in the shell)
@@ -5135,15 +5351,16 @@ function renderToolDetail(toolId) {
                 const dir = PLAT_DIR[pk];
                 const archive = `/api/archive/tools/${dir}/${dlName}`;
                 const build = tool.platforms[pk] === 'build';
+                const btn = platDlBtn(dlName, dir, { build, canMirror: !!tool.downloadTarget });
                 html += `<div class="path-card">
                     <h4>${PLAT_LABEL[pk] || pk}</h4>
-                    <a href="${archive}" class="download-btn dl-plat" data-plat="${dir}" onclick="handleDownload(event,'${archive}')">${build ? '&#x2193; Download source' : '&#x2193; Download'}</a>
-                    ${build ? '<p style="font-size:0.78em;color:var(--text-muted);margin-top:6px">Source tarball — build with CMake / make.</p>' : ''}
+                    ${btn}
                 </div>`;
             });
             html += '</div>';
             if (_apiAvailable && tool.downloadTarget) {
-                html += `<button class="dl-action-btn" style="margin-top:14px" onclick="this.disabled=true;this.innerHTML='<span class=\\'spinner\\'></span> Mirroring all platforms…';triggerDownload('tools','${tool.downloadTarget}')">Mirror all platforms to this Ark</button>`;
+                html += `<button class="dl-action-btn" id="mirror-all-${escAttr(tool.id)}" style="margin-top:14px" data-mirror-target="${escAttr(tool.downloadTarget)}" onclick="mirrorFromEl(this)">Mirror all platforms to this Ark</button>`;
+                html += mirrorStatusHtml(tool.downloadTarget);
                 html += `<p style="font-size:0.8em;color:var(--text-muted);margin-top:8px">Not mirrored yet? "Mirror all platforms" pulls every platform's build onto this Ark, then the buttons above serve them offline.</p>`;
             }
         }
@@ -5883,8 +6100,9 @@ function renderQuickStart() {
         <div class="paths-grid" style="margin-top:12px">`;
     Object.values(PLATFORMS).forEach(p => {
         const gpuNote = p.gpu.startsWith('none') ? p.gpu : `${p.gpu} acceleration`;
-        html += `<div class="path-card" style="cursor:pointer" onclick="setPlatform('${p.id}');window.location.hash='#/quickstart'">
-            <h4>${p.fullLabel}</h4>
+        const sel = p.id === currentPlatform;
+        html += `<div class="path-card${sel ? ' selected' : ''}" role="button" tabindex="0" aria-pressed="${sel}" style="cursor:pointer;${sel ? 'border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);' : ''}" onclick="setPlatform('${p.id}');window.location.hash='#/quickstart'" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">
+            <h4>${p.fullLabel}${sel ? ' ✓' : ''}</h4>
             <p style="font-size:0.82em">${gpuNote}</p>
         </div>`;
     });
@@ -6325,14 +6543,20 @@ function renderOllama() {
         </ul>
     </div>`;
 
-    // Installation
+    // Installation — served from the REAL mirror (tools/<platform>/ollama via /api/archive), with
+    // a Mirror button + live status like every other tool (this page used to link to a stale
+    // assets/ollama/latest/* path that never existed => four dead Download buttons).
+    const OLLAMA_DIR = { ubuntu: 'linux-x86_64', jetson: 'linux-arm64', mac: 'macos-arm64', windows: 'windows-x64' };
     html += `<div class="detail-section"><h3>Installation</h3>`;
+    if (_apiAvailable) {
+        html += `<div style="margin-bottom:14px"><button class="dl-action-btn" id="install-btn-ollama" data-mirror-target="ollama" onclick="mirrorFromEl(this)">Mirror Ollama to this Ark</button>${mirrorStatusHtml('ollama')}</div>`;
+    }
     html += '<div class="paths-grid">';
     Object.entries(installers).forEach(([platId, inst]) => {
         const isActive = platId === currentPlatform;
         html += `<div class="path-card" style="${isActive ? 'border-color:var(--accent);' : ''}">
             <h4>${inst.label}${isActive ? ' (current)' : ''}</h4>
-            <a href="${inst.downloadPath}" download class="download-btn" onclick="handleDownload(event,'${inst.downloadPath}')">${inst.downloadLabel}</a>
+            ${platDlBtn('ollama', OLLAMA_DIR[platId], { canMirror: _apiAvailable, label: '&#x2193; Download for ' + esc(inst.label) })}
             <p style="margin:8px 0 0;font-size:0.8em;color:var(--text-secondary)">Install: <code>${esc(inst.installCmd)}</code></p>
             <p style="margin:4px 0 0;font-size:0.8em;color:var(--text-secondary)">${inst.notes}</p>
         </div>`;
@@ -6582,8 +6806,29 @@ function renderAppFrame(opts) {
                 <a class="subapp-btn" href="${src}" target="_blank" rel="noopener" title="Open in a new tab">Open &#x2197;</a>
             </div>
         </div>
-        <iframe id="${id}" class="subapp-frame" src="${src}" title="${title}" loading="lazy"></iframe>
+        <iframe id="${id}" class="subapp-frame" src="${src}" title="${title}" loading="lazy" onload="appFrameCheck('${id}')"></iframe>
     </div>`;
+}
+// A sub-app whose upstream answers 401/403 renders a BLANK iframe (the browser shows the empty
+// error body). Probe the frame's URL and say what is going on instead of leaving it blank.
+function appFrameCheck(id) {
+    const f = document.getElementById(id);
+    if (!f) return;
+    const src = f.getAttribute('src');
+    fetch(src, { method: 'HEAD' }).then((r) => {
+        const wrap = document.getElementById(id + '-wrap');
+        if (!wrap) return;
+        let note = wrap.querySelector('.subapp-note');
+        if (r.status === 401 || r.status === 403) {
+            if (!note) {
+                note = document.createElement('div');
+                note.className = 'subapp-note';
+                note.setAttribute('role', 'status');
+                note.textContent = 'This service answered HTTP ' + r.status + ' — it needs a sign-in (or is restricted). Use “Open ↗” to sign in in a new tab.';
+                wrap.querySelector('.subapp-bar').after(note);
+            }
+        } else if (note) note.remove();
+    }).catch(() => {});
 }
 function reloadFrame(id) { const f = document.getElementById(id); if (f) f.src = f.src; }
 function toggleFrameFullscreen(id) {
@@ -6723,51 +6968,45 @@ function connectSSE() {
     if (_sseConnection) return;
     try {
         _sseConnection = new EventSource('/api/downloads/stream');
-        _sseConnection.addEventListener('init', () => { /* connected */ });
-        _sseConnection.addEventListener('start', (e) => {
-            const data = JSON.parse(e.data);
-            _activeDownloads.set(data.id, { ...data, progress: 0, lastLine: '', status: 'running', startedAt: Date.now() });
-            renderProgressPanel(); _activityLive();
+        // On every (re)connect the server sends the full job snapshot — adopt it as the truth.
+        _sseConnection.addEventListener('init', (e) => {
+            try { const d = JSON.parse(e.data); if (d && d.jobs) _syncJobs(d.jobs, true); } catch (_) {}
+            loadDownloads();
         });
+        _sseConnection.addEventListener('start', (e) => { _applyJob(JSON.parse(e.data)); jobsChanged(); });
         _sseConnection.addEventListener('progress', (e) => {
-            const data = JSON.parse(e.data);
-            const dl = _activeDownloads.get(data.id);
-            if (dl) {
-                dl.progress = data.progress;
-                dl.lastLine = data.line;
-                renderProgressPanel(); _activityLive();
-            }
+            const d = JSON.parse(e.data);
+            if (!_activeDownloads.has(String(d.id))) { loadDownloads(); return; }   // unknown job: re-sync
+            _applyJob(d); jobsChanged();
         });
         _sseConnection.addEventListener('complete', (e) => {
-            const data = JSON.parse(e.data);
-            const dl = _activeDownloads.get(data.id);
-            if (dl) {
-                dl.status = data.status;
-                renderProgressPanel(); _activityLive();
-                if (data.status === 'complete') {
-                    const panel = document.getElementById('dl-panel');
-                    if (panel) { panel.classList.add('success'); setTimeout(() => panel.classList.remove('success'), 1500); }
-                    // Refresh all status in one call
-                    initFromAPI();
-                }
-                setTimeout(() => { _activeDownloads.delete(data.id); renderProgressPanel(); _activityLive(); }, 8000);
+            const d = JSON.parse(e.data);
+            _applyJob(d); jobsChanged();
+            if (d.status === 'complete') {
+                const panel = document.getElementById('dl-panel');
+                if (panel) { panel.classList.add('success'); setTimeout(() => panel.classList.remove('success'), 1500); }
+                initFromAPI();      // refresh the Mirrored/Not Mirrored badges from the real disk state
+                setTimeout(jobsChanged, 12000);   // let a finished job fade out of the panel
             }
+            loadDownloads();        // reconcile with the server's final state
         });
         _sseConnection.onerror = () => {
             _sseConnection.close();
             _sseConnection = null;
-            // Reconnect after 5s delay
-            setTimeout(connectSSE, 5000);
+            loadDownloads();                 // don't wait for the stream: ask the server what is true now
+            setTimeout(connectSSE, 5000);    // reconnect (the next 'init' re-syncs)
         };
     } catch (e) {}
 }
 
+// Start a tools/models/content/update job. Returns { ok, id } or { error } — and a failure
+// to start is shown (toast), never swallowed.
 async function triggerDownload(type, target) {
-    if (!_apiAvailable) return;
+    if (!_apiAvailable) { const m = 'The Val Ark API is not reachable from this page.'; uiToast(m, 'error'); return { error: m }; }
     // Check disk space
     if (_diskData && _diskData.available < 1024 * 1024 * 1024) {
-        alert('Insufficient disk space (less than 1 GB free)');
-        return;
+        const m = 'Insufficient disk space (less than 1 GB free).';
+        uiToast(m, 'error'); return { error: m };
     }
 
     const endpoint = type === 'update' ? '/api/download/update' :
@@ -6784,11 +7023,13 @@ async function triggerDownload(type, target) {
             body: JSON.stringify(body),
         });
         const result = await resp.json();
-        if (result.error) {
-            alert(result.error);
-        }
+        if (result.error) { uiToast(result.error, 'error'); return result; }
+        if (result.existing) uiToast('That is already in progress — showing its live status.', 'info');
+        await loadDownloads();
+        return { ok: true, ...result };
     } catch (e) {
-        alert('Failed to start installation: ' + e.message);
+        const m = 'Failed to start: ' + e.message;
+        uiToast(m, 'error'); return { error: m };
     }
 }
 
@@ -6796,14 +7037,17 @@ async function triggerDownload(type, target) {
 // Downloads that aren't mirrored yet: a specific ZIM (incl. full Wikipedia), a
 // curated model, or an app. Routed through /api/request -> librarian, which pins
 // the item and auto-evicts lowest-priority unpinned content to fit the footprint
-// cap. Progress + auto-refresh come free via the same SSE panel as triggerDownload.
+// cap. Progress + the final result come from the same job sync as triggerDownload.
 async function triggerRequest(kind, id, btn) {
-    if (!_apiAvailable) { alert('The Val Ark API is not reachable from this page.'); return; }
+    if (!_apiAvailable) { uiToast('The Val Ark API is not reachable from this page.', 'error'); return; }
+    // A request for the complete English Wikipedia is ~124 GB: say so before starting it (the model
+    // "Mirror all" buttons already confirm; this one did not).
+    if (/wikipedia_en_all_maxi/.test(String(id)) && !confirm('Mirror the complete English Wikipedia (~124 GB)? This runs in the background and needs a lot of free space.')) return;
     if (_diskData && _diskData.available < 1024 * 1024 * 1024) {
         // The librarian will still try to evict to fit, but warn on a truly full disk.
         if (!confirm('Very little free space. The librarian will evict lower-priority content to make room. Continue?')) return;
     }
-    if (btn) { btn.dataset.o = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Requesting…'; }
+    if (btn) { btn.dataset.o = btn.dataset.o || btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Requesting…'; }
     try {
         const resp = await fetch('/api/request', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -6811,13 +7055,14 @@ async function triggerRequest(kind, id, btn) {
         });
         const result = await resp.json();
         if (result.error) {
-            alert(result.error);
+            uiToast(result.error, 'error');
             if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.o; }
-        } else if (btn) {
-            btn.innerHTML = 'Requested ✓';   // SSE panel now shows live progress
+        } else {
+            await loadDownloads();      // the button now follows the job (running -> Mirrored / Failed — retry)
+            updateMirrorEls();
         }
     } catch (e) {
-        alert('Failed to start request: ' + e.message);
+        uiToast('Failed to start request: ' + e.message, 'error');
         if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.o; }
     }
 }
@@ -6921,20 +7166,38 @@ function renderCatalogSection(kind, title, blurb) {
         <div id="catalog-${kind}-more" class="catalog-more"></div>
     </div>`;
 }
+// The catalog mount only exists once the API is known to be up, and the page re-renders
+// asynchronously (after /api/status/all, SSE, job events). Loading "once per navigation"
+// left a direct URL / reload of #/models or #/content stuck on "Loading the live
+// catalog…" forever (the first render had no mount; the re-render with a mount never
+// asked). ensureCatalogs() runs after EVERY render and is idempotent.
+const _catalogBusy = { content: false, models: false };
+function ensureCatalogs() {
+    for (const kind of ['content', 'models']) {
+        const mount = document.getElementById('catalog-' + kind);
+        if (!mount) continue;
+        if (_catalogData[kind]) { if (mount.querySelector('.catalog-loading')) renderCatalogItems(kind, _catalogData[kind], ''); }
+        else if (!_catalogBusy[kind]) loadCatalog(kind);
+    }
+}
 function loadCatalog(kind) {
     const mount = document.getElementById('catalog-' + kind);
     if (!mount) return;
     if (_catalogData[kind]) { renderCatalogItems(kind, _catalogData[kind], ''); return; }
     if (!_apiAvailable) { mount.innerHTML = '<div class="catalog-loading">Catalog needs the Val Ark server (open this page from the Ark).</div>'; return; }
+    if (_catalogBusy[kind]) return;
+    _catalogBusy[kind] = true;
+    const put = (html) => { const m = document.getElementById('catalog-' + kind); if (m) m.innerHTML = html; };
     fetch('/api/catalog/' + kind).then(r => r.json()).then(d => {
         if ((!d.items || !d.items.length) && d.computing) {
-            mount.innerHTML = '<div class="catalog-loading">Building the catalog from the live index… this takes a moment.</div>';
-            setTimeout(() => { _catalogData[kind] = null; loadCatalog(kind); }, 4000);
+            put('<div class="catalog-loading">Building the catalog from the live index… this takes a moment.</div>');
+            setTimeout(() => { _catalogBusy[kind] = false; _catalogData[kind] = null; loadCatalog(kind); }, 4000);
             return;
         }
+        _catalogBusy[kind] = false;
         _catalogData[kind] = d.items || [];
         renderCatalogItems(kind, _catalogData[kind], '');
-    }).catch(() => { mount.innerHTML = '<div class="catalog-loading">Catalog unavailable (offline?).</div>'; });
+    }).catch(() => { _catalogBusy[kind] = false; put('<div class="catalog-loading">Catalog unavailable (offline?).</div>'); });
 }
 function catalogCardHtml(kind, it) {
     const rk = kind === 'models' ? 'model' : 'content';
@@ -7044,12 +7307,15 @@ function renderCommunity() {
 
 async function cancelDownload(id) {
     try {
-        await fetch('/api/download/cancel', {
+        const r = await fetch('/api/download/cancel', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id }),
         });
-    } catch (e) {}
+        const j = await r.json();
+        if (j.error) uiToast(j.error, 'error');
+    } catch (e) { uiToast('Could not reach the Ark to cancel: ' + e.message, 'error'); }
+    loadDownloads();
 }
 
 // ===================== First-boot commissioning wizard =======================
@@ -7430,28 +7696,43 @@ function renderProgressPanel() {
         panel = document.createElement('div');
         panel.id = 'dl-panel';
         panel.className = 'dl-panel';
+        panel.setAttribute('aria-live', 'polite');
         document.body.appendChild(panel);
     }
-
-    if (_activeDownloads.size === 0) {
+    // Show: anything running/queued, anything that needs the user (failed/deferred), and a
+    // just-finished job for a few seconds. A failure STAYS until dismissed — it must never
+    // vanish on a timer (that is how "it just stopped, no error" happened).
+    const now = Date.now();
+    const shown = [..._activeDownloads.values()].filter(d =>
+        ['running', 'queued', 'failed', 'deferred'].includes(d.status) ||
+        ((d.status === 'complete' || d.status === 'cancelled') && d.finishedAt && now - d.finishedAt < 12000));
+    if (shown.length === 0) {
         panel.classList.remove('visible');
+        panel.innerHTML = '';
         return;
     }
 
+    const active = shown.filter(d => d.status === 'running' || d.status === 'queued').length;
     panel.classList.add('visible');
-    let html = '<div class="dl-panel-header"><span>Downloads</span><span style="font-size:0.75em;color:var(--text-muted)">' + _activeDownloads.size + ' active</span></div>';
+    let html = '<div class="dl-panel-header"><span>Downloads</span><span style="font-size:0.75em;color:var(--text-muted)">' + active + ' active' + (shown.length - active ? ' · ' + (shown.length - active) + ' finished' : '') + '</span></div>';
     html += '<div class="dl-panel-body">';
-    for (const [id, dl] of _activeDownloads) {
+    for (const dl of shown) {
+        const id = dl.id;
+        const running = dl.status === 'running';
+        const known = dl.progress != null;
         const statusIcon = dl.status === 'complete' ? ' &#x2713;' :
                           dl.status === 'failed' ? ' &#x2717;' :
                           dl.status === 'cancelled' ? ' &#x2014;' : '';
-        html += `<div class="dl-item">
+        html += `<div class="dl-item" data-id="${escAttr(id)}" data-status="${escAttr(dl.status)}">
             <div class="dl-item-header">
-                <span class="dl-item-type">${esc(dl.type)}${statusIcon}</span>
-                ${dl.status === 'running' ? `<button class="dl-cancel-btn" data-dl-act="cancel" data-id="${escAttr(id)}" onclick="dlMiniAction(this)">Cancel</button>` : ''}
+                <span class="dl-item-type">${esc(_dlLabel(dl))}${statusIcon}</span>
+                ${(running || dl.status === 'queued') ? `<button class="dl-cancel-btn" data-dl-act="cancel" data-id="${escAttr(id)}" onclick="dlMiniAction(this)">Cancel</button>` : ''}
+                ${(dl.status === 'failed' || dl.status === 'deferred' || dl.status === 'cancelled') ? `<span><button class="dl-cancel-btn dl-retry-btn" data-dl-act="retry" data-id="${escAttr(id)}" onclick="dlMiniAction(this)">Retry</button><button class="dl-cancel-btn dl-dismiss-btn" data-dl-act="dismiss" data-id="${escAttr(id)}" onclick="dlMiniAction(this)">Dismiss</button></span>` : ''}
             </div>
-            <div class="dl-progress-bar"><div class="dl-progress-fill" style="width:${dl.progress}%"></div></div>
-            <div class="dl-item-line">${((dl.lastLine || (dl.status === 'running' ? 'Starting...' : dl.status)) + '').slice(0, 60)}</div>
+            <div class="dl-progress-bar"><div class="dl-progress-fill${running && !known ? ' indet' : ''}" style="width:${running ? (known ? dl.progress : 100) : (dl.status === 'complete' ? 100 : (known ? dl.progress : 0))}%"></div></div>
+            ${dl.status === 'failed' && dl.error ? '' : `<div class="dl-item-line">${esc((_dlDetail(dl) + (running ? _dlBytes(dl) : '')).slice(0, 90))}</div>`}
+            ${dl.status === 'failed' && dl.error ? `<div class="dl-item-err" role="alert">${esc(dl.error)}</div>` : ''}
+            ${dl.status === 'complete' && dl.warnings && dl.warnings.length ? `<div class="dl-item-warn">${esc(dl.warnings[dl.warnings.length - 1])}</div>` : ''}
         </div>`;
     }
     html += '</div>';

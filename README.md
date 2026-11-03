@@ -7,7 +7,7 @@
 
 **Created by Matthew Valancy**
 
-A self-filling, online-optional mirror of 45 dev/AI tools, AI models, and offline
+A self-filling, online-optional mirror of 50+ dev/AI tools, AI models, and offline
 content (ZIM via Kiwix) — plus an offline **community hub** (chat, mail, message
 boards, file sharing) — all behind one web UI. Local-first, peer-to-peer,
 NFS-shareable, offline-capable — scales to a disk of any size.

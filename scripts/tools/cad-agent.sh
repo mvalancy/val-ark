@@ -217,11 +217,14 @@ _cadagent_source() {
             rm -rf "${mirror:?}.tmp"; log_error "cad-agent: clone failed"; return 1; }
     fi
     git -C "$mirror" rev-parse -q --verify "refs/tags/${tag}" >/dev/null || { log_error "cad-agent: tag ${tag} not in the mirror"; return 1; }
-    git -C "$mirror" bundle create "${src_root}/cad-agent.bundle.part" --all >/dev/null 2>&1 && \
-        mv -f "${src_root}/cad-agent.bundle.part" "${src_root}/cad-agent.bundle"
-    git -C "$mirror" archive --format=tar.gz --prefix="cad-agent-${ver}/" -o "${src_root}/cad-agent-${ver}.tar.gz" "$tag"
+    git -C "$mirror" bundle create "${src_root}/cad-agent.bundle.part" --all >/dev/null 2>"$work/bundle.err" && \
+        mv -f "${src_root}/cad-agent.bundle.part" "${src_root}/cad-agent.bundle" || {
+        rm -f "${src_root:?}/cad-agent.bundle.part"; log_error "cad-agent: git bundle failed: $(tail -1 "$work/bundle.err")"; return 1; }
+    git -C "$mirror" archive --format=tar.gz --prefix="cad-agent-${ver}/" -o "${src_root}/cad-agent-${ver}.tar.gz.part" "$tag" 2>"$work/bundle.err" && \
+        mv -f "${src_root}/cad-agent-${ver}.tar.gz.part" "${src_root}/cad-agent-${ver}.tar.gz" || {
+        rm -f "${src_root:?}/cad-agent-${ver:?}.tar.gz.part"; log_error "cad-agent: source tarball failed: $(tail -1 "$work/bundle.err")"; return 1; }
     ensure_dir "$work/src"
-    git -C "$mirror" archive "$tag" | tar -x -C "$work/src"
+    git -C "$mirror" archive "$tag" | tar -x -C "$work/src" || { log_error "cad-agent: unpacking ${tag} failed"; return 1; }
     log_success "cad-agent source ${tag}: bundle $(du -h "${src_root}/cad-agent.bundle" | cut -f1), tarball $(du -h "${src_root}/cad-agent-${ver}.tar.gz" | cut -f1)"
 }
 
@@ -291,21 +294,23 @@ _cadagent_conda_arm64() {
         log_error "cad-agent: the conda solve pulled ${forbidden} (must come from the wheelhouse: cad-agent needs PyPI's OCP API)"
         return 1
     fi
-    local url md5 size fn n=0 bad=0
+    local url md5 size fn n=0 bad=0 first_bad=""
     { echo "# cad-agent linux-arm64 conda-forge set (micromamba explicit spec; install.sh makes the paths absolute)"
       echo "@EXPLICIT"; } > "$dest/explicit.txt.part"
     while read -r url md5 size fn; do
         [ -n "$fn" ] || continue
         n=$((n + 1))
         if [ -f "$dest/pkgs/$fn" ] && [ "$(stat -c%s "$dest/pkgs/$fn")" = "$size" ]; then :
-        else download_file "$url" "$dest/pkgs/$fn" "conda $fn" >/dev/null 2>&1 || { bad=$((bad + 1)); continue; }
+        # stdout stays on: it carries download_file's @@valark-dl progress markers.
+        else download_file "$url" "$dest/pkgs/$fn" "conda $fn" 2>>"$work/conda-dl.log" || {
+            bad=$((bad + 1)); first_bad="${first_bad:-$fn ($(tail -1 "$work/conda-dl.log" 2>/dev/null))}"; continue; }
         fi
         if [ -n "$md5" ] && [ "$(md5sum "$dest/pkgs/$fn" | cut -d' ' -f1)" != "$md5" ]; then
-            rm -f "${dest:?}/pkgs/$fn"; bad=$((bad + 1)); continue
+            rm -f "${dest:?}/pkgs/$fn"; bad=$((bad + 1)); first_bad="${first_bad:-$fn (md5 mismatch)}"; continue
         fi
         echo "${fn}#${md5}" >> "$dest/explicit.txt.part"
     done < <(cadagent_conda_fetch_list "$work/conda-solve.json")
-    [ "$bad" = 0 ] || { log_error "cad-agent: ${bad}/${n} conda packages failed"; rm -f "${dest:?}/explicit.txt.part"; return 1; }
+    [ "$bad" = 0 ] || { log_error "cad-agent: ${bad}/${n} conda packages failed, first: ${first_bad}"; rm -f "${dest:?}/explicit.txt.part"; return 1; }
     mv -f "$dest/explicit.txt.part" "$dest/explicit.txt"
     # Drop packages an earlier solve needed but this one does not.
     local f
@@ -324,8 +329,10 @@ _cadagent_openfoam() {
     dest="${TOOLS_DIR}/${plat}/cad-agent/openfoam"; ensure_dir "$dest"
     out="${dest}/$(echo "$image" | tr '/:' '__')-${arch}.tar"
     log_info "cad-agent ${plat}: OpenFOAM image ${image} (linux/${arch})"
-    if python3 "${PROJECT_ROOT}/scripts/lib/oci_pull.py" "$image" --platform "linux/${arch}" --out "$out" \
-            --max-bytes "$CADAGENT_MAX_BYTES" > "${out}.json" 2> "${dest}/.pull.log"; then
+    # stderr goes to the job (oci_pull's @@valark-dl markers) and to .pull.log (the reason on failure).
+    python3 "${PROJECT_ROOT}/scripts/lib/oci_pull.py" "$image" --platform "linux/${arch}" --out "$out" \
+            --max-bytes "$CADAGENT_MAX_BYTES" 2>&1 > "${out}.json" | tee "${dest}/.pull.log" >&2
+    if [ "${PIPESTATUS[0]}" = 0 ]; then
         log_success "cad-agent ${plat}: $(basename "$out") ($(du -h "$out" | cut -f1))"
     else
         log_error "cad-agent ${plat}: OpenFOAM image failed: $(tail -1 "${dest}/.pull.log")"; return 1
@@ -342,7 +349,9 @@ _cadagent_gate() {
     have=$(cat "$dest/.version" 2>/dev/null)
     [ "$have" = "$ver" ] && return 0
     if _version_newer "$have" "$ver"; then
-        log_info "cad-agent: keeping ${have} (newer than requested ${ver})"; return 0
+        # e.g. a rate-limited run fell back to the pin: leave the newer mirror
+        # (its wheelhouse, requirements.txt and install.sh) exactly as it is.
+        log_info "cad-agent $(basename "$(dirname "$dest")"): keeping ${have} (newer than requested ${ver})"; return 2
     fi
     [ -n "$have" ] && log_info "cad-agent $(basename "$(dirname "$dest")"): ${have} -> ${ver} (replacing the wheelhouse)"
     rm -rf "${dest:?}/wheelhouse" "${dest:?}/MISSING.txt"
@@ -359,7 +368,8 @@ _cadagent_write_install() {
 # The default installs requirements.txt (core + extras ${CADAGENT_EXTRAS}, minus
 # what this platform has no wheel for) and then cad-agent with --no-deps, because
 # cad-agent's fea extra names pypardiso (MKL, x86_64-only) with no platform marker.
-# Python: \$PYTHON, else Val Ark's python-standalone next to this dir, else python3 (>= 3.10).
+# Python: \$PYTHON, else Val Ark's python-standalone next to this dir, else python3.
+# It must be CPython ${CADAGENT_PY}: every compiled wheel here is cp${CADAGENT_PY/./}.
 set -e
 HERE="\$(cd "\$(dirname "\$0")" && pwd)"
 ENV_DIR="\${1:?usage: install.sh ENV_DIR [extras]}"
@@ -384,6 +394,9 @@ if [ -f "\$HERE/conda/explicit.txt" ]; then
 else
     PY="\${PYTHON:-}"
     [ -n "\$PY" ] || { [ -x "\$HERE/../python-standalone/bin/python3" ] && PY="\$HERE/../python-standalone/bin/python3"; }
+    "\${PY:-python3}" -c 'import sys; sys.exit(0 if sys.version_info[:2] == (${CADAGENT_PY/./, }) else 1)' 2>/dev/null || {
+        echo "install.sh: needs CPython ${CADAGENT_PY} (the wheels are cp${CADAGENT_PY/./}); \${PY:-python3} is \$("\${PY:-python3}" -V 2>&1). Set PYTHON=/path/to/python${CADAGENT_PY}." >&2
+        exit 1; }
     "\${PY:-python3}" -m venv "\$ENV_DIR"
 fi
 if [ -n "\${CONDA_ENV:-}" ]; then
@@ -406,7 +419,11 @@ EOF
     chmod +x "${dest}/install.sh"
     local foam="(Linux dirs only) docker load -i openfoam/<image>.tar   -> ${image}"
     [ -d "${dest}/openfoam" ] && foam="docker load -i openfoam/$(ls "${dest}/openfoam" 2>/dev/null | grep '\.tar$' | head -1)   -> ${image}"
-    cat > "${dest}/INSTALL.txt" <<EOF
+    # Not INSTALL.txt: tool-scan.js reads a top-level INSTALL.txt as "install
+    # hint only" and never looks inside wheelhouse/, so the web UI would show a
+    # complete 1.4 GB platform as "Install guide only".
+    rm -f "${dest:?}/INSTALL.txt"
+    cat > "${dest}/OFFLINE-INSTALL.txt" <<EOF
 cad-agent ${ver} - offline install (${plat})
 =============================================
 
@@ -479,15 +496,20 @@ _cadagent_mirror() {
     for plat in $CADAGENT_PLATFORMS; do
         local dest="${TOOLS_DIR}/${plat}/cad-agent" ok=1
         _cadagent_gate "$dest" "$ver"
+        if [ $? = 2 ]; then DOWNLOAD_SKIPPED=$((DOWNLOAD_SKIPPED + 1)); continue; fi
         _cadagent_wheelhouse "$plat" "$py" "$work/src" "$own" "$work" || ok=0
         if [ "$plat" = linux-arm64 ]; then _cadagent_conda_arm64 "$work" || ok=0; fi
         _cadagent_openfoam "$plat" "$image" || ok=0
-        _cadagent_write_install "$plat" "$ver" "$image"
         if [ "$ok" = 1 ]; then
+            _cadagent_write_install "$plat" "$ver" "$image"
             version_stamp "$dest" "$ver"
             DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
             log_success "cad-agent ${plat}: $(du -sh "$dest" | cut -f1)"
         else
+            # Install docs only describe a complete platform: a failed refill to a
+            # new version must not keep the old version's install.sh beside a
+            # partial wheelhouse.
+            [ "$(cat "$dest/.version" 2>/dev/null)" = "$ver" ] || rm -f "${dest:?}/install.sh" "${dest:?}/OFFLINE-INSTALL.txt"
             failed=1; DOWNLOAD_FAILED=$((DOWNLOAD_FAILED + 1))
         fi
     done

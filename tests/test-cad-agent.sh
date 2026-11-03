@@ -11,7 +11,11 @@
 #   - pip platform flags stop at the glibc floor and name the cp312 ABI
 #   - the conda fetch list and the OpenFOAM image come from their sources
 #   - oci_pull writes a docker-loadable archive (manifest.json RepoTags + OCI
-#     layout), is idempotent, and REJECTS a corrupt blob or a missing platform
+#     layout), is idempotent, and REJECTS a corrupt blob, a missing platform, a
+#     manifest that does not match its digest, a traversal digest, an oversize
+#     blob and a wrong-platform single manifest; it keeps a complete .part,
+#     resumes a half one, refreshes an expired token, never sends the token to
+#     a redirect host, and emits job progress markers
 #   - verify_cad_agent PASSES on a good wheelhouse and FAILS on a broken one
 ###############################################################################
 PASS=0; FAIL=0
@@ -152,6 +156,54 @@ grep -q 'cad-agent\[$EXTRAS\]==9.9.9' "$TD/linux-x86_64/cad-agent/install.sh" &&
 grep -q -- '-r "$HERE/requirements.txt"' "$TD/linux-x86_64/cad-agent/install.sh" && grep -q -- '--no-deps "cad-agent==9.9.9"' "$TD/linux-x86_64/cad-agent/install.sh" \
     && pass || fail "default install.sh must use the platform-filtered requirements.txt + cad-agent --no-deps (fea names x86-only pypardiso)"
 
+# --- 4b. version gate + what the web UI's scan sees ----------------------------------
+# A run that asks for an OLDER version (e.g. rate-limited -> the pin) must leave a
+# newer mirror untouched: no rewritten requirements.txt / install.sh, .version kept.
+GT="$T/gate"; mkdir -p "$GT"
+VAL_ARK_DATA="$GT" bash -c '
+    source "$1"
+    d="$TOOLS_DIR/linux-x86_64/cad-agent"; mkdir -p "$d/wheelhouse"
+    echo 0.17.0 > "$d/.version"; echo "newer-reqs" > "$d/requirements.txt"; echo "newer-install" > "$d/install.sh"
+    _cadagent_source() { mkdir -p "$2/src"; }
+    _cadagent_pip_venv() { printf "#!/bin/sh\ntouch \"\$7/cad_agent-0.13.0-py3-none-any.whl\"\n" > "$1/py"; chmod +x "$1/py"; echo "$1/py"; }
+    cadagent_openfoam_image() { echo img:1; }
+    _cadagent_wheelhouse() { echo older-reqs > "$TOOLS_DIR/$1/cad-agent/requirements.txt"; }
+    _cadagent_openfoam() { :; }
+    CADAGENT_PLATFORMS=linux-x86_64
+    w=$(mktemp -d); _cadagent_mirror v0.13.0 0.13.0 "$w" >/dev/null 2>&1; rc=$?; rm -rf "${w:?}"
+    [ "$rc" = 0 ] && [ "$(cat "$d/.version")" = 0.17.0 ] && [ "$(cat "$d/requirements.txt")" = newer-reqs ] \
+        && [ "$(cat "$d/install.sh")" = newer-install ]
+' _ "$SH" && pass || fail "an older requested version must leave a newer mirror (requirements.txt, install.sh, .version) untouched"
+# A failed refill to a NEW version must not leave the old install.sh beside a partial wheelhouse.
+VAL_ARK_DATA="$GT/fail" bash -c '
+    source "$1"
+    d="$TOOLS_DIR/linux-x86_64/cad-agent"; mkdir -p "$d/wheelhouse"
+    echo 0.12.0 > "$d/.version"; echo old > "$d/install.sh"; echo old > "$d/OFFLINE-INSTALL.txt"
+    _cadagent_source() { mkdir -p "$2/src"; }
+    _cadagent_pip_venv() { printf "#!/bin/sh\ntouch \"\$7/cad_agent-0.13.0-py3-none-any.whl\"\n" > "$1/py"; chmod +x "$1/py"; echo "$1/py"; }
+    cadagent_openfoam_image() { echo img:1; }
+    _cadagent_wheelhouse() { return 1; }
+    _cadagent_openfoam() { :; }
+    CADAGENT_PLATFORMS=linux-x86_64
+    w=$(mktemp -d); _cadagent_mirror v0.13.0 0.13.0 "$w" >/dev/null 2>&1; rc=$?; rm -rf "${w:?}"
+    [ "$rc" != 0 ] && [ ! -e "$d/install.sh" ] && [ ! -e "$d/OFFLINE-INSTALL.txt" ]
+' _ "$SH" && pass || fail "a failed refill must exit non-zero and drop the previous version's install docs"
+# tool-scan.js (web UI badge + post-job verify) must see a filled platform as mirrored,
+# not "Install guide only" (a top-level INSTALL.txt short-circuits it to 'hint').
+if command -v node >/dev/null 2>&1; then
+    VAL_ARK_DATA="$T/scan" bash -c 'source "$1"; mkdir -p "$TOOLS_DIR/linux-x86_64/cad-agent"; touch "$TOOLS_DIR/linux-x86_64/cad-agent/INSTALL.txt"; _cadagent_write_install linux-x86_64 9.9.9 img:1; echo "$TOOLS_DIR"' _ "$SH" > "$T/scan.dir" 2>/dev/null
+    SD=$(tail -1 "$T/scan.dir"); mkdir -p "$SD/linux-x86_64/cad-agent/wheelhouse"; head -c 300000 /dev/urandom > "$SD/linux-x86_64/cad-agent/wheelhouse/numpy-2.0-cp312-cp312-manylinux_2_17_x86_64.whl"
+    [ ! -e "$SD/linux-x86_64/cad-agent/INSTALL.txt" ] && pass || fail "a legacy top-level INSTALL.txt must be removed"
+    node -e '
+        const ts = require(process.argv[1]);
+        ts.verifyToolMirror(process.argv[2], "cad-agent").then(ps => {
+            const p = ps.find(x => x.platform === "linux-x86_64");
+            process.exit(p && p.state === "mirrored" ? 0 : 1);
+        });' "$ROOT/scripts/lib/tool-scan.js" "$SD" && pass || fail "tool-scan must report a filled cad-agent platform as mirrored, not install-hint only"
+else
+    echo "  SKIP: tool-scan check (no node)" >&2
+fi
+
 # --- 5. oci_pull against a local fake registry -------------------------------------
 REG="$T/reg"; mkdir -p "$REG"
 python3 - "$REG" <<'PY'
@@ -176,25 +228,66 @@ idx = json.dumps({"schemaVersion": 2, "mediaType": "application/vnd.oci.image.in
        {"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": md, "size": len(man),
         "platform": {"os": "linux", "architecture": "arm64"}}]}).encode()
 put("index", idx)
+evil = json.dumps({"schemaVersion": 2, "mediaType": "application/vnd.oci.image.manifest.v1+json",
+       "config": {"mediaType": "application/vnd.oci.image.config.v1+json", "digest": cd, "size": len(cfg)},
+       "layers": [{"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": "sha256:../../../escaped", "size": 4}]}).encode()
+put("evil", evil)
 json.dump({"layer": ld, "config": cd, "manifest": md}, open(os.path.join(d, "digests.json"), "w"))
 PY
 cat > "$T/registry.py" <<'PY'
+# Fake OCI registry. Flag files in the fixture dir switch behaviours on:
+#   CORRUPT     the layer is served damaged          BADMANIFEST  manifest bytes altered
+#   OVERSIZE    the layer is served with extra bytes AUTH         Bearer tokens required;
+#   REDIRECT    blobs 307 to the same server under    each token is good for 2 requests
+#               another host name (localhost)        (Docker Hub's expiry, compressed)
+# Range requests are honoured (206 / 416). AUTH_SEEN logs the Authorization header
+# of every CDN (redirected) request.
 import json, os, sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 d = sys.argv[1]; dig = json.load(open(os.path.join(d, "digests.json")))
 by = {v: k for k, v in dig.items()}
+tokens = {}; issued = [0]
+flag = lambda n: os.path.exists(os.path.join(d, n))
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
+    def send(self, code, data=b"", ct="application/octet-stream", extra=()):
+        self.send_response(code)
+        for k, v in extra: self.send_header(k, v)
+        self.send_header("Content-Type", ct); self.send_header("Content-Length", str(len(data))); self.end_headers()
+        self.wfile.write(data)
     def do_GET(self):
-        p = self.path.split("/v2/x/foam/", 1)[-1]
+        port = self.server.server_port
+        if self.path.startswith("/token"):
+            issued[0] += 1; t = "tok%d" % issued[0]; tokens[t] = 2
+            return self.send(200, json.dumps({"token": t}).encode(), "application/json")
+        cdn = self.path.startswith("/cdn/")
+        if cdn:
+            with open(os.path.join(d, "AUTH_SEEN"), "a") as f: f.write((self.headers.get("Authorization") or "-") + "\n")
+        elif flag("AUTH"):
+            t = (self.headers.get("Authorization") or "")[len("Bearer "):]
+            if tokens.get(t, 0) <= 0:
+                return self.send(401, extra=[("WWW-Authenticate", 'Bearer realm="http://127.0.0.1:%d/token",service="fake"' % port)])
+            tokens[t] -= 1
+        p = self.path.split("/v2/x/foam/", 1)[-1] if not cdn else self.path[5:]
         name = None
         if p == "manifests/1.0": name, ct = "index", "application/vnd.oci.image.index.v1+json"
+        elif p == "manifests/single": name, ct = "manifest", "application/vnd.oci.image.manifest.v1+json"
+        elif p == "manifests/evil": name, ct = "evil", "application/vnd.oci.image.manifest.v1+json"
         elif p.startswith("manifests/") and by.get(p[10:]) == "manifest": name, ct = "manifest", "application/vnd.oci.image.manifest.v1+json"
         elif p.startswith("blobs/") and p[6:] in by: name, ct = by[p[6:]], "application/octet-stream"
-        if not name: self.send_response(404); self.end_headers(); return
+        if not name: return self.send(404)
+        if name not in ("index", "manifest", "evil") and flag("REDIRECT") and not cdn:
+            return self.send(307, extra=[("Location", "http://localhost:%d/cdn/%s" % (port, p))])
         data = open(os.path.join(d, name), "rb").read()
-        if name == "layer" and os.path.exists(os.path.join(d, "CORRUPT")): data = data[:-4] + b"XXXX"
-        self.send_response(200); self.send_header("Content-Type", ct); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+        if name == "layer" and flag("CORRUPT"): data = data[:-4] + b"XXXX"
+        if name == "layer" and flag("OVERSIZE"): data = data + b"Z" * 64
+        if name == "manifest" and flag("BADMANIFEST"): data = data + b" "
+        rng = self.headers.get("Range")
+        if rng and rng.startswith("bytes=") and name not in ("index", "manifest", "evil"):
+            start = int(rng[6:].split("-")[0])
+            if start >= len(data): return self.send(416)
+            return self.send(206, data[start:], ct, [("Content-Range", "bytes %d-%d/%d" % (start, len(data) - 1, len(data)))])
+        self.send(200, data, ct)
 s = HTTPServer(("127.0.0.1", 0), H); open(os.path.join(d, "port"), "w").write(str(s.server_port)); s.serve_forever()
 PY
 python3 "$T/registry.py" "$REG" & REG_PID=$!
@@ -218,6 +311,34 @@ python3 "$OCI" x/foam:1.0 --platform linux/arm64 --registry "$URL" --out "$T/img
 touch "$REG/CORRUPT"   # negative control: the registry now serves a damaged layer
 python3 "$OCI" x/foam:1.0 --platform linux/arm64 --registry "$URL" --out "$T/img/bad.tar" >/dev/null 2>&1 && fail "a corrupt blob must be rejected" || pass
 [ ! -f "$T/img/bad.tar" ] && pass || fail "no archive may be written from a corrupt blob"
+rm -f "$REG/CORRUPT"
+pull() { python3 "$OCI" "$1" --platform linux/arm64 --registry "$URL" --out "$2" > /dev/null 2> "$2.err"; }
+touch "$REG/BADMANIFEST"   # negative control: manifest bytes no longer match the index digest
+pull x/foam:1.0 "$T/img/badman.tar" && fail "a manifest whose bytes do not match its digest must be rejected" || pass
+grep -q "manifest digest mismatch" "$T/img/badman.tar.err" && pass || fail "the manifest rejection must name the digest mismatch"
+rm -f "$REG/BADMANIFEST"
+mkdir -p "$T/img/sub"
+pull x/foam:evil "$T/img/sub/evil.tar" && fail "a traversal digest (sha256:../../../x) must be refused" || pass
+grep -q "malformed digest" "$T/img/sub/evil.tar.err" && [ ! -e "$T/img/escaped.part" ] && [ ! -e "$T/escaped.part" ] \
+    && pass || fail "a malformed digest must be refused before it is used as a path"
+python3 "$OCI" x/foam:single --platform linux/amd64 --registry "$URL" --out "$T/img/single.tar" >/dev/null 2>&1 \
+    && fail "a single-manifest arm64 image must not be packed as linux/amd64" || pass
+pull x/foam:single "$T/img/single.tar" && pass || fail "a single-manifest image of the right platform must pull"
+LAYERHEX=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["layer"][7:])' "$REG/digests.json")
+mkdir -p "$T/img/full.tar.blobs"; cp "$REG/layer" "$T/img/full.tar.blobs/$LAYERHEX.part"   # an earlier run died before the rename
+pull x/foam:1.0 "$T/img/full.tar" && pass || fail "a complete .part must be verified and kept, not re-requested (HTTP 416)"
+mkdir -p "$T/img/half.tar.blobs"; head -c 20 "$REG/layer" > "$T/img/half.tar.blobs/$LAYERHEX.part"
+pull x/foam:1.0 "$T/img/half.tar" && pass || fail "a half .part must resume with Range (206)"
+touch "$REG/OVERSIZE"
+pull x/foam:1.0 "$T/img/over.tar" && fail "a blob larger than its declared size must be refused" || pass
+grep -q "larger than its declared" "$T/img/over.tar.err" && pass || fail "the oversize refusal must stop at the declared size"
+rm -f "$REG/OVERSIZE"
+touch "$REG/AUTH" "$REG/REDIRECT"   # tokens expire after 2 requests; blobs redirect to another host name
+pull x/foam:1.0 "$T/img/auth.tar" && pass || fail "an expired bearer token must be refreshed mid-pull (got: $(tail -1 "$T/img/auth.tar.err"))"
+[ -s "$REG/AUTH_SEEN" ] && ! grep -qv '^-$' "$REG/AUTH_SEEN" && pass || fail "the registry token must not be sent to a redirect host ($(sort -u "$REG/AUTH_SEEN" 2>/dev/null | tr '\n' ' '))"
+rm -f "$REG/AUTH" "$REG/REDIRECT"
+VALARK_JOB_MARKERS=1 python3 "$OCI" x/foam:1.0 --platform linux/arm64 --registry "$URL" --out "$T/img/mark.tar" 2>&1 >/dev/null \
+    | grep -q "^@@valark-dl	[0-9]*	.*\.part	0	image blob " && pass || fail "VALARK_JOB_MARKERS=1 must emit @@valark-dl markers for blobs"
 
 # --- 6. verify.sh's offline install check -------------------------------------------
 PY312=""

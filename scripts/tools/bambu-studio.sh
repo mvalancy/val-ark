@@ -16,12 +16,12 @@ BAMBU_PINNED_LINUX="BambuStudio_ubuntu22.04-v02.08.02.61-20260820225108.AppImage
 BAMBU_PINNED_MAC="Bambu_Studio_mac-v02.08.02.61-20260820225108.dmg"
 BAMBU_PINNED_WIN="Bambu_Studio_win-v02.08.02.61-20260820225108.exe"
 
-# Asset URL for a release: the API listing, else the pinned name for the pin.
+# Asset URL for a release. The pinned release's asset names are known, so it
+# needs no API call (a rate-limited run that fell back to the pin must not log
+# lookup ERRORs for downloads that then succeed); a newer release is looked up.
 _bambu_url() {   # $1 tag  $2 grep pattern  $3 pinned asset name
-    local url
-    url=$(github_asset_url "$BAMBU_REPO" "$1" "$2")
-    if [ -z "$url" ] && [ "$1" = "$PINNED_VERSION" ]; then url="${BAMBU_PINNED_BASE}/$3"; fi
-    echo "$url"
+    if [ "$1" = "$PINNED_VERSION" ]; then echo "${BAMBU_PINNED_BASE}/$3"; return; fi
+    github_asset_url "$BAMBU_REPO" "$1" "$2"
 }
 
 # Mirror one asset into a platform dir under a stable name.

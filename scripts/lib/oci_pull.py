@@ -41,6 +41,37 @@ MANIFEST_TYPES = (
     "application/vnd.docker.distribution.manifest.v2+json",
 )
 CHUNK = 1 << 20
+# A digest becomes a file name, so only the exact sha256 form is accepted
+# (a registry-supplied "sha256:../../x" must never reach os.path.join).
+DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def check_digest(d):
+    if not isinstance(d, str) or not DIGEST_RE.fullmatch(d):
+        raise RuntimeError("refusing malformed digest %r" % (d,))
+    return d
+
+
+class _NoAuthAcrossHosts(urllib.request.HTTPRedirectHandler):
+    """Registries redirect blob GETs to a CDN; the bearer token is for the
+    registry only, so drop Authorization when a redirect changes host."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and urllib.parse.urlsplit(newurl).netloc != urllib.parse.urlsplit(req.full_url).netloc:
+            for k in [k for k in new.headers if k.lower() == "authorization"]:
+                del new.headers[k]
+            new.unredirected_hdrs.pop("Authorization", None)
+        return new
+
+
+_OPENER = urllib.request.build_opener(_NoAuthAcrossHosts)
+
+
+def job_marker(total, part, label):
+    """Tell Val Ark's job manager which file is growing (real-byte progress);
+    same tab-separated contract as _common.sh download_file."""
+    if os.environ.get("VALARK_JOB_MARKERS") == "1":
+        print("@@valark-dl\t%d\t%s\t0\t%s" % (total or 0, part, label), file=sys.stderr, flush=True)
 
 
 def parse_ref(ref):
@@ -77,13 +108,16 @@ class Registry:
             raise RuntimeError("bearer challenge without realm")
         params.setdefault("scope", "repository:%s:pull" % self.repo)
         url = realm + "?" + urllib.parse.urlencode(params)
-        with urllib.request.urlopen(url, timeout=self.timeout) as r:
+        with _OPENER.open(url, timeout=self.timeout) as r:
             body = json.load(r)
         self.token = body.get("token") or body.get("access_token")
 
     def open(self, path, accept=None, headers=None):
         url = "%s/v2/%s/%s" % (self.base, self.repo, path)
-        for _ in range(2):
+        # 401 -> (re)authenticate once and retry: the first request has no token,
+        # and Docker Hub tokens expire after ~300 s, so a slow pull needs a fresh
+        # one part-way through.
+        for attempt in range(2):
             h = dict(headers or {})
             if accept:
                 h["Accept"] = accept
@@ -91,9 +125,10 @@ class Registry:
                 h["Authorization"] = "Bearer " + self.token
             req = urllib.request.Request(url, headers=h)
             try:
-                return urllib.request.urlopen(req, timeout=self.timeout)
+                return _OPENER.open(req, timeout=self.timeout)
             except urllib.error.HTTPError as e:
-                if e.code == 401 and not self.token:
+                if e.code == 401 and attempt == 0:
+                    self.token = None
                     self._auth(e.headers.get("WWW-Authenticate", ""))
                     continue
                 raise
@@ -117,9 +152,7 @@ def sha256_file(path):
 
 def fetch_blob(reg, digest, size, dest, retries=5):
     """Download a blob to dest (resumable), verified against its sha256 digest."""
-    algo, hexd = digest.split(":", 1)
-    if algo != "sha256":
-        raise RuntimeError("unsupported digest algorithm: " + algo)
+    hexd = check_digest(digest).split(":", 1)[1]
     if os.path.exists(dest) and os.path.getsize(dest) == size and sha256_file(dest) == hexd:
         return False
     part = dest + ".part"
@@ -129,11 +162,25 @@ def fetch_blob(reg, digest, size, dest, retries=5):
             os.remove(part)
             have = 0
         try:
-            hdr = {"Range": "bytes=%d-" % have} if have else None
-            with reg.open("blobs/" + digest, headers=hdr) as r:
-                mode = "ab" if (have and r.status == 206) else "wb"
-                with open(part, mode) as f:
-                    shutil.copyfileobj(r, f, CHUNK)
+            # A .part that already holds every declared byte (an earlier run died
+            # before the rename) is verified as is: a Range request for it would
+            # only get HTTP 416 on every rerun.
+            if not (size and have == size):
+                hdr = {"Range": "bytes=%d-" % have} if have else None
+                job_marker(size, part, "image blob " + digest[7:19])
+                with reg.open("blobs/" + digest, headers=hdr) as r:
+                    mode = "ab" if (have and r.status == 206) else "wb"
+                    written = have if mode == "ab" else 0
+                    with open(part, mode) as f:
+                        for b in iter(lambda: r.read(CHUNK), b""):
+                            written += len(b)
+                            if size and written > size:   # never store more than declared
+                                raise RuntimeError("blob %s is larger than its declared %d bytes" % (digest[:19], size))
+                            f.write(b)
+        except RuntimeError:
+            if os.path.exists(part):
+                os.remove(part)
+            raise
         except (urllib.error.URLError, OSError) as e:
             if attempt == retries:
                 raise RuntimeError("blob %s failed: %s" % (digest[:19], e))
@@ -200,12 +247,12 @@ def main(argv=None):
                            for x in doc.get("manifests", [])})
             print("oci_pull: %s has no %s image (has: %s)" % (a.image, a.platform, ", ".join(have)), file=sys.stderr)
             return 1
-        raw, doc, digest = reg.manifest(m["digest"])
+        raw, doc, digest = reg.manifest(check_digest(m["digest"]))
         digest = m["digest"]
         mt = doc.get("mediaType") or m.get("mediaType") or MANIFEST_TYPES[0]
     if not digest:
         digest = "sha256:" + hashlib.sha256(raw).hexdigest()
-    if hashlib.sha256(raw).hexdigest() != digest.split(":", 1)[1]:
+    if hashlib.sha256(raw).hexdigest() != check_digest(digest).split(":", 1)[1]:
         print("oci_pull: manifest digest mismatch for %s" % a.image, file=sys.stderr)
         return 1
 
@@ -222,9 +269,11 @@ def main(argv=None):
         print("oci_pull: %s is %d bytes, over the %d byte limit" % (a.image, total, a.max_bytes), file=sys.stderr)
         return 1
 
+    blobs = [doc["config"]] + layers
+    for b in blobs:
+        check_digest(b.get("digest"))
     blobdir = out + ".blobs"
     os.makedirs(blobdir, exist_ok=True)
-    blobs = [doc["config"]] + layers
     for i, b in enumerate(blobs):
         d = b["digest"]
         dest = os.path.join(blobdir, d.split(":", 1)[1])
@@ -232,6 +281,13 @@ def main(argv=None):
               file=sys.stderr)
         fetch_blob(reg, d, int(b.get("size", 0)), dest)
 
+    # A single-manifest image (no index) never named its platform: check the
+    # config so an amd64-only image is not packed as linux/arm64.
+    with open(os.path.join(blobdir, doc["config"]["digest"].split(":", 1)[1]), "rb") as f:
+        cfg = json.load(f)
+    if (cfg.get("os"), cfg.get("architecture")) != (os_name, arch):
+        print("oci_pull: %s is %s/%s, not %s" % (a.image, cfg.get("os"), cfg.get("architecture"), a.platform), file=sys.stderr)
+        return 1
     name = "%s:%s" % (repo[len("library/"):] if repo.startswith("library/") else repo, tag)
     if registry != "registry-1.docker.io" and not a.registry:
         name = registry + "/" + name
@@ -242,7 +298,7 @@ def main(argv=None):
         "mediaType": mt if mt in MANIFEST_TYPES else MANIFEST_TYPES[0], "digest": digest, "size": len(raw),
         "annotations": {"io.containerd.image.name": ("docker.io/%s:%s" % (repo, tag)) if registry == "registry-1.docker.io" else name,
                         "org.opencontainers.image.ref.name": tag},
-        "platform": {"os": os_name, "architecture": arch}}]}
+        "platform": dict({"os": os_name, "architecture": arch}, **({"variant": variant} if variant else {}))}]}
 
     part = out + ".part"
     with tarfile.open(part, "w", format=tarfile.PAX_FORMAT) as t:

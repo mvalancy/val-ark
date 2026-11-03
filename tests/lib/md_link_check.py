@@ -7,8 +7,9 @@ resolves to a real file (or directory), and every `#anchor` resolves to a real
 heading (GitHub-slug) or an explicit `<a name="...">` / `id="..."` in the target.
 Link forms covered: inline `[text](target)` / image `![alt](target)`,
 reference-style `[text][label]` with a defined `[label]: target` (an undefined
-label renders as literal text, so it is NOT treated as a link), and internal HTML
-`<a href="target">`. A `?query` on the path is ignored; the fragment still checks.
+label renders as literal text, so it is NOT treated as a link), internal HTML
+`<a href="target">`, and HTML images `<img src>` / `<source srcset>` (the README's
+`<picture>` hero). Each `srcset` candidate is checked. A `?query` on the path is ignored; the fragment still checks.
 
 Scope is deliberately repo-internal and OFFLINE — external http(s)/mailto/tel/
 protocol-relative links are ignored (URL reachability is a different concern; see
@@ -37,6 +38,10 @@ REF_DEF_RE = re.compile(r"^\s{0,3}\[([^\]]+)\]:\s*(\S+)")
 REF_USE_RE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
 # Internal HTML links (external ones are skipped by EXTERNAL_RE downstream).
 HREF_RE = re.compile(r'<a\s[^>]*?href\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+# <img src="..."> and <picture><source srcset="a.svg 1x, b.svg 2x"> — an embedded image
+# whose file was renamed shows as a broken picture on GitHub, so it must resolve too.
+IMG_SRC_RE = re.compile(r'<(?:img|source)\s[^>]*?\b(src|srcset)\s*=\s*["\']([^"\']+)["\']',
+                        re.IGNORECASE)
 HEADING_RE = re.compile(r"^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$")
 HTML_ANCHOR_RE = re.compile(r'(?:name|id)\s*=\s*["\']([^"\']+)["\']')
 TAG_RE = re.compile(r"<[^>]+>")
@@ -162,9 +167,14 @@ def check(root, files):
             m = REF_DEF_RE.match(line)
             if m:
                 refdefs[m.group(1).strip().lower()] = m.group(2)
-        # Pass 2: resolve inline links, defined reference links, and <a href>.
+        # Pass 2: resolve inline links, defined reference links, <a href>, <img>/<source>.
         for lineno, line in enumerate(content.splitlines(), 1):
             targets = list(LINK_RE.findall(line)) + HREF_RE.findall(line)
+            for attr, val in IMG_SRC_RE.findall(line):
+                if attr.lower() == "srcset":
+                    targets += [c.split()[0] for c in val.split(",") if c.split()]
+                else:
+                    targets.append(val)
             for text, label in REF_USE_RE.findall(line):
                 key = (label.strip() or text.strip()).lower()
                 if key in refdefs:      # undefined label => literal text, not a link

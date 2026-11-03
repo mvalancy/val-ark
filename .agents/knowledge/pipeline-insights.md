@@ -9,10 +9,11 @@ creds, or host paths.**
 - **main's squash history makes the merge-base ancient.** Use two-dot `git diff main..dev` for the
   real release surface; a GitHub merge of a dev-based branch into main falsely reports CONFLICTING.
   Fix by re-parenting the release tree onto main's tip with `git commit-tree` (see
-  [`../skills/release.md`](../skills/release.md)). This is the single most important release trick.
-- **Back-merge `main` into `dev` after every release** (release skill step 8, a merge commit
-  with `dev`'s tree). Without it the squash commits pile up on `main` only and `dev` reads as
-  "N behind" even though nothing is missing: the two-dot diff is empty.
+  [`../skills/release.md`](../skills/release.md)). This was the most important release trick while `main` was never merged back; with the step-8 back-merge it is only needed after a skipped back-merge.
+- **Back-merge `main` into `dev` after every release** (release skill step 8: a three-way merge
+  based on the frozen release commit `F`, landed as a merge commit). Without it the squash commits
+  pile up on `main` only, `dev` reads as "N behind" right after a release even though the two-dot
+  diff is empty, and every release needs the step-3 re-parent.
 - **VERSION is the tag source of truth** (served at `/api/health`). Bump it on dev *before* cutting
   the release, or `release.sh` refuses ("tag already exists"). Tags are unprefixed (`0.1.10`).
 - **Freeze the release on `release/<ver>` before merging held PRs to dev** — otherwise an open

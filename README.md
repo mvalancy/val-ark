@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/hero/val-ark-dark.svg">
+  <img src="docs/img/hero/val-ark-light.svg" width="100%" alt="Val Ark: a disk fills cell by cell from Val Ark's real catalogue of tools, models and installers, then wifi arcs pulse as it serves the mirror to the local network">
+</picture>
+
 # Val Ark
 
 **Created by Matthew Valancy**

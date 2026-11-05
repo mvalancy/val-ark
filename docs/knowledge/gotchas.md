@@ -195,6 +195,17 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   `Authorization` is dropped on a redirect to another host (the blob CDN), and a blob is never
   stored past its declared size.
 
+- **Reference archive copies are kept, not served (cad-agent#323).** `scripts/tools/cad-agent-references.sh`
+  stores sources whose licence is unclear or proprietary, so its store is `$VALARK_HOME/private/`, which
+  `server.js` never serves. Do not move it under `sources/` or `content/` (both are served, and
+  `/api/archive/` tars whole trees), and do not export `private/` on a share without filtering on the
+  manifest's `redistribute`. Two other traps: GitHub's `refs/pull/*` would bloat a `clone --mirror`, so
+  the mirror fetches only `refs/heads/*` and `refs/tags/*`; and a bundle re-made from unchanged refs is
+  not byte-identical, so a re-check compares `git ls-remote` with `git bundle list-heads` first and
+  makes no new blob when they match. The loop's bounded tool refresh can kill a run mid-fetch: the next
+  run clears `tmp/`, and the manifest is appended per item, so it resumes.
+  Regression: `tests/test-cad-agent-references.sh`.
+
 ## Storage / data root
 
 - **`VAL_ARK_DATA` autodetect can pick the wrong mount** (once landed on a backup target that

@@ -51,13 +51,24 @@ Commands:
     verify   blob sizes + by-id links for every copy, sha256 on a sample, `git bundle verify` on a sample
     latest   the latest archived entry per id, one JSON per line (for phase-6 pointers and miners)
 
-Pure stdlib. Politeness: at most one request per second per host
-(--host-interval), robots.txt honoured for pages, 401/403/429 recorded as
-`blocked` and not retried for --backoff-days.
+Pure stdlib. Politeness: the requests this module makes itself (the index,
+robots.txt, each page or file, the GitHub API) are spaced at least
+--host-interval seconds (default 1) per host, by the host of the URL asked
+for; redirect hops are not throttled separately. Not throttled here: the
+assets monolith fetches for a page (images, styles, scripts; 60 s timeout per
+asset) and git traffic. robots.txt is honoured for pages and files (an
+unreachable or 5xx robots.txt counts as disallow, RFC 9309); 401/403/429 are
+recorded as `blocked` and not retried for --backoff-days.
+
+Robustness: one bad item never stops a run. Anything an item raises is
+recorded as `failed` (retried after --retry-hours) and the run moves on. The
+byte budget is enforced against bytes actually written, before each item and
+after each fetch, and the run stops cleanly when it is reached.
 """
 import argparse
 import fcntl
 import hashlib
+import http.client
 import json
 import os
 import random
@@ -97,6 +108,9 @@ MIB = 1024 * 1024
 EST = {"git": 32 * MIB, "page": 2 * MIB, "pdf": 3 * MIB}
 EXT_BY_TYPE = {"application/json": "json", "application/zip": "zip", "text/plain": "txt",
                "text/csv": "csv", "application/xml": "xml", "text/xml": "xml"}
+
+
+NET_ERRORS = (OSError, urllib.error.URLError, ValueError, http.client.HTTPException)
 
 
 class IndexError_(Exception):
@@ -154,7 +168,10 @@ def load_index(loc):
     if not isinstance(index, dict) or not str(index.get("schema", "")).startswith(INDEX_SCHEMA_PREFIX):
         raise IndexError_("%s is not a cad-agent reference index (schema %r)" % (loc, index.get("schema") if isinstance(index, dict) else None))
     tried = []
-    for rloc in (sibling(loc, "records.json"), index.get("records")):
+    # The document may only point at http(s): never at a local path or file:// on its own say-so.
+    named = index.get("records")
+    named = named if isinstance(named, str) and re.match(r"^https?://", named) else None
+    for rloc in (sibling(loc, "records.json"), named):
         if not isinstance(rloc, str) or rloc in tried:
             continue
         tried.append(rloc)
@@ -234,26 +251,46 @@ def value_of(rec):
 # ----------------------------------------------------------------------------- manifest
 
 def load_manifest(path):
-    """(entries, malformed line count). A torn last line (crash mid-write) counts as malformed."""
-    entries, bad = [], 0
+    """(entries, malformed line count, torn). `torn`: the last line has no newline and does not
+    parse, i.e. a write cut short (crash, full disk). It is skipped, not counted as malformed;
+    the next mirror run drops it (repair_manifest)."""
+    entries, bad, torn = [], 0, False
     try:
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    e = json.loads(line)
-                except ValueError:
-                    bad += 1
-                    continue
-                if isinstance(e, dict) and isinstance(e.get("id"), str) and e.get("status") in STATUSES:
-                    entries.append(e)
-                else:
-                    bad += 1
+        with open(path, "rb") as fh:
+            data = fh.read()
     except FileNotFoundError:
-        pass
-    return entries, bad
+        return entries, bad, torn
+    lines = data.split(b"\n")
+    for i, raw in enumerate(lines):
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            e = json.loads(line.decode("utf-8"))
+        except ValueError:
+            e = None
+        if isinstance(e, dict) and isinstance(e.get("id"), str) and e.get("status") in STATUSES:
+            entries.append(e)
+        elif i == len(lines) - 1:
+            torn = True
+        else:
+            bad += 1
+    return entries, bad, torn
+
+
+def repair_manifest(path):
+    """Drop a torn last line (no trailing newline) so the next append starts on a fresh line.
+    Returns the number of bytes dropped. Call under the store lock."""
+    try:
+        with open(path, "rb+") as fh:
+            data = fh.read()
+            if not data or data.endswith(b"\n"):
+                return 0
+            keep = data.rfind(b"\n") + 1
+            fh.truncate(keep)
+            return len(data) - keep
+    except FileNotFoundError:
+        return 0
 
 
 def latest_by_id(entries, archived_only=False):
@@ -266,11 +303,15 @@ def latest_by_id(entries, archived_only=False):
 
 
 def append_manifest(path, entry):
-    line = json.dumps(entry, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(line + "\n")
-        fh.flush()
-        os.fsync(fh.fileno())
+    """One write() of the whole line on an O_APPEND descriptor, then fsync."""
+    data = (json.dumps(entry, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    try:
+        if os.write(fd, data) != len(data):
+            raise OSError("short write to %s" % path)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def base_entry(rec, method, target, revision, when):
@@ -401,10 +442,17 @@ def http_get(url, polite, headers=None, max_bytes=None, timeout=60, dest=None):
                     out["too_large"] = True
                     break
                 (sink.write(chunk) if sink else buf.append(chunk))
+        except http.client.IncompleteRead:
+            out["truncated"] = True
         finally:
             if sink:
                 sink.close()
         out["bytes"] = n
+        # read(amt) returns short data at EOF without raising: compare with the declared length.
+        cl = resp.headers.get("Content-Length")
+        if not out["too_large"] and cl and cl.strip().isdigit() and int(cl) != n:
+            out["truncated"] = True
+            out["expected"] = int(cl)
         if not sink:
             out["body"] = b"".join(buf)
         return out
@@ -416,16 +464,19 @@ class Robots:
         self.cache = {}
 
     def allowed(self, url):
-        """(allowed, reason). robots.txt answering 401/403 means the host refuses us."""
+        """(allowed, reason). 401/403 means the host refuses us; 5xx or no answer means
+        unreachable, which RFC 9309 treats as complete disallow. 404 and other 4xx allow all."""
         p = urllib.parse.urlsplit(url)
         key = "%s://%s" % (p.scheme, p.netloc)
         if key not in self.cache:
             try:
                 r = http_get(key + "/robots.txt", self.polite, max_bytes=512 * 1024, timeout=30)
-            except (OSError, urllib.error.URLError, ValueError):
+            except NET_ERRORS:
                 r = {"status": 0}
             if r["status"] in (401, 403):
                 self.cache[key] = None
+            elif r["status"] == 0 or r["status"] >= 500:
+                self.cache[key] = "unreachable:%s" % (r["status"] or "no answer")
             elif r["status"] == 200 and r.get("body") is not None:
                 rp = RobotFileParser()
                 rp.parse(r["body"].decode("utf-8", "replace").splitlines())
@@ -435,6 +486,8 @@ class Robots:
         rp = self.cache[key]
         if rp is None:
             return False, "robots.txt refused (401/403)"
+        if isinstance(rp, str) and rp.startswith("unreachable:"):
+            return False, "robots.txt unreachable (%s)" % rp.split(":", 1)[1]
         if rp == "all" or rp.can_fetch(ROBOTS_AGENT, url):
             return True, ""
         return False, "disallowed by robots.txt"
@@ -454,7 +507,7 @@ def github_meta(remote, cache, token, api, polite, ttl_days=30):
         hdr["Authorization"] = "Bearer " + token
     try:
         r = http_get("%s/repos/%s" % (api.rstrip("/"), key), polite, headers=hdr, max_bytes=4 * MIB, timeout=30)
-    except (OSError, urllib.error.URLError, ValueError):
+    except NET_ERRORS:
         return hit
     if r["status"] != 200 or not r.get("body"):
         return hit
@@ -489,9 +542,20 @@ def _refs(text):
     return refs, head
 
 
-def mirror_git(remote, prev_blob, store, cap_bytes, timeout):
-    """Full-history bundle of `remote`. Returns a partial manifest entry (status + fields)."""
-    ls = _git(["ls-remote", "--symref", remote], timeout=300)
+def mirror_git(remote, prev_blob, store, cap_bytes, timeout, budget_left=None):
+    """Full-history bundle of `remote`. Returns a partial manifest entry (status + fields), or
+    {"status": "over-budget"} when the fetched repo is larger than `budget_left` bytes (nothing kept)."""
+    try:
+        return _mirror_git(remote, prev_blob, store, cap_bytes, timeout, budget_left)
+    except subprocess.TimeoutExpired as e:
+        step = e.cmd[1] if isinstance(e.cmd, list) and len(e.cmd) > 1 else "?"
+        return {"status": "failed", "error": "git %s timed out after %ds" % (step, e.timeout)}
+    except OSError as e:
+        return {"status": "failed", "error": "git: %s" % e}
+
+
+def _mirror_git(remote, prev_blob, store, cap_bytes, timeout, budget_left):
+    ls = _git(["ls-remote", "--symref", remote], timeout=min(300, timeout))
     if ls.returncode != 0:
         err = (ls.stderr or "").strip().splitlines()
         msg = err[-1] if err else "git ls-remote exit %d" % ls.returncode
@@ -501,7 +565,7 @@ def mirror_git(remote, prev_blob, store, cap_bytes, timeout):
     if not remote_refs:
         return {"status": "failed", "error": "repository has no branches or tags"}
     if prev_blob and os.path.isfile(prev_blob):
-        lh = _git(["bundle", "list-heads", prev_blob], timeout=300)
+        lh = _git(["bundle", "list-heads", prev_blob], timeout=min(300, timeout))
         if lh.returncode == 0 and _refs(lh.stdout)[0] == remote_refs:
             return {"status": "unchanged"}
     work = tempfile.mkdtemp(prefix="git-", dir=store.tmp)
@@ -516,11 +580,12 @@ def mirror_git(remote, prev_blob, store, cap_bytes, timeout):
         f = _git(["fetch", "-q", "--prune", "--no-tags", remote] + specs, cwd=repo, timeout=timeout)
         if f.returncode != 0:
             return {"status": "failed", "error": "git fetch: " + (f.stderr.strip().splitlines() or ["?"])[-1][:300]}
-        if cap_bytes:
-            co = _git(["count-objects", "-v"], cwd=repo)
-            kb = sum(int(v) for k, v in re.findall(r"^(size|size-pack): (\d+)$", co.stdout, re.M))
-            if kb * 1024 > cap_bytes:
-                return {"status": "too-large", "repo_kb": kb, "cap_mb": cap_bytes // MIB}
+        co = _git(["count-objects", "-v"], cwd=repo)
+        kb = sum(int(v) for k, v in re.findall(r"^(size|size-pack): (\d+)$", co.stdout, re.M))
+        if cap_bytes and kb * 1024 > cap_bytes:
+            return {"status": "too-large", "repo_kb": kb, "cap_mb": cap_bytes // MIB}
+        if budget_left is not None and kb * 1024 > budget_left:
+            return {"status": "over-budget", "need": kb * 1024}
         if head and head in remote_refs and head.startswith("refs/heads/"):
             _git(["symbolic-ref", "HEAD", head], cwd=repo)
         elif _git(["rev-parse", "-q", "--verify", "HEAD"], cwd=repo).returncode != 0:
@@ -539,8 +604,6 @@ def mirror_git(remote, prev_blob, store, cap_bytes, timeout):
         return {"status": "archived", "kind": "git-bundle", "sha256": sha, "bytes": n, "blob": rel,
                 "commit": commit, "ref": ref, "refs": len(remote_refs), "lfs": lfs,
                 "tool": "git " + _git(["--version"]).stdout.strip().replace("git version ", "")}
-    except subprocess.TimeoutExpired:
-        return {"status": "failed", "error": "git timed out after %ds" % timeout}
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -557,8 +620,9 @@ def _content_kind(ctype, head):
     return "file", EXT_BY_TYPE.get(ct, "bin")
 
 
-def mirror_http(url, prev, store, polite, robots, opts):
-    """Archive one page or file. `prev` is the latest archived entry for the same URL (or None)."""
+def mirror_http(url, prev, store, polite, robots, opts, budget_left=None):
+    """Archive one page or file. `prev` is the latest archived entry for the same URL (or None).
+    {"status": "over-budget"} when the body would pass `budget_left` bytes (nothing kept)."""
     ok, why = robots.allowed(url)
     if not ok:
         return {"status": "blocked", "error": why}
@@ -571,10 +635,11 @@ def mirror_http(url, prev, store, polite, robots, opts):
     fd, raw = tempfile.mkstemp(prefix="http-", dir=store.tmp)
     os.close(fd)
     try:
+        limit = opts.max_file_bytes if budget_left is None else min(opts.max_file_bytes, max(1, budget_left))
         try:
-            r = http_get(url, polite, headers=hdr, max_bytes=opts.max_file_bytes, timeout=opts.timeout, dest=raw)
-        except (OSError, urllib.error.URLError, ValueError) as e:
-            return {"status": "failed", "error": ("network: %s" % getattr(e, "reason", e))[:300]}
+            r = http_get(url, polite, headers=hdr, max_bytes=limit, timeout=opts.timeout, dest=raw)
+        except NET_ERRORS as e:
+            return {"status": "failed", "error": ("%s: %s" % (type(e).__name__, getattr(e, "reason", e)))[:300]}
         st, hd = r["status"], r["headers"]
         info = {"http_status": st, "final_url": r["final_url"] if r["final_url"] != url else None}
         if st == 304 and prev:
@@ -587,8 +652,12 @@ def mirror_http(url, prev, store, polite, robots, opts):
         if st != 200:
             return dict(info, status="failed", error="HTTP %d" % st)
         if r["too_large"]:
+            if limit < opts.max_file_bytes:
+                return {"status": "over-budget"}
             return dict(info, status="too-large", error="over %d MB" % (opts.max_file_bytes // MIB),
                         cap_mb=opts.max_file_bytes // MIB)
+        if r.get("truncated"):
+            return dict(info, status="failed", error="truncated: %d of %s bytes" % (r["bytes"], r.get("expected", "?")))
         with open(raw, "rb") as fh:
             head = fh.read(2048)
         kind, ext = _content_kind(hd.get("Content-Type"), head)
@@ -597,15 +666,22 @@ def mirror_http(url, prev, store, polite, robots, opts):
         if kind == "html":
             tool = "raw-html"
             if opts.monolith:
+                # Any monolith failure (cannot execute, hangs, exits non-zero, writes nothing)
+                # falls back to the raw HTML, recorded in monolith_error.
                 single = raw + ".single.html"
-                with open(raw, "rb") as fin:
-                    m = subprocess.run([opts.monolith, "-I", "-M", "-e", "-q", "-t", "60", "-u", UA,
-                                        "-b", r["final_url"], "-o", single, "-"],
-                                       stdin=fin, capture_output=True, timeout=600)
-                if m.returncode == 0 and os.path.isfile(single) and os.path.getsize(single) > 0:
-                    src, tool = single, "monolith"
-                else:
-                    info["monolith_error"] = (m.stderr.decode("utf-8", "replace").strip() or "exit %d" % m.returncode)[-200:]
+                try:
+                    with open(raw, "rb") as fin:
+                        m = subprocess.run([opts.monolith, "-I", "-M", "-e", "-q", "-t", "60", "-u", UA,
+                                            "-b", r["final_url"], "-o", single, "-"],
+                                           stdin=fin, capture_output=True, timeout=opts.monolith_timeout)
+                    if m.returncode == 0 and os.path.isfile(single) and os.path.getsize(single) > 0:
+                        src, tool = single, "monolith"
+                    else:
+                        info["monolith_error"] = (m.stderr.decode("utf-8", "replace").strip() or "exit %d" % m.returncode)[-200:]
+                except subprocess.TimeoutExpired:
+                    info["monolith_error"] = "timed out after %ds" % opts.monolith_timeout
+                except OSError as e:
+                    info["monolith_error"] = ("cannot run: %s" % e)[-200:]
         sha, n, rel = store.put(src, ext)
         return dict(info, status="archived", kind=kind, sha256=sha, bytes=n, blob=rel, tool=tool)
     finally:
@@ -641,8 +717,9 @@ def decide(rec, method, last, last_arch, now, opts):
         cap_now = opts.max_repo_bytes // MIB if method == "git" else opts.max_file_bytes // MIB
         was = last.get("cap_mb")
         return "fetch" if (method == "git" and not opts.max_repo_bytes) or (was is not None and cap_now > was) else None
-    if st in ("failed", "no-url"):
-        return "fetch"
+    if st == "failed":
+        age = now - (parse_iso(last.get("fetched")) or now)
+        return "fetch" if age >= timedelta(hours=opts.retry_hours) else None
     return "fetch"
 
 
@@ -789,7 +866,9 @@ def snapshot_index(store, index, doc, a, polite):
         slug = area.get("slug") if isinstance(area, dict) else None
         if not isinstance(slug, str) or not ID_RE.match(slug):
             continue
-        for loc in (sibling(a.index, slug + ".json"), area.get("json")):
+        named = area.get("json")
+        named = named if isinstance(named, str) and re.match(r"^https?://", named) else None
+        for loc in (sibling(a.index, slug + ".json"), named):
             if not isinstance(loc, str):
                 continue
             try:
@@ -797,10 +876,32 @@ def snapshot_index(store, index, doc, a, polite):
                     polite.wait(loc)
                 data = read_location(loc)
                 json.loads(data)
-            except (OSError, ValueError, urllib.error.URLError):
+            except NET_ERRORS:
                 continue
             store.write_if_changed("index/%s.json" % slug, data)
             break
+
+
+def _do_item(w, rec, method, target, prev, store, polite, robots, git_cache, a, budget_left):
+    if w["action"] == "no-url":
+        return {"status": "no-url"}
+    if w["action"] == "relabel":
+        return {"status": "relabelled"}
+    if method == "git":
+        meta = w["meta"]
+        if a.max_repo_bytes and meta and meta.get("size_kb") and meta["size_kb"] * 1024 > a.max_repo_bytes:
+            res = {"status": "too-large", "repo_kb": meta["size_kb"], "cap_mb": a.max_repo_bytes // MIB}
+        elif target in git_cache:
+            res = dict(git_cache[target])
+        else:
+            prev_blob = os.path.join(store.root, prev["blob"]) if prev and prev.get("blob") else None
+            res = mirror_git(target, prev_blob, store, a.max_repo_bytes, a.git_timeout, budget_left)
+            if res["status"] == "archived":
+                git_cache[target] = res
+        if meta and meta.get("size_kb") is not None and res["status"] != "over-budget":
+            res.setdefault("repo_kb", meta["size_kb"])
+        return res
+    return mirror_http(rec["url"], prev, store, polite, robots, a, budget_left)
 
 
 def cmd_mirror(a):
@@ -825,7 +926,11 @@ def cmd_mirror(a):
         records, bad = records_of(doc)
         snapshot_index(store, index, doc, a, polite)
         revision = index.get("revision")
-        entries, malformed = load_manifest(store.manifest)
+        dropped = repair_manifest(store.manifest)
+        if dropped:
+            print("references: dropped a torn last manifest line (%d bytes); that item is fetched again" % dropped,
+                  file=sys.stderr)
+        entries, malformed, _torn = load_manifest(store.manifest)
         meta_path = os.path.join(store.meta, "github.json")
         try:
             with open(meta_path) as fh:
@@ -841,32 +946,30 @@ def cmd_mirror(a):
         arch = latest_by_id(entries, archived_only=True)
         robots = Robots(polite)
         git_cache = {}
-        counts, added = {}, 0
+        counts, added, stopped = {}, 0, None
+
+        def left():
+            return None if a.budget < 0 else a.budget - added
+
         for i, w in enumerate(ordered, 1):
             rec, method, target = w["rec"], w["method"], w["target"]
+            if w["action"] in ("fetch", "refresh") and left() is not None and left() <= 0:
+                stopped = "budget reached: %d of %d bytes written" % (added, a.budget)
+                deferred += ordered[i - 1:]
+                break
             e = base_entry(rec, method, target, revision, now_utc())
             prev = arch.get(rec["id"])
             if prev and prev.get("url") != rec.get("url"):
                 prev = None
-            if w["action"] == "no-url":
-                res = {"status": "no-url"}
-            elif w["action"] == "relabel":
-                res = {"status": "relabelled"}
-            elif method == "git":
-                meta = w["meta"]
-                if a.max_repo_bytes and meta and meta.get("size_kb") and meta["size_kb"] * 1024 > a.max_repo_bytes:
-                    res = {"status": "too-large", "repo_kb": meta["size_kb"], "cap_mb": a.max_repo_bytes // MIB}
-                elif target in git_cache:
-                    res = dict(git_cache[target])
-                else:
-                    prev_blob = os.path.join(store.root, prev["blob"]) if prev and prev.get("blob") else None
-                    res = mirror_git(target, prev_blob, store, a.max_repo_bytes, a.git_timeout)
-                    if res["status"] in ("archived",):
-                        git_cache[target] = res
-                if meta and meta.get("size_kb") is not None:
-                    res.setdefault("repo_kb", meta["size_kb"])
-            else:
-                res = mirror_http(rec["url"], prev, store, polite, robots, a)
+            try:
+                res = _do_item(w, rec, method, target, prev, store, polite, robots, git_cache, a, left())
+            except Exception as ex:  # one bad item never stops the run
+                res = {"status": "failed", "error": ("%s: %s" % (type(ex).__name__, ex))[:300]}
+            if res["status"] == "over-budget":
+                stopped = "budget reached: %s needs %s bytes, %d of %d written" % (
+                    rec["id"], res.get("need", "more"), added, a.budget)
+                deferred += ordered[i - 1:]
+                break
             if res["status"] in ("unchanged", "relabelled"):
                 if not prev:
                     res = {"status": "failed", "error": "no earlier copy to keep"}
@@ -894,8 +997,10 @@ def cmd_mirror(a):
         if meta_cache:
             store.write_if_changed("meta/github.json", json.dumps(meta_cache, indent=1, sort_keys=True).encode() + b"\n")
         out = {"index_revision": revision, "records": len(records), "rejected_ids": bad, "idle": idle,
-               "done": len(ordered), "deferred": len(deferred), "statuses": dict(sorted(counts.items())),
-               "added_bytes": added, "malformed_manifest_lines": malformed}
+               "done": sum(counts.values()), "deferred": len(deferred), "statuses": dict(sorted(counts.items())),
+               "added_bytes": added, "malformed_manifest_lines": malformed, "stopped": stopped}
+        if stopped:
+            sys.stderr.write("references: stopped, %s; %d item(s) left for a later run\n" % (stopped, len(deferred)))
         json.dump(out, sys.stdout, sort_keys=True)
         sys.stdout.write("\n")
         return 0
@@ -905,11 +1010,13 @@ def cmd_mirror(a):
 
 def cmd_verify(a):
     store = Store(a.store)
-    entries, malformed = load_manifest(store.manifest)
+    entries, malformed, torn = load_manifest(store.manifest)
     arch = latest_by_id(entries, archived_only=True)
-    fails = []
+    fails, warnings = [], []
     if malformed:
         fails.append("manifest: %d malformed line(s)" % malformed)
+    if torn:
+        warnings.append("manifest: torn last line (a write cut short); the next mirror run drops it")
     for rid, e in sorted(arch.items()):
         path = os.path.join(store.root, e.get("blob") or "")
         if not e.get("blob") or not os.path.isfile(path):
@@ -943,14 +1050,14 @@ def cmd_verify(a):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
     out = {"ok": not fails, "copies": len(arch), "hashed": len(sample), "bundles_verified": len(bsample),
-           "failures": fails}
+           "failures": fails, "warnings": warnings}
     json.dump(out, sys.stdout, sort_keys=True)
     sys.stdout.write("\n")
     return 0 if not fails else 1
 
 
 def cmd_latest(a):
-    entries, _ = load_manifest(os.path.join(a.store, "manifest.jsonl"))
+    entries = load_manifest(os.path.join(a.store, "manifest.jsonl"))[0]
     for _rid, e in sorted(latest_by_id(entries, archived_only=not a.all).items()):
         sys.stdout.write(json.dumps(e, sort_keys=True, separators=(",", ":")) + "\n")
     return 0
@@ -970,6 +1077,7 @@ def main(argv=None):
         p.add_argument("--refresh-days", type=int, default=30, help="re-check copies older than this")
         p.add_argument("--refresh", action="store_true", help="re-check every copy now")
         p.add_argument("--backoff-days", type=int, default=30, help="wait before retrying blocked or gone sources")
+        p.add_argument("--retry-hours", type=float, default=24, help="wait before retrying a failed item")
         p.add_argument("--host-interval", type=float, default=float(os.environ.get("VALARK_REFS_HOST_INTERVAL", "1.0")),
                        help="seconds between requests to one host")
         p.add_argument("--github-sizes", action="store_true", help="ask the GitHub API for repo sizes (1 call per repo)")
@@ -987,6 +1095,7 @@ def main(argv=None):
     p.add_argument("--limit", type=int, default=0, help="at most this many items this run (0 = all)")
     p.add_argument("--timeout", type=int, default=120, help="HTTP timeout, seconds")
     p.add_argument("--git-timeout", type=int, default=7200, help="git fetch/bundle timeout, seconds")
+    p.add_argument("--monolith-timeout", type=int, default=600, help="monolith timeout per page, seconds")
     p.set_defaults(fn=cmd_mirror)
 
     p = sub.add_parser("verify", help="check the store")

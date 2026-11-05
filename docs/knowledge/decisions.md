@@ -52,7 +52,20 @@ later). See [README](README.md).
   (Y2Z/monolith, CC0; raw HTML when it is missing), PDFs and other files as served. Blobs are
   content-addressed, `manifest.jsonl` is an append-only log, and `by-id/<id>.<ext>` is the stable path
   from a record id to its latest copy. The work is ordered by `planner.py` (value: evidence class and
-  cited status) within `valark_budget_bytes`.
+  cited status); the budget (`valark_budget_bytes`) is enforced on bytes actually written, checked
+  before each item and after each fetch, and the run stops cleanly when it is reached.
+- **Opt-in, run by hand.** `download-tools.sh all` (the loop's weekly refresh, `start.sh` "download
+  all") and the web UI's one-click tool requests leave it out: the first pass is ~37 GB and can take a
+  day. Run `scripts/tools/cad-agent-references.sh` directly (detached, e.g. `nohup … &`), not through
+  `download-tools.sh`, which would hold the tool lock for the whole pass. It resumes per item, so re-run
+  it after an interruption and now and then to re-check (copies older than 30 days are re-checked).
+- **One bad item never stops a run:** anything an item raises (a malformed URL, a git or monolith
+  timeout, a monolith that cannot execute) is recorded as `failed` and retried after `--retry-hours`
+  (24); a monolith failure falls back to raw HTML. A body shorter than its `Content-Length` is never
+  stored. robots.txt is honoured; 5xx or no answer counts as disallow (RFC 9309).
+- **Politeness, precisely:** the module spaces its own requests (index, robots.txt, each page or file,
+  the GitHub API) at least 1 s apart per host. monolith's asset fetches for a page, redirect hops and
+  git traffic are not throttled by it.
 - **`redistribute` governs serving, never keeping.** It is `true` only for the `open` and
   `share-alike` licence classes; `non-commercial`, `unclear`, `proprietary` and `unrecorded` copies are
   archived with `redistribute: false`. So the store lives in `$VALARK_HOME/private/`, which `server.js`
@@ -68,7 +81,9 @@ later). See [README](README.md).
 
 ### The manifest (`manifest.jsonl`, schema `val-ark/cad-agent-references-manifest/1`)
 
-One JSON object per line, one line per fetch outcome, appended and never rewritten. The **latest line of
+One JSON object per line, one line per fetch outcome, appended (one `write()` per line) and never
+rewritten. A torn last line (a write cut short) is skipped by readers and dropped by the next mirror run.
+An item the budget stops is not recorded (it is simply fetched by a later run). The **latest line of
 an id whose `status` is `archived`, `unchanged` or `relabelled`** names its current copy; a later
 `gone` or `blocked` line never removes it (`references_mirror.py latest` prints exactly those). cad-agent's
 phase 6 (`tools/references_archive.py`) copies `sha256`, `kind`, `fetched` and `redistribute` into each
@@ -80,7 +95,7 @@ record's `archive:` block, and never a path or host.
 | `id` | all | cad-agent record id (`^[a-z0-9][a-z0-9._-]*$`; others are rejected, never written) |
 | `url` | all | the record's URL as published (`null` for a book) |
 | `method` | all | `git` \| `page` \| `pdf` \| `none`: how it was classified from the URL |
-| `status` | all | `archived` (copy made; may equal an earlier blob) \| `unchanged` (re-check found the same refs or HTTP 304; same blob) \| `relabelled` (licence changed, no fetch; same blob, `fetched` of the copy, plus `relabelled` time) \| `too-large` (pointer only) \| `no-url` \| `blocked` (401/403/429/451 or robots.txt) \| `gone` (404/410, repo not found) \| `failed` (anything else; retried next run) |
+| `status` | all | `archived` (copy made; may equal an earlier blob) \| `unchanged` (re-check found the same refs or HTTP 304; same blob) \| `relabelled` (licence changed, no fetch; same blob, `fetched` of the copy, plus `relabelled` time) \| `too-large` (pointer only) \| `no-url` \| `blocked` (401/403/429/451, or robots.txt disallows, refuses or is unreachable) \| `gone` (404/410, repo not found) \| `failed` (anything else, incl. a truncated body or a timeout; retried after `--retry-hours`) |
 | `fetched` | all | UTC `YYYY-MM-DDTHH:MM:SSZ` of the fetch that made the copy |
 | `record_kind` | all | cad-agent's `kind` (project, guide, datasheet …) |
 | `licence_class`, `licence_read` | all | as published; `unrecorded` when the record has none |

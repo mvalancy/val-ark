@@ -84,14 +84,30 @@ class H(http.server.BaseHTTPRequestHandler):
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
-        self.wfile.write(body)
+        if self.command != "HEAD":
+            self.wfile.write(body)
+    def do_HEAD(self):
+        self.do_GET()
     def do_GET(self):
         p = self.path.split("?")[0]
+        host = (self.headers.get("Host") or "").split(":")[0]
         with open(os.path.join(ROOT, "http.log"), "a") as fh:
             fh.write("%s %s %s\n" % (p, self.headers.get("If-None-Match") or "-", self.headers.get("User-Agent")))
         if p.startswith("/refs/"):
             f = os.path.join(ROOT, "site", p.lstrip("/"))
             return self.send(200, open(f, "rb").read(), "application/json") if os.path.isfile(f) else self.send(404)
+        if p == "/robots.txt" and host == "localhost":
+            return self.send(503, b"down")
+        if p == "/truncated":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", "5000")
+            self.end_headers()
+            self.wfile.write(b"only 13 bytes")
+            self.close_connection = True
+            return
+        if p.startswith("/monolith/"):
+            return self.send(200, b"not the real monolith", "application/octet-stream")
         if p == "/robots.txt":
             return self.send(200, b"User-agent: *\nDisallow: /private/\n", "text/plain")
         if p in ("/guide.html", "/guide-nc.html"):
@@ -115,7 +131,7 @@ class H(http.server.BaseHTTPRequestHandler):
             return self.send(200, b"<html>secret</html>")
         if p.startswith("/api/repos/acme/"):
             name = p.rsplit("/", 1)[1]
-            sizes = {"widget": 40, "huge": 999999}
+            sizes = {"widget": 40, "huge": 999999, "bigrepo": 10}
             if name in sizes:
                 return self.send(200, json.dumps({"size": sizes[name], "default_branch": "main",
                                                   "license": {"spdx_id": "MIT"}}).encode(), "application/json")
@@ -169,6 +185,7 @@ IDX="$H/refs/index.json"
 cat > "$T/monolith" <<'EOF'
 #!/bin/bash
 # stub monolith: -o OUT ... -  (reads stdin) -> writes a marked single file
+[ "$1" = -V ] && { echo "monolith stub"; exit 0; }
 out=""; base=""; while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; -b) base="$2"; shift ;; esac; shift; done
 { echo "<!-- single-file of ${base} -->"; cat; } > "$out"
 EOF
@@ -327,13 +344,14 @@ check "harness holds the real function" 'grep -q "references_mirror.py\" verify"
 OUT=$(bash "$HV" "$S1"); check "verify.sh PASSES a good store" '[ $? = 0 ] && echo "$OUT" | grep -q "^PASS cad-agent references integrity: 9 copies"' || echo "$OUT" >&2
 rm -f "$PDFB"
 OUT=$(bash "$HV" "$S1"); check "verify.sh FAILS a missing blob, naming it" '[ $? = 1 ] && echo "$OUT" | grep -q "datasheet: blob missing"'
+cp "$T/pdf.bak" "$PDFB"
 OUT=$(bash "$HV" "$T/nothing"); check "verify.sh is silent with no store" '[ $? = 0 ] && [ -z "$OUT" ]'
 
 # --- 12. the tool script ---------------------------------------------------------------
 export VALARK_RESERVE_MIN_GB=0 VALARK_RESERVE_PCT=0 VALARK_MONOLITH=""
 OUT=$(bash "$SH" --dry-run --index "$IDX" 2>&1)
 check "tool --dry-run prints the plan" 'echo "$OUT" | grep -q "\"to_do\": 16"' || echo "$OUT" >&2
-check "the default store is private/, never a served tree" '! [ -e "$VAL_ARK_DATA/val-ark/private" ]'
+check "the dry run creates no store" '! [ -e "$VAL_ARK_DATA/val-ark/private" ]'
 OUT=$(bash "$SH" --index "$IDX" 2>&1); RC=$?
 check "tool run exits 0 (blocked/gone are warnings, not failures)" '[ $RC = 0 ]' || echo "$OUT" >&2
 check "tool run stores under <home>/private/cad-agent-references" '[ -s "$VAL_ARK_DATA/val-ark/private/cad-agent-references/manifest.jsonl" ]'
@@ -342,8 +360,130 @@ check "tool run rejects a non-numeric cap" '! bash "$SH" --max-repo-mb lots --in
 OUT=$(bash "$SH" --index "$T/missing.json" 2>&1)
 check "tool run fails honestly on an unreadable index" '[ $? != 0 ] && echo "$OUT" | grep -q "could not be read"'
 check "private/ counts in the footprint" '( . "$ROOT/scripts/lib/valark-env.sh"; [ "$PRIVATE_DIR" = "$VAL_ARK_DATA/val-ark/private" ] && [ "$(valark_data_used_bytes)" -gt 0 ] )'
-check "server.js never serves private/" '! grep -nE "(ARCHIVE_DIRS|projectDirs) = \[[^]]*private" "$ROOT/scripts/server.js"'
 check ".gitignore keeps private/ out of git" 'grep -qx "/private" "$ROOT/.gitignore"'
+
+
+# --- 13. one bad item never stops a run --------------------------------------------
+mkindex() {   # dir, python list of (id, url, licence) -> $T/site/<dir>/{index,records}.json
+python3 - "$T/site/$1" "$2" <<'EOF2'
+import json, os, sys
+out, recs = sys.argv[1], eval(sys.argv[2])
+os.makedirs(out, exist_ok=True)
+rs = [dict(id=i, title=i, url=u, status="catalogued", kind="guide", licence=l, licence_read=False,
+           evidence="snippet-only", areas=["a"]) for i, u, l in recs]
+json.dump({"schema": "cad-agent-references/1", "revision": "e" * 40, "areas": []}, open(os.path.join(out, "index.json"), "w"))
+json.dump({"schema": "cad-agent-references/1", "count": len(rs), "records": rs}, open(os.path.join(out, "records.json"), "w"))
+EOF2
+}
+mkindex bad "[('a-space', '$H/a b.html', 'open'), ('page-ok', '$H/guide.html', 'open'),
+  ('slow', 'https://github.com/acme/slow', 'open'), ('w2', 'https://github.com/acme/widget', 'open'),
+  ('trunc', '$H/truncated', 'open'), ('robots-5xx', 'http://localhost:$PORT/guide.html', 'open')]"
+REALGIT=$(command -v git); mkdir -p "$T/fakebin"
+cat > "$T/fakebin/git" <<EOF2
+#!/bin/bash
+case " \$* " in *" ls-remote "*slow*) exec sleep 30 ;; esac
+[ -n "\${FAKE_GIT_SLOW_BUNDLE:-}" ] && [ "\$1" = bundle ] && [ "\$2" = create ] && exec sleep 30
+exec "$REALGIT" "\$@"
+EOF2
+chmod +x "$T/fakebin/git"
+printf '<html>not runnable</html>\n' > "$T/noexec-mono"   # no x bit: like a noexec mount
+printf '#!/bin/bash\nexec sleep 30\n' > "$T/hang-mono"; chmod +x "$T/hang-mono"
+S4="$T/store4"
+PATH="$T/fakebin:$PATH" python3 "$PY" mirror --store "$S4" --index "$T/site/bad/index.json" --monolith "$T/noexec-mono" \
+    --git-timeout 3 > "$T/bad1.json" 2>"$T/bad1.err"
+check "a run with bad items exits 0" '[ $? = 0 ]' || cat "$T/bad1.err" >&2
+check "every item got a line" '[ "$(j "$T/bad1.json" "d[\"done\"]")" = 6 ]'
+check "a URL with a space -> failed, recorded" '[ "$(line "$S4" a-space | j - "d[\"status\"]")" = failed ] && line "$S4" a-space | grep -q InvalidURL'
+check "git ls-remote timeout -> failed, recorded" '[ "$(line "$S4" slow | j - "d[\"status\"]")" = failed ] && line "$S4" slow | grep -q "ls-remote timed out"'
+check "the run went on: the repo after them archived" '[ "$(line "$S4" w2 | j - "d[\"status\"]")" = archived ]'
+check "a non-executable monolith falls back to raw HTML" '[ "$(line "$S4" page-ok | j - "(d[\"status\"], d[\"tool\"])")" = "archived raw-html" ] && line "$S4" page-ok | grep -q "cannot run"'
+check "a truncated body (Content-Length) is never stored" '[ "$(line "$S4" trunc | j - "(d[\"status\"], d[\"error\"])")" = "failed truncated: 13 of 5000 bytes" ]'
+check "robots.txt answering 5xx -> blocked" '[ "$(line "$S4" robots-5xx | j - "(d[\"status\"], d[\"error\"])")" = "blocked robots.txt unreachable (503)" ]'
+N4=$(wc -l < "$S4/manifest.jsonl")
+python3 "$PY" mirror --store "$S4" --index "$T/site/bad/index.json" --monolith "" > /dev/null 2>&1
+check "a failed item waits --retry-hours before a retry" '[ "$(wc -l < "$S4/manifest.jsonl")" = "$N4" ]'
+PATH="$T/fakebin:$PATH" python3 "$PY" mirror --store "$S4" --index "$T/site/bad/index.json" --monolith "" --retry-hours 0 --git-timeout 3 > /dev/null 2>&1
+check "--retry-hours 0 retries the failed items" '[ "$(wc -l < "$S4/manifest.jsonl")" = $((N4 + 3)) ]'
+python3 "$PY" mirror --store "$T/store5" --index "$T/site/bad/index.json" --monolith "$T/hang-mono" --monolith-timeout 1 \
+    --git-timeout 3 > /dev/null 2>&1
+check "a hanging monolith times out and falls back to raw HTML" '[ "$(line "$T/store5" page-ok | j - "d[\"tool\"]")" = raw-html ] && line "$T/store5" page-ok | grep -q "timed out after 1s"'
+FAKE_GIT_SLOW_BUNDLE=1 PATH="$T/fakebin:$PATH" python3 "$PY" mirror --store "$T/store6" --index "$T/site/bad/index.json" \
+    --monolith "" --git-timeout 3 > /dev/null 2>&1
+check "git bundle timeout -> failed, recorded, temp cleaned" '[ "$(line "$T/store6" w2 | j - "d[\"status\"]")" = failed ] && line "$T/store6" w2 | grep -q "bundle timed out" && [ -z "$(ls -A "$T/store6/tmp")" ]'
+
+# --- 14. the budget is enforced on bytes written ----------------------------------------
+# mirror() passes --store "$S1"; the later --store wins.
+GITHUB_TOKEN=fixture mirror --store "$T/store7" --budget 1000000 > "$T/b1.json" 2>"$T/b1.err"
+check "a repo larger than the budget left stops the run" 'j "$T/b1.json" "d[\"stopped\"]" | grep -q "budget reached: bigrepo needs"' || cat "$T/b1.json" >&2
+check "nothing over budget is written" '[ "$(j "$T/b1.json" "d[\"added_bytes\"]")" -le 1000000 ] && ! grep -q "\"id\":\"bigrepo\"" "$T/store7/manifest.jsonl" && [ -z "$(ls -A "$T/store7/tmp")" ]'
+check "the tool says why it stopped" 'grep -q "references: stopped, budget reached" "$T/b1.err"'
+mkindex big "[('bigfile', '$H/big.bin', 'open')]"
+python3 "$PY" mirror --store "$T/store8" --index "$T/site/big/index.json" --monolith "" --budget 2097160 > "$T/b2.json" 2>/dev/null
+check "a file larger than the budget left stops the run, nothing kept" 'j "$T/b2.json" "d[\"stopped\"]" | grep -q "budget reached: bigfile" && [ ! -s "$T/store8/manifest.jsonl" ] && [ -z "$(ls "$T/store8/blobs")" ]'
+python3 "$PY" mirror --store "$T/store8" --index "$T/site/big/index.json" --monolith "" --budget 0 > "$T/b3.json" 2>/dev/null
+check "a zero budget fetches nothing" '[ "$(j "$T/b3.json" "d[\"done\"]")" = 0 ]'
+
+# --- 15. manifest: a torn last line is skipped, then dropped ----------------------------
+printf '{"v":1,"id":"torn","sta' >> "$S1/manifest.jsonl"
+python3 "$PY" verify --store "$S1" --sample 0 --bundles 0 > "$T/v4.json"
+check "verify warns on a torn last line and still passes" '[ $? = 0 ] && grep -q "torn last line" "$T/v4.json"'
+mirror > /dev/null 2>"$T/torn.err"
+check "the next mirror run drops the torn line" 'grep -q "dropped a torn last manifest line" "$T/torn.err" && python3 -c "import json,sys; [json.loads(l) for l in open(sys.argv[1])]" "$S1/manifest.jsonl"'
+python3 "$PY" verify --store "$S1" --sample 0 --bundles 0 > "$T/v5.json"
+check "verify is clean after the repair" '[ $? = 0 ] && [ "$(j "$T/v5.json" "d[\"warnings\"]")" = "" ]'
+
+# --- 16. an index may not point at local files --------------------------------------------
+mkdir -p "$T/evil"; echo '{"secret": 1}' > "$T/secret.json"
+echo "{\"schema\": \"cad-agent-references/1\", \"records\": \"file://$T/site/refs/records.json\"}" > "$T/evil/index.json"
+python3 "$PY" plan --index "$T/evil/index.json" >/dev/null 2>&1
+check "records named as file:// are refused" '[ $? = 2 ]'
+mkindex evil2 "[('book2', None, 'open')]"
+python3 - "$T/site/evil2/index.json" "$T/secret.json" <<'EOF2'
+import json, sys
+d = json.load(open(sys.argv[1])); d["areas"] = [{"slug": "zz", "json": "file://" + sys.argv[2]}, {"slug": "yy", "json": sys.argv[2]}]
+json.dump(d, open(sys.argv[1], "w"))
+EOF2
+python3 "$PY" mirror --store "$T/store9" --index "$T/site/evil2/index.json" --monolith "" > /dev/null 2>&1
+check "area files named as local paths are never read" '[ ! -e "$T/store9/index/zz.json" ] && [ ! -e "$T/store9/index/yy.json" ] && [ -s "$T/store9/index/records.json" ]'
+
+# --- 17. opt-in: not in `all`, not one click ----------------------------------------------
+check "download-tools.sh list (and so all) leaves it out" '! bash "$ROOT/scripts/download-tools.sh" list 2>/dev/null | grep -q cad-agent-references && bash "$ROOT/scripts/download-tools.sh" list 2>/dev/null | grep -q "  cad-agent$"'
+check "the web UI cannot start it" 'grep -q "f !== .cad-agent-references.sh." "$ROOT/scripts/server.js"'
+
+# --- 18. monolith: pinned sha256, and a binary that cannot run is not used ----------------
+if [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ]; then
+    OUT=$(env -u VALARK_MONOLITH VALARK_DL_RETRIES=1 VALARK_REFS_DIR="$T/store10" VALARK_MONOLITH_BASE_URL="$H/monolith" PATH="/usr/bin:/bin" \
+        bash -c 'source "$1"; refs_monolith' _ "$SH" 2>&1)
+    check "a monolith download with the wrong sha256 is refused and deleted" 'echo "$OUT" | grep -q "is not the pinned" && [ ! -e "$T/store10/.bin/monolith-v2.12.0" ]' || echo "$OUT" >&2
+fi
+check "a binary that cannot execute is not used" '! bash -c "source \"\$1\"; refs_runs \"\$2\"" _ "$SH" "$T/noexec-mono" && bash -c "source \"\$1\"; refs_runs \"\$2\"" _ "$SH" "$T/monolith"'
+
+# --- 19. the store is never served ----------------------------------------------------------
+NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
+if [ -n "$NODE" ] && command -v curl >/dev/null 2>&1; then
+    MADE_PRIVATE=0; [ -e "${ROOT:?}/private" ] || MADE_PRIVATE=1
+    PD="${ROOT:?}/private/refs-test-$$"; mkdir -p "$PD"; echo SECRET > "$PD/copy.html"
+    SP=3962; B="http://127.0.0.1:$SP"
+    env VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 \
+        VALARK_WEB_PORT="$SP" VALARK_HTTPS_PORT="$((SP + 9000))" VALARK_STATE_DIR="$T/srvstate" \
+        "$NODE" "$ROOT/scripts/server.js" "$SP" >"$T/srv.log" 2>&1 &
+    NPID=$!
+    up=0; for _ in $(seq 1 30); do sleep 0.4; curl -sf --max-time 2 "$B/api/health" >/dev/null 2>&1 && { up=1; break; }; done
+    if [ "$up" = 1 ]; then
+        R="private/refs-test-$$/copy.html"
+        for u in "/$R" "/api/archive/$R" "/api/archive/private/refs-test-$$" "/tools/../$R" "/tools/..%2f$R" "/%2e%2e/$R" "/sources/%2e%2e/$R"; do
+            code=$(curl -s -o "$T/served" -w '%{http_code}' --path-as-is --max-time 5 "$B$u")
+            check "server.js does not serve $u (got $code)" '[ "$code" != 200 ] && ! grep -q SECRET "$T/served"'
+        done
+    else
+        fail "server.js did not start on :$SP"
+    fi
+    kill "$NPID" 2>/dev/null
+    rm -f "${PD:?}/copy.html"; rmdir "${PD:?}"
+    [ "$MADE_PRIVATE" = 1 ] && rmdir "${ROOT:?}/private"
+else
+    echo "  SKIP: served-tree check (no node or curl)" >&2
+fi
 
 echo "cad-agent-references: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ]

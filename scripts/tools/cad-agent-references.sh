@@ -22,6 +22,15 @@
 # why the store lives under private/, outside every tree the web server
 # serves (tools, models, content, sources, assets, installers, docs).
 #
+# OPT-IN: this is not a tool refresh. download-tools.sh `all` (the loop's weekly
+# refresh, start.sh "download all") skips it, and the web UI cannot start it,
+# because its first pass is ~37 GB and can take a day. Run it yourself, detached,
+# straight from this script (not through download-tools.sh, which would hold the
+# tool lock for the whole pass):
+#   nohup scripts/tools/cad-agent-references.sh >> <state>/logs/references.log 2>&1 &
+# It resumes where it stopped (each item is its own manifest line), so re-run it
+# after an interruption, and again now and then (e.g. a monthly cron) to re-check.
+#
 # Options (also from .env): --dry-run (plan + size estimate, fetches only the
 # index), --max-repo-mb N / VALARK_REFS_MAX_REPO_MB (pointer only above N MB,
 # for small disks), --refresh (re-check every copy now; otherwise copies older
@@ -37,14 +46,25 @@ REFS_DIR="${VALARK_REFS_DIR:-${PRIVATE_DIR:-${VALARK_HOME:-$PROJECT_ROOT}/privat
 REFS_MAX_REPO_MB="${VALARK_REFS_MAX_REPO_MB:-0}"
 REFS_REFRESH_DAYS="${VALARK_REFS_REFRESH_DAYS:-30}"
 # monolith (Y2Z/monolith, CC0): one self-contained HTML file per page, no browser.
-MONOLITH_VERSION="${VALARK_MONOLITH_VERSION:-v2.12.0}"
+MONOLITH_VERSION="v2.12.0"
+# sha256 of each v2.12.0 release asset (GitHub's published asset digests).
+monolith_sha256() {
+    case "$1" in
+        monolith-cli-linux-x86_64)               echo 5d6db497e19b51db0c95362b41c966d2e4b18ecd415795f7ac2d324fd5adbcf6 ;;
+        monolith-cli-linux-aarch64)              echo 1933940d489c730e8a665dd81681bc6f3f4f3c6265dc3b3066765503626d0389 ;;
+        monolith-cli-macos-aarch64-apple-darwin) echo 2dc89a796d9c6932e7c7c7a6d58011ec7d99b9c6f454619283664e2aeb0148a9 ;;
+        monolith-cli-macos-x86_64-apple-darwin)  echo fcb8261e2ab45ab047bf05336cc7f5cfc472afb2d821be1e309d630b676f891c ;;
+    esac
+}
 
 # The monolith binary for this host: $VALARK_MONOLITH, one on PATH, or the pinned
-# release fetched into the store's .bin/. Prints its path, or nothing (pages are
-# then kept as raw HTML, recorded as tool "raw-html").
+# release fetched into the store's .bin/ and checked against its sha256. Prints its
+# path only if it actually runs (`-V`; a noexec mount fails here), else nothing:
+# pages are then kept as raw HTML, recorded as tool "raw-html".
 refs_monolith() {
     if [ -n "${VALARK_MONOLITH+x}" ]; then echo "$VALARK_MONOLITH"; return 0; fi
-    command -v monolith 2>/dev/null && return 0
+    local onpath; onpath=$(command -v monolith 2>/dev/null)
+    if refs_runs "$onpath"; then echo "$onpath"; return 0; fi
     local asset
     case "$(uname -s)/$(uname -m)" in
         Linux/x86_64)          asset=monolith-cli-linux-x86_64 ;;
@@ -53,13 +73,23 @@ refs_monolith() {
         Darwin/x86_64)         asset=monolith-cli-macos-x86_64-apple-darwin ;;
         *) return 0 ;;
     esac
-    local bin="${REFS_DIR}/.bin/monolith-${MONOLITH_VERSION}"
-    if [ ! -x "$bin" ]; then
-        download_file "https://github.com/Y2Z/monolith/releases/download/${MONOLITH_VERSION}/${asset}" "$bin" \
-            "monolith ${MONOLITH_VERSION}" >&2 && chmod +x "$bin" 2>/dev/null || { rm -f "${bin:?}"; return 0; }
+    local bin="${REFS_DIR}/.bin/monolith-${MONOLITH_VERSION}" want got
+    if [ ! -f "$bin" ]; then
+        download_file "${VALARK_MONOLITH_BASE_URL:-https://github.com/Y2Z/monolith/releases/download}/${MONOLITH_VERSION}/${asset}" "$bin" \
+            "monolith ${MONOLITH_VERSION}" >&2 || { rm -f "${bin:?}"; return 0; }
+        want=$(monolith_sha256 "$asset")
+        got=$( (sha256sum "$bin" 2>/dev/null || shasum -a 256 "$bin" 2>/dev/null) | cut -d' ' -f1)
+        if [ -z "$want" ] || [ "$got" != "$want" ]; then
+            log_warn "${TOOL_NAME}: monolith ${asset} sha256 ${got:-?} is not the pinned ${want:-?} - not used" >&2
+            rm -f "${bin:?}"; return 0
+        fi
+        chmod +x "$bin" 2>/dev/null
     fi
-    echo "$bin"
+    refs_runs "$bin" && echo "$bin"
 }
+
+# Can this binary execute here? (A noexec data mount passes -x tests on some systems.)
+refs_runs() { [ -n "$1" ] && timeout 20 "$1" -V >/dev/null 2>&1; }
 
 download_cad_agent_references() {
     log "Mirroring ${TOOL_NAME}..."
@@ -110,6 +140,8 @@ download_cad_agent_references() {
     # One JSON summary line: {"statuses": {...}, "added_bytes": N, "deferred": N, ...}
     local summary failed blocked gone deferred added
     summary=$(printf '%s' "$out" | tail -1)
+    local stopped; stopped=$(printf '%s' "$summary" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("stopped") or "")' 2>/dev/null)
+    [ -n "$stopped" ] && log_warn "${TOOL_NAME}: stopped, ${stopped}; free space or raise VALARK_MAX_GB, then re-run"
     _refs_n() { printf '%s' "$summary" | python3 -c 'import json,sys; d=json.load(sys.stdin); k=sys.argv[1]; print(d.get("statuses",{}).get(k, d.get(k, 0)))' "$1" 2>/dev/null || echo 0; }
     failed=$(_refs_n failed); blocked=$(_refs_n blocked); gone=$(_refs_n gone); deferred=$(_refs_n deferred); added=$(_refs_n added_bytes)
     [ "${blocked:-0}" -gt 0 ] && log_warn "${TOOL_NAME}: ${blocked} source(s) refuse automated fetches (403/robots) - link only, retried in 30 days"

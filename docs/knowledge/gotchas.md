@@ -202,8 +202,10 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   manifest's `redistribute`. Two other traps: GitHub's `refs/pull/*` would bloat a `clone --mirror`, so
   the mirror fetches only `refs/heads/*` and `refs/tags/*`; and a bundle re-made from unchanged refs is
   not byte-identical, so a re-check compares `git ls-remote` with `git bundle list-heads` first and
-  makes no new blob when they match. The loop's bounded tool refresh can kill a run mid-fetch: the next
-  run clears `tmp/`, and the manifest is appended per item, so it resumes.
+  makes no new blob when they match. It is opt-in (`download-tools.sh` skips it in `all`/`list`, the web
+  UI cannot start it): a ~37 GB first pass inside the loop's 2 h tool refresh would starve every tool
+  after it. If a run is killed mid-fetch, the next run clears `tmp/` and resumes per item (an
+  interrupted repo fetch restarts that repo).
   Regression: `tests/test-cad-agent-references.sh`.
 
 ## Storage / data root

@@ -11,6 +11,7 @@ later). See [README](README.md).
 
 | Date | Decision | Issue / Phase |
 |------|----------|---------------|
+| 2026‑11 | [cad-agent references: a private, content-addressed archive of every cited source](#202611--cad-agent-references-a-private-content-addressed-archive-of-every-cited-source-cad-agent323) | cad-agent#323 |
 | 2026‑11 | [Python wheelhouses + container archives as tool artifacts](#202611--python-wheelhouses--container-archives-as-tool-artifacts-149) | #149 |
 | 2026‑07 | [CI guards: doc-link integrity + secret/host-leak scan](#202607--ci-guards-doc-link-integrity--secrethost-leak-scan-130) | #130 |
 | 2026‑07 | ["Ask Val Ark": an offline ask endpoint reusing the moderation runtime](#202607--ask-val-ark-slice-1-an-offline-ask-endpoint-that-reuses-the-moderation-runtime-phase-8-67) | Phase 8 · #67 |
@@ -37,6 +38,79 @@ later). See [README](README.md).
 | 2026‑07 | [Notification center: bell/inbox slice 1](#202607--notification-center-bellinbox-slice-1-69) | #69 |
 
 ---
+
+## 2026‑11 — cad-agent references: a private, content-addressed archive of every cited source (cad-agent#323)
+- **Context:** cad-agent keeps a reference knowledge base of ~760 sources (≈330 GitHub repos, ≈350
+  pages, ≈70 PDFs, a few books) and publishes it as JSON beside its site
+  (`catalog/references/index.json`, `records.json`, `<area>.json`). The owner, 2026-11-04: *"the
+  resources were for cad-agent to provide references for designs and also to mine in the future, of
+  course val-ark would back them up as well and clone them."*
+- **Decision:** `scripts/tools/cad-agent-references.sh` + `scripts/lib/references_mirror.py` read that
+  index (the Ark keeps no URL list of its own) and archive **every** source, whatever its licence:
+  repos as full-history `git bundle`s (every branch and tag, no size cap by default; `--max-repo-mb`
+  for small disks keeps a pointer only), pages as one self-contained HTML file via **monolith**
+  (Y2Z/monolith, CC0; raw HTML when it is missing), PDFs and other files as served. Blobs are
+  content-addressed, `manifest.jsonl` is an append-only log, and `by-id/<id>.<ext>` is the stable path
+  from a record id to its latest copy. The work is ordered by `planner.py` (value: evidence class and
+  cited status); the budget (`valark_budget_bytes`) is enforced on bytes actually written, checked
+  before each item and after each fetch, and the run stops cleanly when it is reached.
+- **Opt-in, run by hand.** `download-tools.sh all` (the loop's weekly refresh, `start.sh` "download
+  all") and the web UI's one-click tool requests leave it out: the first pass is ~37 GB and can take a
+  day. Run `scripts/tools/cad-agent-references.sh` directly (detached, e.g. `nohup … &`), not through
+  `download-tools.sh`, which would hold the tool lock for the whole pass. It resumes per item, so re-run
+  it after an interruption and now and then to re-check (copies older than 30 days are re-checked).
+- **One bad item never stops a run:** anything an item raises (a malformed URL, a git or monolith
+  timeout, a monolith that cannot execute) is recorded as `failed` and retried after `--retry-hours`
+  (24); a monolith failure falls back to raw HTML. A body shorter than its `Content-Length` is never
+  stored. robots.txt is honoured; 5xx or no answer counts as disallow (RFC 9309).
+- **Politeness, precisely:** the module spaces its own requests (index, robots.txt, each page or file,
+  the GitHub API) at least 1 s apart per host. monolith's asset fetches for a page, redirect hops and
+  git traffic are not throttled by it.
+- **`redistribute` governs serving, never keeping.** It is `true` only for the `open` and
+  `share-alike` licence classes; `non-commercial`, `unclear`, `proprietary` and `unrecorded` copies are
+  archived with `redistribute: false`. So the store lives in `$VALARK_HOME/private/`, which `server.js`
+  never serves (its static and `/api/archive/` trees are tools/models/content/sources/assets/installers/docs),
+  and it counts in the footprint (`valark_data_used_bytes`). A future UI may serve the `true` copies.
+- **Adopt, don't build:** `git bundle` (restorable with `git clone`, checkable with `git bundle
+  verify`), monolith for pages, the librarian's planner for ordering. ArchiveBox / browsertrix (WARC,
+  JS-heavy pages) stay an optional later path; lychee belongs in cad-agent's link checker, not here.
+- **Size (dry run, 2026-11-04, cad-agent dev index, repo sizes from the GitHub API):** ≈ 37 GiB in all,
+  ≈ 36 GiB of it repos (the largest 6.8 GiB); pages and PDFs ≈ 1 GiB at 2–3 MB each.
+- **Why:** one source of truth (cad-agent's index), a store a later tool can walk with no network,
+  and dedup for free (two records of one repo or one PDF share a blob).
+
+### The manifest (`manifest.jsonl`, schema `val-ark/cad-agent-references-manifest/1`)
+
+One JSON object per line, one line per fetch outcome, appended (one `write()` per line) and never
+rewritten. A torn last line (a write cut short) is skipped by readers and dropped by the next mirror run.
+An item the budget stops is not recorded (it is simply fetched by a later run). The **latest line of
+an id whose `status` is `archived`, `unchanged` or `relabelled`** names its current copy; a later
+`gone` or `blocked` line never removes it (`references_mirror.py latest` prints exactly those). cad-agent's
+phase 6 (`tools/references_archive.py`) copies `sha256`, `kind`, `fetched` and `redistribute` into each
+record's `archive:` block, and never a path or host.
+
+| Field | On | Meaning |
+|---|---|---|
+| `v` | all | `1` |
+| `id` | all | cad-agent record id (`^[a-z0-9][a-z0-9._-]*$`; others are rejected, never written) |
+| `url` | all | the record's URL as published (`null` for a book) |
+| `method` | all | `git` \| `page` \| `pdf` \| `none`: how it was classified from the URL |
+| `status` | all | `archived` (copy made; may equal an earlier blob) \| `unchanged` (re-check found the same refs or HTTP 304; same blob) \| `relabelled` (licence changed, no fetch; same blob, `fetched` of the copy, plus `relabelled` time) \| `too-large` (pointer only) \| `no-url` \| `blocked` (401/403/429/451, or robots.txt disallows, refuses or is unreachable) \| `gone` (404/410, repo not found) \| `failed` (anything else, incl. a truncated body or a timeout; retried after `--retry-hours`) |
+| `fetched` | all | UTC `YYYY-MM-DDTHH:MM:SSZ` of the fetch that made the copy |
+| `record_kind` | all | cad-agent's `kind` (project, guide, datasheet …) |
+| `licence_class`, `licence_read` | all | as published; `unrecorded` when the record has none |
+| `redistribute` | all | `true` only for `open` and `share-alike`: may the Ark serve this copy |
+| `index_revision` | all | cad-agent commit the index was built from |
+| `kind` | copies | `git-bundle` \| `html` \| `pdf` \| `file` |
+| `sha256`, `bytes` | copies | of the stored blob |
+| `blob` | copies | `blobs/<sha256[:2]>/<sha256>.<ext>`, relative to the store |
+| `link` | copies | `by-id/<id>.<ext>`, relative symlink to the blob |
+| `tool` | copies | `git <version>` \| `monolith` \| `raw-html` \| `urllib` |
+| `remote` | git | the clone URL |
+| `commit`, `ref`, `refs`, `lfs` | git | HEAD commit, its branch, number of branches+tags, whether `.gitattributes` uses LFS (LFS objects are not fetched) |
+| `repo_kb` | git | size the host reports (GitHub API), when known |
+| `http_status`, `final_url`, `etag`, `last_modified`, `content_type` | http | as served (`final_url` only after a redirect) |
+| `cap_mb`, `error`, `retry_after`, `monolith_error` | some | why a copy was not made, or fell back |
 
 ## 2026‑11 — Python wheelhouses + container archives as tool artifacts (#149)
 - **Context:** cad-agent (CAD/FEA/CFD toolkit) needs ~100 Python wheels, an OpenFOAM container

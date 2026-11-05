@@ -50,11 +50,17 @@ declare -A ALIASES=(
 ###############################################################################
 
 # Get list of all available tool scripts (excluding _common.sh)
+# Opt-in entries: never part of `all` (the loop's weekly refresh, start.sh
+# "download all") or `list`; run explicitly. cad-agent-references is a ~37 GB
+# archive whose first pass can take a day (see its header for how to run it).
+OPT_IN_TOOLS=" cad-agent-references "
+
 list_tools() {
     local tools=()
     for script in "${TOOLS_SCRIPTS}"/*.sh; do
         local name=$(basename "$script" .sh)
         [ "$name" = "_common" ] && continue
+        [[ "$OPT_IN_TOOLS" == *" $name "* ]] && continue
         tools+=("$name")
     done
     echo "${tools[@]}"

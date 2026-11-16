@@ -77,6 +77,24 @@ verify_cad_agent() {
     done
 }
 
+verify_cad_agent_references() {
+    # The private reference archive (scripts/tools/cad-agent-references.sh): every copy's
+    # blob is present at its manifest size with its by-id link, a sample re-hashes to its
+    # sha256, and a sample of git bundles passes `git bundle verify`.
+    local dir="${1:-${VALARK_REFS_DIR:-${PRIVATE_DIR:-$VALARK_HOME/private}/cad-agent-references}}" out
+    [ -s "$dir/manifest.jsonl" ] || return 0     # not mirrored here: nothing to check
+    out=$(python3 "${_LIB}/references_mirror.py" verify --store "$dir" \
+        --sample "${VALARK_REFS_VERIFY_SAMPLE:-5}" --bundles "${VALARK_REFS_VERIFY_BUNDLES:-2}" 2>&1)
+    local rc=$? summary
+    summary=$(printf '%s' "$out" | python3 -c 'import json,sys
+try: d=json.loads(sys.stdin.read().strip().splitlines()[-1])
+except Exception: print("unreadable verify output"); sys.exit()
+print("%d copies, %d re-hashed, %d bundle(s) verified" % (d["copies"], d["hashed"], d["bundles_verified"]) if d["ok"]
+      else "; ".join(d["failures"][:3]) + (" (+%d more)" % (len(d["failures"]) - 3) if len(d["failures"]) > 3 else ""))' 2>/dev/null)
+    if [ "$rc" = 0 ]; then chk "cad-agent references integrity: ${summary}"
+    else bad "cad-agent references integrity: ${summary:-verify exited $rc}"; fi
+}
+
 verify_local() {
     echo "── local functional checks ──"
     local td; td=$(native_tools_dir)
@@ -103,6 +121,7 @@ verify_local() {
     # throwaway venv and the CLI runs. Core package only: the full extras set is
     # what install.sh proves; it is too heavy for every loop cycle.
     verify_cad_agent "$td"
+    verify_cad_agent_references
 
     # 2) kiwix serves a real ZIM (start on a test port, curl, stop)
     local kbin="$td/kiwix/kiwix-serve"

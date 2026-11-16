@@ -89,6 +89,12 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Downloads / mirroring
 
+- **`apt-get --print-uris` is a trap for offline .deb sets** (`scripts/lib/apt_offline.py`): (1) it
+  prints only an **MD5** digest, so take SHA256 from the signed `*_Packages` lists; (2) its local
+  file name carries the **epoch** URL-encoded (`zlib1g_1%3a1.3…deb`) while the pool/`Packages`
+  `Filename` has none, so name files after the URL basename or the flat-repo index and the SHA
+  lookup silently miss ~5% of packages. Resolve against an **empty dpkg status** in a throwaway
+  APT root so every dependency (even libc6) is included and the set is truly self-contained.
 - **hf‑repo model downloads (e.g. `rhasspy/piper-voices`) fail with exit 127 if the `hf` CLI
   is missing** — silent for a while, then "command not found." **Fix:** `pip install -U
   huggingface_hub` (provides `hf`); `setup.sh` marks it optional but it's required for repo pulls.
@@ -194,6 +200,26 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   HTTP 416 on every rerun. A 401 mid‑pull means re‑authenticate (Docker Hub tokens last ~300 s).
   `Authorization` is dropped on a redirect to another host (the blob CDN), and a blob is never
   stored past its declared size.
+
+- **Reference archive copies are kept, not served (cad-agent#323).** `scripts/tools/cad-agent-references.sh`
+  stores sources whose licence is unclear or proprietary, so its store is `$VALARK_HOME/private/`, which
+  `server.js` never serves. Do not move it under `sources/` or `content/` (both are served, and
+  `/api/archive/` tars whole trees), and do not export `private/` on a share without filtering on the
+  manifest's `redistribute`. Two other traps: GitHub's `refs/pull/*` would bloat a `clone --mirror`, so
+  the mirror fetches only `refs/heads/*` and `refs/tags/*`; and a bundle re-made from unchanged refs is
+  not byte-identical, so a re-check compares `git ls-remote` with `git bundle list-heads` first and
+  makes no new blob when they match. It is opt-in (`download-tools.sh` skips it in `all`/`list`, the web
+  UI cannot start it): a ~37 GB first pass inside the loop's 2 h tool refresh would starve every tool
+  after it. If a run is killed mid-fetch, the next run clears `tmp/` and resumes per item (an
+  interrupted repo fetch restarts that repo).
+  Regression: `tests/test-cad-agent-references.sh`.
+- **A `git clone` of a big repo over a flaky link never finishes.** It is ONE non-resumable transfer
+  (Linux, TensorFlow and Transformers died at curl 92 / early EOF over Wi-Fi), and git's default
+  `http.lowSpeedTime` aborts while GitHub silently packs a large `--deepen` chunk (curl 28 after
+  hours). `scripts/lib/git_bundle_mirror.py` fetches `--depth=1`, deepens in chunks with
+  `http.lowSpeedTime=1800` and HTTP/1.1, and **keeps the shallow staging dir on failure** so the
+  next run resumes. Fetch only `refs/heads/*` + `refs/tags/*`: GitHub's `refs/pull/*` can double
+  a bundle.
 
 ## Storage / data root
 

@@ -2,7 +2,7 @@
 ###############################################################################
 # Test: owner PROFILE biases curation value per bucket (roadmap Phase 5).
 #
-# The commissioning wizard stores a profile (balanced/knowledge/ai/tools) in
+# The commissioning wizard stores a profile (balanced/knowledge/ai/tools/survival) in
 # settings.json; the librarian applies a per-bucket multiplier so the box fills
 # according to what the owner wants. Verifies the resolver + the value bias.
 ###############################################################################

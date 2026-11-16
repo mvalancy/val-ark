@@ -30,6 +30,7 @@ tools/
 /assets
 /installers
 /state
+/private
 
 # Service runtime state can hold generated credentials in dev/fallback mode
 # (VAL_ARK_DATA unset -> STATE_DIR=./state). Never let those reach the public repo.

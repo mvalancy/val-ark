@@ -29,6 +29,15 @@ the web server and legacy scripts work unchanged. Resolution + disk math live in
 
 The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
 
+0. **Grid-down essentials** — before anything else, the ranked list in
+   [`data/essentials.tsv`](../data/essentials.tsv): safe water, field medicine,
+   medicines, food, knots, post-disaster recovery, a pocket Wikipedia, a small
+   offline assistant, then repair / power / radio / farming references and the
+   network-boot images. Each entry takes its **smallest** variant (mini/nopic ZIM)
+   and an entry that does not fit is skipped, so a 2 GB stick still gets the most
+   critical ~20 items and a big disk later upgrades to the full variants in
+   phases 1–3. Rows can target an owner profile (`focus`), e.g. Army field manuals
+   only for `survival`.
 1. **Diversity first** — one item (the *smallest*) from every category before
    deepening any single one. Guarantees breadth across ~40+ categories (22 ZIM
    topics, 17 model modalities, and netboot / OS-install / router-firmware /
@@ -53,7 +62,8 @@ flavours (maxi/nopic/mini) collapse to the most complete one.
 |--------|------|-------|
 | Kiwix ZIM library | live OPDS via `scripts/lib/kiwix_catalog.py` | **Always current** — ZIM dates never go stale. ~1700+ entries across 9 languages by default (`VALARK_ZIM_LANGS`). |
 | Models (diversity) | `data/models-extra.tsv` | Small high-value models across 17 modalities (embeddings, rerankers, tiny VLMs, OCR, depth, segmentation, detection, audio, time-series). |
-| OS / router / netboot | `data/installers.tsv` | Distro ISOs (Alpine/Debian/Ubuntu/…), OpenWRT firmware, netboot.xyz, Jetson BSP — for PXE / mesh commissioning. |
+| OS / router / netboot / server source | `data/installers.tsv` | Distro ISOs (Alpine/Debian/Ubuntu/…), OpenWRT firmware, netboot.xyz, Jetson BSP — for PXE / mesh commissioning — plus `server-source`: upstream LAMP + LAN-infrastructure releases (httpd/APR, PHP, MariaDB, PostgreSQL, nginx, OpenSSL/OpenSSH, BIND, Kea, dnsmasq, Unbound, Samba, Dovecot, WordPress, Nextcloud, Gitea, …). |
+| Offline .deb sets | `data/apt-sets.tsv` | Server package sets resolved with all dependencies per Ubuntu suite+arch by `scripts/lib/apt_offline.py build --suite noble --arch arm64 --set lamp --dest <dir>` → a flat local APT repo for a LAN with no internet. |
 
 The big LLM/STT/TTS/VLM/image catalog is still managed by `download-models.sh`.
 

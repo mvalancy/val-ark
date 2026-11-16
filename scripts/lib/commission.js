@@ -147,7 +147,7 @@ function state(dir, trusted) {
   };
 }
 
-const PROFILES = ['knowledge', 'ai', 'tools', 'balanced'];
+const PROFILES = ['knowledge', 'ai', 'tools', 'survival', 'balanced'];
 const USE_MODES = ['open', 'passworded', 'accounts'];
 const MOD_SENS = ['strict', 'balanced', 'lenient'];
 // Both actions MOVE a flagged file out of the store — they differ only in the review

@@ -175,7 +175,8 @@ const VALID_TOOL_TARGETS = new Set(['all']);
 try {
     const toolScripts = fs.readdirSync(path.join(ROOT, 'scripts/tools'));
     for (const f of toolScripts) {
-        if (f.endsWith('.sh') && f !== '_common.sh') {
+        // cad-agent-references is opt-in (a ~37 GB, day-long archive pass): run from the shell, never one click.
+        if (f.endsWith('.sh') && f !== '_common.sh' && f !== 'cad-agent-references.sh') {
             VALID_TOOL_TARGETS.add(f.replace('.sh', ''));
         }
     }

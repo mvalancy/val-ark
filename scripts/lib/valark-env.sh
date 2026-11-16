@@ -107,6 +107,10 @@ SOURCES_DIR="${VALARK_SOURCES_DIR:-$VALARK_HOME/sources}"
 ASSETS_DIR="${VALARK_ASSETS_DIR:-$VALARK_HOME/assets}"
 INSTALLERS_DIR="${VALARK_INSTALLERS_DIR:-$VALARK_HOME/installers}"
 STATE_DIR="${VALARK_STATE_DIR:-$VALARK_HOME/state}"
+# Kept, never served: copies the Ark may not hand out (scripts/tools/cad-agent-references.sh
+# archives sources whose licence forbids or does not state redistribution). server.js serves
+# only tools/models/content/sources/assets/installers/docs, so nothing here is reachable over HTTP.
+PRIVATE_DIR="${VALARK_PRIVATE_DIR:-$VALARK_HOME/private}"
 LOG_DIR="${VALARK_LOG_DIR:-$STATE_DIR/logs}"
 
 # SeaweedFS blob store. Defaults under VALARK_HOME, but is intentionally its own
@@ -131,7 +135,7 @@ VALARK_MAX_GB="${VALARK_MAX_GB:-}"
 VALARK_MODEL_MAX_GB="${VALARK_MODEL_MAX_GB:-}"
 
 export PROJECT_ROOT DATA_ROOT VALARK_HOME MODELS_DIR TOOLS_DIR CONTENT_DIR ZIM_DIR \
-       SOURCES_DIR ASSETS_DIR INSTALLERS_DIR STATE_DIR LOG_DIR \
+       SOURCES_DIR ASSETS_DIR INSTALLERS_DIR STATE_DIR LOG_DIR PRIVATE_DIR \
        SEAWEED_DIR SEAWEED_MASTER_PORT SEAWEED_VOLUME_PORT SEAWEED_FILER_PORT SEAWEED_S3_PORT \
        VALARK_RESERVE_PCT VALARK_RESERVE_MIN_GB VALARK_MAX_GB VALARK_MODEL_MAX_GB
 
@@ -160,10 +164,10 @@ valark_fillable_bytes() {
 
 # --- Footprint cap (bound Val Ark's OWN data, so it can't take over a shared disk)
 # Bytes currently occupied by Val Ark's own data trees (models + tools + content
-# + sources + assets + installers). Follows symlinks to the real dirs.
+# + sources + assets + installers + private). Follows symlinks to the real dirs.
 valark_data_used_bytes() {
     local total=0 d sz
-    for d in "$MODELS_DIR" "$TOOLS_DIR" "$CONTENT_DIR" "$SOURCES_DIR" "$ASSETS_DIR" "$INSTALLERS_DIR"; do
+    for d in "$MODELS_DIR" "$TOOLS_DIR" "$CONTENT_DIR" "$SOURCES_DIR" "$ASSETS_DIR" "$INSTALLERS_DIR" "$PRIVATE_DIR"; do
         [ -d "$d" ] || continue
         sz=$(du -sbL "$d" 2>/dev/null | cut -f1); total=$(( total + ${sz:-0} ))
     done

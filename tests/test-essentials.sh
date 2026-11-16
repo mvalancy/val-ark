@@ -71,6 +71,36 @@ echo "$BIG" | grep -qE $'^zim:huge_en__eng\t0$' && pass || fail "big budget: hug
 mkdir -p "$T/z"; head -c $((20*MB)) /dev/zero > "$T/z/water.zim"
 plan --budget $((400*MB)) | ids | grep -q 'zim:water_en__eng' && fail "present essential re-planned" || pass
 rm -f "$T/z/water.zim"
+# ...including when only the FULL (maxi) variant is on disk.
+truncate -s $((1800*MB)) "$T/z/med-maxi.zim"
+plan --budget $((400*MB)) | ids | grep -q 'zim:med_en_' && fail "maxi on disk must satisfy the medicine essential" || pass
+
+# 4b. superseded: once the maxi is complete, the managed + unpinned mini is listed for removal.
+truncate -s $((170*MB)) "$T/z/med-mini.zim"
+printf 'zim:med_en_mini_eng\tcontent\tzim:wikipedia\t%s\t1\t1\tzim\t0\n' "$T/z/med-mini.zim" > "$T/manifest.tsv"
+SUP() { python3 "$P" --budget 1 --superseded --manifest "$T/manifest.tsv" "$@" < "$T/cands.tsv" 2>/dev/null | cut -f1; }
+[ "$(SUP)" = "zim:med_en_mini_eng" ] && pass || fail "superseded must list the mini once the maxi is on disk (got '$(SUP)')"
+printf 'content\tzim:med_en_mini_eng\t0\tpinned\n' > "$T/pins.tsv"
+[ -z "$(SUP --pins "$T/pins.tsv")" ] && pass || fail "a pinned mini must never be superseded"
+: > "$T/manifest.tsv"
+[ -z "$(SUP)" ] && pass || fail "an unmanaged (owner-placed) file must never be superseded"
+rm -f "$T/z/med-maxi.zim"
+printf 'zim:med_en_mini_eng\tcontent\tzim:wikipedia\t%s\t1\t1\tzim\t0\n' "$T/z/med-mini.zim" > "$T/manifest.tsv"
+[ -z "$(SUP)" ] && pass || fail "without the full variant on disk the mini must stay"
+rm -f "$T/z/med-mini.zim"
+
+# 4c. glob entries re-plan only the missing file (netboot efi present, iso missing).
+mkdir -p "$T/i"; truncate -s $((2*MB)) "$T/i/n.efi"
+G=$(plan --budget $((400*MB)) | ids)
+grep -q $'^inst:netboot-iso\t0$' <<<"$G" && ! grep -q 'inst:netboot-efi' <<<"$G" && pass || fail "glob essential: plan only the missing file"
+rm -f "$T/i/n.efi"
+
+# 4d. phase-0 picks count as category coverage: no extra phase-1 item for zim:other on a tight budget.
+# (prep_en is zim:videos — not covered; huge_en/trivia are other categories. zim:other is covered by water/knots.)
+python3 "$P" --essentials "$T/ess.tsv" --budget $((60*MB)) < "$T/cands.tsv" 2>/dev/null | awk -F'\t' '$10==1 && $3=="zim:other"' | grep -q . \
+    && fail "phase 1 added a diversity item for a category essentials already cover" || pass
+python3 "$P" --essentials "$T/ess.tsv" --budget $((60*MB)) < "$T/cands.tsv" 2>/dev/null | awk -F'\t' '$10==1 && $3=="zim:ted"' | grep -q . \
+    && pass || fail "phase 1 must still cover categories the essentials do not"
 
 # 5. no --essentials => identical to the pre-existing planner behaviour (no phase 0 rows).
 python3 "$P" --budget $((400*MB)) < "$T/cands.tsv" 2>/dev/null | cut -f10 | grep -qx 0 && fail "phase 0 without --essentials" || pass
@@ -108,6 +138,10 @@ head -50 "$ROOT/data/essentials.tsv" | grep -v '^#' | grep -m1 . | grep -q 'wate
 
 # 7. survival profile end to end.
 grep -q "survival:content" "$ROOT/scripts/lib/catalog.sh" && pass || fail "catalog.sh lacks survival weights"
+node -e "const c=require('$ROOT/scripts/lib/commission.js');const fs=require('fs'),os=require('os'),path=require('path');
+const d=fs.mkdtempSync(path.join(os.tmpdir(),'ess-'));const r=c.commission(d,{token:c.ensureClaim(d),name:'x',profile:'survival',password:'setup-pass'},{trusted:true});
+process.exit(r.ok && c.readSettings(d).profile==='survival'?0:1)" 2>/dev/null && pass || fail "commissioning with profile=survival must persist it"
+grep -q -- '--superseded' "$ROOT/scripts/librarian.sh" && pass || fail "librarian fill does not prune superseded variants"
 grep -q "'survival'" "$ROOT/scripts/lib/commission.js" && pass || fail "commission.js does not accept survival"
 grep -q "id: 'survival'" "$ROOT/web-ui/index.html" && pass || fail "wizard lacks the survival profile"
 grep -q -- '--essentials' "$ROOT/scripts/librarian.sh" && pass || fail "librarian does not pass --essentials"

@@ -12,7 +12,10 @@ implementing the user's priority model:
      data/essentials.tsv, in rank order, SMALLEST variant first (mini/nopic
      ZIM). An entry that does not fit is skipped, never blocking, so a tiny
      disk still gets the most critical small items. The essential pick does not
-     block the full variant later: a big disk still grabs the maxi in 1-3.
+     block the full variant later: a big disk still grabs the maxi in 1-3, and
+     once that full variant is on disk the small copy is SUPERSEDED
+     (--superseded lists it; librarian.sh fill removes it), so nothing is
+     stored twice.
   1. DIVERSITY first  - one item (the smallest) from every category not yet on
      disk, before deepening any single category.
   2. SMALL VALUABLE   - then remaining items by value-per-byte (small + valuable
@@ -186,23 +189,26 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
     # disk in any variant is satisfied. Picks do not reserve the content key, so
     # phases 1-3 can still upgrade to the full variant when space allows.
     pool_all = flavours if flavours is not None else cands
+    ess_cats, ess_count = set(), {}
     for _rank, kind, pattern in essentials:
         matches = [c for c in pool_all if essential_match(c, kind, pattern)]
-        if any(marker_present(c) for c in matches):
-            continue
+        if kind == "zim" and any(marker_present(c) for c in matches):
+            continue  # any variant of this ZIM on disk satisfies the entry
         for c in sorted(matches, key=lambda x: x["bytes"]):
-            # One pick per ZIM name, but every match for glob kinds (netbootxyz-* = iso+efi+arm64).
-            if c["id"] in planned_ids or c["bytes"] > budget_left:
+            # One pick per ZIM name; every MISSING match for glob kinds (netbootxyz-* = iso+efi+arm64).
+            if c["id"] in planned_ids or c["bytes"] > budget_left or marker_present(c):
                 continue
             planned_ids.add(c["id"])
             budget_left -= c["bytes"]
             selected.append((c, 0))
+            ess_cats.add(c["category"])
+            ess_count[c["category"]] = ess_count.get(c["category"], 0) + 1
             if kind == "zim":
                 break
 
     taken_keys = set(present_keys)
-    taken_cats = set(present_cats)
-    cat_count = {}
+    taken_cats = set(present_cats) | ess_cats   # essentials already cover their categories
+    cat_count = dict(ess_count)                 # ...and count toward the phase-2 caps
 
     def take(c, phase):
         nonlocal budget_left
@@ -299,6 +305,34 @@ def evict(cands, manifest_path, need, pinned=None):
     return victims
 
 
+def superseded(raw, manifest_path, pinned=None):
+    """Smaller ZIM variants made redundant by a LARGER variant of the same content
+    that is already complete on disk (maxi > nopic > mini). Only managed (manifest)
+    and unpinned files are proposed, so nothing the owner placed or pinned is touched."""
+    pinned = pinned or set()
+    managed = set()
+    if manifest_path and os.path.isfile(manifest_path):
+        with open(manifest_path) as fh:
+            for line in fh:
+                p = line.rstrip("\n").split("\t")
+                if len(p) >= 4:
+                    managed.add(p[0])
+    groups = {}
+    for c in raw:
+        if c["source"] == "zim" and marker_present(c):
+            groups.setdefault(content_key(c), []).append(c)
+    out = []
+    for variants in groups.values():
+        if len(variants) < 2:
+            continue
+        keep = max(variants, key=lambda c: c["bytes"])
+        for c in variants:
+            if c is not keep and c["bytes"] < keep["bytes"] and c["id"] in managed \
+                    and c["id"] not in pinned and c["dest"] != keep["dest"]:
+                out.append(c)
+    return out
+
+
 def list_absent(cands):
     """Emit every candidate that is NOT already fully on disk, most valuable-per-
     byte first. Powers the web catalog of downloadable-but-absent resources. Same
@@ -319,6 +353,8 @@ def main():
     ap.add_argument("--pins", default="", help="pin registry path; pinned ids are never evicted")
     ap.add_argument("--essentials", default="", help="data/essentials.tsv: grid-down list planned first (phase 0)")
     ap.add_argument("--profile", default="balanced", help="owner profile; selects essentials whose focus includes it")
+    ap.add_argument("--superseded", action="store_true",
+                    help="list managed, unpinned small ZIM variants whose larger variant is complete on disk, then exit")
     ap.add_argument("--list-absent", action="store_true",
                     help="emit every not-yet-downloaded candidate (the web catalog), then exit")
     args = ap.parse_args()
@@ -340,6 +376,11 @@ def main():
             cands = [c for c in cands if not (c["bucket"] == "models" and c["bytes"] > args.model_max_bytes)]
             sys.stderr.write("planner: skipped %d model(s) larger than %s (small-models policy)\n"
                              % (len(oversized), _h(args.model_max_bytes)))
+
+    if args.superseded:
+        for c in superseded(raw, args.manifest, load_pins(args.pins)):
+            sys.stdout.write("\t".join([c["id"], c["category"], c["dest"], str(c["bytes"]), str(c["value"])]) + "\n")
+        return 0
 
     if args.list_absent:
         for c in list_absent(cands):

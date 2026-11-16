@@ -297,6 +297,7 @@ cmd_fill() {
         fi
     done < "${TMPDIR_VA}/plan.tsv"
     log "fill done: ${GREEN}${n_ok} ok${NC}, ${RED}${n_fail} failed${NC}, $(human "$bytes_done") added, $(human "$(valark_fillable_bytes)") fillable left"
+    prune_superseded >&2
     echo "$n_ok"
 }
 
@@ -326,6 +327,19 @@ cmd_verify() {
     done < "$MANIFEST"
     log "verify: ${good} ok, ${bad} bad/missing"
     echo "$bad"
+}
+
+# Essentials land as the SMALL variant first (planner phase 0); once the full
+# variant of the same ZIM is complete, the small copy is redundant. Remove it
+# (managed + unpinned only) so a big disk never keeps both.
+prune_superseded() {
+    [ -f "$MANIFEST" ] || return 0
+    gen_candidates | python3 "$PLANNER" --budget 1 --superseded --manifest "$MANIFEST" --pins "$PINS" | \
+    while IFS=$'\t' read -r id cat dest bytes value; do
+        [ -n "$dest" ] && [ -f "$dest" ] || continue
+        log "superseded: $id ($(human "$bytes")) -> full variant is on disk; removing the small copy"
+        rm -f "$dest" 2>/dev/null && grep -v -F "$(printf '%s\t' "$id")" "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
+    done
 }
 
 cmd_evict() {

@@ -89,6 +89,13 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Downloads / mirroring
 
+- **A `git clone` of a big repo over a flaky link never finishes.** It is ONE non-resumable transfer
+  (Linux, TensorFlow and Transformers died at curl 92 / early EOF over Wi-Fi), and git's default
+  `http.lowSpeedTime` aborts while GitHub silently packs a large `--deepen` chunk (curl 28 after
+  hours). `scripts/lib/git_bundle_mirror.py` fetches `--depth=1`, deepens in chunks with
+  `http.lowSpeedTime=1800` and HTTP/1.1, and **keeps the shallow staging dir on failure** so the
+  next run resumes. Fetch only `refs/heads/*` + `refs/tags/*`: GitHub's `refs/pull/*` can double
+  a bundle.
 - **hf‑repo model downloads (e.g. `rhasspy/piper-voices`) fail with exit 127 if the `hf` CLI
   is missing** — silent for a while, then "command not found." **Fix:** `pip install -U
   huggingface_hub` (provides `hf`); `setup.sh` marks it optional but it's required for repo pulls.

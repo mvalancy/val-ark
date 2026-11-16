@@ -226,7 +226,11 @@ def main(argv=None):
         if not (a.debs or a.dest):
             ap.error("--debs (or --dest) is required")
         if not root.has_lists() and not a.no_update:
-            root.update()
+            try:
+                root.update()
+            except RuntimeError as e:
+                print(e, file=sys.stderr)
+                return 1
         if not root.has_lists():
             print(f"no APT lists for {a.suite}/{a.arch}; refusing to write an empty index", file=sys.stderr)
             return 3

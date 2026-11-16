@@ -62,7 +62,9 @@ value|id|category|repo|file|format|gated|bytes|dest|note
 
 - **`server-source` rows are pinned upstream releases.** Re-resolve versions when bumping (each `sha_url`
   is the upstream checksum or signature beside the tarball); `latest` URLs (WordPress, Nextcloud,
-  Composer) self-heal but their `bytes` drift, so keep them roughly right (the librarian rejects < 90%).
+  Composer) self-heal but their `bytes` drift, so keep them within ~3%: the librarian accepts a download
+  at >= 90% of `bytes`, but the planner/`candidate_present` only count it as present at >= 97%, so a row
+  whose upstream shrank more than 3% re-downloads every cycle.
 - **apt sets are resolved independently** because some packages conflict (`mariadb-server` vs
   `mysql-server`); never merge conflicting packages into one set.
 - **`gated: yes` models are HINTS, never auto-fetched.** They need an HF login + license acceptance,

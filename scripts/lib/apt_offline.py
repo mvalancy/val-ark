@@ -15,7 +15,13 @@ Commands (stdlib only; needs apt-get + the ubuntu-archive-keyring on the host):
   build   --suite S --arch A --set ID --dest DIR   resolve + fetch + index
 
 Missing packages (not in that suite/arch) are reported on stderr and skipped.
-Exit 0 on success, 1 on a usage/resolve failure, 2 if any download failed.
+Exit codes: 0 complete; 1 usage/resolve failure; 2 a download failed;
+3 INCOMPLETE (packages missing for this suite/arch, nothing resolved, an empty
+index, or .debs left unindexed). Pass --allow-missing to accept missing packages.
+
+The APT root is fully isolated from the host: a private APT_CONFIG and an empty
+apt.conf.d, so host hooks, extra index targets (Contents, DEP-11) and settings
+such as Acquire::GzipIndexes never leak in.
 """
 import argparse, gzip, hashlib, os, re, shutil, subprocess, sys, urllib.parse, urllib.request
 from pathlib import Path
@@ -61,9 +67,14 @@ class AptRoot:
         self.suite, self.arch = suite, arch
         self.dir = Path(cache) / f"{suite}-{arch}"
 
+    def env(self):
+        # -o options are applied AFTER /etc/apt/apt.conf.d is parsed, so isolation
+        # must come from a private APT_CONFIG that points parts at an empty dir.
+        return {**os.environ, "APT_CONFIG": str(self.dir / "apt.conf")}
+
     def opts(self):
         d = self.dir
-        return ["-o", f"Dir={d}", "-o", f"Dir::State::status={d}/status",
+        return ["-o", f"Dir={d}", "-o", "Acquire::GzipIndexes=false", "-o", f"Dir::State::status={d}/status",
                 "-o", f"Dir::Etc::sourcelist={d}/sources.list", "-o", "Dir::Etc::sourceparts=-",
                 "-o", f"Dir::Etc::preferencesparts={d}/preferences.d/",
                 "-o", f"APT::Architecture={self.arch}", "-o", f"APT::Architectures={self.arch}",
@@ -72,8 +83,10 @@ class AptRoot:
 
     def prepare(self):
         d = self.dir
-        for sub in ("var/lib/apt/lists/partial", "var/cache/apt/archives/partial", "preferences.d"):
+        for sub in ("var/lib/apt/lists/partial", "var/cache/apt/archives/partial", "preferences.d", "apt.conf.d"):
             (d / sub).mkdir(parents=True, exist_ok=True)
+        (d / "apt.conf").write_text(f'Dir::Etc::parts "{d}/apt.conf.d";\nAcquire::GzipIndexes "false";\n'
+                                    'Acquire::IndexTargets "";\nAPT::Update::Post-Invoke "";\n')
         (d / "status").touch()
         main = MIRRORS.get(self.arch, PORTS)
         sec = SECURITY.get(self.arch, PORTS)
@@ -86,12 +99,13 @@ class AptRoot:
 
     def update(self):
         self.prepare()
-        r = subprocess.run(["apt-get", "-q", *self.opts(), "update"], capture_output=True, text=True)
+        r = subprocess.run(["apt-get", "-q", *self.opts(), "update"], capture_output=True, text=True, env=self.env())
         if r.returncode:
             raise RuntimeError(f"apt-get update {self.suite}/{self.arch} failed: {r.stderr[-400:]}")
 
     def available(self, pkgs):
-        r = subprocess.run(["apt-cache", *self.opts(), "policy", *pkgs], capture_output=True, text=True)
+        r = subprocess.run(["apt-cache", *self.opts(), "policy", *pkgs], capture_output=True, text=True,
+                           env=self.env())
         have, cur = set(), None
         for line in r.stdout.splitlines():
             if line and not line[0].isspace() and line.endswith(":"):
@@ -105,11 +119,11 @@ class AptRoot:
         if not ok:
             return [], missing
         r = subprocess.run(["apt-get", "-qq", "-y", *self.opts(), "--print-uris", "install", *ok],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, env=self.env())
         if r.returncode:
             raise RuntimeError(f"resolve failed ({self.suite}/{self.arch}): {r.stderr[-600:]}")
         rows = parse_print_uris(r.stdout)
-        # print-uris reports the weakest digest (MD5); take SHA256 from the signed lists.
+        # print-uris always reports MD5; take SHA256 from the signed lists.
         if any(not sha for _, _, _, sha in rows):
             shas = self.sha256_map()
             rows = [(u, n, z, sha or shas.get(n, "")) for u, n, z, sha in rows]
@@ -123,6 +137,9 @@ class AptRoot:
             if fn and sh:
                 m[fn.group(1).rsplit("/", 1)[-1]] = sh.group(1)
         return m
+
+    def has_lists(self):
+        return any((self.dir / "var/lib/apt/lists").glob("*_Packages"))
 
     def stanzas(self):
         lists = self.dir / "var/lib/apt/lists"
@@ -195,6 +212,7 @@ def main(argv=None):
     ap.add_argument("--dest")
     ap.add_argument("--debs")
     ap.add_argument("--no-update", action="store_true", help="reuse the cached APT lists")
+    ap.add_argument("--allow-missing", action="store_true", help="exit 0 even if some packages are not in this suite/arch")
     a = ap.parse_args(argv)
     sets = load_sets(a.tsv)
     if a.command == "sets":
@@ -205,36 +223,62 @@ def main(argv=None):
         ap.error("--suite and --arch are required")
     root = AptRoot(a.suite, a.arch, a.cache)
     if a.command == "index":
-        if not root.dir.joinpath("var/lib/apt/lists").is_dir() and not a.no_update:
+        if not (a.debs or a.dest):
+            ap.error("--debs (or --dest) is required")
+        if not root.has_lists() and not a.no_update:
             root.update()
-        n, unindexed = write_index(root.stanzas(), a.debs or a.dest)
-        print(f"indexed {n} packages" + (f"; {len(unindexed)} .deb not in lists" if unindexed else ""), file=sys.stderr)
-        return 0
+        if not root.has_lists():
+            print(f"no APT lists for {a.suite}/{a.arch}; refusing to write an empty index", file=sys.stderr)
+            return 3
+        return report_index(*write_index(root.stanzas(), a.debs or a.dest))
     ids = list(sets) if "all" in a.set or not a.set else a.set
     unknown = [i for i in ids if i not in sets]
     if unknown:
         ap.error(f"unknown set(s): {' '.join(unknown)}")
-    if not a.no_update:
-        root.update()
-    rows, seen = [], set()
+    if a.command in ("fetch", "build") and not a.dest:
+        ap.error("--dest is required")
+    try:
+        if not a.no_update:
+            root.update()
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 1
+    if not root.has_lists():
+        print(f"no APT lists for {a.suite}/{a.arch} (run without --no-update)", file=sys.stderr)
+        return 3
+    rows, seen, incomplete, errors = [], set(), False, 0
     for sid in ids:
-        got, missing = root.resolve(sets[sid]["packages"])
+        try:
+            got, missing = root.resolve(sets[sid]["packages"])
+        except RuntimeError as e:  # e.g. a conflict inside one set: report, keep the others
+            print(f"{a.suite}/{a.arch} {sid}: {e}", file=sys.stderr)
+            errors += 1
+            continue
         if missing:
+            incomplete = True
             print(f"{a.suite}/{a.arch} {sid}: not available: {' '.join(missing)}", file=sys.stderr)
         for r in got:
             if r[1] not in seen:
                 seen.add(r[1])
                 rows.append(r)
+    nosha = sum(1 for r in rows if not r[3])
+    if nosha:
+        print(f"{nosha} package(s) have no SHA256 in the lists (size-checked only)", file=sys.stderr)
+    status = 1 if errors else 3 if not rows or (incomplete and not a.allow_missing) else 0
     if a.command == "resolve":
         for url, name, size, sha in rows:
             print(f"{url}\t{name}\t{size}\t{sha}")
-        return 0
-    if not a.dest:
-        ap.error("--dest is required")
+        return status
     failed = fetch(rows, a.dest)
     if a.command == "build":
-        write_index(root.stanzas(), a.dest)
-    return 2 if failed else 0
+        istatus = report_index(*write_index(root.stanzas(), a.dest))
+        status = status or istatus
+    return 2 if failed else status
+
+
+def report_index(n, unindexed):
+    print(f"indexed {n} packages" + (f"; {len(unindexed)} .deb not in lists" if unindexed else ""), file=sys.stderr)
+    return 3 if n == 0 or unindexed else 0
 
 
 if __name__ == "__main__":

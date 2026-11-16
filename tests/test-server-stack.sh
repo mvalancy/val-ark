@@ -103,9 +103,37 @@ assert "pool/" not in text
 assert gzip.open(sys.argv[2] + "/Packages.gz", "rt").read() == text
 EOF
 
-# 5. CLI rejects an unknown set id instead of silently resolving nothing.
-python3 "$ROOT/scripts/lib/apt_offline.py" resolve --suite noble --arch amd64 --set no-such-set --no-update \
-    --cache "$T/cache" >/dev/null 2>&1 && fail "unknown set id must be rejected" || pass
+# 5. CLI rejects an unknown set id (argparse error: exit 2 + message), not silently nothing.
+ERR=$(python3 "$ROOT/scripts/lib/apt_offline.py" resolve --suite noble --arch amd64 --set no-such-set --no-update \
+    --cache "$T/cache" 2>&1 >/dev/null); RC=$?
+[ "$RC" = 2 ] && grep -q "unknown set" <<<"$ERR" && pass || fail "unknown set id: want exit 2 + message (got $RC: $ERR)"
+
+# 6. Never report success on a hollow repo (exit 3 = incomplete).
+A="$ROOT/scripts/lib/apt_offline.py"
+python3 "$A" resolve --suite noble --arch amd64 --set lamp --no-update --cache "$T/empty-cache" >/dev/null 2>&1
+[ $? = 3 ] && pass || fail "resolve with no APT lists must exit 3"
+mkdir -p "$T/empty-cache/noble-amd64/var/lib/apt/lists"          # dir exists but holds no *_Packages
+python3 "$A" index --suite noble --arch amd64 --no-update --cache "$T/empty-cache" --debs "$T/repo" >/dev/null 2>&1
+[ $? = 3 ] && [ ! -s "$T/repo/Packages.new" ] && pass || fail "index with an empty lists dir must exit 3"
+python3 "$A" index --suite noble --arch amd64 --no-update --cache "$T/empty-cache" >/dev/null 2>&1
+[ $? = 2 ] && pass || fail "index without --debs must be a usage error"
+
+# 7. stanzas() + index against a fake lists dir: complete -> 0, an unindexed .deb -> 3.
+L="$T/fake/noble-amd64/var/lib/apt/lists"; mkdir -p "$L" "$T/flat"
+printf 'Package: hello\nVersion: 2.10\nFilename: pool/main/h/hello/hello_2.10_amd64.deb\nSHA256: %s\n\nPackage: other\nFilename: pool/main/o/other/other_1_amd64.deb\n' \
+    "$(printf 'b%.0s' $(seq 64))" > "$L/archive.example_dists_noble_main_binary-amd64_Packages"
+: > "$T/flat/hello_2.10_amd64.deb"
+python3 "$A" index --suite noble --arch amd64 --no-update --cache "$T/fake" --debs "$T/flat" 2>/dev/null \
+    && grep -q '^Filename: ./hello_2.10_amd64.deb$' "$T/flat/Packages" && pass || fail "index of a complete flat dir must exit 0"
+: > "$T/flat/stray_1_amd64.deb"
+python3 "$A" index --suite noble --arch amd64 --no-update --cache "$T/fake" --debs "$T/flat" >/dev/null 2>&1
+[ $? = 3 ] && pass || fail "a .deb missing from the lists must make index exit 3"
+python3 - "$ROOT/scripts/lib" "$T/fake" <<'PY' && pass || fail "sha256_map from fake lists"
+import sys; sys.path.insert(0, sys.argv[1]); import apt_offline as ao
+r = ao.AptRoot("noble", "amd64", sys.argv[2])
+assert r.has_lists() and r.sha256_map() == {"hello_2.10_amd64.deb": "b" * 64}
+assert 'Dir::Etc::parts' in (r.prepare() or (r.dir / "apt.conf").read_text())   # isolation config is written
+PY
 
 echo "server-stack: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

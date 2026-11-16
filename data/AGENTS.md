@@ -11,8 +11,8 @@ file is the canonical schema.
 | File | Purpose |
 |------|---------|
 | `installers.tsv` | Freely-redistributable OS / router-firmware / netboot / Jetson-BSP images for PXE commissioning of the mesh. |
-| `source-repos.tsv` | Curated upstream source repos (`value\|owner/repo\|group`, ~240: toolchains/OS, firmware, containers, CAD, robotics, Jetson, ML, LLM inference, LAMP/LAN servers, self-hosted apps) mirrored as full-history git bundles by `scripts/lib/git_bundle_mirror.py`. |
 | `models-extra.tsv` | Curated small, high-value models that broaden modality diversity (embeddings, rerankers, tiny VLMs, OCR, speech, safety, plus setup-assistant chat LLMs). |
+| `source-repos.tsv` | Curated upstream source repos (`value\|owner/repo\|group`, ~240: toolchains/OS, firmware, containers, CAD, robotics, Jetson, ML, LLM inference, LAMP/LAN servers, self-hosted apps) mirrored as full-history git bundles by `scripts/lib/git_bundle_mirror.py`. |
 
 ## Schemas (field order the consumers depend on)
 
@@ -39,8 +39,8 @@ value|id|category|repo|file|format|gated|bytes|dest|note
 
 - `scripts/lib/catalog.sh` — parses both files.
 - `scripts/planner.py` — ranks rows by derived value-per-byte.
-- `scripts/loop.sh` — link-checks the `url` field on the self-heal cycle.
 - `scripts/lib/git_bundle_mirror.py` — reads `source-repos.tsv`. Use canonical `owner/repo` names (GitHub redirects renamed repos, but duplicates then slip in); `tests/test-git-bundle-mirror.sh` rejects case-insensitive duplicates.
+- `scripts/loop.sh` — link-checks the `url` field on the self-heal cycle.
 
 `#` and blank lines are skipped by all three.
 

@@ -1375,7 +1375,7 @@ test.describe('Val Ark - Consumer Shell (Home status + Settings + Activity)', ()
     await page.goto(`file://${WEB_UI}#/settings`);
     await page.waitForSelector('#downloads', { timeout: 5000 });
     await expect(page.locator('#downloads')).toContainText('Downloads & Priorities');
-    await expect(page.locator('#downloads .setup-profile')).toHaveCount(4);
+    await expect(page.locator('#downloads .setup-profile')).toHaveCount(5);
     await expect(page.locator('#downloads .setup-profile[data-profile="knowledge"]')).toBeVisible();
     expect(await page.evaluate(() => typeof (window as any).setDownloadProfile)).toBe('function');
   });

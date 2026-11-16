@@ -490,7 +490,7 @@ domains, loopback, and `$`/`{}`/`<>` placeholders pass automatically.
   and applies a **per‑bucket multiplier** on each candidate's value (knowledge 1.6× content, ai 1.6×
   models, tools 1.6× tools; off‑buckets 0.8–0.9×), so the box fills what the owner asked for; the
   planner still sorts by value/bytes. A Settings → **Downloads & Priorities** picker changes it live
-  via admin‑only `POST /api/setup/profile` (validated to the 4 profiles). `test-profile.sh` proves a
+  via admin‑only `POST /api/setup/profile` (validated to the 5 profiles (knowledge/ai/tools/survival/balanced)). `test-profile.sh` proves a
   profile shifts the fill; requesting a specific item still jumps the queue (pins).
 
 ## 2026‑07 — Access-mode enforcement + admin sessions (roadmap Phase 2 depth)
@@ -611,3 +611,22 @@ domains, loopback, and `$`/`{}`/`<>` placeholders pass automatically.
   Self‑heal events are reassuring **info** ("handled it for you"); the lone exception is
   `moderation-error` (could NOT quarantine) → **warning**. Failed functional‑verify checks are
   **warning** ("working on it — self‑heal re‑verifies"), matching the Health page framing.
+
+## 2026‑11 — Grid-down essentials tier + survival profile
+- <a id="griddown-essentials"></a>**The planner gains a phase 0 that always runs first:** the ranked
+  `data/essentials.tsv`. Val Ark's premise is "the internet may disappear", so the most critical small
+  items (water, field medicine, medicines, food, shelter, a pocket encyclopedia, a CPU-sized assistant)
+  must land before diversity or value/byte ever get a say, on ANY disk size.
+- **Smallest variant first, never blocking.** Phase 0 picks from the *uncollapsed* stream (the normal
+  pipeline keeps only the largest ZIM flavour) so it can take the mini/nopic variant, and it skips an
+  entry that doesn't fit instead of stopping. It deliberately does NOT reserve the content key, so on a
+  big disk phases 1–3 still upgrade to the maxi. Eviction would NOT clean up the small copy (it has the
+  *higher* value/byte, so evict() removes it last), hence an explicit step: `planner.py --superseded`
+  lists managed, unpinned smaller variants whose larger variant is complete on disk, and
+  `librarian.sh fill` removes them at the end of every fill, so nothing is stored twice.
+- Phase-0 picks count toward category coverage (phase 1) and the phase-2 per-category caps.
+- **Focus, not a fork:** rows carry `focus` (`all` or profile list). A new `survival` profile weights
+  content 1.4 / tools 1.2 / models 0.8 and unlocks survival-only rows (Army field manuals, self-reliance
+  video). Every profile still gets the `all` rows. Grid-down topics also get a +80 value boost for all
+  profiles in `catalog.sh`.
+- Backward compatible: without `--essentials` the planner is unchanged (tested).

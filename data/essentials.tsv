@@ -1,0 +1,65 @@
+# Val Ark - grid-down ESSENTIALS: what the box must hold first if the internet
+# disappears tomorrow. The planner takes these in rank order BEFORE any other
+# phase, choosing the SMALLEST variant that fits (mini/nopic ZIM), and skips any
+# entry that does not fit instead of stopping, so a tiny disk still gets the most
+# critical small items and a big disk later adds the full variants as usual.
+#
+# Schema (pipe-delimited):  rank|kind|match|focus|note
+#   rank   lower = more critical (taken first)
+#   kind   zim   -> fnmatch on the Kiwix ZIM base name (e.g. zimgit-water_en)
+#          model -> fnmatch on the data/models-extra.tsv id
+#          inst  -> fnmatch on the data/installers.tsv id
+#   focus  all, or comma-separated owner profiles (balanced,knowledge,ai,tools,survival)
+#   note   why it matters
+#
+# --- life safety: water, medicine, food, shelter (all tiny) -------------------
+10|zim|zimgit-water_en|all|Safe drinking water: purification, storage, wells
+11|zim|zimgit-medicine_en|all|Field medicine and first aid
+12|zim|nhs.uk_en_medicines|all|What common medicines are for, doses, side effects
+13|zim|irp.fas.org_en_military-medicine|all|Military field medicine manuals (trauma care without a hospital)
+14|zim|wikipedia_en_medicine|all|Wikipedia medicine subset (mini variant first)
+15|zim|zimgit-food-preparation_en|all|Food preparation and preservation
+16|zim|zimgit-knots_en|all|Knots for rescue, shelter, hauling
+17|zim|wikipedia_en_knots|all|Knot reference
+18|zim|survivors_en_all|all|Survival techniques
+19|zim|zimgit-post-disaster_en|all|Post-disaster recovery and rebuilding
+20|zim|medicalsciences.stackexchange.com_en_all|all|Medical Q&A
+# --- a pocket encyclopedia + an assistant that can explain it ----------------
+30|zim|wikipedia_en_100|all|The 100 most important Wikipedia articles
+31|zim|wikipedia_en_top|all|Top Wikipedia articles (mini first)
+32|model|qwen2.5-1.5b-instruct-gguf|all|Small offline assistant LLM (runs on CPU)
+33|zim|wiktionary_en-simple_all|all|Simple English dictionary
+34|model|whisper-base-onnx|all|Offline speech-to-text
+# --- feeding, powering, fixing ------------------------------------------------
+40|zim|gardenology_en_all|all|Plant and garden encyclopedia
+41|zim|based.cooking_en_all|all|Simple recipes
+42|zim|foss.cooking_en_all|all|Recipes
+43|zim|appropedia_en_all|all|Appropriate technology: water, sanitation, shelter, energy
+44|zim|energypedia_en_all|all|Off-grid energy: solar, micro-hydro, biogas
+45|zim|ham.stackexchange.com_en_all|all|Amateur radio: communications with no internet or phone network
+46|zim|cooking.stackexchange.com_en_all|all|Cooking Q&A
+47|zim|gardening.stackexchange.com_en_all|all|Growing food Q&A
+48|zim|wikivoyage_en_all|all|Travel and geography (nopic first)
+49|zim|libretexts.org_en_med|all|Medicine textbooks
+50|zim|ifixit_en_all|all|Repair guides for devices and machines
+51|zim|diy.stackexchange.com_en_all|all|Home repair, plumbing, electrical
+52|zim|mechanics.stackexchange.com_en_all|all|Vehicle repair
+53|zim|electronics.stackexchange.com_en_all|all|Electronics repair and design
+# --- keep the computers running ------------------------------------------------
+60|zim|archlinux_en_all|all|Linux administration wiki
+61|inst|netbootxyz-*|all|Network-boot any machine on the LAN
+62|inst|alpine-virt-*|all|Tiny Linux install image (x86_64 + arm64)
+63|zim|unix.stackexchange.com_en_all|all|Linux / shell Q&A
+64|zim|askubuntu.com_en_all|all|Ubuntu Q&A
+65|inst|apache-httpd|all|Web server source (local LAN services)
+66|inst|dnsmasq|all|DHCP + DNS + TFTP for a LAN in one small daemon
+67|inst|kea|all|Full DHCP server
+68|inst|chrony|all|Time server: clocks drift with no internet time
+# --- deeper libraries --------------------------------------------------------
+70|zim|wikibooks_en_all|all|Open textbooks (nopic first)
+71|zim|wikipedia_en_all|all|All of Wikipedia (mini first; nopic/maxi later on bigger disks)
+72|zim|quickguidesformedicine_en_all|survival,knowledge|Medical quick-guide videos
+73|zim|armypubs_en_all|survival|Army field manuals: survival, engineering, first aid, water, shelter
+74|zim|lrnselfreliance_en_all|survival|Self-reliance skills videos
+75|zim|canadian-prepper_en_preppingfood|survival|Food storage videos
+76|model|qwen2.5-3b-instruct-gguf|survival,ai|Stronger offline assistant

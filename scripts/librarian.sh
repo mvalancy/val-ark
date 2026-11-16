@@ -212,6 +212,7 @@ gen_candidates() { catalog_all_candidates; }
 build_plan() {
     local budget="$1"
     gen_candidates | python3 "$PLANNER" --budget "$budget" \
+        --essentials "${DATA_DIR:-${PROJECT_ROOT}/data}/essentials.tsv" --profile "$(_valark_profile)" \
         --model-max-bytes "$(valark_model_max_bytes)" 2> "${TMPDIR_VA}/plan.summary"
 }
 
@@ -296,6 +297,7 @@ cmd_fill() {
         fi
     done < "${TMPDIR_VA}/plan.tsv"
     log "fill done: ${GREEN}${n_ok} ok${NC}, ${RED}${n_fail} failed${NC}, $(human "$bytes_done") added, $(human "$(valark_fillable_bytes)") fillable left"
+    prune_superseded >&2
     echo "$n_ok"
 }
 
@@ -325,6 +327,20 @@ cmd_verify() {
     done < "$MANIFEST"
     log "verify: ${good} ok, ${bad} bad/missing"
     echo "$bad"
+}
+
+# Essentials land as the SMALL variant first (planner phase 0); once the full
+# variant of the same ZIM is complete, the small copy is redundant. Remove it
+# (managed + unpinned only) so a big disk never keeps both.
+prune_superseded() {
+    [ -f "$MANIFEST" ] || return 0
+    gen_candidates | python3 "$PLANNER" --budget 1 --superseded --manifest "$MANIFEST" --pins "$PINS" | \
+    while IFS=$'\t' read -r id cat dest bytes value; do
+        [ -n "$dest" ] && [ -f "$dest" ] || continue
+        log "superseded: $id ($(human "$bytes")) -> full variant is on disk; removing the small copy"
+        # exact first-column match; works even when it was the manifest's only line
+        rm -f "$dest" 2>/dev/null && awk -F'\t' -v id="$id" '$1!=id' "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
+    done
 }
 
 cmd_evict() {

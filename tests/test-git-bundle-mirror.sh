@@ -88,5 +88,39 @@ python3 -c "import json,sys;s=json.load(open(sys.argv[1]));sys.exit(0 if s['acme
 mkdir -p "$T/dest3/x"; echo junk > "$T/dest3/x/y.bundle"
 python3 "$M" verify --dest "$T/dest3" 2>/dev/null && fail "verify accepted a corrupt bundle" || pass
 
+# 7. resume keeps tags (fixture partial had heads only)
+git -C "$T/restored2" rev-parse -q --verify v1.0 >/dev/null && pass || fail "tags missing after resume"
+
+# 8. a failing destination copy keeps the built bundle; the retry only re-copies.
+rm -rf "$T/dest4" "$T/stage4"; mkdir -p "$T/dest4/acme/widget.bundle.part"   # a dir where the .part file goes
+python3 "$M" mirror --dest "$T/dest4" --stage "$T/stage4" --tries 1 --retry-wait 0 --repo acme/widget 2>/dev/null
+[ $? = 2 ] && [ -f "$T/stage4/acme__widget.bundle" ] && pass || fail "failed copy must keep the staged bundle"
+rmdir "$T/dest4/acme/widget.bundle.part"
+python3 "$M" mirror --dest "$T/dest4" --stage "$T/stage4" --tries 1 --retry-wait 0 --repo acme/widget 2>/dev/null && \
+python3 -c "import json,sys;s=json.load(open(sys.argv[1]));sys.exit(0 if s['acme/widget']['status']=='complete' and s['acme/widget']['resumed'] else 1)" \
+    "$T/dest4/.mirror-state.json" && [ ! -e "$T/stage4/acme__widget.bundle" ] && pass || fail "copy retry did not reuse the staged bundle"
+
+# 9. renamed upstream (API full_name differs): written once under the API name, then skipped.
+python3 - "$ROOT/scripts/lib" "$T" <<'PY' && pass || fail "renamed repo is re-mirrored or indexed under the wrong name"
+import os, sys, json
+sys.path.insert(0, sys.argv[1]); T = sys.argv[2]
+import git_bundle_mirror as g
+os.makedirs(T + "/remote/Acme", exist_ok=True)
+os.system(f"cp -r {T}/remote/acme/widget.git {T}/remote/Acme/Widget.git")
+g.repo_info = lambda n: dict(full_name="Acme/Widget", size=0, default_branch="main", html_url="x")
+calls = []
+orig = g.mirror_one
+g.mirror_one = lambda *a, **k: (calls.append(a[0]), orig(*a, **k))[1]
+args = ["mirror", "--dest", T + "/dest5", "--stage", T + "/stage5", "--tries", "1", "--retry-wait", "0", "--repo", "acme/widget"]
+assert g.main(args) == 0 and g.main(args) == 0
+assert calls == ["Acme/Widget"], calls                      # second run skipped
+assert os.path.isfile(T + "/dest5/Acme/Widget.bundle")
+assert "Acme/Widget\t" in open(T + "/dest5/INDEX.txt").read()
+PY
+
+# 10. unsafe names are refused; verify on an empty dest is not a pass.
+python3 "$M" mirror --dest "$T/dest6" --stage "$T/stage6" --tries 1 --retry-wait 0 --repo ../evil 2>/dev/null; [ $? = 2 ] && [ ! -e "$T/evil.bundle" ] && pass || fail "unsafe repo name accepted"
+mkdir -p "$T/empty"; python3 "$M" verify --dest "$T/empty" 2>/dev/null && fail "verify passed with zero bundles" || pass
+
 echo "git-bundle-mirror: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

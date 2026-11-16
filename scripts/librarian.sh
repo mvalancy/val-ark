@@ -338,7 +338,8 @@ prune_superseded() {
     while IFS=$'\t' read -r id cat dest bytes value; do
         [ -n "$dest" ] && [ -f "$dest" ] || continue
         log "superseded: $id ($(human "$bytes")) -> full variant is on disk; removing the small copy"
-        rm -f "$dest" 2>/dev/null && grep -v -F "$(printf '%s\t' "$id")" "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
+        # exact first-column match; works even when it was the manifest's only line
+        rm -f "$dest" 2>/dev/null && awk -F'\t' -v id="$id" '$1!=id' "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
     done
 }
 

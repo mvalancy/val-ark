@@ -54,6 +54,9 @@ value|id|category|repo|file|format|gated|bytes|dest|note
 
 - **`gated: yes` models are HINTS, never auto-fetched.** They need an HF login + license acceptance,
   so the librarian skips them unless a token is present and the license is accepted.
+- **One file name per category.** Rows land at `installers/<category>/<url basename>`, so two releases that
+  publish the same name (NVIDIA `public_sources.tbz2`) overwrite each other; `tests/test-installers-catalog.sh`
+  fails on that.
 - **Value is importance, not bytes.** Setting `value` high to "force" a large download is wrong — it
   only raises priority; the size penalty still comes from `bytes`.
 

@@ -13,6 +13,7 @@ file is the canonical schema.
 | `installers.tsv` | Freely-redistributable OS / router-firmware / netboot / Jetson-BSP images for PXE commissioning of the mesh. |
 | `apt-sets.tsv` | Offline APT package **sets** (LAMP, LAN core: DHCP/DNS/NTP/PXE/firewall, routing/VPN, file, mail/chat, directory, apps, containers, ops). Resolved per Ubuntu suite+arch with all dependencies by `scripts/lib/apt_offline.py` into a flat local repo. |
 | `models-extra.tsv` | Curated small, high-value models that broaden modality diversity (embeddings, rerankers, tiny VLMs, OCR, speech, safety, plus setup-assistant chat LLMs). |
+| `source-repos.tsv` | Curated upstream source repos (`value\|owner/repo\|group`, ~240: toolchains/OS, firmware, containers, CAD, robotics, Jetson, ML, LLM inference, LAMP/LAN servers, self-hosted apps) mirrored as full-history git bundles by `scripts/lib/git_bundle_mirror.py`. |
 
 ## Schemas (field order the consumers depend on)
 
@@ -45,6 +46,7 @@ value|id|category|repo|file|format|gated|bytes|dest|note
 
 - `scripts/lib/catalog.sh` — parses both files.
 - `scripts/planner.py` — ranks rows by derived value-per-byte.
+- `scripts/lib/git_bundle_mirror.py` — reads `source-repos.tsv`. Use canonical `owner/repo` names (GitHub redirects renamed repos, but duplicates then slip in); `tests/test-git-bundle-mirror.sh` rejects case-insensitive duplicates.
 - `scripts/loop.sh` — link-checks the `url` field on the self-heal cycle.
 - `scripts/lib/apt_offline.py` — reads `apt-sets.tsv` (`sets` / `resolve` / `fetch` / `index` / `build`).
 

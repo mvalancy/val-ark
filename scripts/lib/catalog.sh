@@ -71,8 +71,9 @@ catalog_refresh_zim() {
 
 # --- Owner PROFILE → per-bucket priority multiplier (Phase 5) ------------------
 # The commissioning wizard stores a profile in settings.json; VALARK_PROFILE overrides.
-# knowledge favours the Library, ai favours models, tools favours apps; balanced is
-# neutral. Applied as a per-bucket multiplier on each candidate's value, so the box
+# knowledge favours the Library, ai favours models, tools favours apps, survival
+# (grid-down) favours practical references + installers over big models; balanced is
+# neutral. Whatever the profile, data/essentials.tsv is planned first (planner phase 0). Applied as a per-bucket multiplier on each candidate's value, so the box
 # fills according to what the owner asked for (planner still sorts by value/bytes).
 _valark_profile() {
     if [ -n "${VALARK_PROFILE:-}" ]; then echo "$VALARK_PROFILE"; return; fi
@@ -85,6 +86,7 @@ _valark_profile_weight() {   # $1 = content | models | tools
         knowledge:content) echo 1.6 ;; knowledge:models) echo 0.8 ;; knowledge:tools) echo 0.9 ;;
         ai:content)        echo 0.9 ;; ai:models)        echo 1.6 ;; ai:tools)        echo 0.9 ;;
         tools:content)     echo 0.9 ;; tools:models)     echo 0.9 ;; tools:tools)     echo 1.6 ;;
+        survival:content)  echo 1.4 ;; survival:models)  echo 0.8 ;; survival:tools)  echo 1.2 ;;
         *)                 echo 1.0 ;;   # balanced / unknown
     esac
 }
@@ -118,6 +120,8 @@ catalog_zim_candidates() {
         # curated topic boosts
         lname=tolower(name);
         if (lname ~ /medicin|medical|wikem|health/) base += 90;
+        # Grid-down practical skills: water, food, shelter, repair, power, radio.
+        if (lname ~ /zimgit|surviv|prepper|selfreliance|appropedia|energypedia|armypubs|knots|gardening|gardenology|cooking|ifixit|diy\.|mechanics\.|ham\.|electronics\.|post-disaster|water|farming/) base += 80;
         if (lname ~ /_100_|_top_|essential/) base += 50;
         if (lname ~ /mathematic|physic|chemistr|comput|climate|biolog/) base += 30;
         # Linux / shell / offline-SETUP help: an offline user must be able to get

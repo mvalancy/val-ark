@@ -29,6 +29,15 @@ the web server and legacy scripts work unchanged. Resolution + disk math live in
 
 The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
 
+0. **Grid-down essentials** — before anything else, the ranked list in
+   [`data/essentials.tsv`](../data/essentials.tsv): safe water, field medicine,
+   medicines, food, knots, post-disaster recovery, a pocket Wikipedia, a small
+   offline assistant, then repair / power / radio / farming references and the
+   network-boot images. Each entry takes its **smallest** variant (mini/nopic ZIM)
+   and an entry that does not fit is skipped, so a 2 GB stick still gets the most
+   critical ~20 items and a big disk later upgrades to the full variants in
+   phases 1–3. Rows can target an owner profile (`focus`), e.g. Army field manuals
+   only for `survival`.
 1. **Diversity first** — one item (the *smallest*) from every category before
    deepening any single one. Guarantees breadth across ~40+ categories (22 ZIM
    topics, 17 model modalities, and netboot / OS-install / router-firmware /

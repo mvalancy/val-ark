@@ -212,6 +212,7 @@ gen_candidates() { catalog_all_candidates; }
 build_plan() {
     local budget="$1"
     gen_candidates | python3 "$PLANNER" --budget "$budget" \
+        --essentials "${DATA_DIR:-${PROJECT_ROOT}/data}/essentials.tsv" --profile "$(_valark_profile)" \
         --model-max-bytes "$(valark_model_max_bytes)" 2> "${TMPDIR_VA}/plan.summary"
 }
 

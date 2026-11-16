@@ -11,6 +11,7 @@ file is the canonical schema.
 | File | Purpose |
 |------|---------|
 | `installers.tsv` | Freely-redistributable OS / router-firmware / netboot / Jetson-BSP images for PXE commissioning of the mesh. |
+| `apt-sets.tsv` | Offline APT package **sets** (LAMP, LAN core: DHCP/DNS/NTP/PXE/firewall, routing/VPN, file, mail/chat, directory, apps, containers, ops). Resolved per Ubuntu suite+arch with all dependencies by `scripts/lib/apt_offline.py` into a flat local repo. |
 | `models-extra.tsv` | Curated small, high-value models that broaden modality diversity (embeddings, rerankers, tiny VLMs, OCR, speech, safety, plus setup-assistant chat LLMs). |
 
 ## Schemas (field order the consumers depend on)
@@ -21,6 +22,12 @@ file is the canonical schema.
 value|id|name|category|arch|url|bytes|sha_url|note
 ```
 
+`apt-sets.tsv`:
+
+```
+value|set|packages|note
+```
+
 `models-extra.tsv`:
 
 ```
@@ -29,7 +36,7 @@ value|id|category|repo|file|format|gated|bytes|dest|note
 
 - `value` — intrinsic importance **0–1000**, NOT size; the planner derives value-per-byte from
   `value` and `bytes`, so a big high-`value` item can still lose to several small ones.
-- `installers`: `category` is the diversity axis (`netboot | os-install | router-firmware | jetson-bsp`);
+- `installers`: `category` is the diversity axis (`netboot | os-install | router-firmware | jetson-bsp | server-source`);
   `arch` is free-form/informational; `sha_url` points at the upstream checksum file.
 - `models-extra`: `format` = `gguf | onnx | repo` (`repo` = HF download using `file` as an `--include`
   glob); `gated` = `no | yes`; `dest` = subdir under `MODELS_DIR`.
@@ -39,6 +46,7 @@ value|id|category|repo|file|format|gated|bytes|dest|note
 - `scripts/lib/catalog.sh` — parses both files.
 - `scripts/planner.py` — ranks rows by derived value-per-byte.
 - `scripts/loop.sh` — link-checks the `url` field on the self-heal cycle.
+- `scripts/lib/apt_offline.py` — reads `apt-sets.tsv` (`sets` / `resolve` / `fetch` / `index` / `build`).
 
 `#` and blank lines are skipped by all three.
 
@@ -52,6 +60,11 @@ value|id|category|repo|file|format|gated|bytes|dest|note
 
 ## Gotchas
 
+- **`server-source` rows are pinned upstream releases.** Re-resolve versions when bumping (each `sha_url`
+  is the upstream checksum or signature beside the tarball); `latest` URLs (WordPress, Nextcloud,
+  Composer) self-heal but their `bytes` drift, so keep them roughly right (the librarian rejects < 90%).
+- **apt sets are resolved independently** because some packages conflict (`mariadb-server` vs
+  `mysql-server`); never merge conflicting packages into one set.
 - **`gated: yes` models are HINTS, never auto-fetched.** They need an HF login + license acceptance,
   so the librarian skips them unless a token is present and the license is accepted.
 - **Value is importance, not bytes.** Setting `value` high to "force" a large download is wrong — it

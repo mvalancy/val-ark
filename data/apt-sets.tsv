@@ -1,0 +1,25 @@
+# Val Ark - offline APT package sets (LAMP / LAN-infrastructure servers)
+# Each set is resolved SEPARATELY (with every dependency, against an empty
+# dpkg status) by scripts/lib/apt_offline.py for each Ubuntu suite+arch, so a
+# bare box with no internet can `apt install` them from the local flat repo the
+# script writes (deb [trusted=yes] file:<dir> ./). Sets are separate because
+# some conflict with each other (mariadb-server vs mysql-server).
+# Packages missing from a suite/arch are skipped and reported, never fatal.
+#
+# Schema (pipe-delimited):  value|set|packages|note
+#   value     intrinsic importance 0-1000 (same meaning as installers.tsv)
+#   set       id (a-z0-9-), becomes <suite>-<arch>/<set>/ under the APT root
+#   packages  space-separated binary package names
+#
+990|lamp|apache2 libapache2-mod-php php php-cli php-fpm php-mysql php-pgsql php-sqlite3 php-curl php-gd php-mbstring php-xml php-zip php-intl php-bcmath php-imagick php-redis php-apcu php-ldap composer mariadb-server mariadb-client certbot python3-certbot-apache|Classic Apache + PHP + MariaDB stack
+960|web-proxy|nginx lighttpd haproxy varnish squid apt-cacher-ng python3-certbot-nginx keepalived|Alternate web servers, reverse proxy / load balancing, LAN caching proxies
+950|database|postgresql postgresql-contrib postgresql-client sqlite3 redis-server memcached phpmyadmin|More databases + web DB admin
+940|mysql|mysql-server mysql-client|Oracle MySQL (conflicts with mariadb-server, hence its own set)
+980|lan-core|openssh-server isc-dhcp-server kea bind9 bind9-utils bind9-dnsutils dnsmasq unbound chrony radvd nftables iptables ufw bridge-utils vlan ifupdown netplan.io iproute2 ethtool hostapd wpasupplicant avahi-daemon tftpd-hpa pxelinux syslinux-common ipxe|Everything to stand up a LAN: DHCP, DNS, NTP, routing/firewall, Wi-Fi AP, PXE boot
+930|lan-routing|frr bird2 wireguard wireguard-tools openvpn strongswan freeradius tcpdump nmap iperf3 mtr-tiny traceroute whois snmpd snmp lldpd|Routing daemons, VPNs, 802.1X/RADIUS, network diagnostics
+920|file-services|samba smbclient cifs-utils nfs-kernel-server nfs-common vsftpd rsync minidlna|File sharing for a LAN (SMB/NFS/FTP/DLNA)
+900|mail-chat|postfix dovecot-imapd dovecot-pop3d opendkim opendkim-tools rspamd ngircd prosody coturn mumble-server|Local mail, chat, voice
+890|directory-auth|slapd ldap-utils krb5-kdc krb5-admin-server sssd|Directory and single sign-on
+880|apps|wordpress mediawiki git gitweb cgit fossil|Classic self-hosted web apps
+870|containers|docker.io docker-compose-v2 podman buildah skopeo incus|Containers for everything not packaged
+860|ops|fail2ban rsyslog logrotate prometheus prometheus-node-exporter prometheus-alertmanager munin nagios4 smartmontools unattended-upgrades reprepro debmirror apt-mirror|Monitoring, hardening, and running your own package mirror

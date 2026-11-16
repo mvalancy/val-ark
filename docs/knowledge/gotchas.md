@@ -89,6 +89,12 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Downloads / mirroring
 
+- **`apt-get --print-uris` is a trap for offline .deb sets** (`scripts/lib/apt_offline.py`): (1) it
+  prints only an **MD5** digest, so take SHA256 from the signed `*_Packages` lists; (2) its local
+  file name carries the **epoch** URL-encoded (`zlib1g_1%3a1.3…deb`) while the pool/`Packages`
+  `Filename` has none, so name files after the URL basename or the flat-repo index and the SHA
+  lookup silently miss ~5% of packages. Resolve against an **empty dpkg status** in a throwaway
+  APT root so every dependency (even libc6) is included and the set is truly self-contained.
 - **hf‑repo model downloads (e.g. `rhasspy/piper-voices`) fail with exit 127 if the `hf` CLI
   is missing** — silent for a while, then "command not found." **Fix:** `pip install -U
   huggingface_hub` (provides `hf`); `setup.sh` marks it optional but it's required for repo pulls.

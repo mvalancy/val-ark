@@ -5,7 +5,7 @@
 #
 # Schema (pipe-delimited):  value|id|name|category|arch|url|bytes|sha_url|note
 #   value     intrinsic importance 0-1000 (NOT size; planner derives value/byte)
-#   category  diversity axis: netboot | os-install | router-firmware | jetson-bsp
+#   category  diversity axis: netboot | os-install | router-firmware | jetson-bsp | server-source
 #   arch      amd64|arm64|x86_64|aarch64|mipsel|mips  (free-form; informational)
 #
 950|netbootxyz-iso|netboot.xyz iPXE ISO|netboot|x86_64|https://github.com/netbootxyz/netboot.xyz/releases/download/3.0.2/netboot.xyz.iso|2424832|https://github.com/netbootxyz/netboot.xyz/releases/download/3.0.2/netboot.xyz-sha256-checksums.txt|Bootable iPXE menu; unlocks network install of everything
@@ -37,3 +37,42 @@
 780|nvidia-l4t-bsp-r3640|NVIDIA L4T BSP r36.4.0|jetson-bsp|aarch64|https://developer.download.nvidia.com/embedded/L4T/r36_Release_v4.0/release/Jetson_Linux_R36.4.0_aarch64.tbz2|709402449|-|OPEN no-auth JetPack6 BSP for Orin; flash via flash.sh
 770|nvidia-l4t-rootfs-r3640|NVIDIA L4T Sample RootFS r36.4.0|jetson-bsp|aarch64|https://developer.download.nvidia.com/embedded/L4T/r36_Release_v4.0/release/Tegra_Linux_Sample-Root-Filesystem_R36.4.0_aarch64.tbz2|1788463211|-|OPEN no-auth Ubuntu-based sample rootfs
 600|nvidia-l4t-sources-r3640|NVIDIA L4T public_sources r36.4.0|jetson-bsp|aarch64|https://developer.download.nvidia.com/embedded/L4T/r36_Release_v4.0/sources/public_sources.tbz2|225930643|-|OPEN no-auth kernel/bootloader source
+#
+# --- server-source: LAMP + LAN-infrastructure upstream releases (source unless arch says otherwise).
+# Pinned to the latest stable at 2026-11; offline .deb sets for the same stack live in data/apt-sets.tsv.
+980|apache-httpd|Apache HTTP Server 2.4.71|server-source|src|https://downloads.apache.org/httpd/httpd-2.4.71.tar.bz2|8618142|https://downloads.apache.org/httpd/httpd-2.4.71.tar.bz2.sha256|The A in LAMP; build with APR + APR-util
+975|php|PHP 8.5.12|server-source|src|https://www.php.net/distributions/php-8.5.12.tar.xz|14554312|https://www.php.net/releases/index.php?json&version=8.5.12|The P in LAMP; sha256 in the release JSON
+970|mariadb|MariaDB Server 12.3.3 LTS|server-source|src|https://archive.mariadb.org/mariadb-12.3.3/source/mariadb-12.3.3.tar.gz|222927580|https://archive.mariadb.org/mariadb-12.3.3/source/sha256sums.txt|The M in LAMP (LTS series)
+965|postgresql-src|PostgreSQL 18.7|server-source|src|https://ftp.postgresql.org/pub/source/v18.7/postgresql-18.7.tar.bz2|23155657|https://ftp.postgresql.org/pub/source/v18.7/postgresql-18.7.tar.bz2.sha256|Primary SQL database
+960|nginx|nginx 1.30.6 stable|server-source|src|https://nginx.org/download/nginx-1.30.6.tar.gz|1331698|https://nginx.org/download/nginx-1.30.6.tar.gz.asc|Web server / reverse proxy (PGP signature only)
+955|openssl|OpenSSL 4.1.0|server-source|src|https://github.com/openssl/openssl/releases/download/openssl-4.1.0/openssl-4.1.0.tar.gz|55738000|https://github.com/openssl/openssl/releases/download/openssl-4.1.0/openssl-4.1.0.tar.gz.sha256|TLS library for every server
+950|openssh|OpenSSH portable 10.0p1|server-source|src|https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-10.0p1.tar.gz|1972675|https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-10.0p1.tar.gz.asc|Remote shell server
+940|apache-apr|Apache Portable Runtime 1.7.6|server-source|src|https://downloads.apache.org/apr/apr-1.7.6.tar.bz2|899670|https://downloads.apache.org/apr/apr-1.7.6.tar.bz2.sha256|httpd build dependency
+935|apache-apr-util|APR-util 1.6.6|server-source|src|https://downloads.apache.org/apr/apr-util-1.6.6.tar.bz2|442523|https://downloads.apache.org/apr/apr-util-1.6.6.tar.bz2.sha256|httpd build dependency
+935|dnsmasq|dnsmasq 2.93|server-source|src|https://thekelleys.org.uk/dnsmasq/dnsmasq-2.93.tar.xz|642764|https://thekelleys.org.uk/dnsmasq/dnsmasq-2.93.tar.xz.asc|DNS+DHCP+TFTP for small LANs/PXE
+930|bind9|ISC BIND 9.20.30|server-source|src|https://downloads.isc.org/isc/bind9/9.20.30/bind-9.20.30.tar.xz|6004232|https://downloads.isc.org/isc/bind9/9.20.30/bind-9.20.30.tar.xz.asc|Authoritative/recursive DNS (PGP signature only)
+925|kea|ISC Kea DHCP 3.2.1|server-source|src|https://downloads.isc.org/isc/kea/3.2.1/kea-3.2.1.tar.xz|6773420|https://downloads.isc.org/isc/kea/3.2.1/kea-3.2.1.tar.xz.sha512.asc|DHCPv4/v6 server
+900|gitea-amd64|Gitea 28.4.0 amd64|server-source|amd64|https://github.com/go-gitea/gitea/releases/download/v28.4.0/gitea-28.4.0-linux-amd64.xz|42050316|https://github.com/go-gitea/gitea/releases/download/v28.4.0/gitea-28.4.0-linux-amd64.xz.sha256|Self-hosted Git forge (single binary)
+900|gitea-arm64|Gitea 28.4.0 arm64|server-source|arm64|https://github.com/go-gitea/gitea/releases/download/v28.4.0/gitea-28.4.0-linux-arm64.xz|37372396|https://github.com/go-gitea/gitea/releases/download/v28.4.0/gitea-28.4.0-linux-arm64.xz.sha256|Self-hosted Git forge (single binary)
+900|haproxy|HAProxy 3.2.26 LTS|server-source|src|https://www.haproxy.org/download/3.2/src/haproxy-3.2.26.tar.gz|5203667|https://www.haproxy.org/download/3.2/src/haproxy-3.2.26.tar.gz.sha256|TCP/HTTP load balancer
+900|unbound|Unbound 1.26.2|server-source|src|https://nlnetlabs.nl/downloads/unbound/unbound-1.26.2.tar.gz|6949796|https://nlnetlabs.nl/downloads/unbound/unbound-1.26.2.tar.gz.sha256|Validating recursive DNS resolver
+890|samba|Samba 4.25.1|server-source|src|https://download.samba.org/pub/samba/stable/samba-4.25.1.tar.gz|43590836|https://download.samba.org/pub/samba/stable/samba-4.25.1.tar.asc|SMB file/print server + AD DC
+890|wordpress|WordPress latest|server-source|src|https://wordpress.org/latest.tar.gz|35378819|https://wordpress.org/latest.tar.gz.sha1|CMS; "latest" URL self-heals
+880|curl|curl 8.23.0|server-source|src|https://curl.se/download/curl-8.23.0.tar.xz|2990916|https://curl.se/download/curl-8.23.0.tar.xz.asc|HTTP client/library
+880|gitea-src|Gitea 28.4.0 source|server-source|src|https://github.com/go-gitea/gitea/releases/download/v28.4.0/gitea-src-28.4.0.tar.gz|70697592|https://github.com/go-gitea/gitea/releases/download/v28.4.0/gitea-src-28.4.0.tar.gz.sha256|Gitea source
+880|nextcloud|Nextcloud server latest|server-source|src|https://download.nextcloud.com/server/releases/latest.tar.bz2|249589366|https://download.nextcloud.com/server/releases/latest.tar.bz2.sha256|Self-hosted files/calendar/contacts
+880|wireguard-tools|wireguard-tools 1.0.20260223|server-source|src|https://git.zx2c4.com/wireguard-tools/snapshot/wireguard-tools-1.0.20260223.tar.xz|100472|https://git.zx2c4.com/wireguard-tools/snapshot/wireguard-tools-1.0.20260223.tar.asc|VPN userspace tools; kernel module is in-tree (cgit sends no Content-Length)
+870|mediawiki|MediaWiki 1.46.2|server-source|src|https://releases.wikimedia.org/mediawiki/1.46/mediawiki-1.46.2.tar.gz|99029682|https://releases.wikimedia.org/mediawiki/1.46/mediawiki-1.46.2.tar.gz.sig|Local wiki engine (pairs with the ZIM library)
+870|sqlite-src|SQLite autoconf 3540100|server-source|src|https://www.sqlite.org/2026/sqlite-autoconf-3540100.tar.gz|3332984|https://www.sqlite.org/download.html|Embedded SQL (sha3 on download page)
+860|dovecot|Dovecot 2.4.5|server-source|src|https://dovecot.org/releases/2.4/dovecot-2.4.5.tar.gz|8747733|https://dovecot.org/releases/2.4/dovecot-2.4.5.tar.gz.sig|IMAP/POP3 server
+860|phpmyadmin|phpMyAdmin 5.2.3|server-source|src|https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.tar.xz|7748924|https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.tar.xz.sha256|Web DB admin for MariaDB/MySQL
+850|chrony|chrony 4.9|server-source|src|https://chrony-project.org/releases/chrony-4.9.tar.gz|663809|https://chrony-project.org/releases/chrony-4.9-tar-gz-asc.txt|NTP time server (no internet time offline!)
+850|redis-src|Redis 8.10.3|server-source|src|https://download.redis.io/releases/redis-8.10.3.tar.gz|21647086|https://raw.githubusercontent.com/redis/redis-hashes/master/README|Key-value store (hashes in redis-hashes)
+840|nftables|nftables 1.1.7|server-source|src|https://www.netfilter.org/pub/nftables/nftables-1.1.7.tar.xz|1062488|https://www.netfilter.org/pub/nftables/nftables-1.1.7.tar.xz.sig|Firewall / NAT for a LAN gateway
+840|squid|Squid 7.8|server-source|src|https://github.com/squid-cache/squid/releases/download/SQUID_7_8/squid-7.8.tar.xz|2463524|https://github.com/squid-cache/squid/releases/download/SQUID_7_8/squid-7.8.tar.xz.asc|Caching web proxy for low-bandwidth LANs
+830|openvpn|OpenVPN 2.7.9|server-source|src|https://github.com/OpenVPN/openvpn/releases/download/v2.7.9/openvpn-2.7.9.tar.gz|2128894|https://github.com/OpenVPN/openvpn/releases/download/v2.7.9/openvpn-2.7.9.tar.gz.asc|VPN server/client
+820|composer|Composer latest-stable|server-source|any|https://getcomposer.org/download/latest-stable/composer.phar|3815650|https://getcomposer.org/download/latest-stable/composer.phar.sha256|PHP dependency manager
+820|lighttpd|lighttpd 1.4.85|server-source|src|https://download.lighttpd.net/lighttpd/releases-1.4.x/lighttpd-1.4.85.tar.xz|897120|https://download.lighttpd.net/lighttpd/releases-1.4.x/lighttpd-1.4.85.tar.xz.sha256sum|Tiny web server for small nodes
+800|memcached|memcached 1.6.45|server-source|src|https://www.memcached.org/files/memcached-1.6.45.tar.gz|1272659|https://www.memcached.org/files/memcached-1.6.45.tar.gz.sha1|Object cache
+780|prosody|Prosody XMPP 13.0.7|server-source|src|https://prosody.im/downloads/source/prosody-13.0.7.tar.gz|745079|https://prosody.im/downloads/source/prosody-13.0.7.tar.gz.sha256|XMPP chat server
+770|openldap|OpenLDAP 2.6.16|server-source|src|https://www.openldap.org/software/download/OpenLDAP/openldap-release/openldap-2.6.16.tgz|6531689|https://www.openldap.org/software/download/OpenLDAP/openldap-release/openldap-2.6.16.sha3-512|Directory/auth server

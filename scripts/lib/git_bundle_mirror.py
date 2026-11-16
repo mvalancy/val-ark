@@ -36,7 +36,7 @@ SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 def safe_name(name):
     """owner/repo only: no '..', no extra slashes (the name becomes a path under --dest)."""
-    if not SAFE_NAME.match(name) or ".." in name.split("/") or name.startswith(".") or "/." in name:
+    if not SAFE_NAME.match(name) or any(part in (".", "..") for part in name.split("/")):
         raise ValueError(f"unsafe repository name {name!r}")
     return name
 
@@ -268,8 +268,12 @@ def main(argv=None):
             state[name] = mirror_one(real, dest, stage, info, a.tries, a.retry_wait)
         except Exception as e:
             failed += 1
-            state[name] = dict(status="failed", time=time.time(), attempts=prev.get("attempts", 0) + 1,
-                               error=str(e)[-300:])
+            if prev.get("status") == "complete":  # a failed REFRESH must not hide the good bundle on disk
+                state[name] = {**prev, "last_error": str(e)[-300:], "last_attempt": time.time(),
+                               "refresh_failures": prev.get("refresh_failures", 0) + 1}
+            else:
+                state[name] = dict(status="failed", time=time.time(), attempts=prev.get("attempts", 0) + 1,
+                                   error=str(e)[-300:])
             print(f"FAILED {name}: {e}", file=sys.stderr)
             owner_repo = real.replace("/", "__") + ".git"
             staged_bundle = stage / (real.replace("/", "__") + ".bundle")

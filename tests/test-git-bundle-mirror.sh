@@ -122,5 +122,23 @@ PY
 python3 "$M" mirror --dest "$T/dest6" --stage "$T/stage6" --tries 1 --retry-wait 0 --repo ../evil 2>/dev/null; [ $? = 2 ] && [ ! -e "$T/evil.bundle" ] && pass || fail "unsafe repo name accepted"
 mkdir -p "$T/empty"; python3 "$M" verify --dest "$T/empty" 2>/dev/null && fail "verify passed with zero bundles" || pass
 
+# 11. a failed refresh keeps the previous good bundle listed (and owner/.github-style names are allowed).
+python3 - "$ROOT/scripts/lib" "$T" <<'PY' && pass || fail "failed refresh hid a good bundle"
+import sys, json
+sys.path.insert(0, sys.argv[1]); T = sys.argv[2]
+import git_bundle_mirror as g
+g.safe_name("acme/.github")
+def boom(*a, **k): raise RuntimeError("network down")
+g.mirror_one = boom
+assert g.main(["mirror", "--dest", T + "/dest", "--stage", T + "/stage", "--tries", "1", "--retry-wait", "0",
+               "--refresh-days", "0", "--repo", "acme/widget"]) == 2
+st = json.load(open(T + "/dest/.mirror-state.json"))["acme/widget"]
+assert st["status"] == "complete" and st["last_error"].endswith("network down"), st
+assert "acme/widget\t" in open(T + "/dest/INDEX.txt").read()
+PY
+for bad in ../evil acme/.. ./x; do python3 -c "import sys;sys.path.insert(0,'$ROOT/scripts/lib');import git_bundle_mirror as g
+try: g.safe_name('$bad'); sys.exit(1)
+except ValueError: pass" && pass || fail "unsafe name $bad accepted"; done
+
 echo "git-bundle-mirror: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

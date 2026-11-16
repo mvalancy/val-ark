@@ -51,6 +51,10 @@
 62|inst|alpine-virt-*|all|Tiny Linux install image (x86_64 + arm64)
 63|zim|unix.stackexchange.com_en_all|all|Linux / shell Q&A
 64|zim|askubuntu.com_en_all|all|Ubuntu Q&A
+65|inst|apache-httpd|all|Web server source (local LAN services)
+66|inst|dnsmasq|all|DHCP + DNS + TFTP for a LAN in one small daemon
+67|inst|kea|all|Full DHCP server
+68|inst|chrony|all|Time server: clocks drift with no internet time
 # --- deeper libraries --------------------------------------------------------
 70|zim|wikibooks_en_all|all|Open textbooks (nopic first)
 71|zim|wikipedia_en_all|all|All of Wikipedia (mini first; nopic/maxi later on bigger disks)

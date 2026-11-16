@@ -11,6 +11,7 @@
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 python3 - "$ROOT/data/installers.tsv" <<'PY'
 import sys
+# Add a new category here when data/installers.tsv gains one.
 CATS = {"netboot", "os-install", "router-firmware", "jetson-bsp", "server-source"}
 errors, ids, dests, rows = [], {}, {}, 0
 for n, line in enumerate(open(sys.argv[1]), 1):

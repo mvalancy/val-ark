@@ -5,12 +5,15 @@
 #  * no tests/test-*.sh starts a server on a hardcoded port: a literal port made
 #    parallel runs (several worktrees/workers) talk to each other's servers or
 #    fail "server did not start" while a leftover held it.
-#  * no small fixed offsets either ($((PORT+1)), $(($PORT + 1)), $((1+PORT)) can
-#    collide with another run's free_port); take a second free_port instead.
-#  * every test that starts server.js stops it from its EXIT trap: the trap (or the
-#    cleanup function it names) calls stop_pids on the variable holding that
-#    server's pid. A stop_pids call only mid-test doesn't count, and a mid-test
-#    stop_pids "$X" must clear X (`; X=""`) so the trap can't signal a reused pid.
+#  * no port arithmetic either ($((PORT+1)), $(($PORT + 1)), $((1+PORT)), $((SP + 1))
+#    on any variable assigned from free_port): it can collide with another run's
+#    free_port; take a second free_port instead.
+#  * every test that starts server.js stops it from its EXIT trap: the LAST trap (or
+#    the cleanup function it names, plus helpers it calls) calls stop_pids on the
+#    variable holding that server's pid. A stop_pids call only mid-test doesn't count,
+#    and a mid-test stop_pids $X must clear X (`; X=""`) so the trap can't signal a
+#    reused pid. The lint is tests/lib/port_hygiene.py; §1d runs it on one fixture
+#    per case it must catch (or must not flag).
 #  * tests/lib/ports.sh: free_port returns a bindable port; a TERM'd test whose EXIT
 #    trap calls stop_pids leaves no server behind, and a broken trap (one that never
 #    kills the server) IS detected as a leak (negative control); stop_pids escalates
@@ -23,75 +26,141 @@ fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 . "$ROOT/tests/lib/ports.sh"
 
-# 1. structural: in a test that starts server.js, no shell var gets a literal port and no
-#    port is derived by a big fixed offset ($((port + 9000)) overflows 65535 on an ephemeral port).
-HITS=$(grep -lE 'scripts/server\.js' "$ROOT"/tests/test-*.sh | xargs grep -nE '^\s*[A-Z_0-9]*P[A-Z_0-9]*=[0-9]{4,5}\b|\+ ?[0-9]{4,}\)\)|\(\( *\$?\{?[A-Za-z_]*(PORT|port)[A-Za-z_0-9]*\}? *[-+] *[0-9]+ *\)\)|\(\( *[0-9]+ *\+ *\$?\{?[A-Za-z_]*(PORT|port)' 2>/dev/null)
-[ -z "$HITS" ] && pass || fail "hardcoded server ports (use free_port from tests/lib/ports.sh):
-$HITS"
+# 1. The lint (tests/lib/port_hygiene.py) on every real test: no literal port, no port
+#    arithmetic, every server launch has a known pid variable that the LAST EXIT trap
+#    stop_pids-es, and every mid-test stop_pids clears its variable.
+REAL=(); for f in "$ROOT"/tests/test-*.sh; do [ "$f" -ef "${BASH_SOURCE[0]}" ] || REAL+=("$f"); done   # not this file's fixture text
+OUT=$(python3 -I "$ROOT/tests/lib/port_hygiene.py" "${REAL[@]}" 2>&1)
+[ -z "$OUT" ] && pass || fail "port hygiene (see tests/lib/port_hygiene.py for the codes):
+$OUT"
 
-# 1b. every server test's EXIT trap stops the server: find the variable that holds each
-#     server.js pid (`X=$!` after the launch, `X="$(cat ...pid)"` for a subshell launch,
-#     or an accumulator like ALL_PIDS="$ALL_PIDS $pid"), then require the EXIT trap body
-#     (inline, or the function it names) to call stop_pids with that variable.
-python3 - "$ROOT"/tests/test-*.sh > "$T/nostop" <<'PY'
-import re, sys
-for path in sys.argv[1:]:
-    src = open(path).read()
-    lines = src.split("\n")
-    pidvars = set()
-    for i, l in enumerate(lines):
-        if not re.search(r'scripts/server\.js"? .*&', l):
-            continue
-        win = "\n".join(lines[i:i + 3])
-        m = re.search(r'\b([A-Za-z_][A-Za-z0-9_]*)=\$!', win)
-        if m:
-            v = m.group(1)
-            acc = re.search(r'\b([A-Z_][A-Z0-9_]*)="\$\1 \$%s"' % re.escape(v), src)
-            pidvars.add(acc.group(1) if acc else v)
-        elif re.search(r'echo \$! *> *"?([^ ")]+)', win):
-            f = re.search(r'echo \$! *> *"?([^ ")]+)', win).group(1)
-            m2 = re.search(r'\b([A-Z_][A-Z0-9_]*)="?\$\(cat "?%s' % re.escape(f), src)
-            pidvars.add(m2.group(1) if m2 else "?unknown-pid-var")
-        else:
-            pidvars.add("?unknown-pid-var")
-    if not pidvars:
-        continue
-    bodies = []
-    for m in re.finditer(r"""trap +(?:'([^']*)'|"([^"]*)"|([A-Za-z_][A-Za-z0-9_]*)) +EXIT""", src):
-        body = m.group(1) or m.group(2)
-        if m.group(3):  # trap <function> EXIT -> that function's body
-            fm = re.search(r'^%s\(\) *\{(.*?)^\}|^%s\(\) *\{([^\n]*)\}' % (m.group(3), m.group(3)), src, re.M | re.S)
-            body = (fm.group(1) or fm.group(2)) if fm else ""
-        bodies.append(body or "")
-    calls = " ".join(re.findall(r'stop_pids[^;\n]*', " ".join(bodies)))
-    missing = [v for v in sorted(pidvars) if not re.search(r'\$\{?%s\b' % re.escape(v), calls)]
-    if missing:
-        print("%s (EXIT trap does not stop_pids: %s)" % (path.rsplit("/", 1)[-1], " ".join(missing)))
-PY
-[ ! -s "$T/nostop" ] && pass || fail "server tests whose EXIT trap does not stop their server: $(tr '\n' ' ' < "$T/nostop")"
-
-# 1c. a mid-test `stop_pids "$X"` must clear X on the same line (`; X=""`), or the EXIT trap
-#     later signals a dead pid that may by then belong to someone else's process. Calls inside
-#     the cleanup function the EXIT trap names are exempt (the shell is exiting).
-python3 - "$ROOT"/tests/test-*.sh > "$T/noclear" <<'PY'
-import re, sys
-for path in sys.argv[1:]:
-    src = open(path).read()
-    if not any(re.search(r'scripts/server\.js"? .*&', l) for l in src.split("\n")):
-        continue  # only tests that launch a server
-    exempt = set()
-    for m in re.finditer(r'trap +([A-Za-z_][A-Za-z0-9_]*) +EXIT', src):
-        fm = re.search(r'^%s\(\) *\{.*?^\}|^%s\(\) *\{[^\n]*\}' % (m.group(1), m.group(1)), src, re.M | re.S)
-        if fm:
-            exempt.update(range(src.count("\n", 0, fm.start()) + 1, src.count("\n", 0, fm.end()) + 2))
-    for n, line in enumerate(src.split("\n"), 1):
-        if n in exempt or re.search(r'\btrap\b', line):
-            continue
-        for v in re.findall(r'stop_pids +"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?"', line):
-            if not re.search(r'\b%s=""' % re.escape(v), line):
-                print("%s:%d stop_pids \"$%s\" without %s=\"\"" % (path.rsplit("/", 1)[-1], n, v, v))
-PY
-[ ! -s "$T/noclear" ] && pass || fail "a mid-test stop_pids must clear its pid var: $(tr '\n' ' ' < "$T/noclear")"
+# 1d. The lint itself, on fixtures (one per case the #211 review found; each is a mutation of a
+#     correct file). fx <name> <expected: CLEAN or a CODE> then the file body on stdin.
+LINT="$ROOT/tests/lib/port_hygiene.py"
+mkdir -p "$T/fx"
+fx() {
+    local name="$1" want="$2" f="$T/fx/test-$1.sh" got
+    cat > "$f"
+    got=$(python3 -I "$LINT" "$f" 2>&1)
+    if [ "$want" = CLEAN ]; then
+        [ -z "$got" ] && pass || fail "lint fixture $name must be clean, got: $got"
+    else
+        grep -q ": $want " <<<"$got" && pass || fail "lint fixture $name must report $want, got: '${got}'"
+    fi
+}
+L='"$NODE" "$ROOT/scripts/server.js" "$PORT" >"$T/srv.log" 2>&1 &'
+fx control CLEAN <<EOF
+PORT=\$(free_port); SRV_PID=""
+trap 'stop_pids "\$SRV_PID"; rm -rf "\$T"' EXIT
+$L
+SRV_PID=\$!
+stop_pids "\$SRV_PID"; SRV_PID=""
+EOF
+fx last-trap-wins TRAP <<EOF
+PORT=\$(free_port)
+trap 'stop_pids "\$SRV_PID"' EXIT
+$L
+SRV_PID=\$!
+trap 'rm -rf "\$T"' EXIT
+EOF
+fx unquoted-noclear NOCLEAR <<EOF
+PORT=\$(free_port)
+trap 'stop_pids "\$SRV_PID"' EXIT
+$L
+SRV_PID=\$!
+stop_pids \$SRV_PID
+EOF
+fx offset-any-port-var OFFSET <<EOF
+SP=\$(free_port)
+trap 'stop_pids "\$NPID"' EXIT
+"\$NODE" "\$ROOT/scripts/server.js" "\$SP" >"\$T/srv.log" 2>&1 &
+NPID=\$!
+VALARK_HTTPS_PORT=\$((SP + 1))
+EOF
+fx offset-dollar-form OFFSET <<EOF
+PORT=\$(free_port)
+trap 'stop_pids "\$SRV_PID"' EXIT
+$L
+SRV_PID=\$!
+H=\$((\$PORT+1))
+EOF
+fx offset-reversed OFFSET <<EOF
+PORT=\$(free_port)
+trap 'stop_pids "\$SRV_PID"' EXIT
+$L
+SRV_PID=\$!
+H=\$((1 + PORT))
+EOF
+fx literal-port LITERAL <<EOF
+PORT=3700
+trap 'stop_pids "\$SRV_PID"' EXIT
+$L
+SRV_PID=\$!
+EOF
+fx amp-on-continuation TRAP <<EOF
+PORT=\$(free_port)
+trap 'rm -rf "\$T"' EXIT
+VALARK_BIND=127.0.0.1 \\
+  "\$NODE" "\$ROOT/scripts/server.js" "\$PORT" \\
+  >"\$T/srv.log" 2>&1 &
+SRV_PID=\$!
+EOF
+fx one-line-cleanup TRAP <<EOF
+PORT=\$(free_port)
+cleanup() { rm -rf "\$T"; }
+trap cleanup EXIT
+$L
+SRV_PID=\$!
+stop_pids "\$SRV_PID"; SRV_PID=""
+later() {
+    echo later
+}
+EOF
+fx no-pid-var NOPID <<EOF
+PORT=\$(free_port)
+trap 'rm -rf "\$T"' EXIT
+$L
+EOF
+fx quoted-trap-name CLEAN <<EOF
+PORT=\$(free_port)
+cleanup() { stop_pids "\$SRV_PID"; rm -rf "\$T"; }
+trap 'cleanup' EXIT
+$L
+SRV_PID=\$!
+EOF
+fx helper-indirection CLEAN <<EOF
+PORT=\$(free_port)
+kill_servers() { stop_pids "\$SRV_PID"; }
+cleanup() {
+    kill_servers
+    rm -rf "\$T"
+}
+trap cleanup EXIT
+$L
+SRV_PID=\$!
+EOF
+fx pid-array CLEAN <<EOF
+PORT=\$(free_port); PIDS=()
+trap 'stop_pids "\${PIDS[@]}"' EXIT
+$L
+PIDS+=(\$!)
+EOF
+fx subshell-capture CLEAN <<EOF
+PORT=\$(free_port)
+start() { $L echo \$!; }
+SRV_PID=\$(start)
+trap 'stop_pids "\$SRV_PID"' EXIT
+EOF
+fx comment-only-stop TRAP <<EOF
+PORT=\$(free_port)
+cleanup() {
+    # stop_pids "\$SRV_PID"   (commented out: must not count)
+    rm -rf "\$T"
+}
+trap cleanup EXIT
+$L
+SRV_PID=\$!
+EOF
 
 # 2. free_port: numeric, bindable, and two picks are (almost always) distinct.
 P1=$(free_port); P2=$(free_port)

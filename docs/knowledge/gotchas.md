@@ -372,12 +372,24 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
     the EXIT trap and mid-test;
   - `trap_signals` is optional belt and braces (exit 130/143 through the EXIT trap).
 
-  `tests/test-port-hygiene.sh` fails on a literal port, on any `PORT+N` offset (`$((PORT+1))`,
-  `$(($PORT + 1))`, `$((1+PORT))`), on a server test whose EXIT trap doesn't `stop_pids` the
-  variable holding that server's PID, and on a mid-test `stop_pids "$X"` that doesn't clear
-  `X=""` (otherwise the trap later signals a PID that may have been reused). Its §3 includes a negative control showing it does catch a
-  trap that never kills the server. If you find a stray `server.js`,
-  only kill the ones your own run started; another worker may be mid-test. (#195, #199, #208)
+  The lint behind `tests/test-port-hygiene.sh` lives in `tests/lib/port_hygiene.py`. It
+  reads bash line by line, joining `\` continuations, and when unsure it reports rather than
+  passes. It fails on:
+  - a literal port;
+  - any port arithmetic (`$((PORT+1))`, `$(($PORT + 1))`, `$((1+PORT))`, or `$((SP + 1))` on
+    any variable assigned from `free_port`);
+  - a server launch whose PID variable it can't find;
+  - a **last** EXIT trap that doesn't `stop_pids` the variable holding that server's PID. Bash
+    keeps only the last trap; a trap that names a function, quoted or not, counts that
+    function's body plus the helpers it calls, one level deep;
+  - a mid-test `stop_pids $X` (quoted or not) that doesn't clear `X=""` on the same line,
+    since the trap would later signal a PID that may have been reused.
+
+  Each rule has a fixture in §1d, which also holds the cases that must stay clean: `PIDS+=($!)`,
+  a `$(start)` capture of `echo $!`, and helper indirection. §3 includes a negative control
+  showing it does catch a trap that never kills the server. If you find a stray `server.js`,
+  only kill the ones your own run started; another worker may be mid-test.
+  (#195, #199, #208, #224)
 - **`run-all.sh`'s green/red gate must not depend on node.** The runner's exit code came
   solely from `report/generate.mjs`; with no node on the host (fresh appliance, minimal
   container) it exited 0 even when suites failed. Every suite writes `results/*.json` with an

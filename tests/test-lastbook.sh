@@ -629,7 +629,7 @@ python3 -c 'import json,sys; p=sys.argv[1]; m=json.load(open(p)); a=[x for x in 
 D30="$T/m30"; mir --dest "$D30" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
 : > "$T/req.log"
 vrun rrbig --dest "$D30" --pack auto; rc=$?
-check "renamed re-release whose HEAD contradicts its size: skipped as broken, the next pack goes through, held All kept, exit 3" '[ "$rc" = 3 ] && [ -s "$D30/packs/Lastbook-All.zip" ] && [ -s "$D30/packs/Lastbook-Medium.zip" ] && grep -q "Lastbook-All-2.zip .*broken upstream" "$T/err" && ! grep -q "^GET .*Lastbook-All-2" "$T/req.log"'
+check "renamed re-release whose HEAD contradicts its size: skipped as broken, and no smaller pack is fetched beside the held All (K1), exit 3" '[ "$rc" = 3 ] && [ -s "$D30/packs/Lastbook-All.zip" ] && [ ! -e "$D30/packs/Lastbook-Medium.zip" ] && grep -q "Lastbook-All-2.zip .*broken upstream" "$T/err" && grep -q "every pack this release offers that is not already held is smaller than the held packs/Lastbook-All.zip" "$T/err" && ! grep -q "^GET .*Lastbook-\(All-2\|Medium\|Small\)" "$T/req.log"'
 # the same re-release whose HEAD gives no size: wait a run, nothing chosen, and the message says why (F2)
 rm -rf "$T/www/rrnohead"; cp -r "$T/www/rrbig" "$T/www/rrnohead"; touch "$(find "$T/www/rrnohead" -name Lastbook-All-2.zip).nohead"
 D35="$T/m35"; mir --dest "$D35" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
@@ -657,12 +657,28 @@ variant allbig 'a=[x for x in m["packs"] if x["id"]=="all"][0]; a["files"][0]["s
 D36="$T/m36"; mir --dest "$D36" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
 : > "$T/req.log"
 vrun allbig --dest "$D36" --pack auto; rc=$?
-check "Small held + All's HEAD contradicts its size: Medium goes through, All never fetched, exit 3" '[ "$rc" = 3 ] && [ -s "$D36/packs/Lastbook-Medium.zip" ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"medium\"\]" && grep -q "Lastbook-All.zip .*broken upstream" "$T/err" && ! grep -q "^GET .*Lastbook-All.zip" "$T/req.log"'
+check "Small held + All's HEAD contradicts its size: Medium goes through, All never fetched, exit 3, and the nested Small is pruned (K2)" '[ "$rc" = 3 ] && [ ! -e "$D36/packs/Lastbook-Small-20261113.zip" ] && grep -q "pruned packs/Lastbook-Small-20261113.zip (nested in the verified medium pack)" "$T/err" && [ -s "$D36/packs/Lastbook-Medium.zip" ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"medium\"\]" && grep -q "Lastbook-All.zip .*broken upstream" "$T/err" && ! grep -q "^GET .*Lastbook-All.zip" "$T/req.log"'
 : > "$T/req.log"
 vrun allbig --dest "$T/m37" --pack auto; rc=$?
 check "fresh box + All's HEAD contradicts its size: auto's pick is HEAD-checked, Medium goes through, exit 3" '[ "$rc" = 3 ] && [ -s "$T/m37/packs/Lastbook-Medium.zip" ] && [ ! -e "$T/m37/packs/Lastbook-All.zip" ] && ! grep -q "^GET .*Lastbook-All.zip" "$T/req.log"'
 vrun allnohead --dest "$T/m38" --pack auto; rc=$?
 check "fresh box + All's HEAD gives no size: nothing to displace, All downloads (sha256 guards it), exit 0" '[ "$rc" = 0 ] && [ -s "$T/m38/packs/Lastbook-All.zip" ]'
+# K2 only when the skip upstream is the ONLY reason for exit 3: a failed file still means no prune
+variant allbigbadmap 'a=[x for x in m["packs"] if x["id"]=="all"][0]; a["files"][0]["size"]=2*a["files"][0]["size"]; a["installed_bytes"]=a["files"][0]["size"]
+ca=[x for x in m["maps"] if x["id"]=="CA"][0]; ca["files"][0]["sha256"]="0"*64'
+D39="$T/m39"; mir --dest "$D39" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+vrun allbigbadmap --dest "$D39" --pack auto --maps CA --addresses none; rc=$?
+check "skip upstream + a failed file: exit 1, nothing pruned (Small kept beside Medium)" '[ "$rc" = 1 ] && [ -s "$D39/packs/Lastbook-Small-20261113.zip" ] && [ -s "$D39/packs/Lastbook-Medium.zip" ]'
+# every pack contradicted upstream on a fresh box: the message says so, not "fits the budget" (K3)
+variant allbroken 'for x in m["packs"]: x["files"][0]["size"]=2*x["files"][0]["size"]; x["installed_bytes"]=x["files"][0]["size"]'
+: > "$T/req.log"
+vrun allbroken --dest "$T/m40" --pack auto; rc=$?
+check "fresh box, every pack contradicted upstream: \"no Lastbook pack could be confirmed upstream\", nothing fetched, exit 3" '[ "$rc" = 3 ] && grep -q "no Lastbook pack could be confirmed upstream" "$T/err" && ! grep -q "fits the budget" "$T/err" && ! grep -q "^GET .*Lastbook-\(All\|Medium\|Small\)" "$T/req.log"'
+# an unlimited budget prints as "unlimited", never "?" (K3)
+variant nopacks 'm["packs"]=[]'
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/nopacks/dl/ https://lastbook.org/=$B/nopacks/site/ https://huggingface.co/=$B/nopacks/hf/" \
+    python3 "$PY" plan --budget -1 > "$T/plan.out" 2>&1; rc=$?
+check "no pack at all, unlimited budget: the note says \"unlimited available\", not \"?\"" '[ "$rc" = 3 ] && grep -q "no Lastbook pack fits the budget (unlimited available" "$T/plan.out" && ! grep -q "(? available" "$T/plan.out"'
 # the nothing-fits message quotes the pack AND the room reserved for base maps + installers (G2)
 plan --budget 8G > "$T/plan.out"; rc=$?
 check "nothing fits: the message adds the base-map + installer room to the smallest pack" '[ "$rc" = 3 ] && grep -q "the smallest, .*, needs .* plus .* for the base maps and installers = " "$T/plan.out"'

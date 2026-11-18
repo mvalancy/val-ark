@@ -455,11 +455,14 @@ def pack_bytes(p):
     return max(p["installed"] or 0, sum(f["size"] or 0 for f in p["files"]))
 
 
-def select(rel, args, budget, dest, stamps, probe=None):
-    """Return (rows, notes, incomplete). rows: dicts with item + status get|deferred."""
+def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
+    """Return (rows, notes, incomplete, upstream_skip). rows: dicts with item + status get|deferred.
+    upstream_skip: auto passed over a larger pack because upstream's size was wrong or unconfirmed
+    (exit 3, but a verified choice may still prune: K2)."""
     remaining = [budget]  # None = unlimited
     rows, notes = [], []
     incomplete = False
+    upstream_skip = False
 
     def need(group):
         return sum(max(0, (f["size"] or 0) - have_bytes(dest, stamps, f)) for f in group["files"])
@@ -542,7 +545,17 @@ def select(rel, args, budget, dest, stamps, probe=None):
                     return False
             return True
 
+        floor_id = ((stamps.get(floor_key) or {}).get("pack") or (kept_packs or {}).get(floor_key)) if floor_key else None
+        below = []
+
         def acceptable(p):
+            if floor and disk_bytes(dest, stamps, p) is None and rank(p) < floor \
+                    and not (p["id"] == floor_id and 2 * rank(p) >= floor):
+                # K1: never download a pack smaller than the largest held, verified one (step up, never
+                # down), whatever happened to the better candidates; a same-id re-release of at least half
+                # its size is the one exception (it replaces the held file, R1)
+                below.append(p["id"])
+                return False
             if rejected and disk_bytes(dest, stamps, p) is None:
                 # after an unconfirmed claim, download no pack this run: not a smaller one, and not an
                 # intermediate upgrade either (Small held + All unconfirmed must not fetch ~67 GB of
@@ -556,7 +569,7 @@ def select(rel, args, budget, dest, stamps, probe=None):
             chosen = [pick["id"]]
             take(pick, True, f"pack {pick['id']}")
         if rejected or broken:  # a larger pack was passed over: exit 3 so the weekly job shows it (G1)
-            incomplete = True
+            upstream_skip = True
         if not chosen and rejected:
             incomplete = True
             listed = {rel_path(f): f for pk in rel["packs"] for f in pk["files"]}
@@ -567,12 +580,23 @@ def select(rel, args, budget, dest, stamps, probe=None):
                 why = f"the held {floor_key} ({human(floor)}) is not in this release"
             notes.append(f"no Lastbook pack chosen: a larger pack's size could not be confirmed and {why}; "
                          "nothing downloaded, keeping what is held (re-checked next run)")
+        elif not chosen and below:
+            incomplete = True
+            notes.append(f"no Lastbook pack chosen: every pack this release offers that is not already held is smaller "
+                         f"than the held {floor_key} ({human(floor)})"
+                         + (f", and the larger {', '.join(broken)} could not be confirmed upstream" if broken else "")
+                         + "; nothing downloaded, keeping what is held (re-checked next run)")
+        elif not chosen and broken:
+            incomplete = True
+            notes.append(f"no Lastbook pack could be confirmed upstream ({', '.join(broken)}: the server's size differs "
+                         "from the manifest); nothing downloaded (re-checked next run)")
         elif not chosen:
             incomplete = True
             smallest = min(rel["packs"], key=lambda p: need(p), default=None)
             # G2: quote what the fit really needs: the pack plus the base maps + installers it reserves
             extra_txt = f" plus {human(extras)} for the base maps and installers" if extras else ""
-            notes.append("no Lastbook pack fits the budget (" + human(remaining[0]) + " available"
+            notes.append("no Lastbook pack fits the budget ("
+                         + (human(remaining[0]) if remaining[0] is not None else "unlimited") + " available"
                          + (f"; the smallest, {smallest['title']}, needs {human(need(smallest))}{extra_txt}"
                             f" = {human(need(smallest) + extras)}" if smallest else "")
                          + "): free space, raise VALARK_MAX_GB / the budget, or pick --pack explicitly")
@@ -616,7 +640,7 @@ def select(rel, args, budget, dest, stamps, probe=None):
     if not follow and aspec != "none":
         for c in (list(addrs) if aspec == "all" else codes(args.addresses, list(addrs), "address index", rel["unavailable"].get("address"), notes)):
             take(addrs[c], True, f"addresses {c}")
-    return rows, notes, incomplete
+    return rows, notes, incomplete, upstream_skip
 
 
 # --- download -----------------------------------------------------------------------------------
@@ -1001,14 +1025,16 @@ def main(argv=None):
         for it in rel["apps"]:  # builds only SHA256SUMS.txt lists carry no size: ask the server
             if it["size"] is None:
                 it["size"] = net.head_size(it["url"])
-        rows, notes, incomplete = select(rel, args, budget, dest, stamps, probe=net.head_size)
+        kept = kept_release(dest) if dest and dest.is_dir() else None  # read before this run replaces it
+        rows, notes, incomplete, upstream_skip = select(rel, args, budget, dest, stamps, probe=net.head_size,
+                                                        kept_packs=pack_of_kept(kept))
     except Usage as e:
         log(f"usage: {e}")
         return EXIT_USAGE
     except ManifestError as e:
         log(f"ERROR: {e}")
         return EXIT_FAIL
-    rc_sel = EXIT_INCOMPLETE if incomplete else EXIT_OK
+    rc_sel = EXIT_INCOMPLETE if (incomplete or upstream_skip) else EXIT_OK
     if args.cmd == "plan" or args.dry_run:
         print_plan(rows, notes, budget, rel)
         return rc_sel
@@ -1017,7 +1043,6 @@ def main(argv=None):
         log(n)
     dest.mkdir(parents=True, exist_ok=True)
     # paths the manifests kept from the previous run still name (read before they are replaced)
-    kept = kept_release(dest)
     names = (all_paths(kept) if kept else set()) | all_paths(rel)
     counts = dict(verified=0, fetched=0, failed=0, deferred=sum(r["status"] == "deferred" for r in rows))
     added, stopped = 0, None
@@ -1042,10 +1067,17 @@ def main(argv=None):
                 log(f"{rel_path(r)}: not enough free space left on the disk: deferred")
         for name, data in raw.items():
             write_atomic(dest / name, data)
-        rc = EXIT_FAIL if counts["failed"] else (EXIT_INCOMPLETE if (incomplete or counts["deferred"]) else EXIT_OK)
+        rc = EXIT_FAIL if counts["failed"] else \
+            (EXIT_INCOMPLETE if (incomplete or counts["deferred"] or upstream_skip) else EXIT_OK)
+        # K2: an exit 3 caused ONLY by auto passing over a larger pack upstream (everything selected was
+        # fetched and verified, nothing deferred or over budget) prunes like an exit 0, with the same
+        # guards, so the smaller pack the verified choice supersedes does not linger while upstream is wrong
+        prunable = rc == EXIT_OK or (rc == EXIT_INCOMPLETE and upstream_skip and not incomplete
+                                     and not counts["deferred"] and not counts["failed"]
+                                     and any(r["section"] == "pack" and r["status"] == "get" for r in rows))
         run_packs = {r["id"] for r in rows if r["section"] == "pack" and r["status"] == "get"}
         pruned = prune(dest, rel, stamps, log, single_pack(args, rows), names, run_packs, pack_of_kept(kept)) \
-            if rc == EXIT_OK and not args.keep_old else 0
+            if prunable and not args.keep_old else 0
         save_stamps(dest, stamps)
     except OSError as e:
         log(f"ERROR: {e}")

@@ -140,8 +140,28 @@ later). See [README](README.md).
     mistake cannot enumerate the operator's files to the LAN.
   - *Auto ranking (R3).* A held, verified pack ranks by its recorded bytes. Any other pack ranks by
     its manifest file sizes; `installed_bytes` counts only when a size is missing. An unheld pack
-    that would outrank the held one must have its size confirmed by a HEAD request first. So an
-    over-reported Medium (`installed_bytes` or file size) no longer moves auto off a held All.
+    that would outrank the held one needs a HEAD whose Content-Length equals every manifest size
+    (see #214 for what happens when HEAD fails). So an over-reported Medium (`installed_bytes` or
+    file size) no longer moves auto off a held All.
+- **HEAD confirmation and id swaps (#214):**
+  - *A failed HEAD is not confirmation (H1).* A HEAD that errors, or answers without a
+    Content-Length, counts as **unconfirmed** when the pack would displace a held one. The held
+    pack stays chosen, the claimant is not downloaded, and the run logs why. The floor it is
+    compared against is the largest pack file held and verified on disk, listed in this release or
+    not. A side effect: a genuine upgrade (Small held, All now fits) also needs a working HEAD, and
+    without one it waits for the next run.
+  - *Renamed re-release that over-claims (H2).* When the larger candidate is a renamed re-release,
+    the old All is no longer listed, so it cannot be "kept chosen". If the claim is unconfirmed,
+    `auto` chooses no pack rather than a smaller download below the held size: rc 3, "no Lastbook
+    pack chosen", nothing fetched or pruned. Separately, every pack download now starts with a HEAD.
+    If the server's size disagrees with the manifest, the file fails at once with "the manifest
+    says X but the server has Y: not downloading; an upstream manifest error", instead of a GET that
+    ends in "range not satisfiable" or a sha mismatch. A failed HEAD there just proceeds, since the
+    sha256 still guards the file.
+  - *Swapped or aliased ids (H4).* The nested-pack prune skips a pack if any of its files was
+    recorded (`pack` in the stamps, else the kept manifest) under a different pack id, because then
+    the ladder no longer says what is nested in what. It also never drops a file that a pack it
+    keeps still names.
 - **Follow-up (not done):** feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
   rank) so value-per-byte, not a fixed share, decides its room.
 

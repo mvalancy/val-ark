@@ -171,7 +171,8 @@ manifest fails the run. A 206 whose `Content-Range` does not start at the `.part
 from 0; a 404 / 410 fails that file at once instead of retrying. Prune removes only files the tool
 recorded (plus stray `*.part`s whose section/[version/]name path a current or previously kept
 manifest gives), never a held pack unless this run verified a pack at least as large on disk (a pack re-released
-under a new name replaces its old file once the new one verifies with at least half its bytes), and refuses
+under a new name replaces its old file once the new one verifies with at least half its bytes; a
+pack that would displace a held one is HEAD-confirmed first, and a failed HEAD keeps the held pack), and refuses
 when the release looks truncated, including maps, addresses or models each losing more than half of
 their held files while the release lists fewer than are held. Decision record:
 [decisions.md](knowledge/decisions.md#202611--lastbook-auto-sized-by-default-every-pack-opt-in-181).

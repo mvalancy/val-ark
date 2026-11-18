@@ -436,6 +436,20 @@ def codes(spec, valid, what, unavailable=None, notes=None):
     return out
 
 
+def held_pack_floor(dest, stamps):
+    """Bytes of the largest pack file this tool recorded that is still on disk at its recorded size."""
+    best = 0
+    for k, v in stamps.items():
+        if k.startswith("packs/") and not k.endswith(".part") and OWNED_KEY.match(k) and v.get("size"):
+            try:
+                st = os.lstat(dest / k)
+            except OSError:
+                continue
+            if os.path.isfile(dest / k) and not os.path.islink(dest / k) and st.st_size == v["size"]:
+                best = max(best, v["size"])
+    return best
+
+
 def pack_bytes(p):
     return max(p["installed"] or 0, sum(f["size"] or 0 for f in p["files"]))
 
@@ -493,24 +507,42 @@ def select(rel, args, budget, dest, stamps, probe=None):
         by_size = sorted(rel["packs"], key=rank, reverse=True)
         held = [p for p in by_size if dest and disk_bytes(dest, stamps, p) is not None]
 
+        # The largest pack file held and verified on disk, listed in this release or not (a renamed
+        # re-release leaves the old All unlisted, H2).
+        floor = held_pack_floor(dest, stamps) if dest else 0
+        rejected = []
+
         def confirmed(p):
-            if not held or p is held[0] or disk_bytes(dest, stamps, p) is not None or rank(p) <= rank(held[0]) \
-                    or probe is None:
+            """An unheld pack that claims to be larger than what is held must prove it: every file's
+            HEAD Content-Length must equal the manifest size. A failed HEAD or a missing length is
+            NOT confirmation (H1): the held pack stays, nothing is downloaded."""
+            if not floor or disk_bytes(dest, stamps, p) is not None or rank(p) <= floor:
                 return True
             for f in p["files"]:
-                n = probe(f["url"])
-                if n is not None and n != f["size"]:
-                    notes.append(f"pack {p['id']}: the manifest says {f['name']} is {human(f['size'])} but the server "
-                                 f"says {human(n)}; keeping the held {held[0]['id']} pack")
+                n = probe(f["url"]) if probe else None
+                if n != f["size"]:
+                    said = f"the server says {human(n)}" if n is not None else "the server did not confirm its size"
+                    notes.append(f"pack {p['id']}: the manifest says {f['name']} is {human(f['size'])} but {said}; "
+                                 f"keeping the held pack ({human(floor)}), nothing downloaded for it")
+                    rejected.append(p["id"])
                     return False
             return True
-        pick = next((p for p in by_size if fits(need(p) + extras) and confirmed(p)), None)
+
+        def acceptable(p):
+            if rejected and disk_bytes(dest, stamps, p) is None and rank(p) < floor:
+                return False  # after an unconfirmed claim, never trade the held pack for a smaller download
+            return fits(need(p) + extras) and confirmed(p)
+        pick = next((p for p in by_size if acceptable(p)), None)
         if pick is None:  # a pack already held costs nothing: keep it chosen when the disk fills
             pick = next((p for p in by_size if need(p) == 0), None)
         if pick is not None:
             chosen = [pick["id"]]
             take(pick, True, f"pack {pick['id']}")
-        if not chosen:
+        if not chosen and rejected:
+            incomplete = True
+            notes.append("no Lastbook pack chosen: a larger pack's size could not be confirmed and the held pack is "
+                         "not in this release; keeping what is held (re-checked next run)")
+        elif not chosen:
             incomplete = True
             smallest = min(rel["packs"], key=lambda p: need(p), default=None)
             notes.append("no Lastbook pack fits the budget (" + human(remaining[0]) + " available"
@@ -599,6 +631,11 @@ def fetch_file(net, it, dest, stamps, tries, wait, log):
         have = 0
     if size is not None and headroom(final.parent) < size - have:  # keeps the Val Ark reserve (N4)
         return "deferred"
+    if size is not None and it["section"] == "pack":
+        n = net.head_size(it["url"])  # a pack that over- or under-claims its size: say so, fetch nothing (H2)
+        if n is not None and n != size:
+            raise RuntimeError(f"the manifest says {human(size)} ({size} bytes) but the server has {human(n)} "
+                               f"({n} bytes): not downloading; an upstream manifest error (re-checked next run)")
     stamps[key + ".part"] = dict(part=True)  # ours: prune may remove it if the release drops it
     if os.environ.get("VALARK_JOB_MARKERS") == "1":
         print(f"@@valark-dl\t{size or 0}\t{part}\t0\tlastbook {it['name']}", file=sys.stderr, flush=True)
@@ -731,7 +768,7 @@ def disk_bytes(dest, stamps, pack):
     return sum(stamps[rel_path(f)]["size"] for f in pack["files"])
 
 
-def superseded(dest, rel, stamps, pack_id):
+def superseded(dest, rel, stamps, pack_id, kept_packs=None):
     """Smaller packs nested in pack_id (the packs are a ladder: Small < Medium < All), once every file
     of pack_id is on disk and verified (N3). Ranked by RECORDED on-disk bytes, never by manifest sizes
     alone: a manifest that omits or under-reports sizes must not make a held All look 'smaller'. A
@@ -754,6 +791,11 @@ def superseded(dest, rel, stamps, pack_id):
         recorded = [n for n in recorded if n is not None]
         if keys & big_keys or any(stamps.get(rel_path(f), {}).get("size") not in (None, f["size"]) for f in p["files"]):
             continue
+        # H4: a file recorded (or named by the kept manifest) under another pack id means the ids were
+        # swapped or aliased upstream: the ladder no longer says what is nested in what.
+        was = lambda k: stamps.get(k, {}).get("pack") or (kept_packs or {}).get(k)
+        if any(was(k) not in (None, p["id"]) for k in keys):
+            continue
         if sum(f["size"] for f in p["files"]) < sum(f["size"] for f in big["files"]) and sum(recorded) < big_disk:
             out.add(p["id"])
     return out
@@ -775,8 +817,9 @@ def prune(dest, rel, stamps, log, verified_pack=None, names=(), run_packs=(), ke
     run_keys = {rel_path(f) for p in run_packs for f in p["files"]}
     run_disk = [n for n in (disk_bytes(dest, stamps, p) for p in run_packs) if n is not None]
     largest_run = max(run_disk) if run_disk else None
-    supersede = superseded(dest, rel, stamps, verified_pack) if verified_pack else set()
-    super_keys = {rel_path(f) for p in rel["packs"] if p["id"] in supersede for f in p["files"]} - run_keys
+    supersede = superseded(dest, rel, stamps, verified_pack, kept_packs) if verified_pack else set()
+    still_named = {rel_path(f) for p in rel["packs"] if p["id"] not in supersede for f in p["files"]}
+    super_keys = {rel_path(f) for p in rel["packs"] if p["id"] in supersede for f in p["files"]} - run_keys - still_named
     keep = (all_paths(rel) - super_keys) | run_keys
     owned = {}
     for k, v in stamps.items():

@@ -32,6 +32,9 @@
 #   - a pack re-released under a new name replaces the old file (not a gutted one); auto
 #     stays on a held, verified pack when the manifest over-reports another; an
 #     out-of-tree Lastbook dir is listed by server.js from its records only
+#   - a size claim that would displace a held pack must be HEAD-confirmed (a failed HEAD is
+#     not confirmation); a pack whose HEAD disagrees is never downloaded; swapped pack ids
+#     never make the nested prune delete a file the release still names
 #   - exit codes 0 / 1 / 3 / 64; argparse errors are 64, not 2
 ###############################################################################
 PASS=0; FAIL=0
@@ -74,6 +77,8 @@ class H(http.server.BaseHTTPRequestHandler):
             f.write(f"{self.command} {urllib.parse.urlsplit(self.path).path} {self.headers.get('Range', '-')}\n")
         if not p:
             self.send_error(404); return
+        if not body_too and os.path.exists(p + ".nohead"):  # persistent: HEAD fails (no size to confirm)
+            self.send_error(500); return
         if os.path.exists(p + ".redirect"):  # persistent: 302 to the URL in the flag file
             self.send_response(302); self.send_header("Location", open(p + ".redirect").read().strip())
             self.send_header("Content-Length", "0"); self.end_headers(); return
@@ -609,6 +614,45 @@ check "Medium's installed_bytes over-reported: auto stays on the held All" '[ "$
 : > "$T/req.log"
 vrun bigmedfile --dest "$D28" --pack auto; rc=$?
 check "Medium's file size over-reported: HEAD disagrees, auto stays on the held All and says why" '[ "$rc" = 0 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"all\"\]" && grep -q "the server says" "$T/err" && ! grep -q "^GET .*Lastbook-Medium.zip" "$T/req.log"'
+
+# an unconfirmed size claim never displaces a held pack (H1): a failed HEAD is not confirmation
+variant bigmednohead 'a=[p for p in m["packs"] if p["id"]=="medium"][0]; a["installed_bytes"]=10**12; a["files"][0]["size"]=10**12'
+touch "$(find "$T/www/bigmednohead" -name Lastbook-Medium.zip).nohead"
+D29="$T/m29"; mir --dest "$D29" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+: > "$T/req.log"
+vrun bigmednohead --dest "$D29" --pack auto; rc=$?
+check "HEAD fails for an over-claiming Medium: auto stays on the held All, no download, says why" '[ "$rc" = 0 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"all\"\]" && grep -q "the server did not confirm its size" "$T/err" && ! grep -q "^GET .*Lastbook-Medium.zip" "$T/req.log"'
+
+# a renamed re-release that over-claims its size is caught before any download (H2)
+rerelease rrbig $((ALLSZ - 50))
+python3 -c 'import json,sys; p=sys.argv[1]; m=json.load(open(p)); a=[x for x in m["packs"] if x["id"]=="all"][0]; a["files"][0]["size"]=2*a["files"][0]["size"]; a["installed_bytes"]=a["files"][0]["size"]; json.dump(m,open(p,"w"))' "$T/www/rrbig/dl/manifest-v1.json"
+D30="$T/m30"; mir --dest "$D30" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+: > "$T/req.log"
+vrun rrbig --dest "$D30" --pack auto; rc=$?
+check "renamed re-release over-claiming its size, auto: no pack chosen, nothing downloaded, the held All kept" '[ "$rc" = 3 ] && [ -s "$D30/packs/Lastbook-All.zip" ] && grep -q "the server says" "$T/err" && grep -q "no Lastbook pack chosen" "$T/err" && ! grep -q "^GET .*Lastbook-\(All-2\|Medium\|Small\)" "$T/req.log"'
+: > "$T/req.log"
+vrun rrbig --dest "$D30" --pack all; rc=$?
+check "renamed re-release over-claiming its size, --pack all: a clear error before any GET (not \"range not satisfiable\")" '[ "$rc" = 1 ] && grep -q "but the server has .*: not downloading; an upstream manifest error" "$T/err" && ! grep -q "range not satisfiable" "$T/err" && ! grep -q "^GET .*Lastbook-All-2.zip" "$T/req.log" && [ -s "$D30/packs/Lastbook-All.zip" ]'
+
+# swapped / aliased pack ids never make the nested prune delete a file the release still names (H4)
+rm -rf "$T/www/swap"; cp -r "$T/www/tiny" "$T/www/swap"
+python3 - "$T/www/swap/dl/manifest-v1.json" "$(dirname "$(find "$T/www/swap" -name Lastbook-Medium.zip)")/Lastbook-Medium-2.zip" <<'PYEOF'
+import hashlib, json, sys
+p, new = sys.argv[1], sys.argv[2]; m = json.load(open(p)); P = {x["id"]: x for x in m["packs"]}
+P["all"]["files"] = [dict(P["medium"]["files"][0])]; P["all"]["installed_bytes"] = P["all"]["files"][0]["size"]
+d = b"medium two " * 900; open(new, "wb").write(d)   # larger than every old pack file
+f = P["medium"]["files"][0]; f["name"] = "Lastbook-Medium-2.zip"; f["url"] = f["url"].replace("Lastbook-Medium.zip", "Lastbook-Medium-2.zip")
+f["size"] = len(d); f["sha256"] = hashlib.sha256(d).hexdigest(); P["medium"]["installed_bytes"] = len(d)
+json.dump(m, open(p, "w"))
+PYEOF
+D31="$T/m31"; held_all "$D31"
+vrun swap --dest "$D31" --pack medium; rc=$?
+check "ids swapped (all names the old Medium file): the nested prune keeps that file" '[ "$rc" = 0 ] && [ -s "$D31/packs/Lastbook-Medium-2.zip" ] && [ -s "$D31/packs/Lastbook-Medium.zip" ] && ! grep -q "pruned packs/Lastbook-Medium.zip" "$T/err"'
+# a file one superseded pack shares with a pack that is kept stays (still named by the release)
+variant shared 'P={p["id"]: p for p in m["packs"]}; P["all"]["files"]=P["all"]["files"]+[dict(P["small"]["files"][0])]'
+D32="$T/m32"; mir --dest "$D32" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+vrun shared --dest "$D32" --pack medium; rc=$?
+check "a superseded pack's file that a kept pack also names is not pruned" '[ "$rc" = 0 ] && [ -s "$D32/packs/Lastbook-Small-20261113.zip" ] && [ -s "$D32/packs/Lastbook-Medium.zip" ]'
 
 # --- 11. the tool entry --------------------------------------------------------------------------
 : > "$T/req.log"

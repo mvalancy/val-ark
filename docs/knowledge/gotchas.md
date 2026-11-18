@@ -232,6 +232,16 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   `http.lowSpeedTime=1800` and HTTP/1.1, and **keeps the shallow staging dir on failure** so the
   next run resumes. Fetch only `refs/heads/*` + `refs/tags/*`: GitHub's `refs/pull/*` can double
   a bundle.
+- <a id="git-bundle-incremental-refresh"></a>**A bundle refresh must not refetch history it already
+  holds (#179).** Deleting staging and re-cloning every `--refresh-days` re-downloads Linux-sized
+  histories monthly. `git_bundle_mirror.py` seeds a fresh bare staging repo by `git fetch`ing the
+  archived `<dest>/<owner>/<repo>.bundle` (heads + tags), then runs one `git fetch --prune origin`,
+  so upstream negotiates with our `have`s and sends only new objects; deleted upstream branches are
+  pruned and orphaned objects drop out of `bundle create --all`. The rebuilt bundle is
+  `git bundle verify`d before the `.part` rename replaces the old one. If the old bundle is
+  missing, unreadable or yields a shallow/empty repo, staging is wiped and the full chunked fetch
+  runs. State records `incremental: true|false`. Regression: `tests/test-git-bundle-mirror.sh`
+  cases 12-13 (trace shows `have` lines and no `deepen`).
 
 ## Storage / data root
 

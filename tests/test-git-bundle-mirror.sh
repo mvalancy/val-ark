@@ -8,6 +8,8 @@
 #  * bundle restores with `git clone`, keeps branches + tags, drops refs/pull/*.
 #  * .source.json sha256 matches the bundle; INDEX.txt lists it; verify passes.
 #  * a failing remote marks the repo failed (exit 2) without killing the run.
+#  * a refresh seeds from the existing bundle and fetches only new objects;
+#    a corrupt old bundle falls back to the full fetch (#179).
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -139,6 +141,36 @@ PY
 for bad in ../evil acme/.. ./x; do python3 -c "import sys;sys.path.insert(0,'$ROOT/scripts/lib');import git_bundle_mirror as g
 try: g.safe_name('$bad'); sys.exit(1)
 except ValueError: pass" && pass || fail "unsafe name $bad accepted"; done
+
+# 12. incremental refresh (#179): seeded from the archived bundle, upstream sends only new objects.
+R="$T/remote/acme/widget.git"
+git -C "$T/work" checkout -q main; echo 41 > "$T/work/f"; git -C "$T/work" commit -qam c41
+git -C "$T/work" push -q "$R" main
+git -C "$R" branch -D side >/dev/null; git -C "$R" tag v2.0 main
+GIT_TRACE_PACKET="$T/trace12" run --refresh-days 0 --repo acme/widget 2>"$T/log12" && pass || fail "incremental refresh failed: $(cat "$T/log12")"
+python3 -c "import json,sys;s=json.load(open(sys.argv[1]))['acme/widget'];sys.exit(0 if s['status']=='complete' and s.get('incremental') else 1)" \
+    "$T/dest/.mirror-state.json" && pass || fail "refresh was not seeded from the existing bundle"
+# Seeded: one negotiation that advertises the history we hold; no shallow/deepen chunk walk.
+grep -q 'fetch> have ' "$T/trace12" && ! grep -q 'fetch> deepen' "$T/trace12" && pass || fail "refresh refetched history from upstream"
+rm -rf "$T/r12"; git clone -q "$B" "$T/r12" 2>/dev/null
+[ "$(git -C "$T/r12" rev-list --count HEAD 2>/dev/null)" = "41" ] && pass || fail "incremental bundle lacks the new commit"
+git -C "$T/r12" rev-parse -q --verify v2.0 >/dev/null && git -C "$T/r12" rev-parse -q --verify v1.0 >/dev/null && pass || fail "tags lost/missing after incremental refresh"
+git -C "$T/r12" rev-parse -q --verify origin/side >/dev/null && fail "branch deleted upstream survived the refresh" || pass
+python3 "$M" verify --dest "$T/dest" 2>/dev/null && pass || fail "incremental bundle does not verify"
+python3 - "$B" <<'EOF2' && pass || fail ".source.json stale after incremental refresh"
+import hashlib, json, sys
+b = sys.argv[1]; meta = json.load(open(b + ".source.json"))
+assert meta["sha256"] == hashlib.sha256(open(b, "rb").read()).hexdigest()
+EOF2
+[ ! -e "$T/stage/acme__widget.git" ] && pass || fail "staging not cleaned after incremental refresh"
+
+# 13. a corrupt archived bundle falls back to the full fetch (and is replaced by a good one).
+echo junk > "$B"
+run --refresh-days 0 --repo acme/widget 2>"$T/log13" && pass || fail "fallback refresh failed: $(cat "$T/log13")"
+python3 -c "import json,sys;s=json.load(open(sys.argv[1]))['acme/widget'];sys.exit(0 if s['status']=='complete' and not s.get('incremental') else 1)" \
+    "$T/dest/.mirror-state.json" && pass || fail "corrupt bundle was not a full-fetch fallback"
+rm -rf "$T/r13"; git clone -q "$B" "$T/r13" 2>/dev/null
+[ "$(git -C "$T/r13" rev-list --count HEAD 2>/dev/null)" = "41" ] && pass || fail "fallback bundle lacks full history"
 
 echo "git-bundle-mirror: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

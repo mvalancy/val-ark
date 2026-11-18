@@ -101,7 +101,7 @@ download_lastbook() {
         0)  DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
             log_success "${TOOL_NAME}: current release mirrored (pack: $(_lb packs || echo none); app $(_lb app_version); $(valark_human "$(_lb added_bytes)") added; $(du -sh "$LASTBOOK_DIR" 2>/dev/null | cut -f1) held)" ;;
         3)  DOWNLOAD_SKIPPED=$((DOWNLOAD_SKIPPED + 1))
-            log_warn "${TOOL_NAME}: incomplete - part of the selection did not fit the budget (${budget:-${pct}% share}); pack: $(_lb packs || echo none). Free space, raise VALARK_LASTBOOK_BUDGET_PCT / VALARK_MAX_GB, then re-run" ;;
+            log_warn "${TOOL_NAME}: incomplete (pack: $(_lb packs || echo none)) - part of the selection did not fit the budget (${budget:-${pct}% share}), or a larger pack was skipped because upstream's size could not be confirmed / is wrong (see the lastbook: lines above). Budget: free space or raise VALARK_LASTBOOK_BUDGET_PCT / VALARK_MAX_GB; upstream: re-checked next run" ;;
         64) log_error "${TOOL_NAME}: bad option (see the header of scripts/tools/lastbook.sh)"; return 2 ;;
         *)  log_error "${TOOL_NAME}: mirror failed (exit ${rc}); partial downloads resume next run"; return 1 ;;
     esac

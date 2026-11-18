@@ -511,21 +511,33 @@ def select(rel, args, budget, dest, stamps, probe=None):
         # The largest pack file held and verified on disk, listed in this release or not (a renamed
         # re-release leaves the old All unlisted, H2).
         floor, floor_key = held_pack_top(dest, stamps) if dest else (0, None)
-        rejected = []
+        rejected, broken = [], []  # rejected: HEAD gave no size (transient); broken: a definite mismatch
 
         def confirmed(p):
-            """An unheld pack that claims to be larger than what is held must prove it: every file's
-            HEAD Content-Length must equal the manifest size. A failed HEAD or a missing length is
-            NOT confirmation (H1): the held pack stays, nothing is downloaded."""
-            if not floor or disk_bytes(dest, stamps, p) is not None or rank(p) <= floor:
+            """HEAD-check an unheld auto pick before it is chosen (fresh boxes too, G1).
+            - HEAD answers with a size different from the manifest: that pack is broken upstream.
+              Skip it and let the next confirmed pack through (a lying All must not stall the box).
+            - HEAD gives no size: on a box holding a pack this would displace, that is NOT confirmation
+              (H1): nothing is downloaded this run and the held pack stays. On a fresh box (nothing to
+              displace) the download goes ahead and its sha256 guards it.
+            A pack held and verified, or smaller than the held one (it displaces nothing), needs no
+            HEAD here; fetch_file still HEADs every pack before downloading it."""
+            if disk_bytes(dest, stamps, p) is not None or probe is None:
+                return True
+            displacing = bool(floor) and rank(p) > floor
+            if floor and not displacing:
                 return True
             for f in p["files"]:
-                n = probe(f["url"]) if probe else None
-                if n != f["size"]:
-                    said = f"the server says {human(n)}" if n is not None else "the server did not confirm its size"
-                    notes.append(f"pack {p['id']}: the manifest says {f['name']} is {human(f['size'])} but {said}; "
-                                 f"not downloading it or any other pack this run, keeping the held {floor_key} "
-                                 f"({human(floor)}); retried next run")
+                n = probe(f["url"])
+                if n is not None and n != f["size"]:
+                    notes.append(f"pack {p['id']}: the manifest says {f['name']} is {human(f['size'])} but the server "
+                                 f"says {human(n)}: broken upstream, skipped this run; trying the next pack")
+                    broken.append(p["id"])
+                    return False
+                if n is None and displacing:
+                    notes.append(f"pack {p['id']}: the manifest says {f['name']} is {human(f['size'])} but the server "
+                                 f"did not confirm its size; not downloading it or any other pack this run, keeping "
+                                 f"the held {floor_key} ({human(floor)}); retried next run")
                     rejected.append(p["id"])
                     return False
             return True
@@ -543,6 +555,8 @@ def select(rel, args, budget, dest, stamps, probe=None):
         if pick is not None:
             chosen = [pick["id"]]
             take(pick, True, f"pack {pick['id']}")
+        if rejected or broken:  # a larger pack was passed over: exit 3 so the weekly job shows it (G1)
+            incomplete = True
         if not chosen and rejected:
             incomplete = True
             listed = {rel_path(f): f for pk in rel["packs"] for f in pk["files"]}
@@ -556,8 +570,11 @@ def select(rel, args, budget, dest, stamps, probe=None):
         elif not chosen:
             incomplete = True
             smallest = min(rel["packs"], key=lambda p: need(p), default=None)
+            # G2: quote what the fit really needs: the pack plus the base maps + installers it reserves
+            extra_txt = f" plus {human(extras)} for the base maps and installers" if extras else ""
             notes.append("no Lastbook pack fits the budget (" + human(remaining[0]) + " available"
-                         + (f"; the smallest, {smallest['title']}, needs {human(need(smallest))}" if smallest else "")
+                         + (f"; the smallest, {smallest['title']}, needs {human(need(smallest))}{extra_txt}"
+                            f" = {human(need(smallest) + extras)}" if smallest else "")
                          + "): free space, raise VALARK_MAX_GB / the budget, or pick --pack explicitly")
     elif spec != "none":
         chosen = pack_ids if spec == "every" else codes(spec, pack_ids, "pack", rel["unavailable"].get("pack"), notes)

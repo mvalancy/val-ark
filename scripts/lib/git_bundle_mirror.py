@@ -16,6 +16,11 @@ staging dir is kept so the next run resumes. Only branches + tags are fetched
 and copied in with a size-checked .part rename, so network shares that cannot
 chmod (git's config.lock) still work as the destination.
 
+A --refresh-days refresh is incremental: staging is seeded from the bundle
+already in <dest>, so upstream sends only new objects; the rebuilt bundle is
+verified before it atomically replaces the old one. A missing or unreadable
+old bundle falls back to the full (chunked) fetch.
+
 Commands (stdlib + git; GITHUB_TOKEN raises API limits, never printed):
   plan    [--top N]                            list what would be mirrored, in order
   mirror  --dest DIR [--repo O/R ...] [--top N] [--max-gb G] [--refresh-days D]
@@ -110,20 +115,47 @@ def git(local, *args, tries=6, wait=30):
     raise RuntimeError(" ".join(args[:2]) + ": " + err)
 
 
-def fetch_resumable(name, local, size_kb, tries=6, wait=30):
-    resuming = (local / "shallow").exists()
-    if not resuming:
+REFSPECS = ["+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"]
+
+
+def init_staging(name, local):
+    shutil.rmtree(local, ignore_errors=True)
+    local.mkdir(parents=True)
+    subprocess.run(["git", "init", "--quiet", "--bare", str(local)], check=True)
+    subprocess.run(["git", "-C", str(local), "remote", "add", "origin", f"{GIT_BASE}/{name}.git"], check=True)
+    subprocess.run(["git", "-C", str(local), "config", "--replace-all", "remote.origin.fetch", REFSPECS[0]], check=True)
+    subprocess.run(["git", "-C", str(local), "config", "--add", "remote.origin.fetch", REFSPECS[1]], check=True)
+
+
+def seed_from_bundle(name, local, prev):
+    """Refresh incrementally: load the history we already archived from the previous
+    bundle, so the upstream fetch below only transfers new objects. False (staging wiped)
+    when the old bundle is missing, unreadable or incomplete -> caller does a full fetch."""
+    if not prev.is_file():
+        return False
+    init_staging(name, local)
+    p = subprocess.run(["git", "-C", str(local), "fetch", "--quiet", "--no-tags", str(prev), *REFSPECS],
+                       capture_output=True, text=True, timeout=6 * 3600)
+    ok = p.returncode == 0 and not (local / "shallow").exists() and subprocess.run(
+        ["git", "-C", str(local), "for-each-ref", "--count=1", "refs/heads"],
+        capture_output=True, text=True).stdout.strip() != ""
+    if not ok:
+        print(f"  {name}: previous bundle unusable, full refetch", file=sys.stderr)
         shutil.rmtree(local, ignore_errors=True)
-        local.mkdir(parents=True)
-        subprocess.run(["git", "init", "--quiet", "--bare", str(local)], check=True)
-        subprocess.run(["git", "-C", str(local), "remote", "add", "origin", f"{GIT_BASE}/{name}.git"], check=True)
-        subprocess.run(["git", "-C", str(local), "config", "--replace-all", "remote.origin.fetch",
-                        "+refs/heads/*:refs/heads/*"], check=True)
-        subprocess.run(["git", "-C", str(local), "config", "--add", "remote.origin.fetch",
-                        "+refs/tags/*:refs/tags/*"], check=True)
+    return ok
+
+
+def fetch_resumable(name, local, size_kb, tries=6, wait=30, prev=None):
+    """Returns (resumed, incremental)."""
+    resuming = (local / "shallow").exists()
+    if not resuming and prev is not None and seed_from_bundle(name, local, prev):
+        git(local, "fetch", "--quiet", "--prune", "origin", tries=tries, wait=wait)  # new objects only
+        return False, True
+    if not resuming:
+        init_staging(name, local)
     if size_kb < BIG_KB and not resuming:
         git(local, "fetch", "--quiet", "origin", tries=tries, wait=wait)
-        return resuming
+        return resuming, False
     if not resuming:
         git(local, "fetch", "--quiet", "--depth=1", "origin", tries=tries, wait=wait)
     shallow = local / "shallow"
@@ -136,7 +168,7 @@ def fetch_resumable(name, local, size_kb, tries=6, wait=30):
             break  # deepen made no progress: finish with one unshallow below
     if shallow.exists():
         git(local, "fetch", "--quiet", "--unshallow", "origin", tries=tries, wait=wait)
-    return resuming
+    return resuming, False
 
 
 def sha256(path):
@@ -161,7 +193,8 @@ def mirror_one(name, dest, stage, info, tries=6, wait=30):
             ["git", "bundle", "verify", "--quiet", str(bundle)], capture_output=True).returncode == 0:
         return finish(name, dest, local, bundle, info, resumed=True)  # only the copy failed last time
     bundle.unlink(missing_ok=True)
-    resumed = fetch_resumable(name, local, int(info.get("size") or 0), tries, wait)
+    prev = dest / owner / (repo + ".bundle")  # last archived bundle: seeds an incremental refresh
+    resumed, incremental = fetch_resumable(name, local, int(info.get("size") or 0), tries, wait, prev)
     branch = info.get("default_branch")
     heads = git(local, "for-each-ref", "--format=%(refname:short)", "refs/heads", tries=1).split()
     if not branch or branch not in heads:
@@ -174,10 +207,15 @@ def mirror_one(name, dest, stage, info, tries=6, wait=30):
                        capture_output=True, text=True, timeout=6 * 3600)
     if p.returncode:
         raise RuntimeError("bundle: " + p.stderr[-300:])
-    return finish(name, dest, local, bundle, info, resumed)
+    v = subprocess.run(["git", "-C", str(local), "bundle", "verify", "--quiet", str(bundle)],
+                       capture_output=True, text=True, timeout=6 * 3600)
+    if v.returncode:  # never replace a good archived bundle with a broken one
+        bundle.unlink(missing_ok=True)
+        raise RuntimeError("bundle verify: " + v.stderr[-300:])
+    return finish(name, dest, local, bundle, info, resumed, incremental)
 
 
-def finish(name, dest, local, bundle, info, resumed):
+def finish(name, dest, local, bundle, info, resumed, incremental=False):
     """Copy a built bundle into dest. Staging is removed only after the copy lands,
     so a failing destination (flaky share) retries the copy, not the download."""
     owner, repo = name.split("/")
@@ -200,7 +238,7 @@ def finish(name, dest, local, bundle, info, resumed):
                 restore=f"git clone {repo}.bundle {repo}")
     write_atomic(target.with_name(target.name + ".source.json"), json.dumps(meta, indent=2))
     return dict(status="complete", time=time.time(), bytes=size, head=head, resumed=resumed,
-                path=f"{owner}/{repo}")
+                incremental=incremental, path=f"{owner}/{repo}")
 
 
 def write_index(dest, state):

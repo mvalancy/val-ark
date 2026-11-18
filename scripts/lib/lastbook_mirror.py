@@ -9,8 +9,12 @@ upstream files, which this mirror reads live and keeps beside the copies:
   https://downloads.lastbook.org/app-v1.json       current mac / windows / linux installers
   https://lastbook.org/SHA256SUMS.txt              sha256 of every installer ever published
 
-Layout under --dest (current release only; older files are pruned after a
-complete run unless --keep-old):
+Layout under --dest (current release only). After a complete run, files THIS
+tool recorded in .lastbook-verified.json that the release no longer names are
+removed (--keep-old keeps them). Unrecorded files are never touched, symlinked
+section dirs are never followed, and nothing is pruned when the release looks
+truncated (a section that held files comes back empty, or more than half of the
+held files and bytes would go):
 
   packs/<name>  maps/<name>  addresses/<name>  models/<name>  app/<version>/<name>
   manifest-v1.json  app-v1.json  SHA256SUMS.txt  .lastbook-verified.json
@@ -55,7 +59,7 @@ Exit codes (distinct from argparse's 2):
   64  usage error (bad option or unknown pack / state code)
 mirror prints one JSON summary line last on stdout.
 """
-import argparse, hashlib, json, os, re, shutil, sys, time, urllib.error, urllib.parse, urllib.request
+import argparse, hashlib, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 
 EXIT_OK, EXIT_FAIL, EXIT_INCOMPLETE, EXIT_USAGE = 0, 1, 3, 64
@@ -200,6 +204,11 @@ def _item(section, eid, title, f, sub=None, name_key="name"):
                 sub=sub or SECTION_DIR[section])
 
 
+def version_key(v):
+    """Sort key that never compares int with str: numeric parts rank above text ones (1.1.11 > 1.1.rc1)."""
+    return [(1, int(x), "") if x.isdigit() else (0, 0, x) for x in str(v).split(".")]
+
+
 def parse_release(manifest, app, sums_text):
     """Every downloadable file of the current release, validated (raises ManifestError)."""
     if not isinstance(manifest, dict) or not isinstance(manifest.get("packs"), list):
@@ -239,7 +248,7 @@ def parse_release(manifest, app, sums_text):
         raise ManifestError("app-v1.json: not an object")
     plats = {k: v for k, v in app.items() if isinstance(v, dict) and v.get("url")}
     vers = sorted({str(v.get("version", "")) for v in plats.values() if re.fullmatch(r"[0-9][0-9A-Za-z.]*", str(v.get("version", "")))},
-                  key=lambda s: [int(x) if x.isdigit() else x for x in re.split(r"[.]", s)])
+                  key=version_key)
     if not vers:
         raise ManifestError("app-v1.json: no installer version")
     ver = rel["app_version"] = vers[-1]
@@ -493,6 +502,7 @@ def fetch_file(net, it, dest, stamps, tries, wait, log):
         have = 0
     if size is not None and free_bytes(final.parent) < size - have:
         return "deferred"
+    stamps[key + ".part"] = dict(part=True)  # ours: prune may remove it if the release drops it
     if os.environ.get("VALARK_JOB_MARKERS") == "1":
         print(f"@@valark-dl\t{size or 0}\t{part}\t0\tlastbook {it['name']}", file=sys.stderr, flush=True)
     err = None
@@ -535,10 +545,12 @@ def fetch_file(net, it, dest, stamps, tries, wait, log):
     got = sha256_file(part).hexdigest()
     if got != it["sha256"]:
         part.unlink()  # corrupt: resuming it would only repeat the mismatch
+        stamps.pop(key + ".part", None)
         raise RuntimeError(f"sha256 mismatch (got {got[:12]}..., manifest {it['sha256'][:12]}...): not kept")
     if size is not None and part.stat().st_size != size:
         raise RuntimeError("size changed during verification")
     os.replace(part, final)
+    stamps.pop(key + ".part", None)
     st = final.stat()
     stamps[key] = dict(sha256=it["sha256"], size=st.st_size, mtime_ns=st.st_mtime_ns)
     return "fetched"
@@ -550,31 +562,77 @@ def write_atomic(p, data):
     os.replace(tmp, p)
 
 
+OWNED_KEY = re.compile(r"^(?:(packs|maps|addresses|models)|app/([0-9][0-9A-Za-z.]{0,40}))/([^/]+)$")
+
+
+def _inside(dest, p):
+    """p (a section dir or file) is a real path under dest: no symlink on the way, no escape."""
+    root = dest.resolve()
+    cur = dest
+    for part in p.relative_to(dest).parts:
+        cur = cur / part
+        if cur.is_symlink():
+            return False
+    try:
+        return p.resolve().is_relative_to(root) if hasattr(p, "is_relative_to") else str(p.resolve()).startswith(str(root) + os.sep)
+    except OSError:
+        return False
+
+
 def prune(dest, rel, stamps, log):
-    """Drop files the current release no longer names (older versions); never touches others."""
+    """Drop files THIS tool recorded (in .lastbook-verified.json) that the current release no longer
+    names. Never touches an unrecorded file, never follows a symlinked section dir, never rmtree.
+    Refuses to prune at all when the release looks truncated (N1): a section that held files comes
+    back empty, or the run would drop more than half of the held files AND bytes."""
     keep = {rel_path(f) for g in ("packs", "base_maps", "maps", "addresses", "models")
             for e in rel[g] for f in e["files"]} | {rel_path(f) for f in rel["apps"]}
-    removed = 0
-    for sub in ("packs", "maps", "addresses", "models"):
-        d = dest / sub
-        if not d.is_dir():
+    owned = {}
+    for k, v in stamps.items():
+        base = k[:-5] if k.endswith(".part") else k
+        m = OWNED_KEY.match(base)
+        if m and SAFE_NAME.match(m.group(3)) and ".." not in base:
+            owned[k] = (base, m.group(1) or "app", v)
+    held = {k: v for k, (b, sec, v) in owned.items() if not k.endswith(".part")}
+    section_len = dict(packs=len(rel["packs"]), maps=len(rel["base_maps"]) + len(rel["maps"]),
+                       addresses=len(rel["addresses"]), models=len(rel["models"]), app=len(rel["apps"]))
+    for sec, n in section_len.items():
+        if n == 0 and any(owned[k][1] == sec for k in held):
+            log(f"NOT pruning: the release lists no {sec} but this mirror holds some; "
+                "an incomplete upstream manifest must not wipe the mirror (re-checked next run)")
+            return 0
+    drop = [k for k, (base, sec, v) in owned.items() if base not in keep]
+    drop_held = [k for k in drop if k in held]
+    held_bytes = sum(v.get("size") or 0 for v in held.values())
+    drop_bytes = sum(held[k].get("size") or 0 for k in drop_held)
+    if held and 2 * len(drop_held) > len(held) and 2 * drop_bytes > held_bytes:
+        log(f"NOT pruning: the release would drop {len(drop_held)} of {len(held)} held files "
+            f"({human(drop_bytes)} of {human(held_bytes)}); that looks like a bad manifest (re-checked next run)")
+        return 0
+    removed, dirs = 0, set()
+    for k in drop:
+        p = dest / k
+        if not _inside(dest, p.parent):
+            log(f"not pruning {k}: its directory is a symlink or outside the mirror")
             continue
-        for p in d.iterdir():
-            k = f"{sub}/{p.name[:-5] if p.name.endswith('.part') else p.name}"
-            if p.is_file() and not p.is_symlink() and k not in keep:
-                p.unlink()
-                stamps.pop(k, None)
-                removed += 1
-                log(f"pruned {sub}/{p.name} (not in the current release)")
-    appdir = dest / "app"
-    if appdir.is_dir():
-        for v in appdir.iterdir():
-            if v.is_dir() and not v.is_symlink() and v.name != rel["app_version"]:
-                shutil.rmtree(v)
-                for k in [k for k in stamps if k.startswith(f"app/{v.name}/")]:
-                    stamps.pop(k)
-                removed += 1
-                log(f"pruned app/{v.name} (older Lastbook version)")
+        try:
+            st = os.lstat(p)
+        except FileNotFoundError:
+            stamps.pop(k, None)  # already gone
+            continue
+        if not os.path.isfile(p) or os.path.islink(p):
+            log(f"not pruning {k}: not a regular file")
+            continue
+        p.unlink()
+        stamps.pop(k, None)
+        removed += 1
+        if k.startswith("app/"):
+            dirs.add(p.parent)
+        log(f"pruned {k} (not in the current release)")
+    for d in dirs:
+        try:
+            d.rmdir()  # only when nothing else (nothing of the user's) is left in it
+        except OSError:
+            pass
     return removed
 
 

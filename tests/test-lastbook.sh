@@ -16,7 +16,11 @@
 #   - a URL off the allow-list (host, scheme, port, credentials) or an unsafe name fails closed
 #   - sha256 mismatch -> nothing finalized, .part dropped, exit 1
 #   - a .part resumes with Range; a dropped connection is retried and resumed
-#   - a second run fetches no data files; a complete run prunes older files
+#   - a second run fetches no data files; a complete run prunes older files it recorded,
+#     never a file it did not record, never through a symlinked section dir, and not at
+#     all when the release looks truncated
+#   - a server ignoring Range restarts from 0; a 416 resets the .part; an off-list
+#     redirect is refused (a same-host redirect of a rewritten base is followed)
 #   - exit codes 0 / 1 / 3 / 64; argparse errors are 64, not 2
 ###############################################################################
 PASS=0; FAIL=0
@@ -48,16 +52,24 @@ class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def _file(self):
         p = os.path.join(ROOT, urllib.parse.urlsplit(self.path).path.lstrip("/"))
-        return p if os.path.isfile(p) else None
+        return p if os.path.isfile(p) or os.path.isfile(p + ".redirect") else None
     def _send(self, body_too):
         p = self._file()
         with open(LOG, "a") as f:
             f.write(f"{self.command} {urllib.parse.urlsplit(self.path).path} {self.headers.get('Range', '-')}\n")
         if not p:
             self.send_error(404); return
+        if os.path.exists(p + ".redirect"):  # persistent: 302 to the URL in the flag file
+            self.send_response(302); self.send_header("Location", open(p + ".redirect").read().strip())
+            self.send_header("Content-Length", "0"); self.end_headers(); return
         data = open(p, "rb").read()
         start, code = 0, 200
         rng = self.headers.get("Range")
+        if rng and os.path.exists(p + ".416once"):  # one-shot: refuse the range
+            os.remove(p + ".416once")
+            self.send_response(416); self.send_header("Content-Length", "0"); self.end_headers(); return
+        if os.path.exists(p + ".norange"):  # persistent: ignore Range, always 200 + the whole file
+            rng = None
         if rng and rng.startswith("bytes="):
             start = int(rng[6:].split("-")[0])
             if start >= len(data):
@@ -309,11 +321,101 @@ mir --dest "$T/m5" --pack every --maps none --apps none --budget 1 > "$T/out" 2>
 check "budget too small for explicit packs: exit 3, nothing fetched" '[ "$rc" = 3 ] && [ -z "$(ls "$T/m5/packs" 2>/dev/null)" ]'
 mir --dest "$T/m6" --pack small --dry-run > "$T/out" 2>"$T/err"; rc=$?
 check "--dry-run: plan printed, nothing written" '[ "$rc" = 0 ] && grep -q "^get	pack	small" "$T/out" && [ ! -e "$T/m6" ]'
-mkdir -p "$D/app/1.1.10"; echo old > "$D/app/1.1.10/Lastbook-1.1.10-mac.dmg"; echo old > "$D/packs/Lastbook-Small-20261001.zip"
+# stamp DEST KEY...: record files as this tool's own (as an earlier run would have)
+stamp() { python3 - "$@" <<'EOF'
+import json, os, sys
+d, keys = sys.argv[1], sys.argv[2:]; f = os.path.join(d, ".lastbook-verified.json")
+s = json.load(open(f)) if os.path.exists(f) else {}
+for k in keys:
+    st = os.stat(os.path.join(d, k))
+    s[k] = {"part": True} if k.endswith(".part") else dict(sha256="0" * 64, size=st.st_size, mtime_ns=st.st_mtime_ns)
+json.dump(s, open(f, "w"))
+EOF
+}
+mkdir -p "$D/app/1.1.10" "$D/app/1.1.9" "$D/app/myproject"
+echo old > "$D/app/1.1.10/Lastbook-1.1.10-mac.dmg"; echo old > "$D/app/1.1.9/Lastbook_1.1.9_amd64.deb"
+echo old > "$D/packs/Lastbook-Small-20261001.zip"; echo old > "$D/maps/Lastbook-Map-Old.zip.part"
+stamp "$D" app/1.1.10/Lastbook-1.1.10-mac.dmg app/1.1.9/Lastbook_1.1.9_amd64.deb packs/Lastbook-Small-20261001.zip maps/Lastbook-Map-Old.zip.part
+# files this tool never recorded: must survive every prune
+echo mine > "$D/packs/foreign.zip"; echo mine > "$D/maps/hiking.mbtiles"; echo mine > "$D/addresses/mine.zip"
+echo mine > "$D/models/llama-3-8b.gguf"; echo mine > "$D/app/myproject/main.py"; echo mine > "$D/app/1.1.10/notes.txt"
 mir --dest "$D" --pack small --maps CA --model yes --keep-old > "$T/out" 2>"$T/err"
-check "--keep-old keeps older files" '[ -e "$D/app/1.1.10" ] && [ -e "$D/packs/Lastbook-Small-20261001.zip" ]'
+check "--keep-old keeps older files" '[ -e "$D/app/1.1.10/Lastbook-1.1.10-mac.dmg" ] && [ -e "$D/packs/Lastbook-Small-20261001.zip" ]'
 mir --dest "$D" --pack small --maps CA --model yes > "$T/out" 2>"$T/err"; rc=$?
-check "complete run prunes older versions/files" '[ "$rc" = 0 ] && [ ! -e "$D/app/1.1.10" ] && [ ! -e "$D/packs/Lastbook-Small-20261001.zip" ] && [ -s "$D/packs/Lastbook-Small-20261113.zip" ]'
+check "prune: recorded older files go (incl. a recorded .part)" '[ "$rc" = 0 ] && [ ! -e "$D/app/1.1.10/Lastbook-1.1.10-mac.dmg" ] && [ ! -e "$D/packs/Lastbook-Small-20261001.zip" ] && [ ! -e "$D/maps/Lastbook-Map-Old.zip.part" ] && [ -s "$D/packs/Lastbook-Small-20261113.zip" ]'
+check "prune: an emptied old app dir is removed" '[ ! -e "$D/app/1.1.9" ]'
+check "prune: unrecorded files in every section survive" '[ -s "$D/packs/foreign.zip" ] && [ -s "$D/maps/hiking.mbtiles" ] && [ -s "$D/addresses/mine.zip" ] && [ -s "$D/models/llama-3-8b.gguf" ] && [ -s "$D/app/myproject/main.py" ] && [ -s "$D/app/1.1.10/notes.txt" ]'
+check "prune: the current release is intact" '[ "$(ls "$D/app/1.1.11" | wc -l)" = 4 ] && [ -s "$D/maps/Lastbook-Map-CA.zip" ] && [ -s "$D/models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf" ]'
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert not any(k.startswith(("app/1.1.10/","app/1.1.9/","packs/Lastbook-Small-20261001","maps/Lastbook-Map-Old")) for k in s)' "$D/.lastbook-verified.json" && pass || fail "prune: pruned keys leave the stamps file"
+
+# symlinked section dirs are never followed by prune (B2)
+D7="$T/m7"; mkdir -p "$D7" "$T/shared" "$T/otherapp/1.0.0"
+echo shared > "$T/shared/qwen.gguf"; echo keep > "$T/otherapp/1.0.0/keep.bin"
+ln -s "$T/shared" "$D7/models"; ln -s "$T/otherapp" "$D7/app"
+mir --dest "$D7" --pack none --maps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "symlinked app/: installers land through the link (fetch follows it)" '[ "$rc" = 0 ] && [ "$(ls "$T/otherapp/1.1.11" | wc -l)" = 4 ]'
+stamp "$D7" models/qwen.gguf app/1.0.0/keep.bin
+mir --dest "$D7" --pack none --maps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "symlinked models/ and app/: prune does not follow them" '[ "$rc" = 0 ] && [ -s "$T/shared/qwen.gguf" ] && [ -s "$T/otherapp/1.0.0/keep.bin" ] && grep -q "symlink" "$T/err"'
+
+# a truncated / bad upstream manifest never wipes the mirror (N1)
+mkdir -p "$T/www/trunc"
+python3 - "$T/www/tiny/dl" "$T/www/trunc" <<'EOF'
+import json, os, sys
+src, out = sys.argv[1], sys.argv[2]
+m = json.load(open(os.path.join(src, "manifest-v1.json"))); m["maps"] = []; m["address_indexes"] = []
+json.dump(m, open(os.path.join(out, "empty-maps.json"), "w"))
+m = json.load(open(os.path.join(src, "manifest-v1.json")))
+for sec in ("packs", "maps", "address_indexes"):
+    for e in m[sec]:
+        for f in e.get("files", []): f["name"] = f["name"].replace(".zip", "-v2.zip")
+for x in m["models"]: x["file"] = "renamed-" + x["file"]
+json.dump(m, open(os.path.join(out, "renamed.json"), "w"))
+a = json.load(open(os.path.join(src, "app-v1.json")))
+for v in a.values():
+    if isinstance(v, dict): v["version"] = "1.1.12"
+json.dump(a, open(os.path.join(out, "app-bumped.json"), "w"))
+EOF
+held_before=$(find "$D" -type f ! -name ".*" | sort | md5sum)
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/manifest-v1.json=$B/trunc/empty-maps.json $TINY" \
+    python3 "$PY" mirror --dest "$D" --budget -1 --pack none --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "release with an emptied section: no prune, says why" '[ "$rc" = 0 ] && [ -s "$D/maps/Lastbook-Map-CA.zip" ] && [ -s "$D/addresses/Lastbook-Addresses-CA.zip" ] && grep -q "NOT pruning: the release lists no" "$T/err"'
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/manifest-v1.json=$B/trunc/renamed.json https://downloads.lastbook.org/app-v1.json=$B/trunc/app-bumped.json $TINY" \
+    python3 "$PY" mirror --dest "$D" --budget -1 --pack none --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "release dropping most held files: no prune, says why" '[ "$rc" = 0 ] && grep -q "NOT pruning: the release would drop" "$T/err"'
+check "bad releases left every held file in place" '[ "$(find "$D" -type f ! -name ".*" | sort | md5sum)" = "$held_before" ]'
+# restore the real manifests in D for the later sections
+mir --dest "$D" --pack small --maps CA --model yes > "$T/out" 2>"$T/err"
+
+# --- 10b. odd servers: Range ignored, 416, redirects (N8) --------------------------------------------
+PK="$T/www/tiny/dl/Lastbook-Small-20261113.zip"
+D10="$T/m10"; mkdir -p "$D10/packs"; head -c 100 /dev/zero | tr '\0' x > "$D10/packs/Lastbook-Small-20261113.zip.part"
+touch "$PK.norange"; : > "$T/req.log"
+mir --dest "$D10" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+rm -f "$PK.norange"
+check "server ignores Range (200): restart from 0, verified" '[ "$rc" = 0 ] && cmp -s "$PK" "$D10/packs/Lastbook-Small-20261113.zip" && grep -q "Lastbook-Small-20261113.zip bytes=100-" "$T/req.log"'
+D11="$T/m11"; mkdir -p "$D11/packs"; head -c 100 "$PK" > "$D11/packs/Lastbook-Small-20261113.zip.part"
+touch "$PK.416once"; : > "$T/req.log"
+mir --dest "$D11" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "416: .part reset, refetched from 0, verified" '[ "$rc" = 0 ] && cmp -s "$PK" "$D11/packs/Lastbook-Small-20261113.zip" && grep -q "Lastbook-Small-20261113.zip bytes=100-" "$T/req.log" && grep -q "^GET /tiny/dl/Lastbook-Small-20261113.zip -$" "$T/req.log"'
+CA="$T/www/tiny/dl/maps/Lastbook-Map-CA.zip"
+mv "$CA" "$T/ca.keep"; echo "https://evil.example/Lastbook-Map-CA.zip" > "$CA.redirect"
+mir --dest "$T/m12" --pack none --maps CA --addresses none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "redirect off the allow-list: refused, exit 1, nothing finalized" '[ "$rc" = 1 ] && [ ! -e "$T/m12/maps/Lastbook-Map-CA.zip" ] && grep -q "redirect to a non-allow-listed URL refused" "$T/err"'
+mkdir -p "$T/www/tiny/alt"; cp "$T/ca.keep" "$T/www/tiny/alt/Lastbook-Map-CA.zip"; echo "$B/tiny/alt/Lastbook-Map-CA.zip" > "$CA.redirect"
+mir --dest "$T/m13" --pack none --maps CA --addresses none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "same-host redirect of a rewritten base: followed + verified" '[ "$rc" = 0 ] && cmp -s "$T/ca.keep" "$T/m13/maps/Lastbook-Map-CA.zip"'
+rm -f "$CA.redirect"; mv "$T/ca.keep" "$CA"
+
+# version sort never crashes on text parts (N6)
+mkdir -p "$T/www/rc"
+python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); a["windows"]["version"]="1.1.rc1"; json.dump(a,open(sys.argv[2],"w"))' "$FIX/app-v1.json" "$T/www/rc/app-v1.json"
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/app-v1.json=$B/rc/app-v1.json $REAL" python3 "$PY" plan --pack none --maps none --budget -1 > "$T/plan.out" 2>"$T/plan.err"; rc=$?
+check "version 1.1.rc1 beside 1.1.11: no crash, current stays 1.1.11" '[ "$rc" = 0 ] && grep -q "app 1.1.11:" "$T/plan.out" && ! grep -q Traceback "$T/plan.err"'
+python3 - "$ROOT/scripts/lib" <<'EOF' && pass || fail "version_key orders mixed versions"
+import sys; sys.path.insert(0, sys.argv[1]); import lastbook_mirror as l
+assert sorted(["1.1.rc1", "1.1.11", "1.1.9", "1.2", "1.1.1"], key=l.version_key) == ["1.1.rc1", "1.1.1", "1.1.9", "1.1.11", "1.2"]
+EOF
 
 # --- 11. the tool entry --------------------------------------------------------------------------
 : > "$T/req.log"
@@ -328,6 +430,9 @@ VALARK_LASTBOOK_REWRITE="$TINY" bash "$SH" plan --budget -1 --pack every > "$T/s
 check "lastbook.sh plan: CLI overrides .env" '[ "$rc" = 0 ] && [ "$(grep -c "^get	pack" "$T/sh.out")" = 3 ]'
 VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_PACK=nope bash "$SH" > "$T/sh.out" 2>&1; rc=$?
 check "lastbook.sh: bad option -> non-zero + error" '[ "$rc" != 0 ] && grep -q "bad option" "$T/sh.out"'
+VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_BUDGET_PCT=500 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh: BUDGET_PCT over 100 is clamped, not rejected" '[ "$rc" != 64 ] && grep -q "^# Lastbook manifest" "$T/sh.out"'
+check "lastbook comes last in download-tools.sh ordered_tools" 'sed -n "/local ordered_tools=(/,/^    )/p" "$ROOT/scripts/download-tools.sh" | grep -v "^ *#" | tr -s " \n" " " | grep -q "cad-agent lastbook )"'
 check "lastbook is in download-tools.sh list (default refresh)" 'bash "$ROOT/scripts/download-tools.sh" list 2>/dev/null | grep -q "  lastbook$"'
 check "source-repos.tsv lists Immortal-Protocols/lastbook" 'grep -q "^[0-9]*|Immortal-Protocols/lastbook|" "$ROOT/data/source-repos.tsv"'
 check ".env.example documents the knobs" 'grep -q "VALARK_LASTBOOK_PACK" "$ROOT/.env.example" && grep -q "VALARK_LASTBOOK_BUDGET_PCT" "$ROOT/.env.example"'

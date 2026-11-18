@@ -68,7 +68,22 @@ later). See [README](README.md).
   file names, 64-hex sha256s; one bad entry anywhere in a manifest fails the whole run. A file is
   renamed into place only after its sha256 matches; a mismatched `.part` is deleted. Exit codes `0` ok,
   `1` failure, `3` incomplete (budget), `64` usage (argparse's `2` is remapped so it can't collide).
-- **Follow-up (not done):** feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
+- **Prune only what it recorded (PR #182 review).** After a complete run, a file goes only if *this tool*
+  recorded it in `.lastbook-verified.json` (finals and the `.part`s it started) and the release no
+  longer names it; a stray file under `packs/`, `maps/`, `models/` or `app/<x>/` is never touched (a
+  misconfigured `VALARK_LASTBOOK_DIR` pointing at `$HOME` or the model dir must not cost user data).
+  A section dir that is a symlink (e.g. `models/` linked to a shared model dir) is never followed by
+  prune, old `app/<ver>/` dirs are emptied file by file and `rmdir`ed, never `rmtree`d. And nothing is
+  pruned when the release looks truncated: a section that holds files comes back empty, or the run
+  would drop more than half of the held files *and* bytes (a normal pack re-release or app bump drops
+  less), so one bad upstream publish cannot wipe every box's maps on the weekly refresh.
+- **Follow-up (not done):** auto mode keeps a smaller pack after a larger one is verified (~75 GB
+  duplicates on a box that grew Small→Medium→All); pack choice does not reserve room for the base
+  maps + installers, so a budget just above a pack size reports `3` every run; the 50% share is of
+  the *current* headroom each run (repeated runs compound) and is measured on `DATA_ROOT` even when
+  `VALARK_LASTBOOK_DIR` is on another disk, whose fetch-time free check keeps no reserve; a 206's
+  `Content-Range` start is not checked (the sha256 still catches it) and a 404 is retried. Also:
+  feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
   rank) so value-per-byte, not a fixed share, decides its room; the Software/Library UI has no
   Lastbook card yet.
 

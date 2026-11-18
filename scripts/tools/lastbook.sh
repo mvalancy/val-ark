@@ -44,7 +44,8 @@ download_lastbook() {
     # The bytes this run may ADD: an explicit budget, else a share of the librarian's budget.
     # -1 = unknown (no limit).
     local budget="${VALARK_LASTBOOK_BUDGET:-}" pct="${VALARK_LASTBOOK_BUDGET_PCT:-50}"
-    case "$pct" in ''|*[!0-9]*) log_error "${TOOL_NAME}: VALARK_LASTBOOK_BUDGET_PCT wants 0-100"; return 2 ;; esac
+    case "$pct" in ''|*[!0-9]*) log_error "${TOOL_NAME}: VALARK_LASTBOOK_BUDGET_PCT wants 1-100"; return 2 ;; esac
+    pct=$((10#$pct)); [ "$pct" -lt 1 ] && pct=1; [ "$pct" -gt 100 ] && pct=100
     if [ -z "$budget" ]; then
         budget=-1
         if declare -F valark_budget_bytes >/dev/null; then

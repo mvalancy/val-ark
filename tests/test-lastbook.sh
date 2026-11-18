@@ -613,7 +613,7 @@ vrun bigmed --dest "$D28" --pack auto; rc=$?
 check "Medium's installed_bytes over-reported: auto stays on the held All" '[ "$rc" = 0 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"all\"\]" && [ ! -e "$D28/packs/Lastbook-Medium.zip" ]'
 : > "$T/req.log"
 vrun bigmedfile --dest "$D28" --pack auto; rc=$?
-check "Medium's file size over-reported: HEAD disagrees, auto stays on the held All and says why" '[ "$rc" = 0 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"all\"\]" && grep -q "the server says" "$T/err" && ! grep -q "^GET .*Lastbook-Medium.zip" "$T/req.log"'
+check "Medium's file size over-reported: HEAD disagrees, Medium skipped as broken, auto stays on the held All, exit 3" '[ "$rc" = 3 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"all\"\]" && grep -q "the server says .*: broken upstream" "$T/err" && ! grep -q "^GET .*Lastbook-Medium.zip" "$T/req.log"'
 
 # an unconfirmed size claim never displaces a held pack (H1): a failed HEAD is not confirmation
 variant bigmednohead 'a=[p for p in m["packs"] if p["id"]=="medium"][0]; a["installed_bytes"]=10**12; a["files"][0]["size"]=10**12'
@@ -621,7 +621,7 @@ touch "$(find "$T/www/bigmednohead" -name Lastbook-Medium.zip).nohead"
 D29="$T/m29"; mir --dest "$D29" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
 : > "$T/req.log"
 vrun bigmednohead --dest "$D29" --pack auto; rc=$?
-check "HEAD fails for an over-claiming Medium: auto stays on the held All, no download, says why" '[ "$rc" = 0 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"all\"\]" && grep -q "the server did not confirm its size" "$T/err" && ! grep -q "^GET .*Lastbook-Medium.zip" "$T/req.log"'
+check "HEAD fails for an over-claiming Medium: auto stays on the held All, no download, says why, exit 3" '[ "$rc" = 3 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"all\"\]" && grep -q "the server did not confirm its size" "$T/err" && ! grep -q "^GET .*Lastbook-Medium.zip" "$T/req.log"'
 
 # a renamed re-release that over-claims its size is caught before any download (H2)
 rerelease rrbig $((ALLSZ - 50))
@@ -629,10 +629,16 @@ python3 -c 'import json,sys; p=sys.argv[1]; m=json.load(open(p)); a=[x for x in 
 D30="$T/m30"; mir --dest "$D30" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
 : > "$T/req.log"
 vrun rrbig --dest "$D30" --pack auto; rc=$?
-check "renamed re-release over-claiming its size, auto: no pack chosen, nothing downloaded, the held All kept" '[ "$rc" = 3 ] && [ -s "$D30/packs/Lastbook-All.zip" ] && grep -q "the server says" "$T/err" && grep -q "no Lastbook pack chosen" "$T/err" && ! grep -q "^GET .*Lastbook-\(All-2\|Medium\|Small\)" "$T/req.log"'
-check "renamed re-release: the rc-3 message says the held pack is not in this release" 'grep -q "the held packs/Lastbook-All.zip (.*) is not in this release" "$T/err"'
+check "renamed re-release whose HEAD contradicts its size: skipped as broken, the next pack goes through, held All kept, exit 3" '[ "$rc" = 3 ] && [ -s "$D30/packs/Lastbook-All.zip" ] && [ -s "$D30/packs/Lastbook-Medium.zip" ] && grep -q "Lastbook-All-2.zip .*broken upstream" "$T/err" && ! grep -q "^GET .*Lastbook-All-2" "$T/req.log"'
+# the same re-release whose HEAD gives no size: wait a run, nothing chosen, and the message says why (F2)
+rm -rf "$T/www/rrnohead"; cp -r "$T/www/rrbig" "$T/www/rrnohead"; touch "$(find "$T/www/rrnohead" -name Lastbook-All-2.zip).nohead"
+D35="$T/m35"; mir --dest "$D35" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+: > "$T/req.log"
+vrun rrnohead --dest "$D35" --pack auto; rc=$?
+check "renamed re-release, HEAD without a size: no pack chosen, nothing downloaded, message says not in this release" '[ "$rc" = 3 ] && [ -s "$D35/packs/Lastbook-All.zip" ] && grep -q "no Lastbook pack chosen" "$T/err" && grep -q "the held packs/Lastbook-All.zip (.*) is not in this release" "$T/err" && ! grep -q "^GET .*Lastbook-\(All-2\|Medium\|Small\)" "$T/req.log"'
 # the held All listed under its own name with an over-claimed size: the message says so (F2)
 variant samebig 'a=[x for x in m["packs"] if x["id"]=="all"][0]; a["files"][0]["size"]=2*a["files"][0]["size"]; a["installed_bytes"]=a["files"][0]["size"]'
+touch "$(find "$T/www/samebig" -name Lastbook-All.zip).nohead"   # no size to confirm: wait a run
 D33="$T/m33"; mir --dest "$D33" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
 : > "$T/req.log"
 vrun samebig --dest "$D33" --pack auto; rc=$?
@@ -643,9 +649,23 @@ touch "$(find "$T/www/allnohead" -name Lastbook-All.zip).nohead"
 D34="$T/m34"; mir --dest "$D34" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
 : > "$T/req.log"
 vrun allnohead --dest "$D34" --pack auto; rc=$?
-check "Small held + All unconfirmed: no Medium either, Small kept, log says nothing downloaded" '[ "$rc" = 0 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"small\"\]" && [ ! -e "$D34/packs/Lastbook-Medium.zip" ] && [ -s "$D34/packs/Lastbook-Small-20261113.zip" ] && ! grep -q "^GET .*Lastbook-\(All\|Medium\)" "$T/req.log" && grep -q "not downloading it or any other pack this run, keeping the held packs/Lastbook-Small-20261113.zip" "$T/err"'
+check "Small held + All unconfirmed: no Medium either, Small kept, log says nothing downloaded, exit 3" '[ "$rc" = 3 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"small\"\]" && [ ! -e "$D34/packs/Lastbook-Medium.zip" ] && [ -s "$D34/packs/Lastbook-Small-20261113.zip" ] && ! grep -q "^GET .*Lastbook-\(All\|Medium\)" "$T/req.log" && grep -q "not downloading it or any other pack this run, keeping the held packs/Lastbook-Small-20261113.zip" "$T/err"'
 vrun tiny --dest "$D34" --pack auto; rc=$?
 check "next run with HEAD answering: the upgrade to All goes ahead" '[ "$rc" = 0 ] && [ -s "$D34/packs/Lastbook-All.zip" ]'
+# a HEAD that contradicts the manifest marks that pack broken: skip it, let the next confirmed pack through (G1)
+variant allbig 'a=[x for x in m["packs"] if x["id"]=="all"][0]; a["files"][0]["size"]=2*a["files"][0]["size"]; a["installed_bytes"]=a["files"][0]["size"]'
+D36="$T/m36"; mir --dest "$D36" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+: > "$T/req.log"
+vrun allbig --dest "$D36" --pack auto; rc=$?
+check "Small held + All's HEAD contradicts its size: Medium goes through, All never fetched, exit 3" '[ "$rc" = 3 ] && [ -s "$D36/packs/Lastbook-Medium.zip" ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"medium\"\]" && grep -q "Lastbook-All.zip .*broken upstream" "$T/err" && ! grep -q "^GET .*Lastbook-All.zip" "$T/req.log"'
+: > "$T/req.log"
+vrun allbig --dest "$T/m37" --pack auto; rc=$?
+check "fresh box + All's HEAD contradicts its size: auto's pick is HEAD-checked, Medium goes through, exit 3" '[ "$rc" = 3 ] && [ -s "$T/m37/packs/Lastbook-Medium.zip" ] && [ ! -e "$T/m37/packs/Lastbook-All.zip" ] && ! grep -q "^GET .*Lastbook-All.zip" "$T/req.log"'
+vrun allnohead --dest "$T/m38" --pack auto; rc=$?
+check "fresh box + All's HEAD gives no size: nothing to displace, All downloads (sha256 guards it), exit 0" '[ "$rc" = 0 ] && [ -s "$T/m38/packs/Lastbook-All.zip" ]'
+# the nothing-fits message quotes the pack AND the room reserved for base maps + installers (G2)
+plan --budget 8G > "$T/plan.out"; rc=$?
+check "nothing fits: the message adds the base-map + installer room to the smallest pack" '[ "$rc" = 3 ] && grep -q "the smallest, .*, needs .* plus .* for the base maps and installers = " "$T/plan.out"'
 : > "$T/req.log"
 vrun rrbig --dest "$D30" --pack all; rc=$?
 check "renamed re-release over-claiming its size, --pack all: a clear error before any GET (not \"range not satisfiable\")" '[ "$rc" = 1 ] && grep -q "but the server has .*: not downloading; an upstream manifest error" "$T/err" && ! grep -q "range not satisfiable" "$T/err" && ! grep -q "^GET .*Lastbook-All-2.zip" "$T/req.log" && [ -s "$D30/packs/Lastbook-All.zip" ]'

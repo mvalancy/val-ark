@@ -171,9 +171,26 @@ later). See [README](README.md).
   - *Accurate rc-3 reason (F2).* When no pack is chosen, the message names the held pack file and
     says either that it "is not in this release" (a renamed re-release) or that it "is listed in
     this release with a different size" (same name, over- or under-claimed).
+  - *Superseded by #218:* the wait-a-run rule now applies only to a HEAD that gives **no** size;
+    a HEAD that contradicts the manifest marks the pack broken and the next pack goes through.
   - *Real-box check (F3).* HEAD on `downloads.lastbook.org` returns a Content-Length equal to the
     manifest size for all three pack zips (checked 2026-11), so genuine upgrades are not blocked by
     the HEAD gate.
+- **Broken upstream vs not confirmed (#218):**
+  - *A definite mismatch skips only that pack (G1).* `auto`'s HEAD check now has two outcomes.
+    - **A HEAD that answers with a size different from the manifest** means that pack is broken
+      upstream: it is skipped this run and the next pack that confirms goes through. Before, a
+      lying All kept a Small box on Small, or failed a fresh box with rc 1, for as long as upstream
+      stayed wrong.
+    - **A HEAD that gives no size** is still the transient case. On a box holding a pack it would
+      displace, nothing is downloaded and the held pack is kept (F1).
+  - *Fresh boxes are checked too.* `auto`'s pick is now HEAD-checked even with nothing held. On a
+    fresh box a HEAD with no size still proceeds (nothing to displace; the sha256 guards it).
+  - *Exit 3 when a larger pack is passed over.* Whenever a larger pack was skipped (broken) or not
+    confirmed, the run exits 3, so the weekly job shows "incomplete" instead of "mirrored".
+    `lastbook.sh`'s rc-3 line now names both causes (budget, or upstream size).
+  - *Nothing-fits message (G2).* It now quotes the smallest pack's need **plus** the room reserved
+    for the base maps and installers, and the total, which is what the fit actually compares.
 - **Follow-up (not done):** feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
   rank) so value-per-byte, not a fixed share, decides its room.
 

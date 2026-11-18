@@ -16,10 +16,13 @@ Commands (stdlib only; needs apt-get + the ubuntu-archive-keyring on the host):
 
 Missing packages (not in that suite/arch) are reported on stderr and skipped.
 Exit codes (when several apply, the MOST SEVERE wins, in this order):
-  64 usage error (bad/unknown option or set id, a required flag missing; EX_USAGE,
-     so it can never be confused with argparse's default 2)
-   1 apt-get update or a set's dependency resolve failed (a whole set is absent)
-   2 a download failed (size/sha256 mismatch or network; rerun to resume)
+  64 usage error (bad/unknown option or set id, a required flag missing, an unreadable
+     or malformed --tsv; EX_USAGE, so it can never be confused with argparse's default 2)
+   1 apt-get update or a set's dependency resolve failed (a whole set is absent), or the
+     environment is broken (apt-get not installed, --dest not writable): a clean message,
+     never a traceback
+   2 a download failed (size/sha256 mismatch or network). A rerun skips files already
+     complete and re-downloads each failed file whole (no byte-level resume)
    3 INCOMPLETE (packages missing for this suite/arch, nothing resolved, an empty
      index, or .debs left unindexed). Pass --allow-missing to accept missing packages.
    0 complete
@@ -223,6 +226,14 @@ class Parser(argparse.ArgumentParser):
 
 
 def main(argv=None):
+    try:
+        return _main(argv)
+    except OSError as e:  # apt-get/apt-cache missing, unwritable --dest, ...: environment failure
+        print(f"apt_offline: {e}", file=sys.stderr)
+        return EX_RESOLVE
+
+
+def _main(argv=None):
     ap = Parser(description=__doc__.split("\n")[0])
     ap.add_argument("command", choices=["sets", "resolve", "fetch", "index", "build"])
     ap.add_argument("--tsv", default=str(DEFAULT_TSV))
@@ -235,7 +246,10 @@ def main(argv=None):
     ap.add_argument("--no-update", action="store_true", help="reuse the cached APT lists")
     ap.add_argument("--allow-missing", action="store_true", help="exit 0 even if some packages are not in this suite/arch")
     a = ap.parse_args(argv)
-    sets = load_sets(a.tsv)
+    try:
+        sets = load_sets(a.tsv)
+    except (OSError, ValueError) as e:
+        ap.error(f"cannot read --tsv: {e}")
     if a.command == "sets":
         for s in sorted(sets.values(), key=lambda s: -s["value"]):
             print(f"{s['set']}\t{s['value']}\t{len(s['packages'])}\t{s['note']}")
@@ -257,7 +271,7 @@ def main(argv=None):
             return EX_INCOMPLETE
         return report_index(*write_index(root.stanzas(), a.debs or a.dest))
     ids = list(sets) if "all" in a.set or not a.set else a.set
-    unknown = [i for i in ids if i not in sets]
+    unknown = [i for i in a.set if i != "all" and i not in sets]   # `--set all --set bogus` still rejects bogus
     if unknown:
         ap.error(f"unknown set(s): {' '.join(unknown)}")
     if a.command in ("fetch", "build") and not a.dest:

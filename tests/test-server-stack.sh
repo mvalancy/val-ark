@@ -10,6 +10,7 @@
 #    Filename rewritten to ./<name> (Packages == gunzip Packages.gz).
 #  * apt_offline.py exit codes: usage errors exit 64 (never argparse's 2 =
 #    "a download failed"), and the most severe class wins (1 > 2 > 3 > 0).
+#  * bad --tsv / `--set all --set bogus` -> 64; no apt-get / unwritable --dest -> 1, no traceback.
 # No network: every check runs on repo files and fixtures.
 ###############################################################################
 PASS=0; FAIL=0
@@ -178,6 +179,32 @@ with contextlib.redirect_stderr(io.StringIO()):
     assert run(missing=True, extra=("--allow-missing",)) == 0
 assert ao.worst(0, 3) == 3 and ao.worst(3, 2) == 2 and ao.worst(2, 1) == 1 and ao.worst(1, 64) == 64
 assert ao.worst(0) == 0 and ao.worst(0, 0) == 0
+PY
+
+# 9. Clean errors, never a traceback (#197): an unreadable/malformed --tsv is a usage error (64);
+#    `--set all --set bogus` still rejects bogus (64); a missing apt-get or an unwritable --dest is
+#    an environment failure (1) with a one-line message.
+noerr() { ! grep -q Traceback <<<"$1"; }
+ERR=$(python3 "$A" sets --tsv "$T/no-such.tsv" 2>&1); RC=$?
+[ "$RC" = 64 ] && grep -q "cannot read --tsv" <<<"$ERR" && noerr "$ERR" && pass || fail "missing --tsv: want 64 + message (got $RC: $ERR)"
+printf 'not|enough\n' > "$T/bad.tsv"
+ERR=$(python3 "$A" sets --tsv "$T/bad.tsv" 2>&1); RC=$?
+[ "$RC" = 64 ] && noerr "$ERR" && pass || fail "malformed --tsv: want 64, no traceback (got $RC: $ERR)"
+ERR=$(python3 "$A" resolve --suite noble --arch amd64 --set all --set bogus --no-update --cache "$T/cache" 2>&1); RC=$?
+[ "$RC" = 64 ] && grep -q "unknown set(s): bogus" <<<"$ERR" && pass || fail "--set all --set bogus must reject bogus with 64 (got $RC: $ERR)"
+ERR=$(PATH="$T/empty-path" "$(command -v python3)" "$A" resolve --suite noble --arch amd64 --set lamp --cache "$T/nopath" 2>&1); RC=$?
+[ "$RC" = 1 ] && noerr "$ERR" && grep -q "apt_offline:" <<<"$ERR" && pass || fail "no apt-get on PATH: want 1 + clean message (got $RC: $ERR)"
+: > "$T/a-file"
+python3 - "$ROOT/scripts/lib" "$T/a-file/dest" <<'PY' && pass || fail "unwritable --dest must exit 1 cleanly"
+import sys, io, contextlib; sys.path.insert(0, sys.argv[1]); import apt_offline as ao
+ao.AptRoot.update = lambda self: None
+ao.AptRoot.has_lists = lambda self: True
+ao.AptRoot.resolve = lambda self, pkgs: ([("http://archive.example/a.deb", "a.deb", 1, "")], [])
+err = io.StringIO()
+with contextlib.redirect_stderr(err):
+    rc = ao.main(["fetch", "--suite", "noble", "--arch", "amd64", "--set", "lamp", "--dest", sys.argv[2]])
+assert rc == 1, rc
+assert "apt_offline:" in err.getvalue() and "Traceback" not in err.getvalue(), err.getvalue()
 PY
 
 echo "server-stack: $PASS passed, $FAIL failed"

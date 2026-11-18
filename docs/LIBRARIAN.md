@@ -77,12 +77,19 @@ The big LLM/STT/TTS/VLM/image catalog is still managed by `download-models.sh`.
 
 ### Offline .deb sets: exit codes and a real-box check
 
-`apt_offline.py` exits **0** complete, **1** `apt-get update` or a set's resolve failed, **2** a
-download failed (rerun to resume), **3** incomplete (packages missing for that suite/arch, an empty
-index, or `.deb`s left unindexed; `--allow-missing` accepts missing packages), and **64** for a
-usage error (bad option, unknown set, missing `--suite`/`--arch`/`--dest`). When several apply, the
-most severe wins, in that order: 64, 1, 2, 3, 0. So a failed download never hides a set that could
-not be resolved at all.
+`apt_offline.py` exits with one of these codes:
+
+- **0** complete.
+- **1** `apt-get update` or a set's resolve failed, or the environment is broken (`apt-get` is
+  missing, `--dest` isn't writable).
+- **2** a download failed. A rerun skips finished files and re-downloads each failed one whole.
+- **3** incomplete: packages missing for that suite/arch, an empty index, or `.deb`s left
+  unindexed. `--allow-missing` accepts missing packages.
+- **64** usage error: a bad option, an unknown set, an unreadable `--tsv`, or a missing
+  `--suite`/`--arch`/`--dest`.
+
+When several apply, the most severe wins, in that order: 64, 1, 2, 3, 0. So a failed download
+never hides a set that could not be resolved at all.
 
 CI only runs `apt_offline.py` against stubs and fixture lists (`tests/test-server-stack.sh`); it never
 talks to the real Ubuntu archive. Before trusting a change to it, check on a real Ubuntu box with
@@ -92,7 +99,7 @@ talks to the real Ubuntu archive. Before trusting a change to it, check on a rea
 1. **Cross-arch resolve, empty dpkg status.** On an x86_64 host run
    `apt_offline.py resolve --suite noble --arch arm64 --set lamp --cache <scratch>`. Expect exit 0,
    every URL on `ports.ubuntu.com`, `libc6_…_arm64.deb` in the list (the empty status pulled in the
-   base dependencies), and a SHA256 in the 4th column of every row (stderr names any without one).
+   base dependencies), and a SHA256 in the 4th column of every row (otherwise stderr prints a count: "N package(s) have no SHA256").
 2. **Native arch.** The same with `--arch amd64`: URLs on `archive.ubuntu.com` / `security.ubuntu.com`.
 3. **Build.** `apt_offline.py build --suite noble --arch arm64 --set lamp --dest <dir> --cache <scratch>`
    exits 0, stderr says `indexed N packages` with no ".deb not in lists", `<dir>` has `Packages` +
@@ -105,7 +112,7 @@ talks to the real Ubuntu archive. Before trusting a change to it, check on a rea
    `deb [trusted=yes] file:<dir> ./` as the only source, `apt-get update`, then install the set's
    packages: every dependency resolves from `<dir>`.
 6. **Exit codes.** `--set no-such-set` exits 64. An interrupted download (pull the network during
-   step 3) exits 2, and rerunning finishes the job.
+   step 3) exits 2, and rerunning re-fetches the failed files and finishes the job.
 
 ## Commands
 

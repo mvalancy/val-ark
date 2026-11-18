@@ -189,9 +189,9 @@ KEEP="zim:food_en_mini_eng zim:knots_en_maxi_eng zim:knots_en_mini_eng zim:med_e
 setup; prune_superseded >/dev/null
 [ ! -e "$Z/med-mini.zim" ] && ok_ || no_ "prune: the superseded mini must be deleted"
 [ "$(ids)" = "$KEEP" ] && ok_ || no_ "prune: manifest must drop exactly the superseded id (got '$(ids)')"
-for f in med-maxi med-old med-pfx knots-mini knots-maxi food-mini; do
-  [ -e "$Z/$f.zim" ] || no_ "prune: $f.zim must be kept"
-done; ok_
+for f in med-maxi med-old med-pfx knots-mini knots-maxi food-mini; do   # one result per file
+  [ -e "$Z/$f.zim" ] && ok_ || no_ "prune: $f.zim must be kept"
+done
 [ -e "$Z/food-maxi.zim.part" ] && ok_ || no_ "prune: an in-progress .part must be untouched"
 prune_superseded >/dev/null; [ "$(ids)" = "$KEEP" ] && ok_ || no_ "prune: second run must be a no-op"
 

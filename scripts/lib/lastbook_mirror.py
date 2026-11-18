@@ -565,8 +565,9 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
                 return False
             return fits(need(p) + extras) and confirmed(p)
         pick = next((p for p in by_size if acceptable(p)), None)
-        if pick is None:  # a pack already held costs nothing: keep it chosen when the disk fills
-            pick = next((p for p in by_size if need(p) == 0), None)
+        if pick is None:  # a pack already held costs nothing: keep it chosen when the disk fills. It must be
+            # held AND verified on disk: a manifest entry with no size also has need 0 (#230)
+            pick = next((p for p in by_size if need(p) == 0 and disk_bytes(dest, stamps, p) is not None), None)
         if pick is not None:
             chosen = [pick["id"]]
             take(pick, True, f"pack {pick['id']}")

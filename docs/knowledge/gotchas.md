@@ -67,9 +67,14 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   match, so removing `zim:a` also removes `xzim:a` (any id that *ends* in the target). And when the row
   is the file's only line, `grep -v` prints nothing and exits 1, so `grep … > f.tmp && mv f.tmp f` never
   runs and the row stays put. In `scripts/librarian.sh` this left duplicate manifest rows on re-record
-  and dropped unrelated items from the manifest on evict. Match the first column exactly instead:
-  `awk -F'\t' -v id="$id" '$1!=id' f > f.tmp && mv f.tmp f`. That is `manifest_drop` in
-  `librarian.sh` (and `cmd_pins` looks rows up the same way); tested in `tests/test-librarian-download.sh` §10. (#192)
+  and dropped unrelated items from the manifest on evict. Match the first column exactly, as a
+  STRING, with the id passed through the environment:
+  `ID="$id" awk -F'\t' '$1"" != ENVIRON["ID"]""' f > f.tmp && mv f.tmp f`. Not `awk -v id=…`:
+  `-v` expands backslash escapes (`C:\temp` becomes `C:<TAB>emp`, so the row is never matched),
+  and fields and `-v` values are strnums, so without the `""` id `1` also matches row `1.0`. That is
+  `manifest_drop` in `librarian.sh`, which `manifest_add`, `cmd_evict` and `prune_superseded` all
+  call; `pin_remove` and `cmd_pins` compare the same way. Tested in
+  `tests/test-librarian-download.sh` §10-11. (#192)
 
 ## Cross‑architecture (arm64 boxes: Jetson-, Grace‑Blackwell-, Rockchip-class)
 
@@ -240,8 +245,26 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   pruned and orphaned objects drop out of `bundle create --all`. The rebuilt bundle is
   `git bundle verify`d before the `.part` rename replaces the old one. If the old bundle is
   missing, unreadable or yields a shallow/empty repo, staging is wiped and the full chunked fetch
-  runs. State records `incremental: true|false`. Regression: `tests/test-git-bundle-mirror.sh`
-  cases 12-13 (trace shows `have` lines and no `deepen`).
+  runs. The single incremental fetch gets only `INCR_TRIES` (2) attempts. A huge delta (an upstream
+  history rewrite) over a flaky link would otherwise fail the same transfer every run, so it then
+  falls back in the same run to the chunked shallow/deepen path, which leaves a resumable shallow
+  partial. Before any of this, if `git ls-remote --heads --tags` equals the bundle's
+  `git bundle list-heads` (peeled `^{}` lines and `HEAD` ignored) and the default branch has not
+  moved, nothing is rebuilt or re-copied and the repo is recorded as `unchanged: true`, so a
+  multi-GB file on the share is not rewritten monthly for nothing. **That skip also requires the
+  archived bundle's size and sha256 to match its `.source.json`.** `list-heads` reads only the
+  header, and git 2.43's `bundle verify` passes a *truncated* bundle, so without the hash a torn
+  or bit-rotted bundle would stay "unchanged" forever. The `verify` subcommand checks the same
+  provenance. **`git bundle verify` needs a repository:** run from a non-repo cwd it fails every
+  bundle ("need a repository to verify a bundle"). That broke `verify` and silently discarded
+  built bundles in the copy-only resume, so every call goes through `bundle_verify(bundle, repo)`,
+  which passes `-C` (an empty scratch repo is enough for full bundles). State records
+  `incremental: true|false`. Regression: `tests/test-git-bundle-mirror.sh` cases 3, 8 and 12-16:
+  - 3, 8: run from a non-repo cwd
+  - 12: the trace shows `have` lines and no `deepen`
+  - 14: unchanged, a moved default branch, a truncated / bit-flipped bundle, a moved tag
+  - 15: the incremental fetch is retried once, then falls back to the chunked fetch
+  - 16: a rebuilt bundle that fails verify leaves the archived one byte-identical
 
 ## Storage / data root
 

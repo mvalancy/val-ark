@@ -19,15 +19,19 @@ chmod (git's config.lock) still work as the destination.
 A --refresh-days refresh is incremental: staging is seeded from the bundle
 already in <dest>, so upstream sends only new objects; the rebuilt bundle is
 verified before it atomically replaces the old one. A missing or unreadable
-old bundle falls back to the full (chunked) fetch.
+old bundle, or an incremental fetch that keeps failing, falls back to the full
+(chunked) fetch. When upstream's branches + tags already equal the bundle's
+(git ls-remote vs git bundle list-heads) and the archived bundle still matches
+its .source.json size + sha256, nothing is rebuilt or re-copied: the repo is
+recorded as unchanged.
 
 Commands (stdlib + git; GITHUB_TOKEN raises API limits, never printed):
   plan    [--top N]                            list what would be mirrored, in order
   mirror  --dest DIR [--repo O/R ...] [--top N] [--max-gb G] [--refresh-days D]
-  verify  --dest DIR                           git bundle verify every bundle
+  verify  --dest DIR                           git bundle verify + .source.json size/sha256
 Exit 0 on success, 2 if any repo failed (others still complete).
 """
-import argparse, hashlib, json, os, re, shutil, subprocess, sys, time, urllib.request
+import argparse, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time, urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +40,7 @@ API = os.environ.get("VALARK_GITHUB_API", "https://api.github.com")
 GIT_BASE = os.environ.get("VALARK_GIT_BASE", "https://github.com")  # tests point this at file://
 BIG_KB = int(os.environ.get("VALARK_GIT_BIG_KB", str(300 * 1024)))  # above this: shallow + deepen
 DEEPEN = int(os.environ.get("VALARK_GIT_DEEPEN", "20000"))
+INCR_TRIES = 2  # attempts at the single incremental-refresh fetch before falling back to chunked
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
@@ -149,8 +154,14 @@ def fetch_resumable(name, local, size_kb, tries=6, wait=30, prev=None):
     """Returns (resumed, incremental)."""
     resuming = (local / "shallow").exists()
     if not resuming and prev is not None and seed_from_bundle(name, local, prev):
-        git(local, "fetch", "--quiet", "--prune", "origin", tries=tries, wait=wait)  # new objects only
-        return False, True
+        try:  # new objects only, in ONE transfer: give it few tries, then go chunked
+            git(local, "fetch", "--quiet", "--prune", "origin", tries=min(tries, INCR_TRIES), wait=wait)
+            return False, True
+        except RuntimeError as e:
+            # A huge delta (an upstream history rewrite) over a flaky link would fail the same
+            # single transfer every run; the chunked shallow/deepen path below makes progress
+            # and leaves a shallow partial that the next run resumes.
+            print(f"  {name}: incremental fetch failed ({str(e)[-120:]}); chunked full fetch", file=sys.stderr)
     if not resuming:
         init_staging(name, local)
     if size_kb < BIG_KB and not resuming:
@@ -171,6 +182,74 @@ def fetch_resumable(name, local, size_kb, tries=6, wait=30, prev=None):
     return resuming, False
 
 
+def _branch_tag_refs(text):
+    """{ref: sha} for refs/heads/* + refs/tags/* in ls-remote / bundle list-heads output
+    (peeled ^{} lines and HEAD dropped)."""
+    out = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1].startswith(("refs/heads/", "refs/tags/")) and not parts[1].endswith("^{}"):
+            out[parts[1]] = parts[0]
+    return out
+
+
+def unchanged(name, prev, info, stage):
+    """Refresh short-circuit: when upstream's branches + tags equal the archived bundle's
+    (and the default branch did not move), rebuilding would rewrite a multi-GB file on the
+    share for nothing. Returns a "complete" state row marked unchanged, else None (also
+    when either side cannot be read: then the normal refresh path decides)."""
+    if not prev.is_file():
+        return None
+    try:
+        meta = json.loads(prev.with_name(prev.name + ".source.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if info.get("default_branch") and info["default_branch"] != meta.get("default_branch"):
+        return None
+    # list-heads reads only the header, and git's `bundle verify` passes a truncated pack,
+    # so a torn or bit-rotted bundle would otherwise stay "unchanged" forever. Its size
+    # and sha256 must still match the provenance written when it was built.
+    why = provenance_mismatch(prev)
+    if why:
+        print(f"  {name}: archived bundle {why}; rebuilding", file=sys.stderr)
+        return None
+    lh = subprocess.run(["git", "bundle", "list-heads", str(prev)], capture_output=True, text=True, timeout=3600)
+    if lh.returncode:
+        return None
+    try:
+        remote = git(stage, "ls-remote", "--heads", "--tags", f"{GIT_BASE}/{name}.git", tries=1)
+    except (RuntimeError, subprocess.TimeoutExpired):
+        return None
+    have = _branch_tag_refs(lh.stdout)
+    if not have or have != _branch_tag_refs(remote):
+        return None
+    owner, repo = name.split("/")
+    return dict(status="complete", time=time.time(), bytes=prev.stat().st_size, head=meta.get("head_commit"),
+                resumed=False, incremental=False, unchanged=True, path=f"{owner}/{repo}")
+
+
+def bundle_verify(bundle, repo):
+    """`git bundle verify` needs a repository: run outside one it fails every bundle
+    ("need a repository to verify a bundle"), so always pass -C <repo>. Our bundles are
+    full (no prerequisites), so an empty repo is enough for the verify subcommand."""
+    return subprocess.run(["git", "-C", str(repo), "bundle", "verify", "--quiet", str(bundle)],
+                          capture_output=True, text=True, timeout=6 * 3600)
+
+
+def provenance_mismatch(bundle):
+    """Reason the bundle disagrees with its .source.json (size, then sha256), else None.
+    No .source.json -> None (nothing to compare against)."""
+    try:
+        meta = json.loads(bundle.with_name(bundle.name + ".source.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if bundle.stat().st_size != meta.get("bytes"):
+        return f"size {bundle.stat().st_size} != {meta.get('bytes')} in .source.json"
+    if sha256(bundle) != meta.get("sha256"):
+        return "sha256 differs from .source.json"
+    return None
+
+
 def sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -189,11 +268,14 @@ def mirror_one(name, dest, stage, info, tries=6, wait=30):
     owner, repo = name.split("/")
     local = stage / f"{owner}__{repo}.git"
     bundle = stage / f"{owner}__{repo}.bundle"
-    if bundle.exists() and local.is_dir() and subprocess.run(
-            ["git", "bundle", "verify", "--quiet", str(bundle)], capture_output=True).returncode == 0:
+    if bundle.exists() and local.is_dir() and bundle_verify(bundle, local).returncode == 0:
         return finish(name, dest, local, bundle, info, resumed=True)  # only the copy failed last time
     bundle.unlink(missing_ok=True)
     prev = dest / owner / (repo + ".bundle")  # last archived bundle: seeds an incremental refresh
+    if not (local / "shallow").exists():
+        same = unchanged(name, prev, info, stage)
+        if same:
+            return same
     resumed, incremental = fetch_resumable(name, local, int(info.get("size") or 0), tries, wait, prev)
     branch = info.get("default_branch")
     heads = git(local, "for-each-ref", "--format=%(refname:short)", "refs/heads", tries=1).split()
@@ -207,8 +289,7 @@ def mirror_one(name, dest, stage, info, tries=6, wait=30):
                        capture_output=True, text=True, timeout=6 * 3600)
     if p.returncode:
         raise RuntimeError("bundle: " + p.stderr[-300:])
-    v = subprocess.run(["git", "-C", str(local), "bundle", "verify", "--quiet", str(bundle)],
-                       capture_output=True, text=True, timeout=6 * 3600)
+    v = bundle_verify(bundle, local)
     if v.returncode:  # never replace a good archived bundle with a broken one
         bundle.unlink(missing_ok=True)
         raise RuntimeError("bundle verify: " + v.stderr[-300:])
@@ -272,11 +353,17 @@ def main(argv=None):
     dest, stage = Path(a.dest), Path(a.stage)
     if a.command == "verify":
         bad = 0
-        for b in sorted(dest.glob("*/*.bundle")):
-            p = subprocess.run(["git", "bundle", "verify", "--quiet", str(b)], capture_output=True, text=True)
-            if p.returncode:
-                bad += 1
-                print(f"BAD {b.relative_to(dest)}: {p.stderr.strip()[-200:]}", file=sys.stderr)
+        scratch = tempfile.mkdtemp(prefix="bundle-verify-")
+        try:
+            subprocess.run(["git", "init", "--quiet", "--bare", scratch], check=True)
+            for b in sorted(dest.glob("*/*.bundle")):
+                p = bundle_verify(b, scratch)
+                why = p.stderr.strip()[-200:] if p.returncode else provenance_mismatch(b)
+                if why:
+                    bad += 1
+                    print(f"BAD {b.relative_to(dest)}: {why}", file=sys.stderr)
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
         n = len(list(dest.glob('*/*.bundle')))
         print(f"verified {n} bundles, {bad} bad", file=sys.stderr)
         return 2 if bad or n == 0 else 0

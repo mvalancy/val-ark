@@ -116,6 +116,17 @@ talks to the real Ubuntu archive. Before trusting a change to it, check on a rea
 6. **Exit codes.** `--set no-such-set` exits 64. An interrupted download (pull the network during
    step 3) exits 2, and rerunning re-fetches the failed files and finishes the job.
 
+**Last real-archive run (release 0.1.22, 2026-11-18, Ubuntu 24.04 x86_64 host, `noble`, `--set lamp`):**
+steps 1–4 passed. The arm64 resolve gave 281 rows, all on `ports.ubuntu.com`, with `libc6` included
+and a SHA256 on every row. The amd64 resolve gave 281 rows on `archive.ubuntu.com`. The arm64 build
+indexed 281 packages (98 MB) with no `.part` left, and the `--no-update` rerun took 10 s.
+`/etc/apt` and `dpkg -l` were unchanged.
+
+Step 5 ran on amd64, because the host had no arm64 emulation. In an `ubuntu:24.04` container started
+with `--network none`, with only the flat repo as a source, the whole `lamp` set installed (apache2,
+mariadb-server, php 8.3). `--set no-such-set` exited 64. Not yet run: the interrupted-download half
+of step 6, and step 5 on a real arm64 target.
+
 ## Commands
 
 ```bash

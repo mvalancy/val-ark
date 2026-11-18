@@ -595,7 +595,9 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
                          "from the manifest); nothing downloaded (re-checked next run)")
         elif not chosen:
             incomplete = True
-            smallest = min(rel["packs"], key=lambda p: need(p), default=None)
+            # quote only packs whose size is known: a manifest entry with no size would read as "needs 0 B"
+            sized = [p for p in rel["packs"] if p["files"] and all(f["size"] for f in p["files"])]
+            smallest = min(sized, key=lambda p: need(p), default=None)
             # G2: quote what the fit really needs: the pack plus the base maps + installers it reserves
             extra_txt = f" plus {human(extras)} for the base maps and installers" if extras else ""
             notes.append("no Lastbook pack fits the budget ("

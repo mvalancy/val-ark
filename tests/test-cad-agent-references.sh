@@ -24,6 +24,7 @@
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib/ports.sh"   # free_port / trap_signals: no fixed ports (parallel runs)
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 check() { if eval "$2"; then pass; else fail "$1"; fi; }
@@ -34,6 +35,7 @@ command -v git >/dev/null 2>&1 || { echo "SKIP: no git" >&2; exit 0; }
 
 T="$(mktemp -d)"; SRV_PID=""
 trap 'rm -rf "${T:?}"; [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null' EXIT
+trap_signals
 export VAL_ARK_CONFIG="$T/empty.conf" VAL_ARK_DATA="$T/disk" FORCE_COLOR=0 VALARK_REFS_HOST_INTERVAL=0
 export GIT_CONFIG_GLOBAL="$T/gitconfig" GIT_CONFIG_NOSYSTEM=1 GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid \
        GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
@@ -463,9 +465,9 @@ NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/
 if [ -n "$NODE" ] && command -v curl >/dev/null 2>&1; then
     MADE_PRIVATE=0; [ -e "${ROOT:?}/private" ] || MADE_PRIVATE=1
     PD="${ROOT:?}/private/refs-test-$$"; mkdir -p "$PD"; echo SECRET > "$PD/copy.html"
-    SP=3962; B="http://127.0.0.1:$SP"
+    SP=$(free_port); B="http://127.0.0.1:$SP"
     env VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 \
-        VALARK_WEB_PORT="$SP" VALARK_HTTPS_PORT="$((SP + 9000))" VALARK_STATE_DIR="$T/srvstate" \
+        VALARK_WEB_PORT="$SP" VALARK_HTTPS_PORT="$(free_port)" VALARK_STATE_DIR="$T/srvstate" \
         "$NODE" "$ROOT/scripts/server.js" "$SP" >"$T/srv.log" 2>&1 &
     NPID=$!
     up=0; for _ in $(seq 1 30); do sleep 0.4; curl -sf --max-time 2 "$B/api/health" >/dev/null 2>&1 && { up=1; break; }; done

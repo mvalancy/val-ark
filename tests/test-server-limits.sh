@@ -29,14 +29,14 @@ SRV_PID=""; BG_PIDS=()
 # track whether we created ROOT/content so cleanup removes only what we made.
 ADIR="__srvlimits_$$__"; MADE_CONTENT=0
 [ -e "$ROOT/content" ] || MADE_CONTENT=1
+. "$ROOT/tests/lib/ports.sh"
 cleanup() {
-    for p in "${BG_PIDS[@]}"; do kill "$p" 2>/dev/null; done
-    [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null
+    stop_pids "${BG_PIDS[@]}" "$SRV_PID"
     rm -rf "$ROOT/content/$ADIR" 2>/dev/null
     [ "$MADE_CONTENT" = 1 ] && rmdir "$ROOT/content" 2>/dev/null
     rm -rf "$T" 2>/dev/null
 }
-trap cleanup EXIT
+trap cleanup EXIT; trap_signals   # INT/TERM exit through cleanup too
 T="$(mktemp -d)"
 mkdir -p "$T/state" "$T/content/zim" "$T/models"
 
@@ -55,7 +55,8 @@ chmod +x "$T/stub"
 mkdir -p "$ROOT/content/$ADIR"
 head -c 80000000 /dev/urandom > "$ROOT/content/$ADIR/blob.bin"
 
-PORT=3700; B="http://127.0.0.1:$PORT"
+# A kernel-picked free port (or VALARK_TEST_PORT): a fixed port collided with parallel runs.
+PORT="${VALARK_TEST_PORT:-$(free_port)}"; B="http://127.0.0.1:$PORT"
 VALARK_TEST_FORCE_REMOTE=1 VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 \
   VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" VALARK_MODERATION_CMD="$T/stub" \
   VALARK_MODERATION_MAX_BYTES=4096 VALARK_MODERATION_MAX_CONCURRENT=1 \

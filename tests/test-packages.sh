@@ -12,6 +12,7 @@
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib/ports.sh"   # free_port / trap_signals: no fixed ports (parallel runs)
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
@@ -20,6 +21,7 @@ NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/
 T="$(mktemp -d)"; SRV_PID=""; ALL_PIDS=""
 trap 'for p in $ALL_PIDS; do kill "$p" 2>/dev/null; done; rm -rf "$T"' EXIT
 
+trap_signals
 # --- Build a populated fake mirror (all four package kinds) -------------------
 mkdir -p "$T/tools/linux-x86_64/helix" "$T/models/llm/qwen2.5" \
          "$T/content/zim" "$T/sources/val-ark" "$T/state"
@@ -71,7 +73,7 @@ start_srv() {  # start_srv <port> <state-dir>  (mirror dirs come from TOOLS/SOUR
     # `VAR=val` is NOT recognized as a shell assignment prefix and would otherwise
     # be run as a command ("VALARK_TEST_FORCE_REMOTE=1: command not found").
     env VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 \
-      VALARK_WEB_PORT="$port" VALARK_HTTPS_PORT="$((port + 9000))" VALARK_STATE_DIR="$sd" \
+      VALARK_WEB_PORT="$port" VALARK_HTTPS_PORT="$(free_port)" VALARK_STATE_DIR="$sd" \
       VALARK_TOOLS_DIR="$TOOLS" VALARK_SOURCES_DIR="$SOURCES" \
       VALARK_MODELS_DIR="$MODELS" VALARK_CONTENT_DIR="$CONTENT" \
       ${FORCE_REMOTE:+VALARK_TEST_FORCE_REMOTE=1} \
@@ -87,7 +89,7 @@ wait_up() {
 
 # --- 1. Populated mirror: manifest shape + all four kinds ---------------------
 TOOLS="$T/tools" SOURCES="$T/sources" MODELS="$T/models" CONTENT="$T/content"
-PORT=3951; B="http://127.0.0.1:$PORT"
+PORT=$(free_port); B="http://127.0.0.1:$PORT"
 start_srv "$PORT" "$T/state"; [ "$(wait_up "$PORT")" = 1 ] && pass || { fail "server did not start on :$PORT"; echo "packages: ${PASS} passed, ${FAIL} failed"; exit 1; }
 
 PK="$(curl -s --max-time 6 "$B/api/packages")"
@@ -148,7 +150,7 @@ kill "$SRV_PID" 2>/dev/null; SRV_PID=""
 # --- 2. Bare box (empty trees): partial/empty list, never a crash ------------
 mkdir -p "$T/empty/tools" "$T/empty/sources" "$T/empty/models" "$T/empty/content/zim" "$T/state2"
 TOOLS="$T/empty/tools" SOURCES="$T/empty/sources" MODELS="$T/empty/models" CONTENT="$T/empty/content"
-PORT=3952; B="http://127.0.0.1:$PORT"
+PORT=$(free_port); B="http://127.0.0.1:$PORT"
 start_srv "$PORT" "$T/state2"; [ "$(wait_up "$PORT")" = 1 ] && pass || fail "server did not start on :$PORT (empty box)"
 E="$(curl -s --max-time 6 "$B/api/packages")"
 echo "$E" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);process.exit(j.count===0&&Array.isArray(j.packages)&&j.packages.length===0?0:1)})' \
@@ -160,7 +162,7 @@ mkdir -p "$T/s3"
 "$NODE" -e 'const a=require(process.argv[1]);const d=process.argv[2];a.setPassword("packpass","admin",d);a.setUseMode("passworded",d);' \
     "$ROOT/scripts/lib/auth.js" "$T/s3"
 TOOLS="$T/tools" SOURCES="$T/sources" MODELS="$T/models" CONTENT="$T/content"
-PORT=3953; B="http://127.0.0.1:$PORT"; FORCE_REMOTE=1
+PORT=$(free_port); B="http://127.0.0.1:$PORT"; FORCE_REMOTE=1
 start_srv "$PORT" "$T/s3"; [ "$(wait_up "$PORT")" = 1 ] && pass || fail "server did not start on :$PORT (passworded)"
 CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$B/api/packages")"
 [ "$CODE" = "401" ] && pass || fail "/api/packages must be read-gated (401) on a Passworded LAN, got $CODE"

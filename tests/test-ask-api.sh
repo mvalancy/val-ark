@@ -19,6 +19,7 @@
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib/ports.sh"   # free_port / trap_signals: no fixed ports (parallel runs)
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
@@ -29,6 +30,7 @@ T="$(mktemp -d)"
 cleanup() { for p in $ALL_PIDS; do kill "$p" 2>/dev/null; done; rm -rf "$T"; }
 trap cleanup EXIT
 
+trap_signals
 # Native-tools platform dir the server resolves (mirrors moderation.sh / server.js).
 case "$(uname -s)-$(uname -m)" in
   Darwin-*)                 PLAT=macos-arm64 ;;
@@ -73,7 +75,7 @@ boot() {
   local name="$1" port="$2" tools="$3" models="$4" state="$5"; shift 5
   mkdir -p "$state"
   env VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 \
-      VALARK_WEB_PORT="$port" VALARK_HTTPS_PORT="$((port + 9000))" \
+      VALARK_WEB_PORT="$port" VALARK_HTTPS_PORT="$(free_port)" \
       VALARK_ASK_MAX_CONCURRENT=1 \
       VALARK_TOOLS_DIR="$tools" VALARK_MODELS_DIR="$models" \
       VALARK_STATE_DIR="$state" VALARK_CONTENT_DIR="$T/content" \
@@ -90,7 +92,7 @@ code() { curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$@"; }
 ###############################################################################
 # Server A — full runtime (stub binary + fake model). Happy path, injection, cap.
 ###############################################################################
-PA=3990; BA="http://127.0.0.1:$PA"
+PA=$(free_port); BA="http://127.0.0.1:$PA"
 boot A "$PA" "$T/tools" "$T/models" "$T/stateA" && pass || true
 
 # --- 1. readiness: ready:true, names surfaced, reason ok --------------------------
@@ -173,7 +175,7 @@ grep -q 'STUBANSWER' "$T/disc.out"          && pass || fail "post-disconnect ask
 ###############################################################################
 # Server B — binary present, NO model → FAIL-SOFT reason:model (200, not 500).
 ###############################################################################
-PB=3991; BB="http://127.0.0.1:$PB"
+PB=$(free_port); BB="http://127.0.0.1:$PB"
 boot B "$PB" "$T/tools" "$T/models-empty" "$T/stateB" && pass || true
 echo "$(curl -s --max-time 6 "$BB/api/status/ask")" | grep -q '"reason":"model"' && pass || fail "no-model → status reason model"
 c=$(code -X POST -H 'Content-Type: application/json' -d '{"question":"hi"}' "$BB/api/ask")
@@ -186,7 +188,7 @@ echo "$MB" | grep -q 'STUBANSWER'           && fail "no-model must NOT run any m
 ###############################################################################
 # Server C — no binary at all → FAIL-SOFT reason:runtime (200, not 500).
 ###############################################################################
-PC=3992; BC="http://127.0.0.1:$PC"
+PC=$(free_port); BC="http://127.0.0.1:$PC"
 boot C "$PC" "$T/tools-empty" "$T/models" "$T/stateC" && pass || true
 echo "$(curl -s --max-time 6 "$BC/api/status/ask")" | grep -q '"reason":"runtime"' && pass || fail "no-binary → status reason runtime"
 c=$(code -X POST -H 'Content-Type: application/json' -d '{"question":"hi"}' "$BC/api/ask")
@@ -199,7 +201,7 @@ echo "$RC" | grep -q '"reason":"runtime"'   && pass || fail "no-binary ask strea
 ###############################################################################
 "$NODE" -e 'const a=require(process.argv[1]);const d=process.argv[2];a.setPassword("askpass12","admin",d);a.setUseMode("passworded",d);' \
     "$ROOT/scripts/lib/auth.js" "$T/stateD"
-PD=3993; BD="http://127.0.0.1:$PD"
+PD=$(free_port); BD="http://127.0.0.1:$PD"
 boot D "$PD" "$T/tools" "$T/models" "$T/stateD" VALARK_TEST_FORCE_REMOTE=1 && pass || true
 [ "$(code -X POST -H 'Content-Type: application/json' -d '{"question":"hi"}' "$BD/api/ask")" = 401 ] \
     && pass || fail "POST /api/ask must be 401 for a non-admin on a Passworded box"

@@ -29,6 +29,7 @@
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib/ports.sh"   # free_port / trap_signals: no fixed ports (parallel runs)
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
@@ -50,6 +51,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+trap_signals
 # --- Secret target OUTSIDE ROOT ----------------------------------------------
 mkdir -p "$SECRET"
 printf 'TOPSECRET-CONTENTS\n' > "$SECRET/secret.txt"
@@ -69,9 +71,9 @@ head -c 8192 /dev/zero > "$T/content/zim/real.zim"            # legit zim → li
 ln -s "$SECRET/secret.zim" "$T/content/zim/evil.zim"          # escaping zim symlink → NOT listed
 
 # --- Start ONE server: real ROOT/content for serving, temp mirror for listing --
-PORT=3961; B="http://127.0.0.1:$PORT"
+PORT=$(free_port); B="http://127.0.0.1:$PORT"
 env VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 \
-  VALARK_WEB_PORT="$PORT" VALARK_HTTPS_PORT="$((PORT + 9000))" VALARK_STATE_DIR="$T/state" \
+  VALARK_WEB_PORT="$PORT" VALARK_HTTPS_PORT="$(free_port)" VALARK_STATE_DIR="$T/state" \
   VALARK_TOOLS_DIR="$T/tools" VALARK_SOURCES_DIR="$T/sources" \
   VALARK_MODELS_DIR="$T/models" VALARK_CONTENT_DIR="$T/content" \
   "$NODE" "$ROOT/scripts/server.js" "$PORT" >"$T/srv.log" 2>&1 &

@@ -14,7 +14,8 @@ tool recorded in .lastbook-verified.json that the release no longer names are
 removed (--keep-old keeps them), and with --pack auto / one explicit pack the
 smaller packs nested in the verified one go too (ranked by recorded on-disk bytes;
 a missing or implausible manifest size never supersedes). A held pack goes only
-when this run verified a pack at least as large on disk. Unrecorded files are never
+when this run verified a pack at least as large on disk, or the same pack id under
+a new name with at least half its bytes (a re-release replaces the old file). Unrecorded files are never
 touched (except a stray <path>.part whose section/[version/]name path the current
 or previously kept manifests name), symlinked section dirs are never followed, and
 nothing is pruned when the release looks truncated (a section that held files
@@ -439,7 +440,7 @@ def pack_bytes(p):
     return max(p["installed"] or 0, sum(f["size"] or 0 for f in p["files"]))
 
 
-def select(rel, args, budget, dest, stamps):
+def select(rel, args, budget, dest, stamps, probe=None):
     """Return (rows, notes, incomplete). rows: dicts with item + status get|deferred."""
     remaining = [budget]  # None = unlimited
     rows, notes = [], []
@@ -478,11 +479,32 @@ def select(rel, args, budget, dest, stamps):
         extras = sum(need(m) for m in rel["base_maps"])
         if args.apps == "current" and rel["apps"]:
             extras += need(dict(files=rel["apps"]))
-        # rank by the larger of the manifest's size and what is recorded on disk, so a manifest that
-        # omits or under-reports a held pack's size does not demote it
-        held_of = lambda p: sum((stamps.get(rel_path(f)) or {}).get("size") or 0 for f in p["files"]) if dest else 0
-        by_size = sorted(rel["packs"], key=lambda p: max(pack_bytes(p), held_of(p)), reverse=True)
-        pick = next((p for p in by_size if fits(need(p) + extras)), None)
+        # Rank (R3): a pack held and verified on disk by its RECORDED bytes; any other by the bytes the
+        # manifest says it would download (its file sizes; installed_bytes only when a size is
+        # missing). A manifest that omits, under- or over-reports a size must not move auto off a held,
+        # verified pack: installed_bytes alone never outranks it, and an unheld pack that claims to
+        # be larger must have its size confirmed by the server (HEAD) before it displaces it.
+        def rank(p):
+            d = disk_bytes(dest, stamps, p) if dest else None
+            if d is not None:
+                return d
+            sizes = [f["size"] for f in p["files"]]
+            return sum(sizes) if all(sizes) else pack_bytes(p)
+        by_size = sorted(rel["packs"], key=rank, reverse=True)
+        held = [p for p in by_size if dest and disk_bytes(dest, stamps, p) is not None]
+
+        def confirmed(p):
+            if not held or p is held[0] or disk_bytes(dest, stamps, p) is not None or rank(p) <= rank(held[0]) \
+                    or probe is None:
+                return True
+            for f in p["files"]:
+                n = probe(f["url"])
+                if n is not None and n != f["size"]:
+                    notes.append(f"pack {p['id']}: the manifest says {f['name']} is {human(f['size'])} but the server "
+                                 f"says {human(n)}; keeping the held {held[0]['id']} pack")
+                    return False
+            return True
+        pick = next((p for p in by_size if fits(need(p) + extras) and confirmed(p)), None)
         if pick is None:  # a pack already held costs nothing: keep it chosen when the disk fills
             pick = next((p for p in by_size if need(p) == 0), None)
         if pick is not None:
@@ -671,15 +693,19 @@ def all_paths(rel):
             for e in rel[g] for f in e["files"]} | {rel_path(f) for f in rel["apps"]}
 
 
-def kept_paths(dest):
-    """The relative paths the manifests kept from the previous run named (read before this run
-    replaces them). Parsed with the same validation as a live release; anything unreadable -> none."""
+def kept_release(dest):
+    """The release the manifests kept from the previous run describe (read before this run replaces
+    them), parsed with the same validation as a live one; anything unreadable -> None."""
     try:
-        rel = parse_release(json.loads(read_kept(dest, "manifest-v1.json")), json.loads(read_kept(dest, "app-v1.json")),
-                            read_kept(dest, "SHA256SUMS.txt"))
+        return parse_release(json.loads(read_kept(dest, "manifest-v1.json")), json.loads(read_kept(dest, "app-v1.json")),
+                             read_kept(dest, "SHA256SUMS.txt"))
     except (ManifestError, ValueError, TypeError, AttributeError, KeyError):
-        return set()
-    return all_paths(rel)
+        return None
+
+
+def pack_of_kept(kept):
+    """{packs/<name>: pack id} for the files of a kept release's packs."""
+    return {rel_path(f): p["id"] for p in (kept or {}).get("packs", []) for f in p["files"]}
 
 
 def read_kept(dest, name):
@@ -733,13 +759,15 @@ def superseded(dest, rel, stamps, pack_id):
     return out
 
 
-def prune(dest, rel, stamps, log, verified_pack=None, names=(), run_packs=()):
+def prune(dest, rel, stamps, log, verified_pack=None, names=(), run_packs=(), kept_packs=None):
     """Drop files THIS tool recorded (in .lastbook-verified.json) that the current release no longer
     names, plus (verified_pack given) the smaller packs nested in that verified pack.
     Never touches an unrecorded file, except a stray `*.part` in a Lastbook section whose final path
     is in `names` (the section/[version/]name paths the current or previously kept manifests name:
     .parts from before .part stamps existed). A held pack file goes only when a pack this run
-    verified (`run_packs`) is at least as large on disk, and never a file of such a pack. Never follows a symlinked section dir, never rmtree. Refuses to prune at all
+    verified (`run_packs`) is at least as large on disk, or when it is the old file of a pack id this
+    run verified under a new name (a re-release, R1) and the new copy holds at least half its bytes;
+    never a file of a pack verified this run. Never follows a symlinked section dir, never rmtree. Refuses to prune at all
     when the release looks truncated (N1): a section that held files comes back empty, the run would
     drop more than half of the held files AND bytes, or maps / addresses / models would each lose more
     than half of their own held files while the release lists fewer than are held there."""
@@ -766,8 +794,18 @@ def prune(dest, rel, stamps, log, verified_pack=None, names=(), run_packs=()):
             return 0
     drop = [k for k, (base, sec, v) in owned.items() if base not in keep]
     # A held pack (hundreds of GB) goes only when this run verified a pack at least as large on
-    # disk: a packs list truncated to Small must not cost the All pack.
+    # disk: a packs list truncated to Small must not cost the All pack. Exception (R1): the old file
+    # of a pack id this run re-verified under a new name is replaced, not dropped, even when the new
+    # file is a little smaller, so a re-release does not leave two copies of All; the new copy must
+    # still hold at least half the old one's bytes (a gutted re-release keeps the old file).
+    run_disk_of = {p["id"]: disk_bytes(dest, stamps, p) for p in run_packs}
+    replaced = {}
     for k in [k for k in drop if k in held and owned[k][1] == "packs"]:
+        old_id = held[k].get("pack") or (kept_packs or {}).get(k)
+        new = run_disk_of.get(old_id) if old_id else None
+        if new is not None and 2 * new >= (held[k].get("size") or 0):
+            replaced[k] = old_id
+            continue
         if largest_run is None or (held[k].get("size") or 0) > largest_run:
             drop.remove(k)
             log(f"keeping {k}: no pack verified this run is at least as large (re-checked next run)")
@@ -825,6 +863,7 @@ def prune(dest, rel, stamps, log, verified_pack=None, names=(), run_packs=()):
             dirs.add(p.parent)
         base = k[:-5] if k.endswith(".part") else k
         log(f"pruned {k} (" + (f"nested in the verified {verified_pack} pack" if base in super_keys
+                               else f"replaced by the verified re-release of the {replaced[k]} pack" if k in replaced
                                else "not in the current release") + ")")
     for d in dirs:
         try:
@@ -891,7 +930,7 @@ def main(argv=None):
         for it in rel["apps"]:  # builds only SHA256SUMS.txt lists carry no size: ask the server
             if it["size"] is None:
                 it["size"] = net.head_size(it["url"])
-        rows, notes, incomplete = select(rel, args, budget, dest, stamps)
+        rows, notes, incomplete = select(rel, args, budget, dest, stamps, probe=net.head_size)
     except Usage as e:
         log(f"usage: {e}")
         return EXIT_USAGE
@@ -907,7 +946,8 @@ def main(argv=None):
         log(n)
     dest.mkdir(parents=True, exist_ok=True)
     # paths the manifests kept from the previous run still name (read before they are replaced)
-    names = kept_paths(dest) | all_paths(rel)
+    kept = kept_release(dest)
+    names = (all_paths(kept) if kept else set()) | all_paths(rel)
     counts = dict(verified=0, fetched=0, failed=0, deferred=sum(r["status"] == "deferred" for r in rows))
     added, stopped = 0, None
     try:
@@ -921,6 +961,8 @@ def main(argv=None):
             finally:
                 save_stamps(dest, stamps)
             counts[st] += 1
+            if r["section"] == "pack" and st in ("verified", "fetched") and rel_path(r) in stamps:
+                stamps[rel_path(r)]["pack"] = r["id"]  # so a later re-release under a new name is a replacement (R1)
             if st == "fetched":
                 added += r["size"] or 0
                 log(f"fetched + verified {rel_path(r)} ({human(r['size'])})")
@@ -931,7 +973,7 @@ def main(argv=None):
             write_atomic(dest / name, data)
         rc = EXIT_FAIL if counts["failed"] else (EXIT_INCOMPLETE if (incomplete or counts["deferred"]) else EXIT_OK)
         run_packs = {r["id"] for r in rows if r["section"] == "pack" and r["status"] == "get"}
-        pruned = prune(dest, rel, stamps, log, single_pack(args, rows), names, run_packs) \
+        pruned = prune(dest, rel, stamps, log, single_pack(args, rows), names, run_packs, pack_of_kept(kept)) \
             if rc == EXIT_OK and not args.keep_old else 0
         save_stamps(dest, stamps)
     except OSError as e:

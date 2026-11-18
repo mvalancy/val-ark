@@ -29,6 +29,9 @@
 #     (never with every or a list); maps / addresses / models each refuse a prune that
 #     loses most of the section while the release lists fewer; stray unrecorded .parts
 #     go only when a current or kept manifest names them
+#   - a pack re-released under a new name replaces the old file (not a gutted one); auto
+#     stays on a held, verified pack when the manifest over-reports another; an
+#     out-of-tree Lastbook dir is listed by server.js from its records only
 #   - exit codes 0 / 1 / 3 / 64; argparse errors are 64, not 2
 ###############################################################################
 PASS=0; FAIL=0
@@ -41,9 +44,8 @@ SH="$ROOT/scripts/tools/lastbook.sh"
 FIX="$ROOT/tests/fixtures/lastbook"
 command -v python3 >/dev/null 2>&1 || { echo "SKIP: no python3" >&2; exit 0; }
 
-. "$ROOT/tests/lib/ports.sh"   # free_port / stop_pids: no fixed ports, no leaked servers
-T="$(mktemp -d)"; SRV_PID=""; NPID=""
-trap 'stop_pids $SRV_PID $NPID; rm -rf "${T:?}"' EXIT
+T="$(mktemp -d)"; SRV_PID=""
+trap 'rm -rf "${T:?}"; [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null' EXIT
 export VAL_ARK_CONFIG="$T/empty.conf" VAL_ARK_DATA="$T/disk" FORCE_COLOR=0 LC_ALL=C
 # No disk reserve by default: fetches stop at the reserve, and a CI runner has little free space.
 export VALARK_RESERVE_PCT=0 VALARK_RESERVE_MIN_GB=0
@@ -569,6 +571,44 @@ assert not l.OWNED_KEY.match("app/2024photos/x") and not l.OWNED_KEY.match("app/
 PYEOF
 
 
+# a pack re-released under a new file name replaces the old file once the new one verifies (R1)
+ALLF=$(find "$T/www/tiny" -name Lastbook-All.zip); ALLSZ=$(stat -c %s "$ALLF")
+rerelease() {  # rerelease NAME BYTES : All republished as Lastbook-All-2.zip, its first BYTES bytes
+    variant "$1" ''
+    head -c "$2" "$ALLF" > "$(dirname "$(find "$T/www/$1" -name Lastbook-All.zip)")/Lastbook-All-2.zip"
+    python3 - "$T/www/$1/dl/manifest-v1.json" "$(find "$T/www/$1" -name Lastbook-All-2.zip)" <<'PYEOF'
+import hashlib, json, sys
+p, f = sys.argv[1], sys.argv[2]; m = json.load(open(p)); d = open(f, "rb").read()
+a = [x for x in m["packs"] if x["id"] == "all"][0]; fl = a["files"][0]
+fl["name"] = "Lastbook-All-2.zip"; fl["url"] = fl["url"].replace("Lastbook-All.zip", "Lastbook-All-2.zip")
+fl["size"] = len(d); fl["sha256"] = hashlib.sha256(d).hexdigest(); a["installed_bytes"] = len(d)
+json.dump(m, open(p, "w"))
+PYEOF
+}
+rerelease rr $((ALLSZ - 50))       # a little smaller than the held All
+rerelease rrgut 10                 # gutted: 10 bytes
+D25="$T/m25"; mir --dest "$D25" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["packs/Lastbook-All.zip"]["pack"] == "all"' "$D25/.lastbook-verified.json" && pass || fail "a verified pack file records its pack id"
+vrun rr --dest "$D25" --pack auto; rc=$?
+check "All re-released under a new name, slightly smaller: the old file is replaced, not kept twice" '[ "$rc" = 0 ] && [ -s "$D25/packs/Lastbook-All-2.zip" ] && [ ! -e "$D25/packs/Lastbook-All.zip" ] && grep -q "pruned packs/Lastbook-All.zip (replaced by the verified re-release of the all pack)" "$T/err"'
+D26="$T/m26"; mir --dest "$D26" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+python3 -c 'import json,sys; f=sys.argv[1]; s=json.load(open(f)); [v.pop("pack", None) for v in s.values()]; json.dump(s, open(f, "w"))' "$D26/.lastbook-verified.json"
+vrun rr --dest "$D26" --pack all; rc=$?
+check "re-release on a box stamped before pack ids: the kept manifest names the old file's pack, replaced" '[ "$rc" = 0 ] && [ ! -e "$D26/packs/Lastbook-All.zip" ] && [ -s "$D26/packs/Lastbook-All-2.zip" ]'
+D27="$T/m27"; mir --dest "$D27" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+vrun rrgut --dest "$D27" --pack all; rc=$?
+check "a gutted re-release (under half the bytes) never replaces the held All" '[ "$rc" = 0 ] && [ -s "$D27/packs/Lastbook-All.zip" ] && grep -q "keeping packs/Lastbook-All.zip" "$T/err"'
+
+# auto never leaves a held, verified pack because the manifest over-reports another pack (R3)
+variant bigmed 'a=[p for p in m["packs"] if p["id"]=="medium"][0]; a["installed_bytes"]=10**15'
+variant bigmedfile 'a=[p for p in m["packs"] if p["id"]=="medium"][0]; a["installed_bytes"]=10**12; a["files"][0]["size"]=10**12'
+D28="$T/m28"; mir --dest "$D28" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+vrun bigmed --dest "$D28" --pack auto; rc=$?
+check "Medium's installed_bytes over-reported: auto stays on the held All" '[ "$rc" = 0 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"all\"\]" && [ ! -e "$D28/packs/Lastbook-Medium.zip" ]'
+: > "$T/req.log"
+vrun bigmedfile --dest "$D28" --pack auto; rc=$?
+check "Medium's file size over-reported: HEAD disagrees, auto stays on the held All and says why" '[ "$rc" = 0 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"all\"\]" && grep -q "the server says" "$T/err" && ! grep -q "^GET .*Lastbook-Medium.zip" "$T/req.log"'
+
 # --- 11. the tool entry --------------------------------------------------------------------------
 : > "$T/req.log"
 VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_BUDGET=-1 VALARK_LASTBOOK_MAPS=none VALARK_LASTBOOK_MODEL=no \
@@ -601,10 +641,17 @@ check "lastbook.sh: a Lastbook dir outside the data trees gets --share but no --
 # server.js reports a VALARK_LASTBOOK_DIR outside content/ under lastbook/, flagged external (not served)
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
 if [ -n "$NODE" ] && command -v curl >/dev/null 2>&1; then
-    mkdir -p "$T/ext/lastbook/packs"; echo pack > "$T/ext/lastbook/packs/Lastbook-Small-20261113.zip"
-    SP=$(free_port); SPS=$(free_port)
+    # a mirror kept outside content/: one recorded pack, plus things the listing must NOT reveal (R2)
+    X="$T/ext/lastbook"; mkdir -p "$X/packs" "$X/docs" "$T/ext/elsewhere"
+    echo pack > "$X/packs/Lastbook-Small-20261113.zip"
+    echo mine > "$X/secret.txt"; echo mine > "$X/packs/unrecorded.zip"; echo mine > "$X/docs/notes.txt"   # unrecorded / not a section
+    echo mine > "$T/ext/elsewhere/Lastbook-Map-CA.zip"; ln -s "$T/ext/elsewhere" "$X/maps"                  # symlinked section dir
+    ln -s "$T/ext/elsewhere/Lastbook-Map-CA.zip" "$X/packs/Lastbook-Medium.zip"                             # symlinked file
+    stamp "$X" packs/Lastbook-Small-20261113.zip docs/notes.txt
+    python3 -c 'import json,sys; f=sys.argv[1]; s=json.load(open(f)); s.update({"maps/Lastbook-Map-CA.zip": {"size": 5}, "packs/Lastbook-Medium.zip": {"size": 5}, "../secret.txt": {"size": 5}, "app/2024photos/x.zip": {"size": 5}}); json.dump(s, open(f, "w"))' "$X/.lastbook-verified.json"
+    SP=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
     env VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 \
-        VALARK_WEB_PORT="$SP" VALARK_HTTPS_PORT="$SPS" VALARK_STATE_DIR="$T/srvstate" VALARK_LASTBOOK_DIR="$T/ext/lastbook" \
+        VALARK_WEB_PORT="$SP" VALARK_HTTPS_PORT="$((SP + 1))" VALARK_STATE_DIR="$T/srvstate" VALARK_LASTBOOK_DIR="$T/ext/lastbook" \
         "$NODE" "$ROOT/scripts/server.js" "$SP" >"$T/srv.log" 2>&1 &
     NPID=$!
     up=0; for _ in $(seq 1 30); do sleep 0.4; curl -sf --max-time 2 "http://127.0.0.1:$SP/api/health" >/dev/null 2>&1 && { up=1; break; }; done
@@ -612,12 +659,14 @@ if [ -n "$NODE" ] && command -v curl >/dev/null 2>&1; then
         curl -s --max-time 5 "http://127.0.0.1:$SP/api/status/content" > "$T/content.json"
         python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); e=d["lastbook/packs/Lastbook-Small-20261113.zip"]; assert e["external"] is True and e["size"] == 5' "$T/content.json" \
             && pass || fail "server.js: an out-of-tree VALARK_LASTBOOK_DIR shows in /api/status/content as lastbook/..., external"
+        python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); ks=sorted(k for k in d if k.startswith("lastbook/")); assert ks == ["lastbook/packs/Lastbook-Small-20261113.zip"], ks; assert not any("secret" in k or "notes" in k or "unrecorded" in k for k in d)' "$T/content.json" \
+            && pass || fail "server.js: only recorded files in Lastbook sections are listed (no unrecorded files, no symlinks, no other dirs)"
         code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$SP/api/archive/content/lastbook/packs/Lastbook-Small-20261113.zip")
         check "server.js: the external Lastbook dir is not served (got $code)" '[ "$code" != 200 ]'
     else
         fail "server.js did not start on :$SP"; cat "$T/srv.log" >&2
     fi
-    stop_pids "$NPID"; NPID=""
+    kill "$NPID" 2>/dev/null
 else
     echo "  SKIP: server.js external Lastbook dir (no node or curl)" >&2
 fi

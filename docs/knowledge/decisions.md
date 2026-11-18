@@ -124,6 +124,24 @@ later). See [README](README.md).
     `content/` is still reported by `server.js` under `lastbook/…` but flagged `external`: the card
     shows Mirrored and explains that those files are not served (no links), since `/api/archive`
     stays confined to the served trees.
+- **Re-review follow-ups (#204):**
+  - *Re-released packs are replaced (R1).* The held-pack guard ("a verified pack at least as large")
+    kept the old All whenever upstream re-released it under a new file name that was even one byte
+    smaller, so a box held two copies of All. Each verified pack file now records its pack id in
+    `.lastbook-verified.json` (boxes stamped before that fall back to the kept manifest, which names
+    the old file's pack). A held pack file is dropped as **replaced** when this run verified the same
+    pack id under another name and the new copy holds at least half the old one's bytes. A gutted
+    re-release (under half) keeps the old file, and the truncation guards still apply.
+  - *External listing from records only (R2).* For a `VALARK_LASTBOOK_DIR` outside `content/`,
+    `server.js` no longer walks the tree. It lists only keys recorded in that dir's
+    `.lastbook-verified.json` that are shaped like Lastbook's sections
+    (`packs|maps|addresses|models/<name>`, `app/<version>/<name>`), are regular files, and have no
+    symlink on the way. With no stamps file it lists nothing, so pointing the variable at `$HOME` by
+    mistake cannot enumerate the operator's files to the LAN.
+  - *Auto ranking (R3).* A held, verified pack ranks by its recorded bytes. Any other pack ranks by
+    its manifest file sizes; `installed_bytes` counts only when a size is missing. An unheld pack
+    that would outrank the held one must have its size confirmed by a HEAD request first. So an
+    over-reported Medium (`installed_bytes` or file size) no longer moves auto off a held All.
 - **Follow-up (not done):** feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
   rank) so value-per-byte, not a fixed share, decides its room.
 

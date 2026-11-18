@@ -488,6 +488,38 @@ function getToolsStatus() {
     return tools;
 }
 
+// An out-of-tree VALARK_LASTBOOK_DIR is listed by what lastbook_mirror.py RECORDED there, never by
+// walking it (R2): if the variable is misconfigured (say to $HOME) an unauthenticated
+// /api/status/content must not enumerate the operator's files. Only recorded keys shaped like
+// Lastbook's own sections (packs|maps|addresses|models/<name>, app/<version>/<name>) that are regular
+// files with no symlink anywhere on the way are reported; no stamps file -> nothing.
+const LASTBOOK_KEY = /^(?:(?:packs|maps|addresses|models)|app\/[0-9]{1,6}(?:\.[0-9A-Za-z]{1,20}){1,5})\/[A-Za-z0-9][A-Za-z0-9._+-]{0,200}$/;
+function lastbookExternalFiles(realLb) {
+    const out = {};
+    let stamps;
+    try {
+        const sf = path.join(realLb, '.lastbook-verified.json');
+        const st = fs.lstatSync(sf);
+        if (!st.isFile() || st.size > 8 * 1024 * 1024) return out;
+        stamps = JSON.parse(fs.readFileSync(sf, 'utf8'));
+    } catch (_) { return out; }
+    if (!stamps || typeof stamps !== 'object' || Array.isArray(stamps)) return out;
+    for (const k of Object.keys(stamps).slice(0, 5000)) {
+        if (!LASTBOOK_KEY.test(k) || k.includes('..') || k.endsWith('.part')) continue;
+        let p = realLb, st = null;
+        try {
+            for (const part of k.split('/')) {
+                p = path.join(p, part);
+                st = fs.lstatSync(p);
+                if (st.isSymbolicLink()) { st = null; break; }
+            }
+        } catch (_) { st = null; }
+        if (!st || !st.isFile()) continue;
+        out['lastbook/' + k] = { size: st.size, lastModified: st.mtime.toISOString(), external: true };
+    }
+    return out;
+}
+
 function getContentStatus() {
     const now = Date.now();
     if (statusCache.content.data && (now - statusCache.content.timestamp) < CACHE_TTL) {
@@ -525,9 +557,7 @@ function getContentStatus() {
             let realContent = '';
             try { realContent = fs.realpathSync(contentDir); } catch (_) {}
             if (!realContent || (realLb !== realContent && !realLb.startsWith(realContent + path.sep))) {
-                const before = new Set(Object.keys(content));
-                walk(realLb, 'lastbook');
-                for (const k of Object.keys(content)) if (!before.has(k)) content[k].external = true;
+                Object.assign(content, lastbookExternalFiles(realLb));
             }
         } catch (_) { /* not there yet */ }
     }

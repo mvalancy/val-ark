@@ -15,7 +15,9 @@
 #    never replaces the archived one; a torn/bit-rotted archived bundle (size or
 #    sha256 vs .source.json) is never "unchanged" and fails verify; verify and the
 #    copy-only resume work from a non-repo cwd, also with relative --dest/--stage;
-#    a bundle with no .source.json is UNVERIFIED until --adopt checks it fully.
+#    a bundle with no .source.json is UNVERIFIED until --adopt checks it fully;
+#    empty/[]/garbage sidecars are UNVERIFIED (never a match or crash); --adopt
+#    runs fsck; stale .adopt-* dirs are swept; bundle + sidecar are fsync'd.
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -309,6 +311,75 @@ EOF2
 [ -z "$(ls -A "$T/stage7" 2>/dev/null)" ] && pass || fail "--adopt left scratch clones in --stage"
 rm "$T/dest7/other/torn.bundle"
 python3 "$M" verify --dest "$T/dest7" --stage "$T/stage7" 2>/dev/null && pass || fail "an adopted bundle must verify clean"
+
+# 19. the sidecar is read through ONE strict helper: an empty, `[]` or garbage .source.json is never
+#     provenance (UNVERIFIED, never a match, never a crash); verify keeps walking; --adopt rewrites it.
+rm -rf "$T/dest8"; mkdir -p "$T/dest8/a" "$T/dest8/b" "$T/dest8/c" "$T/dest8/d" "$T/dest8/e"
+GOOD="$T/norepo/rel/dest/acme/widget.bundle"
+cp "$GOOD" "$T/dest8/a/torn.bundle"; truncate -s $(( $(stat -c %s "$GOOD") - 40 )) "$T/dest8/a/torn.bundle"; : > "$T/dest8/a/torn.bundle.source.json"
+cp "$GOOD" "$T/dest8/b/list.bundle"; echo '[]' > "$T/dest8/b/list.bundle.source.json"
+cp "$GOOD" "$T/dest8/c/junk.bundle"; echo '{"bytes": "12", "sha256": "abc"}' > "$T/dest8/c/junk.bundle.source.json"
+cp "$GOOD" "$T/dest8/e/badsha.bundle"; printf '{"bytes": %s, "sha256": "%s"}' "$(stat -c %s "$GOOD")" "$(printf 'Z%.0s' $(seq 64))" > "$T/dest8/e/badsha.bundle.source.json"
+cp "$GOOD" "$T/dest8/d/ok.bundle"; cp "$GOOD.source.json" "$T/dest8/d/ok.bundle.source.json"
+python3 "$M" verify --dest "$T/dest8" --stage "$T/stage8" 2>"$T/log19"; rc=$?
+[ "$rc" = 3 ] && pass || fail "torn+empty / [] / garbage sidecars must be UNVERIFIED, exit 3 (got $rc: $(cat "$T/log19"))"
+for x in a/torn b/list c/junk e/badsha; do grep -q "^UNVERIFIED $x.bundle: no provenance" "$T/log19" && pass || fail "$x: not reported UNVERIFIED"; done
+grep -q '^verified 5 bundles, 0 bad, 4 unverified' "$T/log19" && pass || fail "verify must keep walking all bundles ($(tail -1 "$T/log19"))"
+python3 "$M" verify --adopt --dest "$T/dest8" --stage "$T/stage8" 2>"$T/log19a"; rc=$?
+[ "$rc" = 2 ] && grep -q '^BAD a/torn.bundle: not adopted' "$T/log19a" && [ ! -s "$T/dest8/a/torn.bundle.source.json" ] \
+    && pass || fail "--adopt must refuse a truncated bundle with an empty sidecar (got $rc: $(cat "$T/log19a"))"
+grep -q '^ADOPTED b/list.bundle' "$T/log19a" && grep -q '^ADOPTED c/junk.bundle' "$T/log19a" && grep -q '^ADOPTED e/badsha.bundle' "$T/log19a" && pass || fail "--adopt must rewrite invalid sidecars"
+rm -rf "$T/dest8/a"; python3 "$M" verify --dest "$T/dest8" --stage "$T/stage8" 2>/dev/null && pass || fail "rewritten sidecars must verify clean"
+python3 - "$ROOT/scripts/lib" "$T/dest9" <<'PY' && pass || fail "no provenance must be a mismatch, never a silent match"
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1]); d = Path(sys.argv[2]); d.mkdir(parents=True, exist_ok=True)
+import git_bundle_mirror as g
+b = d / "lone.bundle"; b.write_bytes(b"x")
+assert g.read_provenance(b) is None and g.provenance_mismatch(b) == "no valid .source.json"
+b.unlink()
+PY
+# A refresh over a `[]` sidecar rebuilds (and rewrites it) instead of failing forever.
+run --refresh-days 0 --repo acme/widget 2>/dev/null
+echo '[]' > "$B.source.json"
+run --refresh-days 0 --repo acme/widget 2>"$T/log19m" && python3 - "$T/dest/.mirror-state.json" "$B" <<'EOF2' && pass || fail "refresh over a [] sidecar: $(cat "$T/log19m")"
+import json, sys
+st = json.load(open(sys.argv[1]))["acme/widget"]
+assert st["status"] == "complete" and not st.get("unchanged") and "last_error" not in st, st
+m = json.load(open(sys.argv[2] + ".source.json")); assert isinstance(m, dict) and len(m["sha256"]) == 64
+EOF2
+
+# 20. --adopt runs fsck: a bundle that verifies AND clones but holds a malformed commit (no
+#     author email; index-pack does not run fsck's object checks) is not adopted.
+rm -rf "$T/fz" "$T/dest9"; git init -q -b main "$T/fz"; echo a > "$T/fz/f"; git -C "$T/fz" add f; git -C "$T/fz" commit -qm a
+c=$(printf 'tree %s\nauthor nobody 1700000000 +0000\ncommitter nobody 1700000000 +0000\n\nbad\n' "$(git -C "$T/fz" rev-parse 'HEAD^{tree}')" \
+    | git -C "$T/fz" hash-object -t commit -w --literally --stdin)
+git -C "$T/fz" update-ref refs/heads/main "$c"; mkdir -p "$T/dest9/x"; git -C "$T/fz" bundle create -q "$T/dest9/x/bad.bundle" --all 2>/dev/null
+rm -rf "$T/fzc"; git clone -q --bare "$T/dest9/x/bad.bundle" "$T/fzc" 2>/dev/null && pass || fail "fixture: the malformed bundle should still clone"
+python3 "$M" verify --adopt --dest "$T/dest9" --stage "$T/stage9" 2>"$T/log20"; rc=$?
+[ "$rc" = 2 ] && grep -q '^BAD x/bad.bundle: not adopted: fsck' "$T/log20" && [ ! -e "$T/dest9/x/bad.bundle.source.json" ] \
+    && pass || fail "--adopt must fsck (got $rc: $(cat "$T/log20"))"
+
+# 21. stale .adopt-* scratch dirs (a killed --adopt) older than a day are swept at verify start.
+mkdir -p "$T/stage9/.adopt-old/repo.git" "$T/stage9/.adopt-new"; touch -d '2 days ago' "$T/stage9/.adopt-old"
+python3 "$M" verify --dest "$T/dest8" --stage "$T/stage9" 2>/dev/null
+[ ! -e "$T/stage9/.adopt-old" ] && [ -d "$T/stage9/.adopt-new" ] && pass || fail "stale .adopt-* not swept (or a fresh one removed)"
+
+# 22. durability: bundle bytes fsync'd before the rename, sidecar written (fsync + rename + dir fsync) after.
+python3 - "$ROOT/scripts/lib" "$T" <<'PY' && pass || fail "bundle/sidecar not fsync'd around the renames"
+import os, sys
+sys.path.insert(0, sys.argv[1]); T = sys.argv[2]
+import git_bundle_mirror as g
+ev, rf, rr = [], os.fsync, os.replace
+g.os.fsync = lambda fd: (ev.append("fsync"), rf(fd))[1]
+g.os.replace = lambda a, b: (ev.append("replace " + os.path.basename(str(b))), rr(a, b))[1]
+assert g.main(["mirror", "--dest", T + "/dest10", "--stage", T + "/stage10", "--tries", "1", "--retry-wait", "0",
+               "--repo", "acme/widget"]) == 0
+i, j = ev.index("replace widget.bundle"), ev.index("replace widget.bundle.source.json")
+assert i > 0 and ev[i - 1] == "fsync", ev          # bundle bytes durable before it is renamed in
+assert ev[i + 1] == "fsync" and i < j, ev          # its directory entry durable, then the sidecar
+assert ev[j - 1] == "fsync" and ev[j + 1] == "fsync", ev
+PY
 
 echo "git-bundle-mirror: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

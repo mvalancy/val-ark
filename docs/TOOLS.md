@@ -191,13 +191,24 @@ their held files while the release lists fewer than are held. Decision record:
 `verify` exit codes:
 - `0`: every bundle is good.
 - `2`: any bundle is bad, or there are none.
-- `3`: the only problem is bundles with no `.source.json`. They are listed as `UNVERIFIED … no
-  provenance`, because git's own verify passes a truncated bundle and so cannot vouch for them.
+- `3`: the only problem is bundles with no valid `.source.json`. That means missing, empty,
+  `[]`, garbage, or lacking an integer `bytes` and a 64-hex `sha256`. They are listed as
+  `UNVERIFIED … no provenance`, because git's own verify passes a truncated bundle and so cannot
+  vouch for them. One bad bundle or sidecar never stops the walk over the rest.
 
 `verify --adopt` writes a `.source.json` for those from their current bytes, but only after
-`git bundle verify`, a full bare clone, and `git fsck --full` in a scratch dir under `--stage`. That
-needs about one repo's worth of free space there. A bundle that fails any step is reported `BAD`
-and is not adopted.
+`git bundle verify`, a full bare clone, and `git fsck --full` in a scratch dir under `--stage`.
+Clone alone accepts a malformed commit. That needs about one repo's worth of free space there.
+A bundle that fails any step is reported `BAD` and is not adopted. Leftover `.adopt-*` scratch
+dirs older than a day (from a killed run) are removed when `verify` starts.
+
+**Adopting trusts the bundle's current header.** Ref names and the commits they point to carry no
+checksum, so a renamed or repointed ref (to an object that exists) cannot be detected. Only adopt
+bundles whose origin you trust. A refresh from upstream replaces the adopted provenance anyway.
+
+Bundle bytes are fsync'd before the `.part` rename and the sidecar after it, each followed by a
+directory fsync. After a power cut you may get a new bundle with the old sidecar: that reads as a
+mismatch and gets rebuilt. You never get a torn pair that passes.
 
 ---
 

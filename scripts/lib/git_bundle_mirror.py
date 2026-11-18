@@ -203,16 +203,15 @@ def unchanged(name, prev, info, stage):
     when either side cannot be read: then the normal refresh path decides)."""
     if not prev.is_file():
         return None
-    try:
-        meta = json.loads(prev.with_name(prev.name + ".source.json").read_text())
-    except (OSError, ValueError):
+    meta = read_provenance(prev)
+    if meta is None:  # missing / empty / garbage sidecar: rebuild (a fresh one gets written)
         return None
     if info.get("default_branch") and info["default_branch"] != meta.get("default_branch"):
         return None
     # list-heads reads only the header, and git's `bundle verify` passes a truncated pack,
     # so a torn or bit-rotted bundle would otherwise stay "unchanged" forever. Its size
     # and sha256 must still match the provenance written when it was built.
-    why = provenance_mismatch(prev)
+    why = provenance_mismatch(prev, meta)
     if why:
         print(f"  {name}: archived bundle {why}; rebuilding", file=sys.stderr)
         return None
@@ -239,16 +238,37 @@ def bundle_verify(bundle, repo):
                           capture_output=True, text=True, timeout=6 * 3600)
 
 
-def provenance_mismatch(bundle):
-    """Reason the bundle disagrees with its .source.json (size, then sha256), else None.
-    No .source.json -> None (nothing to compare against)."""
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def read_provenance(bundle):
+    """The bundle's .source.json, or None unless it is a JSON object with an int `bytes`
+    and a 64-hex `sha256`. The ONE reader: an empty, truncated, `[]` or garbage sidecar
+    must never count as provenance (nor crash a caller): it is UNVERIFIED, and
+    `verify --adopt` / a refresh rewrites it."""
     try:
         meta = json.loads(bundle.with_name(bundle.name + ".source.json").read_text())
-    except (OSError, ValueError):
+    except (OSError, ValueError, UnicodeDecodeError):
         return None
-    if bundle.stat().st_size != meta.get("bytes"):
+    if not isinstance(meta, dict):
+        return None
+    n, digest = meta.get("bytes"), meta.get("sha256")
+    if not isinstance(n, int) or isinstance(n, bool) or n < 0:
+        return None
+    if not isinstance(digest, str) or not SHA256_RE.match(digest):
+        return None
+    return meta
+
+
+def provenance_mismatch(bundle, meta=None):
+    """Reason the bundle disagrees with its provenance (size, then sha256), else None.
+    No valid provenance is itself a mismatch: never a silent pass."""
+    meta = meta if meta is not None else read_provenance(bundle)
+    if meta is None:
+        return "no valid .source.json"
+    if bundle.stat().st_size != meta["bytes"]:
         return f"size {bundle.stat().st_size} != {meta.get('bytes')} in .source.json"
-    if sha256(bundle) != meta.get("sha256"):
+    if sha256(bundle) != meta["sha256"]:
         return "sha256 differs from .source.json"
     return None
 
@@ -261,10 +281,36 @@ def sha256(path):
     return h.hexdigest()
 
 
+def fsync_dir(d):
+    """Make a rename durable. Some network filesystems refuse fsync on a directory; then the
+    server's own commit is all we get, so that is not an error."""
+    try:
+        fd = os.open(str(d), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def fsync_file(path):
+    with open(path, "rb+") as f:
+        os.fsync(f.fileno())
+
+
 def write_atomic(path, text):
+    """tmp + fsync + rename + fsync(dir): after a power cut the file is the old or the new
+    content, never empty or torn (an empty .source.json used to read as 'no mismatch')."""
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text)
+    with open(tmp, "w") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, path)
+    fsync_dir(path.parent)
 
 
 def mirror_one(name, dest, stage, info, tries=6, wait=30):
@@ -312,7 +358,9 @@ def finish(name, dest, local, bundle, info, resumed, incremental=False):
     shutil.copyfile(bundle, part)
     if part.stat().st_size != size:
         raise RuntimeError("copy size mismatch")
-    os.replace(part, target)
+    fsync_file(part)  # bundle bytes durable BEFORE the rename, the sidecar only after it:
+    os.replace(part, target)  # a cut in between leaves new bundle + old sidecar -> mismatch -> rebuild
+    fsync_dir(target.parent)
     bundle.unlink()
     shutil.rmtree(local, ignore_errors=True)
     meta = dict(repository=name, url=info.get("html_url"), description=info.get("description"),
@@ -335,14 +383,30 @@ def write_index(dest, state):
 
 
 def has_provenance(bundle):
-    return bundle.with_name(bundle.name + ".source.json").is_file()
+    return read_provenance(bundle) is not None
+
+
+ADOPT_STALE_S = 86400
+
+
+def sweep_adopt_scratch(stage):
+    """Remove `.adopt-*` scratch clones under --stage older than a day (a killed --adopt)."""
+    for d in stage.glob(".adopt-*"):
+        try:
+            if d.is_dir() and time.time() - d.stat().st_mtime > ADOPT_STALE_S:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            pass
 
 
 def adopt(bundle, dest, stage, scratch_repo):
-    """Write .source.json for a bundle that has none (copied in by hand, or its sidecar was
-    lost), from its CURRENT bytes. Only after `git bundle verify` AND a full bare clone +
-    `git fsck --full` in a scratch dir: verify alone passes a truncated pack. Returns an
-    error string, or None once adopted."""
+    """Write .source.json for a bundle that has no valid one (copied in by hand, or its
+    sidecar was lost or torn), from its CURRENT bytes. Only after `git bundle verify` AND a
+    full bare clone + `git fsck --full` in a scratch dir: verify alone passes a truncated
+    pack, and clone (index-pack) does not run fsck's object checks, so a malformed commit
+    clones fine. Adopting trusts the current header: a bundle's ref names carry no checksum,
+    so refs that were renamed or repointed (to objects that exist) cannot be detected.
+    Returns an error string, or None once adopted."""
     p = bundle_verify(bundle, scratch_repo)
     if p.returncode:
         return p.stderr.strip()[-200:]
@@ -376,37 +440,44 @@ def adopt(bundle, dest, stage, scratch_repo):
 
 def verify(dest, stage, do_adopt=False):
     """Full read of every bundle: git bundle verify, then size + sha256 against .source.json.
-    A bundle with no .source.json is UNVERIFIED (git's verify passes a truncated pack, so it
-    alone proves nothing) unless --adopt checks it fully and writes one.
+    A bundle with no valid .source.json is UNVERIFIED (git's verify passes a truncated pack,
+    so it alone proves nothing) unless --adopt checks it fully and writes one. One bad
+    bundle or sidecar never stops the walk over the rest.
     Exit 0 all good, 2 any bad (or no bundles), 3 only unverified ones left."""
     bad = unverified = adopted = 0
     bundles = sorted(dest.glob("*/*.bundle"))
+    if stage.is_dir():
+        sweep_adopt_scratch(stage)
     scratch = tempfile.mkdtemp(prefix="bundle-verify-")
     try:
         subprocess.run(["git", "init", "--quiet", "--bare", scratch], check=True)
         for b in bundles:
             rel = b.relative_to(dest)
-            if not has_provenance(b):
-                if do_adopt:
-                    stage.mkdir(parents=True, exist_ok=True)
-                    why = adopt(b, dest, stage, scratch)
-                    if why:
+            try:
+                if not has_provenance(b):
+                    if do_adopt:
+                        stage.mkdir(parents=True, exist_ok=True)
+                        why = adopt(b, dest, stage, scratch)
+                        if why:
+                            bad += 1
+                            print(f"BAD {rel}: not adopted: {why}", file=sys.stderr)
+                        else:
+                            adopted += 1
+                            print(f"ADOPTED {rel}: wrote .source.json from the current bytes", file=sys.stderr)
+                        continue
+                    p = bundle_verify(b, scratch)
+                    if p.returncode:
                         bad += 1
-                        print(f"BAD {rel}: not adopted: {why}", file=sys.stderr)
+                        print(f"BAD {rel}: {p.stderr.strip()[-200:]}", file=sys.stderr)
                     else:
-                        adopted += 1
-                        print(f"ADOPTED {rel}: wrote .source.json from the current bytes", file=sys.stderr)
+                        unverified += 1
+                        print(f"UNVERIFIED {rel}: no provenance (missing or invalid .source.json); "
+                              "re-run with --adopt", file=sys.stderr)
                     continue
                 p = bundle_verify(b, scratch)
-                if p.returncode:
-                    bad += 1
-                    print(f"BAD {rel}: {p.stderr.strip()[-200:]}", file=sys.stderr)
-                else:
-                    unverified += 1
-                    print(f"UNVERIFIED {rel}: no provenance (.source.json); re-run with --adopt", file=sys.stderr)
-                continue
-            p = bundle_verify(b, scratch)
-            why = p.stderr.strip()[-200:] if p.returncode else provenance_mismatch(b)
+                why = p.stderr.strip()[-200:] if p.returncode else provenance_mismatch(b)
+            except (OSError, subprocess.SubprocessError) as e:
+                why = f"{type(e).__name__}: {e}"[-200:]
             if why:
                 bad += 1
                 print(f"BAD {rel}: {why}", file=sys.stderr)

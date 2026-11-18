@@ -263,8 +263,14 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   runs with `-C <staging repo>`, so a relative bundle path resolved inside staging
   (`…/acme__widget.git/rel/stage/…bundle.lock: No such file`). **No `.source.json` means
   UNVERIFIED** (exit 3) and never a pass. `verify --adopt` writes one only after `bundle verify`,
-  a full bare clone and `fsck --full`. Verify alone adopted a truncated bundle in testing.
-  Regression: `tests/test-git-bundle-mirror.sh` cases 3, 8, 12-18:
+  a full bare clone and `fsck --full`. Verify alone adopted a truncated bundle in testing, and clone
+  alone accepts a commit with no author email (index-pack skips fsck's object checks). **Read the
+  sidecar through ONE strict helper** (`read_provenance`). It accepts only an object with an int
+  `bytes` and a 64-hex `sha256`. An earlier "exists" check plus a parse that treated an unparseable
+  file as "no mismatch" let a truncated bundle with an empty `.source.json` verify clean. A `[]`
+  sidecar crashed `verify` and made every refresh fail. Write bundle and sidecar with fsync, then
+  rename, then directory fsync (bundle first) so a power cut cannot produce that pair.
+  Regression: `tests/test-git-bundle-mirror.sh` cases 3, 8, 12-22:
   - 3, 8: run from a non-repo cwd
   - 12: the trace shows `have` lines and no `deepen`
   - 14: unchanged, a moved default branch, a truncated / bit-flipped bundle, a moved tag
@@ -272,6 +278,10 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   - 16: a rebuilt bundle that fails verify leaves the archived one byte-identical
   - 17: relative `--dest`/`--stage` from a non-repo cwd
   - 18: UNVERIFIED and `--adopt`, including refusing a truncated bundle
+  - 19: empty / `[]` / garbage / bad-sha sidecars, a refresh over `[]`
+  - 20: `--adopt` refuses a bundle that clones but fails fsck
+  - 21: the stale `.adopt-*` sweep
+  - 22: fsync order
 
 ## Storage / data root
 

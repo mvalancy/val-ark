@@ -206,6 +206,18 @@ later). See [README](README.md).
   - *Messages (K3).* When every candidate is contradicted upstream, the note says "no Lastbook pack
     could be confirmed upstream" (not "fits the budget"), and an unlimited budget prints as
     "unlimited", never "?".
+- **A frozen pack still refreshes everything else (#222).** "Step up, never down" means `auto`
+  never trades a held, verified pack for a smaller download. So when the only candidates are
+  smaller (for example a same-id re-release under half the held size), or the larger one cannot be
+  confirmed upstream, no pack is chosen and the held one is **frozen**: kept as it is, not updated,
+  and the run exits 3. Before, a frozen pack also stopped the base map, state maps, address indexes
+  and model, which only ride with a chosen pack. Now a held, verified pack counts as the pack for
+  them: they keep refreshing within the budget (installers always did), and the log says so. A
+  fresh box with no pack held still gets no maps without a pack.
+  - **Escape hatch:** to take a re-release that `auto` refuses, set `VALARK_LASTBOOK_PACK=all` (or
+    run `lastbook.sh --pack all`). That fetches the current All whatever its size. The old file is
+    kept while it is larger than the verified new one (the held-pack guard), so delete it by hand
+    once the new one is verified if the disk is tight.
 - **Follow-up (not done):** feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
   rank) so value-per-byte, not a fixed share, decides its room.
 

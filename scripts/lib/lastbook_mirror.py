@@ -490,6 +490,7 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
     pack_ids = [p["id"] for p in rel["packs"]]
     spec = args.pack.lower()
     chosen = []
+    frozen = False  # auto chose no pack but a verified one is held: it stays, and the rest still refreshes
     if spec == "auto":
         # A pack comes with the base maps and (by default) the installers, both wanted: reserve room
         # for them in the fit, or a budget just above a pack's size picks it and then defers the
@@ -514,6 +515,7 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
         # The largest pack file held and verified on disk, listed in this release or not (a renamed
         # re-release leaves the old All unlisted, H2).
         floor, floor_key = held_pack_top(dest, stamps) if dest else (0, None)
+        frozen = bool(floor)  # cleared below if a pack is chosen
         rejected, broken = [], []  # rejected: HEAD gave no size (transient); broken: a definite mismatch
 
         def confirmed(p):
@@ -604,7 +606,13 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
         chosen = pack_ids if spec == "every" else codes(spec, pack_ids, "pack", rel["unavailable"].get("pack"), notes)
         for pid in chosen:
             take(packs[pid], True, f"pack {pid}")
-    have_pack = bool(chosen)
+    frozen = frozen and not chosen
+    if frozen:
+        notes.append("the held pack stays as it is this run; the base map, state maps, address indexes, model and "
+                     "installers still refresh within the budget (VALARK_LASTBOOK_PACK=all forces the new pack)")
+    # A held, verified pack counts as "a pack" for what rides with one: when auto chooses none (step up,
+    # never down; or upstream unconfirmed) the maps, addresses and model must not stop refreshing too.
+    have_pack = bool(chosen) or frozen
 
     if have_pack:
         for m in rel["base_maps"]:

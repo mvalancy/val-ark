@@ -227,6 +227,24 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   got pruned overnight). **Fix:** set `VAL_ARK_DATA` explicitly in `.env` on multi‑mount hosts.
 - **Default footprint cap can be tiny** — a box with 7 TB free had `VALARK_MAX_GB=500`, so almost
   nothing mirrored. Check the cap when "nothing downloads."
+- <a id="apparent-vs-allocated-size"></a>**Allocated-block sizes read ~0 on ZFS, compressed or
+  delayed-allocation filesystems (#176).** Right after a write, `st_blocks` (and so `du` without
+  `-b`, and `git count-objects -v`'s `size`/`size-pack`) can report almost nothing until the
+  filesystem commits, and compression shrinks it for good. `references_mirror.py` sized a fresh
+  fetch with `count-objects -v`, so on a ZFS root `--max-repo-mb` and the budget stop let an
+  oversized repo through (6 cases of `tests/test-cad-agent-references.sh` failed there while ext4
+  CI passed). **Rule:** any cap, budget or footprint check uses apparent size: `os.stat().st_size`
+  summed over the tree, `du -sb`, or `stat -c %s`. Use `du -sh` only for human-readable display.
+  The test pins this on any filesystem with a `git` shim that reports `count-objects` as zeros.
+- <a id="smb-reserved-chars"></a>**SMB/CIFS shares reject `: * ? " < > | \` in file and directory
+  names.** NAS targets are commonly SMB; a name like `run-12:39:51` fails to write, and some clients
+  (GVFS) report it as `ENOTDIR` "Not a directory" on the *child* when a *parent* directory name holds
+  a `:`, which sends debugging the wrong way. **Rule:** a mirror that writes upstream-chosen names onto
+  a share maps those characters (e.g. to `-`) before writing, and does it *before* deriving any id or
+  hash from the destination path, so re-discovery maps to the same place and stays idempotent.
+  `git_bundle_mirror.py` (`SAFE_NAME` whitelist) and `references_mirror.py` (`ID_RE` ids,
+  sha256-named blobs) never write upstream-chosen characters, and `lastbook_mirror.py` rejects
+  names outside its `SAFE_NAME` whitelist. Check any new mirror against this rule.
 - <a id="data-disk-mount-guard"></a>**A late/failed data-disk mount at `@reboot` would rebuild the
   tree on the ROOT fs** — the writability probe (`valark_ensure_writable`) *passes* on an empty,
   user-writable mountpoint, so `loop.sh`'s unconditional `mkdir` seeded `state/`+`content/` on the

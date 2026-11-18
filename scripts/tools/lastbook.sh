@@ -46,7 +46,7 @@ download_lastbook() {
     # The bytes this run may ADD: an explicit VALARK_LASTBOOK_BUDGET (-1 = no limit), else
     # lastbook_mirror.py works it out: headroom above the reserve on the filesystem that holds
     # LASTBOOK_DIR (not DATA_ROOT: it may be another disk), capped by what VALARK_MAX_GB still
-    # allows, and Lastbook may hold PCT percent of (that headroom + what it already holds), so its
+    # allows (only when LASTBOOK_DIR is inside the data trees that cap accounts for), and Lastbook may hold PCT percent of (that headroom + what it already holds), so its
     # share never compounds across runs. Downloads also stop at the reserve.
     local budget="${VALARK_LASTBOOK_BUDGET:-}" pct="${VALARK_LASTBOOK_BUDGET_PCT:-50}"
     case "$pct" in ''|*[!0-9]*) log_error "${TOOL_NAME}: VALARK_LASTBOOK_BUDGET_PCT wants 1-100"; return 2 ;; esac
@@ -54,7 +54,20 @@ download_lastbook() {
     local size_args=(--budget "$budget")
     if [ -z "$budget" ]; then
         size_args=(--share "$pct")
-        case "${VALARK_MAX_GB:-}" in
+        # VALARK_MAX_GB bounds Val Ark's own data trees (valark_data_used_bytes). A Lastbook dir
+        # outside them is not in that accounting, so the cap would not count what Lastbook holds:
+        # then it is not applied (the dest disk's headroom + reserve + share still are).
+        local in_trees=0 d real_lb; real_lb=$(realpath -m "$LASTBOOK_DIR" 2>/dev/null || echo "$LASTBOOK_DIR")
+        for d in "${MODELS_DIR:-}" "${TOOLS_DIR:-}" "${CONTENT_DIR:-}" "${SOURCES_DIR:-}" "${ASSETS_DIR:-}" "${INSTALLERS_DIR:-}" "${PRIVATE_DIR:-}"; do
+            [ -n "$d" ] || continue
+            d=$(realpath -m "$d" 2>/dev/null || echo "$d")
+            case "$real_lb/" in "$d"/*) in_trees=1 ;; esac
+        done
+        if [ -n "${VALARK_MAX_GB:-}" ] && [ "$in_trees" = 0 ]; then
+            log_info "${TOOL_NAME}: ${LASTBOOK_DIR} is outside the Val Ark data trees, so VALARK_MAX_GB does not bound it"
+        fi
+        local max_gb="${VALARK_MAX_GB:-}"; [ "$in_trees" = 1 ] || max_gb=""
+        case "$max_gb" in
             ''|*[!0-9]*) ;;
             *) if declare -F valark_data_used_bytes >/dev/null; then
                    local used cap; used=$(valark_data_used_bytes 2>/dev/null)

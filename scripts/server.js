@@ -496,10 +496,6 @@ function getContentStatus() {
 
     const content = {};
     const contentDir = path.join(ROOT, 'content');
-    if (!fs.existsSync(contentDir)) {
-        statusCache.content = { data: content, timestamp: now };
-        return content;
-    }
 
     const walk = (dir, prefix) => {
         for (const entry of readdirSafe(dir)) {
@@ -518,7 +514,23 @@ function getContentStatus() {
             } catch (e) {}
         }
     };
-    walk(contentDir, '');
+    if (fs.existsSync(contentDir)) walk(contentDir, '');
+    // Lastbook may live outside content/ (VALARK_LASTBOOK_DIR on another disk). Report it under the
+    // same lastbook/ prefix so its Library card is honest, flagged `external`: it is NOT served from
+    // here (/api/archive is confined to the served trees), so the UI offers no download links for it.
+    const lbDir = cfg('VALARK_LASTBOOK_DIR', '');
+    if (lbDir) {
+        try {
+            const realLb = fs.realpathSync(lbDir);
+            let realContent = '';
+            try { realContent = fs.realpathSync(contentDir); } catch (_) {}
+            if (!realContent || (realLb !== realContent && !realLb.startsWith(realContent + path.sep))) {
+                const before = new Set(Object.keys(content));
+                walk(realLb, 'lastbook');
+                for (const k of Object.keys(content)) if (!before.has(k)) content[k].external = true;
+            }
+        } catch (_) { /* not there yet */ }
+    }
     statusCache.content = { data: content, timestamp: now };
     return content;
 }

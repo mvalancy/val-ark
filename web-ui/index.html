@@ -2397,6 +2397,9 @@ const CONTENT_LIBRARY = [
         // Not a ZIM: scripts/tools/lastbook.sh writes the current release under content/lastbook/, and
         // /api/status/content (a walk of content/) feeds this card. A held pack = mirrored.
         file: 'content/lastbook/',
+        // No HEAD-probe fallback: a directory URL can answer 200 while empty. Without the API the
+        // card says Not Mirrored rather than guess.
+        probe: false,
         match: '^lastbook/packs/Lastbook-[A-Za-z0-9._+-]+\\.zip$',
         // Files LAN users download straight from the Ark (installers, packs), listed from the same walk.
         filesMatch: '^lastbook/(app/[0-9][^/]*|packs)/[^/]+$',
@@ -5970,7 +5973,12 @@ function renderContentDetail(contentId) {
 
     if (item.filesMatch && _contentRaw) {
         let re; try { re = new RegExp(item.filesMatch); } catch (_) { re = null; }
-        const keys = re ? Object.keys(_contentRaw).filter(k => re.test(k) && !k.endsWith('.part')).sort() : [];
+        const all = re ? Object.keys(_contentRaw).filter(k => re.test(k) && !k.endsWith('.part')).sort() : [];
+        // `external` = held outside content/ (VALARK_LASTBOOK_DIR on another disk): present, not served.
+        const keys = all.filter(k => !_contentRaw[k].external);
+        if (all.length > keys.length) {
+            html += '<div class="detail-section"><h3>Download from this Ark</h3><p class="content-external" style="color:var(--text-muted)">This mirror is kept outside <code>content/</code> (<code>VALARK_LASTBOOK_DIR</code>), so the web UI shows it as mirrored but cannot serve its files. Copy them from that directory, or point <code>VALARK_LASTBOOK_DIR</code> under <code>content/</code>.</p></div>';
+        }
         if (keys.length) {
             html += '<div class="detail-section"><h3>Download from this Ark</h3><ul class="content-files">';
             for (const k of keys) {
@@ -6037,6 +6045,7 @@ async function checkContentStatus() {
     } catch (e) {}
     // Fallback: parallel HEAD requests
     await Promise.all(CONTENT_LIBRARY.map(async (item) => {
+        if (item.probe === false) { CONTENT_STATUS[item.id] = 'missing'; return; }
         try {
             const resp = await fetch(item.file, { method: 'HEAD' });
             CONTENT_STATUS[item.id] = resp.ok ? 'installed' : 'missing';
@@ -7833,6 +7842,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         await checkInstalledToolsFallback();
         // Parallelize content HEAD checks
         await Promise.all(CONTENT_LIBRARY.map(async (item) => {
+            if (item.probe === false) { CONTENT_STATUS[item.id] = 'missing'; return; }
             try {
                 const resp = await fetch(item.file, { method: 'HEAD' });
                 CONTENT_STATUS[item.id] = resp.ok ? 'installed' : 'missing';

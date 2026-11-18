@@ -12,8 +12,10 @@ upstream files, which this mirror reads live and keeps beside the copies:
 Layout under --dest (current release only). After a complete run, files THIS
 tool recorded in .lastbook-verified.json that the release no longer names are
 removed (--keep-old keeps them), and with --pack auto / one explicit pack the
-smaller packs nested in the verified one go too. Unrecorded files are never
-touched (except a stray <name>.part in a Lastbook section whose <name> the current
+smaller packs nested in the verified one go too (ranked by recorded on-disk bytes;
+a missing or implausible manifest size never supersedes). A held pack goes only
+when this run verified a pack at least as large on disk. Unrecorded files are never
+touched (except a stray <path>.part whose section/[version/]name path the current
 or previously kept manifests name), symlinked section dirs are never followed, and
 nothing is pruned when the release looks truncated (a section that held files
 comes back empty; more than half of the held files and bytes would go; or maps,
@@ -85,6 +87,7 @@ REDIRECT_SUFFIXES = (".hf.co", ".huggingface.co")  # Hugging Face serves LFS blo
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,200}$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 CODE_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+VERSION = r"[0-9]{1,6}(?:\.[0-9A-Za-z]{1,20}){1,5}"  # 1.1.11, 1.1.rc1; not "2024photos"
 STAMPS = ".lastbook-verified.json"
 UA = "val-ark-lastbook-mirror"
 CHUNK = 1 << 20
@@ -259,7 +262,7 @@ def parse_release(manifest, app, sums_text):
     if not isinstance(app, dict):
         raise ManifestError("app-v1.json: not an object")
     plats = {k: v for k, v in app.items() if isinstance(v, dict) and v.get("url")}
-    vers = sorted({str(v.get("version", "")) for v in plats.values() if re.fullmatch(r"[0-9][0-9A-Za-z.]*", str(v.get("version", "")))},
+    vers = sorted({str(v.get("version", "")) for v in plats.values() if re.fullmatch(VERSION, str(v.get("version", "")))},
                   key=version_key)
     if not vers:
         raise ManifestError("app-v1.json: no installer version")
@@ -475,7 +478,10 @@ def select(rel, args, budget, dest, stamps):
         extras = sum(need(m) for m in rel["base_maps"])
         if args.apps == "current" and rel["apps"]:
             extras += need(dict(files=rel["apps"]))
-        by_size = sorted(rel["packs"], key=pack_bytes, reverse=True)
+        # rank by the larger of the manifest's size and what is recorded on disk, so a manifest that
+        # omits or under-reports a held pack's size does not demote it
+        held_of = lambda p: sum((stamps.get(rel_path(f)) or {}).get("size") or 0 for f in p["files"]) if dest else 0
+        by_size = sorted(rel["packs"], key=lambda p: max(pack_bytes(p), held_of(p)), reverse=True)
         pick = next((p for p in by_size if fits(need(p) + extras)), None)
         if pick is None:  # a pack already held costs nothing: keep it chosen when the disk fills
             pick = next((p for p in by_size if need(p) == 0), None)
@@ -642,7 +648,7 @@ def write_atomic(p, data):
     os.replace(tmp, p)
 
 
-OWNED_KEY = re.compile(r"^(?:(packs|maps|addresses|models)|app/([0-9][0-9A-Za-z.]{0,40}))/([^/]+)$")
+OWNED_KEY = re.compile(r"^(?:(packs|maps|addresses|models)|app/(" + VERSION + r"))/([^/]+)$")
 
 
 def _inside(dest, p):
@@ -659,26 +665,21 @@ def _inside(dest, p):
         return False
 
 
-def release_names(manifest, sums_text):
-    """Every file name a (possibly older, as kept on disk) manifest pair names; lenient, never raises."""
-    names = set()
+def all_paths(rel):
+    """Every relative path (section/[version/]name) a parsed release names."""
+    return {rel_path(f) for g in ("packs", "base_maps", "maps", "addresses", "models")
+            for e in rel[g] for f in e["files"]} | {rel_path(f) for f in rel["apps"]}
+
+
+def kept_paths(dest):
+    """The relative paths the manifests kept from the previous run named (read before this run
+    replaces them). Parsed with the same validation as a live release; anything unreadable -> none."""
     try:
-        m = json.loads(manifest) if manifest else {}
-        for sec in ("packs", "maps", "address_indexes"):
-            for e in m.get(sec) or []:
-                for f in (e.get("files") or []) if isinstance(e, dict) else []:
-                    if isinstance(f, dict) and isinstance(f.get("name"), str):
-                        names.add(f["name"])
-        for x in m.get("models") or []:
-            if isinstance(x, dict) and isinstance(x.get("file"), str):
-                names.add(x["file"])
-    except (ValueError, AttributeError, TypeError):
-        pass
-    for line in (sums_text or "").splitlines():
-        parts = line.split()
-        if len(parts) == 2 and SHA_RE.match(parts[0].lower()):
-            names.add(parts[1].lstrip("*"))
-    return {n for n in names if SAFE_NAME.match(n) and ".." not in n}
+        rel = parse_release(json.loads(read_kept(dest, "manifest-v1.json")), json.loads(read_kept(dest, "app-v1.json")),
+                            read_kept(dest, "SHA256SUMS.txt"))
+    except (ManifestError, ValueError, TypeError, AttributeError, KeyError):
+        return set()
+    return all_paths(rel)
 
 
 def read_kept(dest, name):
@@ -697,29 +698,58 @@ def single_pack(args, rows):
     return chosen[0]
 
 
+def disk_bytes(dest, stamps, pack):
+    """Recorded on-disk bytes of a pack whose every file is present and verified, else None."""
+    if not all(stamped(dest, stamps, f) for f in pack["files"]):
+        return None
+    return sum(stamps[rel_path(f)]["size"] for f in pack["files"])
+
+
 def superseded(dest, rel, stamps, pack_id):
-    """Smaller packs nested in pack_id (the packs are a ladder: Small < Medium < All), but only once
-    every file of pack_id is on disk and verified (N3); otherwise nothing."""
+    """Smaller packs nested in pack_id (the packs are a ladder: Small < Medium < All), once every file
+    of pack_id is on disk and verified (N3). Ranked by RECORDED on-disk bytes, never by manifest sizes
+    alone: a manifest that omits or under-reports sizes must not make a held All look 'smaller'. A
+    pack is superseded only when every manifest size (its and pack_id's) is present and positive, its
+    held files' recorded sizes match the manifest, its held bytes are strictly below pack_id's
+    verified bytes, and it shares no file with pack_id."""
     big = next((p for p in rel["packs"] if p["id"] == pack_id), None)
-    if big is None or not all(stamped(dest, stamps, f) for f in big["files"]):
+    if big is None or any(not f["size"] or f["size"] <= 0 for f in big["files"]):
         return set()
-    return {p["id"] for p in rel["packs"] if p["id"] != pack_id and pack_bytes(p) < pack_bytes(big)}
+    big_disk = disk_bytes(dest, stamps, big)
+    if big_disk is None:
+        return set()
+    big_keys = {rel_path(f) for f in big["files"]}
+    out = set()
+    for p in rel["packs"]:
+        if p["id"] == pack_id or any(not f["size"] or f["size"] <= 0 for f in p["files"]):
+            continue
+        keys = {rel_path(f) for f in p["files"]}
+        recorded = [stamps.get(k, {}).get("size") for k in keys if not stamps.get(k, {}).get("part")]
+        recorded = [n for n in recorded if n is not None]
+        if keys & big_keys or any(stamps.get(rel_path(f), {}).get("size") not in (None, f["size"]) for f in p["files"]):
+            continue
+        if sum(f["size"] for f in p["files"]) < sum(f["size"] for f in big["files"]) and sum(recorded) < big_disk:
+            out.add(p["id"])
+    return out
 
 
-def prune(dest, rel, stamps, log, verified_pack=None, names=()):
+def prune(dest, rel, stamps, log, verified_pack=None, names=(), run_packs=()):
     """Drop files THIS tool recorded (in .lastbook-verified.json) that the current release no longer
     names, plus (verified_pack given) the smaller packs nested in that verified pack.
-    Never touches an unrecorded file, except a stray `*.part` in a Lastbook section whose final name
-    is in `names` (what the current or previously kept manifests name: .parts from before .part
-    stamps existed). Never follows a symlinked section dir, never rmtree. Refuses to prune at all
+    Never touches an unrecorded file, except a stray `*.part` in a Lastbook section whose final path
+    is in `names` (the section/[version/]name paths the current or previously kept manifests name:
+    .parts from before .part stamps existed). A held pack file goes only when a pack this run
+    verified (`run_packs`) is at least as large on disk, and never a file of such a pack. Never follows a symlinked section dir, never rmtree. Refuses to prune at all
     when the release looks truncated (N1): a section that held files comes back empty, the run would
     drop more than half of the held files AND bytes, or maps / addresses / models would each lose more
     than half of their own held files while the release lists fewer than are held there."""
+    run_packs = [p for p in rel["packs"] if p["id"] in set(run_packs)]
+    run_keys = {rel_path(f) for p in run_packs for f in p["files"]}
+    run_disk = [n for n in (disk_bytes(dest, stamps, p) for p in run_packs) if n is not None]
+    largest_run = max(run_disk) if run_disk else None
     supersede = superseded(dest, rel, stamps, verified_pack) if verified_pack else set()
-    super_keys = {rel_path(f) for p in rel["packs"] if p["id"] in supersede for f in p["files"]}
-    keep = {rel_path(f) for g in ("packs", "base_maps", "maps", "addresses", "models")
-            for e in rel[g] for f in e["files"]} | {rel_path(f) for f in rel["apps"]}
-    keep -= super_keys
+    super_keys = {rel_path(f) for p in rel["packs"] if p["id"] in supersede for f in p["files"]} - run_keys
+    keep = (all_paths(rel) - super_keys) | run_keys
     owned = {}
     for k, v in stamps.items():
         base = k[:-5] if k.endswith(".part") else k
@@ -735,6 +765,12 @@ def prune(dest, rel, stamps, log, verified_pack=None, names=()):
                 "an incomplete upstream manifest must not wipe the mirror (re-checked next run)")
             return 0
     drop = [k for k, (base, sec, v) in owned.items() if base not in keep]
+    # A held pack (hundreds of GB) goes only when this run verified a pack at least as large on
+    # disk: a packs list truncated to Small must not cost the All pack.
+    for k in [k for k in drop if k in held and owned[k][1] == "packs"]:
+        if largest_run is None or (held[k].get("size") or 0) > largest_run:
+            drop.remove(k)
+            log(f"keeping {k}: no pack verified this run is at least as large (re-checked next run)")
     drop_held = [k for k in drop if k in held]
     # Per-section guard: a manifest listing only a few states drops most maps but, on a box with
     # the 388 GB All pack, well under half the held bytes, so the whole-mirror check passes.
@@ -755,7 +791,7 @@ def prune(dest, rel, stamps, log, verified_pack=None, names=()):
             f"({human(drop_bytes)} of {human(held_bytes)}); that looks like a bad manifest (re-checked next run)")
         return 0
     # Stray .parts nobody recorded (pre-change runs): only in Lastbook's own sections, only when
-    # their final name is one a current or previously kept manifest names, never anything else.
+    # their final section/[version/]name path is one a current or previously kept manifest names.
     secs = ["packs", "maps", "addresses", "models"]
     if (dest / "app").is_dir() and _inside(dest, dest / "app"):
         secs += [f"app/{v.name}" for v in (dest / "app").iterdir() if OWNED_KEY.match(f"app/{v.name}/x")]
@@ -765,7 +801,7 @@ def prune(dest, rel, stamps, log, verified_pack=None, names=()):
             continue
         for p in d.iterdir():
             k = f"{sec}/{p.name}"
-            if p.name.endswith(".part") and k not in stamps and k[:-5] not in keep and p.name[:-5] in names \
+            if p.name.endswith(".part") and k not in stamps and k[:-5] not in keep and k[:-5] in names \
                     and OWNED_KEY.match(k[:-5]):
                 drop.append(k)
     removed, dirs = 0, set()
@@ -870,9 +906,8 @@ def main(argv=None):
     for n in notes:
         log(n)
     dest.mkdir(parents=True, exist_ok=True)
-    # names the manifests kept from the previous run still give (read before they are replaced)
-    names = release_names(read_kept(dest, "manifest-v1.json"), read_kept(dest, "SHA256SUMS.txt")) \
-        | release_names(raw["manifest-v1.json"], raw["SHA256SUMS.txt"].decode("utf-8", "replace"))
+    # paths the manifests kept from the previous run still name (read before they are replaced)
+    names = kept_paths(dest) | all_paths(rel)
     counts = dict(verified=0, fetched=0, failed=0, deferred=sum(r["status"] == "deferred" for r in rows))
     added, stopped = 0, None
     try:
@@ -895,7 +930,8 @@ def main(argv=None):
         for name, data in raw.items():
             write_atomic(dest / name, data)
         rc = EXIT_FAIL if counts["failed"] else (EXIT_INCOMPLETE if (incomplete or counts["deferred"]) else EXIT_OK)
-        pruned = prune(dest, rel, stamps, log, single_pack(args, rows), names) \
+        run_packs = {r["id"] for r in rows if r["section"] == "pack" and r["status"] == "get"}
+        pruned = prune(dest, rel, stamps, log, single_pack(args, rows), names, run_packs) \
             if rc == EXIT_OK and not args.keep_old else 0
         save_stamps(dest, stamps)
     except OSError as e:

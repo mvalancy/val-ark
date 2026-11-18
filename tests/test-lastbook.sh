@@ -525,10 +525,48 @@ import json, sys
 m = json.load(open(sys.argv[1])); e = json.loads(json.dumps(m["maps"][0])); e["id"] = "GONE"
 e["files"][0]["name"] = "Lastbook-Map-GONE.zip"; m["maps"].append(e); json.dump(m, open(sys.argv[1], "w"))
 PYEOF
-mkdir -p "$D21/addresses"; for f in maps/Lastbook-Map-GONE.zip.part maps/random.part maps/hiking.mbtiles.part maps/Lastbook-Map-TX.zip.part addresses/mine.zip.part; do echo x > "$D21/$f"; done
+mkdir -p "$D21/addresses" "$D21/app/2024photos"
+for f in maps/Lastbook-Map-GONE.zip.part maps/random.part maps/hiking.mbtiles.part maps/Lastbook-Map-TX.zip.part addresses/mine.zip.part \
+         models/Lastbook-Map-GONE.zip.part maps/Lastbook-Medium.zip.part app/2024photos/Lastbook-Map-GONE.zip.part; do echo x > "$D21/$f"; done
 mir --dest "$D21" --pack small --maps CA --addresses none --model no > "$T/out" 2>"$T/err"; rc=$?
 check "stray .part named by the previously kept manifest: pruned" '[ "$rc" = 0 ] && [ ! -e "$D21/maps/Lastbook-Map-GONE.zip.part" ]'
 check "stray .parts with other names, or of a file the release still lists, survive" '[ -e "$D21/maps/random.part" ] && [ -e "$D21/maps/hiking.mbtiles.part" ] && [ -e "$D21/maps/Lastbook-Map-TX.zip.part" ] && [ -e "$D21/addresses/mine.zip.part" ]'
+check "stray .parts match the whole recorded path, not the bare name (other section / non-version app dir survive)" '[ -e "$D21/models/Lastbook-Map-GONE.zip.part" ] && [ -e "$D21/maps/Lastbook-Medium.zip.part" ] && [ -e "$D21/app/2024photos/Lastbook-Map-GONE.zip.part" ]'
+
+# nested-pack prune never trusts manifest sizes alone (PR #194 review B1): a held, verified All
+# must survive a manifest that omits or under-reports pack sizes
+variant() {  # variant NAME PYTHON-EDIT-OF-m : a copy of tiny/ with an altered manifest
+    rm -rf "$T/www/$1"; cp -r "$T/www/tiny" "$T/www/$1"
+    python3 -c 'import json,sys; p=sys.argv[1]; m=json.load(open(p)); exec(sys.argv[2]); json.dump(m,open(p,"w"))' "$T/www/$1/dl/manifest-v1.json" "$2"
+}
+vrun() { local v=$1; shift; VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/$v/dl/ https://lastbook.org/=$B/$v/site/ https://huggingface.co/=$B/$v/hf/" \
+    python3 "$PY" mirror --tries 1 --retry-wait 0 --budget -1 --maps none --apps none --model no "$@" > "$T/out" 2>"$T/err"; }
+held_all() { mir --dest "$1" --pack every --maps none --apps none --model no > "$T/out" 2>"$T/err"; }
+variant nosize 'a=[p for p in m["packs"] if p["id"]=="all"][0]; a.pop("installed_bytes",None); a["files"][0].pop("size",None)'
+variant onesize 'a=[p for p in m["packs"] if p["id"]=="all"][0]; a["installed_bytes"]=1; a["files"][0]["size"]=1'
+variant onlysmall 'm["packs"]=[p for p in m["packs"] if p["id"]=="small"]'
+D22="$T/m22"; held_all "$D22"
+vrun nosize --dest "$D22" --pack auto; rc=$?
+check "manifest without All's sizes, auto: the held All is kept (and stays chosen)" '[ "$rc" = 0 ] && [ -s "$D22/packs/Lastbook-All.zip" ] && ! grep -q "pruned packs/Lastbook-All" "$T/err" && tail -1 "$T/out" | grep -q "\"packs\": \[\"all\"\]"'
+vrun nosize --dest "$D22" --pack medium; rc=$?
+check "manifest without All's sizes, --pack medium: All never superseded" '[ "$rc" = 0 ] && [ -s "$D22/packs/Lastbook-All.zip" ]'
+D23="$T/m23"; held_all "$D23"
+vrun onesize --dest "$D23" --pack medium; rc=$?
+check "manifest under-reporting All (size 1), --pack medium: All kept, Small (smaller on disk) superseded" '[ "$rc" = 0 ] && [ -s "$D23/packs/Lastbook-All.zip" ] && [ ! -e "$D23/packs/Lastbook-Small-20261113.zip" ]'
+vrun onesize --dest "$D23" --pack auto; rc=$?
+check "manifest under-reporting All (size 1), auto: nothing of All deleted" '[ -s "$D23/packs/Lastbook-All.zip" ] && ! grep -q "pruned packs/Lastbook-All" "$T/err"'
+# a packs list truncated to Small never costs a larger held pack (review N1)
+D24="$T/m24"; held_all "$D24"
+vrun onlysmall --dest "$D24" --pack auto; rc=$?
+check "packs list truncated to Small: Medium + All kept (no verified pack as large), says why" '[ "$rc" = 0 ] && [ -s "$D24/packs/Lastbook-All.zip" ] && [ -s "$D24/packs/Lastbook-Medium.zip" ] && grep -q "keeping packs/Lastbook-All.zip: no pack verified this run is at least as large" "$T/err"'
+vrun onlysmall --dest "$D24" --pack none; rc=$?
+check "--pack none never drops a held pack" '[ "$rc" = 0 ] && [ -s "$D24/packs/Lastbook-All.zip" ] && [ -s "$D24/packs/Lastbook-Small-20261113.zip" ]'
+python3 - "$ROOT/scripts/lib" <<'PYEOF' && pass || fail "app version dirs must be real versions"
+import sys; sys.path.insert(0, sys.argv[1]); import lastbook_mirror as l
+assert l.OWNED_KEY.match("app/1.1.11/x") and l.OWNED_KEY.match("app/1.1.rc1/x")
+assert not l.OWNED_KEY.match("app/2024photos/x") and not l.OWNED_KEY.match("app/1/x") and not l.OWNED_KEY.match("app/1..2/x")
+PYEOF
+
 
 # --- 11. the tool entry --------------------------------------------------------------------------
 : > "$T/req.log"
@@ -545,14 +583,43 @@ VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_PACK=nope bash "$SH" > "$T/sh.ou
 check "lastbook.sh: bad option -> non-zero + error" '[ "$rc" != 0 ] && grep -q "bad option" "$T/sh.out"'
 VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_BUDGET_PCT=500 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
 check "lastbook.sh: BUDGET_PCT over 100 is clamped, not rejected" '[ "$rc" != 64 ] && grep -q "^# Lastbook manifest" "$T/sh.out"'
-# the default budget is worked out by lastbook_mirror.py on the Lastbook dir (not DATA_ROOT), as a share
+# the default budget is worked out by lastbook_mirror.py on the Lastbook dir (not DATA_ROOT), as a share;
+# --cap (VALARK_MAX_GB) only when the dir is inside the data trees that cap accounts for
 mkdir -p "$T/bin"; REALPY=$(command -v python3)
 printf '#!/bin/sh\n[ "$(basename "$1")" = lastbook_mirror.py ] && echo "$*" >> "%s"\nexec "%s" "$@"\n' "$T/py.args" "$REALPY" > "$T/bin/python3"; chmod +x "$T/bin/python3"
 : > "$T/py.args"
+PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_MAX_GB=1 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh: default budget = --share PCT + --cap (VALARK_MAX_GB) for content/lastbook, no DATA_ROOT --budget" \
+    'grep -q -- "--dest .*/content/lastbook .*--share 50 --cap [0-9]" "$T/py.args" && ! grep -q -- "--budget" "$T/py.args" && grep -q "^# Lastbook manifest" "$T/sh.out"'
+: > "$T/py.args"
 PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$T/elsewhere/lastbook" VALARK_MAX_GB=1 \
     bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
-check "lastbook.sh: default budget = --share PCT (+ --cap from VALARK_MAX_GB) on the Lastbook dir, no DATA_ROOT --budget" \
-    'grep -q -- "--dest $T/elsewhere/lastbook .*--share 50 --cap [0-9]" "$T/py.args" && ! grep -q -- "--budget" "$T/py.args" && grep -q "^# Lastbook manifest" "$T/sh.out"'
+check "lastbook.sh: a Lastbook dir outside the data trees gets --share but no --cap, and says so" \
+    'grep -q -- "--dest $T/elsewhere/lastbook .*--share 50" "$T/py.args" && ! grep -q -- "--cap\|--budget" "$T/py.args" && grep -q "outside the Val Ark data trees" "$T/sh.out"'
+
+# server.js reports a VALARK_LASTBOOK_DIR outside content/ under lastbook/, flagged external (not served)
+NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
+if [ -n "$NODE" ] && command -v curl >/dev/null 2>&1; then
+    mkdir -p "$T/ext/lastbook/packs"; echo pack > "$T/ext/lastbook/packs/Lastbook-Small-20261113.zip"
+    SP=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+    env VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 \
+        VALARK_WEB_PORT="$SP" VALARK_HTTPS_PORT="$((SP + 1))" VALARK_STATE_DIR="$T/srvstate" VALARK_LASTBOOK_DIR="$T/ext/lastbook" \
+        "$NODE" "$ROOT/scripts/server.js" "$SP" >"$T/srv.log" 2>&1 &
+    NPID=$!
+    up=0; for _ in $(seq 1 30); do sleep 0.4; curl -sf --max-time 2 "http://127.0.0.1:$SP/api/health" >/dev/null 2>&1 && { up=1; break; }; done
+    if [ "$up" = 1 ]; then
+        curl -s --max-time 5 "http://127.0.0.1:$SP/api/status/content" > "$T/content.json"
+        python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); e=d["lastbook/packs/Lastbook-Small-20261113.zip"]; assert e["external"] is True and e["size"] == 5' "$T/content.json" \
+            && pass || fail "server.js: an out-of-tree VALARK_LASTBOOK_DIR shows in /api/status/content as lastbook/..., external"
+        code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$SP/api/archive/content/lastbook/packs/Lastbook-Small-20261113.zip")
+        check "server.js: the external Lastbook dir is not served (got $code)" '[ "$code" != 200 ]'
+    else
+        fail "server.js did not start on :$SP"; cat "$T/srv.log" >&2
+    fi
+    kill "$NPID" 2>/dev/null
+else
+    echo "  SKIP: server.js external Lastbook dir (no node or curl)" >&2
+fi
 check "lastbook comes last in download-tools.sh ordered_tools" 'sed -n "/local ordered_tools=(/,/^    )/p" "$ROOT/scripts/download-tools.sh" | grep -v "^ *#" | tr -s " \n" " " | grep -q "cad-agent lastbook )"'
 check "lastbook is in download-tools.sh list (default refresh)" 'bash "$ROOT/scripts/download-tools.sh" list 2>/dev/null | grep -q "  lastbook$"'
 check "source-repos.tsv lists Immortal-Protocols/lastbook" 'grep -q "^[0-9]*|Immortal-Protocols/lastbook|" "$ROOT/data/source-repos.tsv"'

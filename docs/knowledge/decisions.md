@@ -84,26 +84,46 @@ later). See [README](README.md).
     held**. The whole-mirror AND check missed the All-pack box whose manifest lists only a few states
     (most maps go, but under half the bytes). The "lists fewer" qualifier lets a like-for-like
     replacement (a new model file, renamed maps) still prune; packs and `app/` are left out because
-    their names change every release by design.
+    their names change every release by design. All three checks trigger on **more than** half, so a
+    release that keeps exactly half (26 of 52 states) still prunes the other half: a deliberate
+    line, since an even split is as likely to be a real re-scope as a truncation.
   - *Nested packs (N3).* With `--pack auto` or one explicit pack, once every file of the chosen pack
     is verified (rc 0), the smaller packs of the ladder are pruned (only recorded files). `every`, a
-    list, `none` and `--keep-old` never do this.
+    list, `none` and `--keep-old` never do this. **Ranked on disk, not by the manifest (PR #194
+    review):** a manifest that omitted or under-reported All's size made `auto` pick Medium and then
+    delete the verified All as "smaller". Now a pack is superseded only when every manifest size (its
+    and the chosen pack's) is present and positive, its recorded on-disk sizes match the manifest,
+    its held bytes are strictly below the chosen pack's *verified* bytes, and it shares no file with
+    it; files of a pack verified this run are never dropped, and `auto` ranks packs by the larger of
+    the manifest size and the recorded bytes, so a held All stays chosen.
+  - *No held pack without a larger verified one.* Any held pack file (superseded or no longer in the
+    release) is dropped only when a pack this run verified is at least as large on disk. A packs
+    list truncated to Small therefore keeps Medium and All, and `--pack none` keeps every held pack.
   - *Fit reserves the extras (N5).* `auto` picks the largest pack whose need **plus** the base maps
     and installers fits; if none does, a pack already held (need 0) stays chosen.
   - *Share without compounding (N4).* `lastbook.sh` no longer passes a budget from
     `valark_budget_bytes` on `DATA_ROOT`. `lastbook_mirror.py --share PCT [--cap N]` measures headroom
     above the reserve on the filesystem that holds the Lastbook dir, caps it with what `VALARK_MAX_GB`
     still allows, and lets Lastbook hold PCT% of (headroom + the bytes it already holds), so
-    repeated runs stay at the share. The fetch-time free check keeps the reserve too.
+    repeated runs stay at the share. The fetch-time free check keeps the reserve too. `--cap` is
+    passed only when the Lastbook dir is inside the data trees `VALARK_MAX_GB` accounts for
+    (`valark_data_used_bytes`); a dir elsewhere is not bounded by that cap (logged), only by its own
+    disk's headroom, the reserve and the share.
   - *Downloads (N7).* A 206 whose `Content-Range` start is not the `.part` size deletes the `.part`
     and restarts; 404 / 410 fail the file at once (no back-off).
   - *Pre-change `.part`s.* A stray unrecorded `*.part` in `packs|maps|addresses|models|app/<ver>` is
-    pruned only when its final name is one the current or the previously kept manifests name (read
-    before the new ones overwrite them); anything else stays.
+    pruned only when its final **path** (section/[version/]name) is one the current or the previously
+    kept manifests name (those are re-parsed with the live validation, read before the new ones
+    overwrite them); a bare name in another section stays. `app/<ver>` must be a real version
+    (`1.1.11`, `1.1.rc1`; not `2024photos`).
   - *Library card.* Lastbook is a `CONTENT_LIBRARY` card (Library ▸ Content): its state comes from the
     `/api/status/content` walk of `content/` (a held pack = Mirrored), its Mirror button starts the
     `lastbook` tool job, and the detail page lists the installers and packs held as direct
-    `/api/archive/content/lastbook/…` downloads. No server change.
+    `/api/archive/content/lastbook/…` downloads. Without the API there is no HEAD-probe guess (an
+    empty directory can answer 200), so it says Not Mirrored. A `VALARK_LASTBOOK_DIR` outside
+    `content/` is still reported by `server.js` under `lastbook/…` but flagged `external`: the card
+    shows Mirrored and explains that those files are not served (no links), since `/api/archive`
+    stays confined to the served trees.
 - **Follow-up (not done):** feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
   rank) so value-per-byte, not a fixed share, decides its room.
 

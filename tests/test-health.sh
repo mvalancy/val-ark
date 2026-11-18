@@ -17,7 +17,7 @@ NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/
 [ -n "$NODE" ] || { echo "SKIP: no node runtime" >&2; exit 0; }
 
 T="$(mktemp -d)"; SRV_PID=""
-trap 'rm -rf "$T"; [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null' EXIT
+trap 'rm -rf "$T"; stop_pids "$SRV_PID"' EXIT
 trap_signals
 mkdir -p "$T/state" "$T/content/zim" "$T/models"
 
@@ -82,7 +82,7 @@ echo "$R1" | grep -q '"started":true' && pass || fail "localhost admin repair mu
 # immediate second call is de-duped (running) — never a second spawn
 R2="$(curl -s -X POST --max-time 6 "$B/api/maintenance/repair")"
 echo "$R2" | grep -qE '"started":false' && pass || fail "a repeat repair must be de-duped (got: $R2)"
-kill "$SRV_PID" 2>/dev/null; SRV_PID=""
+stop_pids "$SRV_PID"; SRV_PID=""
 
 # --- 5. read-gate + admin-gate under a Passworded box (simulated LAN) --------
 mkdir -p "$T/s2"

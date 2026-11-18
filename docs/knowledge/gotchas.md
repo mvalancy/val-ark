@@ -315,17 +315,27 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   worktrees or workers often run `tests/run-all.sh` on one box at once. With a literal port
   (`test-server-limits.sh` had 3700; `test-health.sh` and `test-moderation-api.sh` even shared
   3927/3928), the second run either fails "server did not start" or quietly talks to the *first*
-  run's server and fails on its state (404 on a temp dir that server never had). Worse, bash does
-  **not** run an EXIT trap when the script is killed by a signal it doesn't trap, so a timed-out
-  or ^C'd run leaves `server.js` holding the port for every run after it. **Fix:** source
-  `tests/lib/ports.sh` and:
-  - pick ports with `free_port` (kernel-chosen), including a separate `free_port` for
-    `VALARK_HTTPS_PORT` (`port + 9000` overflows 65535 on an ephemeral port);
-  - call `trap_signals` after the EXIT trap, so INT/TERM run the cleanup;
-  - stop servers with `stop_pids` (TERM, then KILL after about 3s).
+  run's server and fails on its state (404 on a temp dir that server never had). A leftover
+  `server.js` then holds the port for every run after it. (Bash 5.x *does* run the EXIT trap on
+  TERM and INT, so a ^C'd or TERM'd run cleans up if its trap is right.) The real ways a server
+  gets left behind are:
+  - the EXIT trap never kills it: `test-commission.sh`'s trap only removed the temp dir;
+  - the trap kills an empty or stale PID because `$!` was read inside `$(...)` or a subshell;
+  - the test is SIGKILLed (`timeout -s KILL`, an OOM kill), so no trap can run;
+  - the server outlives a plain TERM.
 
-  `tests/test-port-hygiene.sh` fails on a new literal port. If you find a stray `server.js`,
-  only kill the ones your own run started; another worker may be mid-test. (#195)
+  **Fix:** source `tests/lib/ports.sh` and:
+  - pick every port with `free_port` (kernel-chosen), including a separate `free_port` for
+    `VALARK_HTTPS_PORT`. `port + 9000` overflows 65535 on an ephemeral port, and `PORT+1` can
+    land on another run's port;
+  - stop every server you started with `stop_pids` (TERM, then KILL after about 3s), both in
+    the EXIT trap and mid-test;
+  - `trap_signals` is optional belt and braces (exit 130/143 through the EXIT trap).
+
+  `tests/test-port-hygiene.sh` fails on a literal port, a `PORT+N` offset, or a server test
+  that never calls `stop_pids`. Its §3 includes a negative control showing it does catch a
+  trap that never kills the server. If you find a stray `server.js`,
+  only kill the ones your own run started; another worker may be mid-test. (#195, #199)
 - **`run-all.sh`'s green/red gate must not depend on node.** The runner's exit code came
   solely from `report/generate.mjs`; with no node on the host (fresh appliance, minimal
   container) it exited 0 even when suites failed. Every suite writes `results/*.json` with an

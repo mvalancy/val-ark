@@ -19,7 +19,8 @@ fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
 [ -n "$NODE" ] || { echo "SKIP: no node runtime for commission.js" >&2; exit 0; }
 
-T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
+SRV_PID=""
+T="$(mktemp -d)"; trap 'stop_pids "$SRV_PID"; rm -rf "$T"' EXIT   # the trap must stop the server too
 trap_signals
 export VALARK_STATE_DIR="$T/state" VALARK_CONTENT_DIR="$T/content" VALARK_MODELS_DIR="$T/models"
 mkdir -p "$T/content/zim" "$T/models/llm"
@@ -89,7 +90,7 @@ if [ "$up" = 1 ]; then
 else
     fail "test server did not start on :$PORT (see srv.log)"
 fi
-kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null
+stop_pids "$SRV_PID"
 
 echo "commission: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

@@ -19,7 +19,7 @@ NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/
 [ -n "$NODE" ] || { echo "SKIP: no node runtime" >&2; exit 0; }
 
 T="$(mktemp -d)"; SRV_PID=""; ALL_PIDS=""
-trap 'for p in $ALL_PIDS; do kill "$p" 2>/dev/null; done; rm -rf "$T"' EXIT
+trap 'stop_pids $ALL_PIDS; rm -rf "$T"' EXIT
 
 trap_signals
 # --- Build a populated fake mirror (all four package kinds) -------------------
@@ -145,7 +145,7 @@ echo "$PK" | BUNDLE_SHA="$BUNDLE_SHA" "$NODE" -e '
 
 # No host filesystem paths or absolute host URLs may leak into the manifest.
 echo "$PK" | grep -qE '"/home/|'"$T"'|http://127|http://localhost|/tmp/' && fail "manifest must not leak filesystem paths / absolute host URLs" || pass
-kill "$SRV_PID" 2>/dev/null; SRV_PID=""
+stop_pids "$SRV_PID"; SRV_PID=""
 
 # --- 2. Bare box (empty trees): partial/empty list, never a crash ------------
 mkdir -p "$T/empty/tools" "$T/empty/sources" "$T/empty/models" "$T/empty/content/zim" "$T/state2"
@@ -155,7 +155,7 @@ start_srv "$PORT" "$T/state2"; [ "$(wait_up "$PORT")" = 1 ] && pass || fail "ser
 E="$(curl -s --max-time 6 "$B/api/packages")"
 echo "$E" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);process.exit(j.count===0&&Array.isArray(j.packages)&&j.packages.length===0?0:1)})' \
     && pass || fail "an empty box must return {count:0,packages:[]} (never a crash)"
-kill "$SRV_PID" 2>/dev/null; SRV_PID=""
+stop_pids "$SRV_PID"; SRV_PID=""
 
 # --- 3. Read-gate: 401 for an un-authed LAN visitor on a Passworded box -------
 mkdir -p "$T/s3"
@@ -167,7 +167,7 @@ start_srv "$PORT" "$T/s3"; [ "$(wait_up "$PORT")" = 1 ] && pass || fail "server 
 CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$B/api/packages")"
 [ "$CODE" = "401" ] && pass || fail "/api/packages must be read-gated (401) on a Passworded LAN, got $CODE"
 unset FORCE_REMOTE
-kill "$SRV_PID" 2>/dev/null; SRV_PID=""
+stop_pids "$SRV_PID"; SRV_PID=""
 
 echo "packages: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

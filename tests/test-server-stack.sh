@@ -207,5 +207,9 @@ assert rc == 1, rc
 assert "apt_offline:" in err.getvalue() and "Traceback" not in err.getvalue(), err.getvalue()
 PY
 
+ERR=$(VALARK_DEBUG=1 PATH="$T/empty-path" "$(command -v python3)" "$A" resolve --suite noble --arch amd64 --set lamp --cache "$T/nopath2" 2>&1); RC=$?
+[ "$RC" = 1 ] && grep -q Traceback <<<"$ERR" && grep -q "apt_offline:" <<<"$ERR" && pass \
+    || fail "VALARK_DEBUG=1 must add the traceback to an environment failure (got $RC: $ERR)"
+
 echo "server-stack: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

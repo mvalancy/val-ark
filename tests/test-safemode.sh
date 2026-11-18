@@ -18,7 +18,7 @@ NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/
 [ -n "$NODE" ] || { echo "SKIP: no node runtime" >&2; exit 0; }
 
 SRV_PID=""; SRV_PID2=""
-T="$(mktemp -d)"; trap 'rm -rf "$T"; [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null; [ -n "$SRV_PID2" ] && kill "$SRV_PID2" 2>/dev/null' EXIT
+T="$(mktemp -d)"; trap 'rm -rf "$T"; stop_pids "$SRV_PID"; stop_pids "$SRV_PID2"' EXIT
 trap_signals
 mkdir -p "$T/state" "$T/content/zim" "$T/models"
 echo "WIKIPEDIA" > "$T/content/zim/w.zim"; echo "GGUF" > "$T/models/m.gguf"
@@ -70,7 +70,7 @@ if [ "$up" = 1 ]; then
     [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$B2/content/")" = "401" ] && pass || fail "Safe Mode must FAIL CLOSED — unauthed content read must be 401 despite corrupt auth.json"
     [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST -H 'Content-Type: application/json' -d '{"target":"all"}' "$B2/api/download/content")" = "401" ] && pass || fail "Safe Mode must gate use-actions (401)"
 else fail "safe-mode fail-closed server did not start"; fi
-kill "$SRV_PID2" 2>/dev/null; wait "$SRV_PID2" 2>/dev/null; SRV_PID2=""
+stop_pids "$SRV_PID2"; SRV_PID2=""
 
 echo "safemode: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

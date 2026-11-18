@@ -12,7 +12,7 @@ them into one hostable HTML report.
 |------------|---------|
 | `run-all.sh` | Orchestrator + node-free failure gate. Wipes `results/*.json`, resolves a node dir, then runs five stages: bash validators → Playwright → community-services e2e → VM matrix → unified report. |
 | `lib/results.sh` | Common result schema. `results_init` / `results_case` / `results_run` / `results_finish` — **source this in any new bash suite** so it emits `results/<suite>.json` and joins the report + both failure gates. |
-| `lib/ports.sh` | `free_port` / `stop_pids` / `trap_signals` for any test that starts a server: **never hardcode a port** (parallel runs on one box collide) and make INT/TERM run cleanup. Enforced by `test-port-hygiene.sh`; see [gotchas](../docs/knowledge/gotchas.md#parallel-test-ports). |
+| `lib/ports.sh` | `free_port` / `stop_pids` / `trap_signals` for any test that starts a server: **never hardcode a port** (parallel runs on one box collide) and stop every server you start with `stop_pids`, in the EXIT trap and mid-test. Enforced by `test-port-hygiene.sh`; see [gotchas](../docs/knowledge/gotchas.md#parallel-test-ports). |
 | `lib/md_link_check.py` | Offline internal-Markdown link + `#anchor` resolver (GitHub-slug compatible) behind `test-doc-links.sh` — keeps the `.md` hierarchy interconnected. |
 | `lib/secret_scan.py` + `lib/secrets-allowlist.txt` | Offline secret/private-host leak scanner behind `test-secrets.sh` (LAN IPs, private-TLD + bare URL hosts, tracked secret files); reviewed exceptions live in the allowlist. |
 | `report/generate.mjs` | Reads every common-schema `results/*.json` and renders ONE self-contained offline `results/report.html` (inline CSS/JS, failures-first, dark/light). Exits 1 if any case failed. |

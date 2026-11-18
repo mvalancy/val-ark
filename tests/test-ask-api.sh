@@ -27,7 +27,7 @@ NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/
 
 ALL_PIDS=""
 T="$(mktemp -d)"
-cleanup() { for p in $ALL_PIDS; do kill "$p" 2>/dev/null; done; rm -rf "$T"; }
+cleanup() { stop_pids $ALL_PIDS; rm -rf "$T"; }
 trap cleanup EXIT
 
 trap_signals

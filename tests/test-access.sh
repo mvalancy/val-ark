@@ -17,7 +17,7 @@ NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/
 [ -n "$NODE" ] || { echo "SKIP: no node runtime" >&2; exit 0; }
 
 SRV_PID=""
-T="$(mktemp -d)"; trap 'rm -rf "$T"; [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null' EXIT
+T="$(mktemp -d)"; trap 'rm -rf "$T"; stop_pids "$SRV_PID"' EXIT
 trap_signals
 mkdir -p "$T/state" "$T/content/zim" "$T/models"
 # Session-crypto unit checks: IP-binding, tamper/expiry rejection, rotate = sign-out

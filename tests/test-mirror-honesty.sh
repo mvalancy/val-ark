@@ -21,6 +21,7 @@
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib/ports.sh"   # free_port / stop_pids: no fixed ports, servers always stopped
 SRC="${VALARK_TEST_SCRIPTS_SRC:-$ROOT}"
 PARTS="${VALARK_TEST_PARTS:-AB}"    # A = shell layer, B = server job layer (old code retries 5 x 15s: use B for the negative control)
 pass() { PASS=$((PASS + 1)); }
@@ -31,7 +32,7 @@ command -v python3 >/dev/null 2>&1 || { echo "SKIP: no python3" >&2; exit 0; }
 command -v flock >/dev/null 2>&1 || { echo "SKIP: no flock" >&2; exit 0; }
 
 T="$(mktemp -d)"; SRV_PID=""
-cleanup() { [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null; rm -rf "${T:?}" 2>/dev/null; }
+cleanup() { stop_pids "$SRV_PID"; rm -rf "${T:?}" 2>/dev/null; }
 trap cleanup EXIT
 
 # jq-free JSON helper: jget '<file or ->' '<python expression on d>'
@@ -213,11 +214,11 @@ tool_stub zzpart 'd="${TOOLS_DIR}/linux-x86_64/zzpart"; mkdir -p "$d"; head -c 2
 tool_stub zzquiet 'd="${TOOLS_DIR}/linux-x86_64/zzquiet"; mkdir -p "$d/zzquiet"; end=$((SECONDS+6)); while [ $SECONDS -lt $end ]; do :; done
 head -c 120000 /dev/urandom > "$d/zzquiet/zzquiet"; log_success "Extracted: zzquiet"'
 
-PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+PORT=$(free_port); HTTPS_PORT=$(free_port)   # two kernel-picked ports, never PORT+N
 B="http://127.0.0.1:$PORT"
 start_server() {
     ( VAL_ARK_DATA="$R" VALARK_COMMISSIONED=1 VALARK_DISABLE_KIWIX=1 VALARK_BIND=127.0.0.1 VALARK_WEB_PORT="$PORT" \
-      VALARK_HTTPS_PORT=$((PORT+1)) VALARK_JOB_STALL_SEC=3 VALARK_JOB_POLL_MS=200 VALARK_TEST_NO_SPAWN=1 \
+      VALARK_HTTPS_PORT="$HTTPS_PORT" VALARK_JOB_STALL_SEC=3 VALARK_JOB_POLL_MS=200 VALARK_TEST_NO_SPAWN=1 \
       "$NODE" "$R/scripts/server.js" "$PORT" >"$T/srv.log" 2>&1 & echo $! > "$T/srv.pid" )
     SRV_PID="$(cat "$T/srv.pid")"
     local up=0 i; for i in $(seq 1 40); do sleep 0.25; curl -sf --max-time 2 "$B/api/health" >/dev/null 2>&1 && { up=1; break; }; done
@@ -341,7 +342,7 @@ id=$(start_tool zzquiet); st=$(wait_job "$id" 30)
 # B14. server restart mid-job: history survives, the interrupted job is reported FAILED (not 'running' forever)
 id=$(start_tool zzstall); sleep 1.0
 OPID="$(python3 -c 'import json; d=json.load(open("'"$R"'/state/jobs.json")); print([j for j in d["jobs"] if j["id"]=="'"$id"'"][0].get("pid",""))' 2>/dev/null)"
-kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null
+stop_pids "$SRV_PID"
 # the job's process group would be orphaned; the new server must still report it honestly
 start_server && pass || fail "B14 server restart failed"
 st="$(job "$id" "['status']")"
@@ -355,7 +356,7 @@ job "$id" "['error']" | grep -qi 'leftover download process was stopped' && pass
 
 # B17. a jobs.json with the wrong shape must never stop the server from booting
 for bad in 'null' '{"jobs":{"a":1}}' '[1,2]' '{"jobs":[null,5,{"id":"9","status":"running"}]}'; do
-    kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null
+    stop_pids "$SRV_PID"
     printf '%s' "$bad" > "$R/state/jobs.json"
     start_server && pass || fail "B17 server must boot with jobs.json = $bad (see $T/srv.log)"
 done

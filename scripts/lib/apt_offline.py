@@ -20,7 +20,7 @@ Exit codes (when several apply, the MOST SEVERE wins, in this order):
      or malformed --tsv; EX_USAGE, so it can never be confused with argparse's default 2)
    1 apt-get update or a set's dependency resolve failed (a whole set is absent), or the
      environment is broken (apt-get not installed, --dest not writable): a clean message,
-     never a traceback
+     never a traceback (VALARK_DEBUG=1 also prints the traceback)
    2 a download failed (size/sha256 mismatch or network). A rerun skips files already
      complete and re-downloads each failed file whole (no byte-level resume)
    3 INCOMPLETE (packages missing for this suite/arch, nothing resolved, an empty
@@ -31,7 +31,7 @@ The APT root is fully isolated from the host: a private APT_CONFIG and an empty
 apt.conf.d, so host hooks, extra index targets (Contents, DEP-11) and settings
 such as Acquire::GzipIndexes never leak in.
 """
-import argparse, gzip, hashlib, os, re, shutil, subprocess, sys, urllib.parse, urllib.request
+import argparse, gzip, hashlib, os, re, shutil, subprocess, sys, traceback, urllib.parse, urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -229,6 +229,8 @@ def main(argv=None):
     try:
         return _main(argv)
     except OSError as e:  # apt-get/apt-cache missing, unwritable --dest, ...: environment failure
+        if os.environ.get("VALARK_DEBUG") == "1":
+            traceback.print_exc()  # a real bug that happens to raise OSError stays debuggable
         print(f"apt_offline: {e}", file=sys.stderr)
         return EX_RESOLVE
 

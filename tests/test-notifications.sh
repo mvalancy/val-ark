@@ -18,7 +18,7 @@ NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/
 [ -n "$NODE" ] || { echo "SKIP: no node runtime" >&2; exit 0; }
 
 T="$(mktemp -d)"; SRV_PID=""
-trap 'rm -rf "$T"; [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null' EXIT
+trap 'rm -rf "$T"; stop_pids "$SRV_PID"' EXIT
 trap_signals
 mkdir -p "$T/bare/state" "$T/seed/state" "$T/content/zim" "$T/models"
 
@@ -77,7 +77,7 @@ N2="$(curl -s --max-time 6 "$B/api/status/notifications")"
 # bounded: never unbounded (cap is 60)
 echo "$N1" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{process.exit(JSON.parse(s).items.length<=60?0:1)})' \
     && pass || fail "notifications must be bounded (<=60)"
-kill "$SRV_PID" 2>/dev/null; SRV_PID=""
+stop_pids "$SRV_PID"; SRV_PID=""
 
 # --- 2. Bare box: never throws, no phantom events ----------------------------
 PORT=$(free_port); B="http://127.0.0.1:$PORT"
@@ -95,7 +95,7 @@ echo "$NB" | "$NODE" -e '
     process.exit(Array.isArray(it) && !it.some(n=>n.id.startsWith("ev-")) ? 0 : 1);
   });
 ' && pass || fail "bare box must return a well-formed empty-feed list (got: $NB)"
-kill "$SRV_PID" 2>/dev/null; SRV_PID=""
+stop_pids "$SRV_PID"; SRV_PID=""
 
 # --- 3. Read-gating: 401 on a passworded LAN box -----------------------------
 mkdir -p "$T/pw/state"

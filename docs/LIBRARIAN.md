@@ -89,7 +89,8 @@ The big LLM/STT/TTS/VLM/image catalog is still managed by `download-models.sh`.
   `--suite`/`--arch`/`--dest`.
 
 When several apply, the most severe wins, in that order: 64, 1, 2, 3, 0. So a failed download
-never hides a set that could not be resolved at all.
+never hides a set that could not be resolved at all. An environment failure (code 1) prints a single
+`apt_offline: …` line; set `VALARK_DEBUG=1` to get the full Python traceback as well.
 
 CI only runs `apt_offline.py` against stubs and fixture lists (`tests/test-server-stack.sh`); it never
 talks to the real Ubuntu archive. Before trusting a change to it, check on a real Ubuntu box with
@@ -99,7 +100,8 @@ talks to the real Ubuntu archive. Before trusting a change to it, check on a rea
 1. **Cross-arch resolve, empty dpkg status.** On an x86_64 host run
    `apt_offline.py resolve --suite noble --arch arm64 --set lamp --cache <scratch>`. Expect exit 0,
    every URL on `ports.ubuntu.com`, `libc6_…_arm64.deb` in the list (the empty status pulled in the
-   base dependencies), and a SHA256 in the 4th column of every row (otherwise stderr prints a count: "N package(s) have no SHA256").
+   base dependencies), and a SHA256 in the 4th column of every row. If some rows lack one,
+   stderr prints only a count: `N package(s) have no SHA256`.
 2. **Native arch.** The same with `--arch amd64`: URLs on `archive.ubuntu.com` / `security.ubuntu.com`.
 3. **Build.** `apt_offline.py build --suite noble --arch arm64 --set lamp --dest <dir> --cache <scratch>`
    exits 0, stderr says `indexed N packages` with no ".deb not in lists", `<dir>` has `Packages` +

@@ -21,7 +21,7 @@ NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/
 [ -n "$NODE" ] || { echo "SKIP: no node runtime" >&2; exit 0; }
 
 SRV_PID=""
-T="$(mktemp -d)"; trap 'rm -rf "$T"; [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null' EXIT
+T="$(mktemp -d)"; trap 'rm -rf "$T"; stop_pids "$SRV_PID"' EXIT
 trap_signals
 mkdir -p "$T/state" "$T/content/zim" "$T/models"
 
@@ -136,7 +136,7 @@ curl -s -b "$T/cj" --max-time 6 "$B/api/moderation/queue" | grep -q '"count":0' 
 #        (planted by a same-uid process / NFS-mesh peer) must NOT redirect the write
 #        outside <state> — the staged bytes must never land in the symlink target.
 #        Needs its own server (the symlink would break the happy-path checks above).
-kill "$SRV_PID" 2>/dev/null; SRV_PID=""
+stop_pids "$SRV_PID"; SRV_PID=""
 mkdir -p "$T/state2/moderation" "$T/external"
 ln -s "$T/external" "$T/state2/moderation/scan"        # scan → outside <state>
 "$NODE" -e 'const a=require(process.argv[1]);const d=process.argv[2];a.setPassword("modtestpass","admin",d);' \

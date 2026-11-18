@@ -44,7 +44,7 @@ SRV_PID=""
 ADIR="__contain_$$__"; MADE_CONTENT=0
 [ -e "$ROOT/content" ] || MADE_CONTENT=1
 cleanup() {
-    [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null
+    stop_pids "$SRV_PID"
     rm -rf "$ROOT/content/$ADIR" 2>/dev/null
     [ "$MADE_CONTENT" = 1 ] && rmdir "$ROOT/content" 2>/dev/null
     rm -rf "$T" "$ZT"

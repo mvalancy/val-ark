@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "published": "2026-11-17",
+  "mac": {
+    "version": "1.1.11",
+    "min_os": "14.0",
+    "url": "https://downloads.lastbook.org/Lastbook-1.1.11-mac.dmg",
+    "size": 28436543,
+    "sha256": "0b53850fc1123b7e964087537fcd88bb48418c2ee29cc7b735cacffd8f77a12b"
+  },
+  "windows": {
+    "version": "1.1.11",
+    "min_os": "10.0",
+    "url": "https://downloads.lastbook.org/Lastbook-1.1.11-Setup.exe",
+    "size": 105001592,
+    "sha256": "a953b60fafd5a84361195ed1d713fd386e7b564c1e136537c915020a7e0e9dab"
+  },
+  "linux": {
+    "version": "1.1.11",
+    "min_os": "24.04",
+    "url": "https://downloads.lastbook.org/Lastbook_1.1.11_amd64.deb",
+    "size": 29872528,
+    "sha256": "6ddaec43baa7e85e214863ba454f5e4f4faf3eed99735a0063c8b68c3137dd0a"
+  }
+}

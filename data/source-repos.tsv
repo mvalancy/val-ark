@@ -180,6 +180,7 @@
 850|kiwix/kiwix-desktop|home-offline
 850|openzim/libzim|home-offline
 850|openzim/mwoffliner|home-offline
+900|Immortal-Protocols/lastbook|home-offline
 850|syncthing/syncthing|sync-security
 850|restic/restic|sync-security
 850|borgbackup/borg|sync-security

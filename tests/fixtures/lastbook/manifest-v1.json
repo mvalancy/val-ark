@@ -1,0 +1,202 @@
+{
+  "version": 1,
+  "published": "2026-11-13",
+  "packs": [
+    {
+      "id": "small",
+      "title": "Small",
+      "summary": "Essential first aid, water, food, shelter and repair knowledge.",
+      "revision": "2026-11-13-small-v2",
+      "records": 314,
+      "installed_bytes": 7691309976,
+      "available": true,
+      "map": "base",
+      "files": [
+        {
+          "name": "Lastbook-Small-20261113.zip",
+          "url": "https://downloads.lastbook.org/Lastbook-Small-20261113.zip",
+          "size": 7691528852,
+          "sha256": "bfe8b0b66d898cac18b7f979dd5e560b8fd653f03244b6186e0436306cf96291",
+          "kind": "zip"
+        }
+      ]
+    },
+    {
+      "id": "medium",
+      "title": "Medium",
+      "summary": "Small, plus the core how-to videos, all documents, Wikibooks and a detailed map of California.",
+      "records": 9696,
+      "installed_bytes": 67476559546,
+      "available": true,
+      "files": [
+        {
+          "name": "Lastbook-Medium.zip",
+          "url": "https://downloads.lastbook.org/Lastbook-Medium.zip",
+          "size": 67492034038,
+          "sha256": "e4ef75afd584dd174bfb34468a41a9c7c5e6907d5b37bb722aa9b5435876068a",
+          "kind": "zip"
+        }
+      ]
+    },
+    {
+      "id": "all",
+      "title": "All",
+      "summary": "Everything in the library: every video, document and encyclopedia, Wikipedia included, with detailed maps for the whole US.",
+      "records": 12864,
+      "installed_bytes": 387861708053,
+      "available": true,
+      "files": [
+        {
+          "name": "Lastbook-All.zip",
+          "url": "https://downloads.lastbook.org/Lastbook-All.zip",
+          "size": 387878571619,
+          "sha256": "4b4ea73fc530a073782981fd83f30ebda18e8809cbff0cf18f82d45ea21f10f7",
+          "kind": "zip"
+        }
+      ]
+    }
+  ],
+  "models": [
+    {
+      "id": "gemma-4-26b-a4b",
+      "title": "Gemma 4 26B A4B",
+      "file": "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
+      "url": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/c099eb48e663fd284577b04978a94ffccb261841/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf?download=true",
+      "size": 16947541728,
+      "sha256": "f2c28b3dc4776931ac6f879e11f203dec637ea0f14267a86ec8f6165f63f293f",
+      "memory_bytes": 19027384256,
+      "available": true
+    }
+  ],
+  "maps": [
+    {
+      "id": "base",
+      "title": "World base map (fixture)",
+      "kind": "base",
+      "installed_bytes": 1200000000,
+      "available": true,
+      "files": [
+        {
+          "name": "Lastbook-Map-base.zip",
+          "url": "https://downloads.lastbook.org/maps/Lastbook-Map-base.zip",
+          "size": 1100000000,
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "kind": "zip"
+        }
+      ]
+    },
+    {
+      "id": "CA",
+      "title": "California",
+      "kind": "state",
+      "installed_bytes": 5404574262,
+      "available": true,
+      "includes": "Local streets, buildings, terrain and crops, plus water, help and resource points",
+      "files": [
+        {
+          "name": "Lastbook-Map-CA.zip",
+          "url": "https://downloads.lastbook.org/maps/Lastbook-Map-CA.zip",
+          "size": 3218756405,
+          "sha256": "00ce57ce77531e23fa6d9dc6512c3d1678087889062d92f8e31e85be84c9f7dc",
+          "kind": "zip"
+        }
+      ]
+    },
+    {
+      "id": "TX",
+      "title": "Texas",
+      "kind": "state",
+      "installed_bytes": 5779706419,
+      "available": true,
+      "includes": "Local streets, buildings, terrain and crops, plus water, help and resource points",
+      "files": [
+        {
+          "name": "Lastbook-Map-TX.zip",
+          "url": "https://downloads.lastbook.org/maps/Lastbook-Map-TX.zip",
+          "size": 3469355657,
+          "sha256": "1552fe988b213ffba4368f06d4af2b765b30f27b23e98299cc5d1315f6ec4cfa",
+          "kind": "zip"
+        }
+      ]
+    },
+    {
+      "id": "AK",
+      "title": "Alaska",
+      "kind": "state",
+      "installed_bytes": 11845780015,
+      "available": true,
+      "includes": "Local streets, buildings, terrain and crops, plus water, help and resource points",
+      "files": [
+        {
+          "name": "Lastbook-Map-AK.zip",
+          "url": "https://downloads.lastbook.org/maps/Lastbook-Map-AK.zip",
+          "size": 10377224515,
+          "sha256": "da341fdf60c051897ce20949c7f1de33494f35ea980a696a86c6809487f13e38",
+          "kind": "zip"
+        }
+      ]
+    }
+  ],
+  "address_indexes": [
+    {
+      "available": true,
+      "files": [
+        {
+          "kind": "zip",
+          "name": "Lastbook-Addresses-AK.zip",
+          "sha256": "05080b0733dbc54d5fd1e9f4653eb385444d71cce43f34e6ecab299e840beecc",
+          "size": 12333286,
+          "url": "https://downloads.lastbook.org/addresses/2026-10-21.0/Lastbook-Addresses-AK.zip"
+        }
+      ],
+      "id": "AK",
+      "installed_bytes": 41861120,
+      "kind": "state-addresses",
+      "records": 325347,
+      "title": "Alaska"
+    },
+    {
+      "available": true,
+      "files": [
+        {
+          "kind": "zip",
+          "name": "Lastbook-Addresses-CA.zip",
+          "sha256": "95876428f9c4a127f8f236a51ba7e3e0012197efcfd2fc181bb5f757d13cafc9",
+          "size": 526161211,
+          "url": "https://downloads.lastbook.org/addresses/2026-10-21.0/Lastbook-Addresses-CA.zip"
+        }
+      ],
+      "id": "CA",
+      "installed_bytes": 1720041472,
+      "kind": "state-addresses",
+      "records": 13604710,
+      "title": "California"
+    },
+    {
+      "available": true,
+      "files": [
+        {
+          "kind": "zip",
+          "name": "Lastbook-Addresses-TX.zip",
+          "sha256": "41c11b2860aba7b07d6e8e45705bb8d5fe159453ea5e689d37a292696c386e17",
+          "size": 498058820,
+          "url": "https://downloads.lastbook.org/addresses/2026-10-21.0/Lastbook-Addresses-TX.zip"
+        }
+      ],
+      "id": "TX",
+      "installed_bytes": 1557028864,
+      "kind": "state-addresses",
+      "records": 12089884,
+      "title": "Texas"
+    },
+    {
+      "available": false,
+      "id": "HI",
+      "installed_bytes": 0,
+      "kind": "state-addresses",
+      "records": 0,
+      "title": "Hawaii",
+      "unavailable_reason": "The saved address source has no records for this state."
+    }
+  ]
+}

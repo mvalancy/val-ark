@@ -149,6 +149,8 @@ run_all() {
         ollama vscodium godot freecad bambu-studio
         # Largest tools last
         sd-cpp whisper-cpp llama-cpp ffmpeg blender cad-agent
+        # Content mirrors: multi-GB, resumable across refreshes; never ahead of the apps
+        lastbook
     )
 
     # Add any tools not in the ordered list

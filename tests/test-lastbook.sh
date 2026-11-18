@@ -604,6 +604,13 @@ check "re-release on a box stamped before pack ids: the kept manifest names the 
 D27="$T/m27"; mir --dest "$D27" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
 vrun rrgut --dest "$D27" --pack all; rc=$?
 check "a gutted re-release (under half the bytes) never replaces the held All" '[ "$rc" = 0 ] && [ -s "$D27/packs/Lastbook-All.zip" ] && grep -q "keeping packs/Lastbook-All.zip" "$T/err"'
+# auto chooses no pack (step up, never down) but one is held: maps, addresses, model and apps still refresh
+D41="$T/m41"; mir --dest "$D41" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+: > "$T/req.log"
+vrun rrgut --dest "$D41" --pack auto --maps CA --model auto --apps current; rc=$?
+check "no pack chosen, a verified one held: the held All stays, base + state map, addresses, model and apps refresh, exit 3" '[ "$rc" = 3 ] && [ -s "$D41/packs/Lastbook-All.zip" ] && [ ! -e "$D41/packs/Lastbook-All-2.zip" ] && [ -s "$D41/maps/Lastbook-Map-CA.zip" ] && [ -s "$D41/maps/Lastbook-Map-base.zip" ] && [ -s "$D41/addresses/Lastbook-Addresses-CA.zip" ] && [ -s "$D41/models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf" ] && [ "$(ls "$D41/app/1.1.11" | wc -l)" = 4 ] && grep -q "the held pack stays as it is this run" "$T/err" && ! grep -q "^GET .*Lastbook-\(All-2\|Medium\|Small\)" "$T/req.log"'
+vrun rrgut --dest "$T/m42" --pack auto --maps CA --budget 1; rc=$?
+check "fresh box, no pack fits, nothing held: no frozen-pack refresh (no maps without a pack)" '[ "$rc" = 3 ] && ! grep -q "the held pack stays" "$T/err" && [ ! -e "$T/m42/maps/Lastbook-Map-CA.zip" ]'
 
 # auto never leaves a held, verified pack because the manifest over-reports another pack (R3)
 variant bigmed 'a=[p for p in m["packs"] if p["id"]=="medium"][0]; a["installed_bytes"]=10**15'

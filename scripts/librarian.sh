@@ -52,11 +52,17 @@ ensure_state() { mkdir -p "$STATE_DIR" "$LOG_DIR" "$TMPDIR_VA" "$ZIM_DIR" "$INST
 
 # --- manifest --------------------------------------------------------------
 # id  bucket  category  dest  bytes  value  source  epoch
+# Drop the row whose FIRST column is exactly $1. Not `grep -v -F "id<TAB>"`: that
+# substring match also drops any id ENDING in $1 (xzim:a for zim:a), and when the
+# row is the only line grep exits 1, so `&& mv` never ran and the row stayed. (#192)
+manifest_drop() {
+    [ -f "$MANIFEST" ] || return 0
+    awk -F'\t' -v id="$1" '$1!=id' "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
+}
 manifest_add() {
     local id="$1" bucket="$2" cat="$3" dest="$4" bytes="$5" value="$6" source="$7"
     ensure_state
-    grep -qF "$(printf '%s\t' "$id")" "$MANIFEST" 2>/dev/null && \
-        grep -v -F "$(printf '%s\t' "$id")" "$MANIFEST" > "${MANIFEST}.tmp" 2>/dev/null && mv "${MANIFEST}.tmp" "$MANIFEST"
+    manifest_drop "$id"
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$bucket" "$cat" "$dest" "$bytes" "$value" "$source" "$(date +%s)" >> "$MANIFEST"
 }
 
@@ -350,7 +356,7 @@ cmd_evict() {
     gen_candidates | python3 "$PLANNER" --budget 1 --evict-need "$need" --manifest "$MANIFEST" --pins "$PINS" | \
     while IFS=$'\t' read -r id cat dest bytes value; do
         warn "evict $id ($cat, $(human "$bytes"), value $value) -> $dest"
-        rm -f "$dest" 2>/dev/null && grep -v -F "$(printf '%s\t' "$id")" "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
+        rm -f "$dest" 2>/dev/null && manifest_drop "$id"
     done
 }
 

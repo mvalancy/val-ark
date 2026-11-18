@@ -259,12 +259,19 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   bundle ("need a repository to verify a bundle"). That broke `verify` and silently discarded
   built bundles in the copy-only resume, so every call goes through `bundle_verify(bundle, repo)`,
   which passes `-C` (an empty scratch repo is enough for full bundles). State records
-  `incremental: true|false`. Regression: `tests/test-git-bundle-mirror.sh` cases 3, 8 and 12-16:
+  `incremental: true|false`. **Resolve `--dest`/`--stage` to absolute paths first:** every git call
+  runs with `-C <staging repo>`, so a relative bundle path resolved inside staging
+  (`…/acme__widget.git/rel/stage/…bundle.lock: No such file`). **No `.source.json` means
+  UNVERIFIED** (exit 3) and never a pass. `verify --adopt` writes one only after `bundle verify`,
+  a full bare clone and `fsck --full`. Verify alone adopted a truncated bundle in testing.
+  Regression: `tests/test-git-bundle-mirror.sh` cases 3, 8, 12-18:
   - 3, 8: run from a non-repo cwd
   - 12: the trace shows `have` lines and no `deepen`
   - 14: unchanged, a moved default branch, a truncated / bit-flipped bundle, a moved tag
   - 15: the incremental fetch is retried once, then falls back to the chunked fetch
   - 16: a rebuilt bundle that fails verify leaves the archived one byte-identical
+  - 17: relative `--dest`/`--stage` from a non-repo cwd
+  - 18: UNVERIFIED and `--adopt`, including refusing a truncated bundle
 
 ## Storage / data root
 

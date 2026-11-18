@@ -28,8 +28,11 @@ recorded as unchanged.
 Commands (stdlib + git; GITHUB_TOKEN raises API limits, never printed):
   plan    [--top N]                            list what would be mirrored, in order
   mirror  --dest DIR [--repo O/R ...] [--top N] [--max-gb G] [--refresh-days D]
-  verify  --dest DIR                           git bundle verify + .source.json size/sha256
-Exit 0 on success, 2 if any repo failed (others still complete).
+  verify  --dest DIR [--adopt]                 full read: git bundle verify + .source.json size/sha256
+                                               (no .source.json -> UNVERIFIED, exit 3; --adopt writes
+                                               one after a full clone + fsck under --stage)
+Exit 0 on success, 2 if any repo failed (others still complete); verify also
+exits 3 when the only problem is bundles with no provenance.
 """
 import argparse, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time, urllib.request
 from pathlib import Path
@@ -331,6 +334,91 @@ def write_index(dest, state):
     write_atomic(dest / "INDEX.txt", text)
 
 
+def has_provenance(bundle):
+    return bundle.with_name(bundle.name + ".source.json").is_file()
+
+
+def adopt(bundle, dest, stage, scratch_repo):
+    """Write .source.json for a bundle that has none (copied in by hand, or its sidecar was
+    lost), from its CURRENT bytes. Only after `git bundle verify` AND a full bare clone +
+    `git fsck --full` in a scratch dir: verify alone passes a truncated pack. Returns an
+    error string, or None once adopted."""
+    p = bundle_verify(bundle, scratch_repo)
+    if p.returncode:
+        return p.stderr.strip()[-200:]
+    work = Path(tempfile.mkdtemp(prefix=".adopt-", dir=stage))
+    try:
+        clone = work / "repo.git"
+        c = subprocess.run(["git", "clone", "--quiet", "--bare", str(bundle), str(clone)],
+                           capture_output=True, text=True, timeout=6 * 3600)
+        if c.returncode:
+            return "clone: " + c.stderr.strip()[-200:]
+        f = subprocess.run(["git", "-C", str(clone), "fsck", "--full", "--no-dangling"],
+                           capture_output=True, text=True, timeout=6 * 3600)
+        if f.returncode:
+            return "fsck: " + (f.stderr or f.stdout).strip()[-200:]
+        head = subprocess.run(["git", "-C", str(clone), "rev-parse", "-q", "--verify", "HEAD"],
+                              capture_output=True, text=True).stdout.strip()
+        branch = subprocess.run(["git", "-C", str(clone), "symbolic-ref", "-q", "--short", "HEAD"],
+                                capture_output=True, text=True).stdout.strip()
+        rel = bundle.relative_to(dest)
+        repo = bundle.name[:-len(".bundle")]
+        meta = dict(repository=f"{rel.parent.as_posix()}/{repo}", default_branch=branch or None,
+                    head_commit=head or None, bytes=bundle.stat().st_size, sha256=sha256(bundle),
+                    bundled_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(bundle.stat().st_mtime)),
+                    adopted_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), adopted=True,
+                    restore=f"git clone {repo}.bundle {repo}")
+        write_atomic(bundle.with_name(bundle.name + ".source.json"), json.dumps(meta, indent=2))
+        return None
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def verify(dest, stage, do_adopt=False):
+    """Full read of every bundle: git bundle verify, then size + sha256 against .source.json.
+    A bundle with no .source.json is UNVERIFIED (git's verify passes a truncated pack, so it
+    alone proves nothing) unless --adopt checks it fully and writes one.
+    Exit 0 all good, 2 any bad (or no bundles), 3 only unverified ones left."""
+    bad = unverified = adopted = 0
+    bundles = sorted(dest.glob("*/*.bundle"))
+    scratch = tempfile.mkdtemp(prefix="bundle-verify-")
+    try:
+        subprocess.run(["git", "init", "--quiet", "--bare", scratch], check=True)
+        for b in bundles:
+            rel = b.relative_to(dest)
+            if not has_provenance(b):
+                if do_adopt:
+                    stage.mkdir(parents=True, exist_ok=True)
+                    why = adopt(b, dest, stage, scratch)
+                    if why:
+                        bad += 1
+                        print(f"BAD {rel}: not adopted: {why}", file=sys.stderr)
+                    else:
+                        adopted += 1
+                        print(f"ADOPTED {rel}: wrote .source.json from the current bytes", file=sys.stderr)
+                    continue
+                p = bundle_verify(b, scratch)
+                if p.returncode:
+                    bad += 1
+                    print(f"BAD {rel}: {p.stderr.strip()[-200:]}", file=sys.stderr)
+                else:
+                    unverified += 1
+                    print(f"UNVERIFIED {rel}: no provenance (.source.json); re-run with --adopt", file=sys.stderr)
+                continue
+            p = bundle_verify(b, scratch)
+            why = p.stderr.strip()[-200:] if p.returncode else provenance_mismatch(b)
+            if why:
+                bad += 1
+                print(f"BAD {rel}: {why}", file=sys.stderr)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    print(f"verified {len(bundles)} bundles, {bad} bad, {unverified} unverified (no provenance), "
+          f"{adopted} adopted", file=sys.stderr)
+    if bad or not bundles:
+        return 2
+    return 3 if unverified else 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("command", choices=["plan", "mirror", "verify"])
@@ -343,6 +431,9 @@ def main(argv=None):
     ap.add_argument("--refresh-days", type=float, default=30.0)
     ap.add_argument("--tries", type=int, default=6)
     ap.add_argument("--retry-wait", type=float, default=30.0)
+    ap.add_argument("--adopt", action="store_true",
+                    help="verify: write .source.json for bundles that have none, after git bundle verify "
+                         "+ a full clone and fsck in a scratch dir under --stage")
     a = ap.parse_args(argv)
     names = a.repo or candidates(load_catalog(a.tsv), a.top)
     if a.command == "plan":
@@ -350,23 +441,11 @@ def main(argv=None):
         return 0
     if not a.dest:
         ap.error("--dest is required")
-    dest, stage = Path(a.dest), Path(a.stage)
+    # Absolute: git runs with -C <staging repo>, so a relative bundle/dest path would
+    # resolve against the staging dir instead of the caller's cwd.
+    dest, stage = Path(a.dest).expanduser().resolve(), Path(a.stage).expanduser().resolve()
     if a.command == "verify":
-        bad = 0
-        scratch = tempfile.mkdtemp(prefix="bundle-verify-")
-        try:
-            subprocess.run(["git", "init", "--quiet", "--bare", scratch], check=True)
-            for b in sorted(dest.glob("*/*.bundle")):
-                p = bundle_verify(b, scratch)
-                why = p.stderr.strip()[-200:] if p.returncode else provenance_mismatch(b)
-                if why:
-                    bad += 1
-                    print(f"BAD {b.relative_to(dest)}: {why}", file=sys.stderr)
-        finally:
-            shutil.rmtree(scratch, ignore_errors=True)
-        n = len(list(dest.glob('*/*.bundle')))
-        print(f"verified {n} bundles, {bad} bad", file=sys.stderr)
-        return 2 if bad or n == 0 else 0
+        return verify(dest, stage, a.adopt)
     dest.mkdir(parents=True, exist_ok=True)
     stage.mkdir(parents=True, exist_ok=True)
     state_file = dest / ".mirror-state.json"

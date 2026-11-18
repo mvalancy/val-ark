@@ -14,7 +14,8 @@
 #    fetch falls back to the chunked path; a rebuilt bundle that fails verify
 #    never replaces the archived one; a torn/bit-rotted archived bundle (size or
 #    sha256 vs .source.json) is never "unchanged" and fails verify; verify and the
-#    copy-only resume work from a non-repo cwd.
+#    copy-only resume work from a non-repo cwd, also with relative --dest/--stage;
+#    a bundle with no .source.json is UNVERIFIED until --adopt checks it fully.
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -279,6 +280,35 @@ assert not os.path.exists(B + ".part") and not os.path.exists(T + "/stage/acme__
 st = json.load(open(T + "/dest/.mirror-state.json"))["acme/widget"]
 assert st["status"] == "complete" and "bundle verify" in st["last_error"], st
 PY
+
+# 17. relative --dest/--stage from a non-repo cwd: mirror + verify still work (paths resolved).
+rm -rf "$T/norepo/rel"
+nr python3 "$M" mirror --dest rel/dest --stage rel/stage --tries 1 --retry-wait 0 --repo acme/widget 2>"$T/log17" \
+    && [ -f "$T/norepo/rel/dest/acme/widget.bundle" ] && pass || fail "relative --dest/--stage mirror failed: $(tail -2 "$T/log17")"
+nr python3 "$M" verify --dest rel/dest --stage rel/stage 2>"$T/log17v" && pass || fail "relative --dest verify failed: $(cat "$T/log17v")"
+[ ! -e "$T/norepo/rel/stage/acme__widget.git" ] && pass || fail "relative --stage: staging not cleaned"
+
+# 18. a bundle with no .source.json is UNVERIFIED (exit 3), not a pass; --adopt writes one only
+#     after verify + a full clone + fsck, and never for a truncated bundle.
+rm -rf "$T/dest7"; mkdir -p "$T/dest7/acme" "$T/dest7/other"
+cp "$T/norepo/rel/dest/acme/widget.bundle" "$T/dest7/acme/widget.bundle"
+python3 "$M" verify --dest "$T/dest7" --stage "$T/stage7" 2>"$T/log18"; rc=$?
+[ "$rc" = 3 ] && grep -q '^UNVERIFIED acme/widget.bundle: no provenance' "$T/log18" && pass \
+    || fail "a bundle without provenance must be UNVERIFIED, exit 3 (got $rc: $(cat "$T/log18"))"
+cp "$T/dest7/acme/widget.bundle" "$T/dest7/other/torn.bundle"
+truncate -s $(( $(stat -c %s "$T/dest7/other/torn.bundle") - 40 )) "$T/dest7/other/torn.bundle"
+python3 "$M" verify --adopt --dest "$T/dest7" --stage "$T/stage7" 2>"$T/log18a"; rc=$?
+[ "$rc" = 2 ] && grep -q '^BAD other/torn.bundle: not adopted' "$T/log18a" && [ ! -e "$T/dest7/other/torn.bundle.source.json" ] \
+    && pass || fail "--adopt must refuse a truncated bundle (got $rc: $(cat "$T/log18a"))"
+grep -q '^ADOPTED acme/widget.bundle' "$T/log18a" && python3 - "$T/dest7/acme/widget.bundle" <<'EOF2' && pass || fail "--adopt wrote a wrong .source.json"
+import hashlib, json, os, sys
+b = sys.argv[1]; m = json.load(open(b + ".source.json"))
+assert m["sha256"] == hashlib.sha256(open(b, "rb").read()).hexdigest() and m["bytes"] == os.path.getsize(b)
+assert m["adopted"] and m["repository"] == "acme/widget" and m["default_branch"] == "main" and len(m["head_commit"]) == 40
+EOF2
+[ -z "$(ls -A "$T/stage7" 2>/dev/null)" ] && pass || fail "--adopt left scratch clones in --stage"
+rm "$T/dest7/other/torn.bundle"
+python3 "$M" verify --dest "$T/dest7" --stage "$T/stage7" 2>/dev/null && pass || fail "an adopted bundle must verify clean"
 
 echo "git-bundle-mirror: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

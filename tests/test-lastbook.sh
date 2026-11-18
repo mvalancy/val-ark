@@ -616,6 +616,7 @@ variant medsizeless 'a=[x for x in m["packs"] if x["id"]=="medium"][0]; a.pop("i
 : > "$T/req.log"
 vrun medsizeless --dest "$T/m43" --pack auto --budget 1; rc=$?
 check "nothing fits + an unheld pack with no size: not picked through the held-pack fallback, nothing fetched, exit 3" '[ "$rc" = 3 ] && [ ! -e "$T/m43/packs/Lastbook-Medium.zip" ] && ! grep -q "^GET .*Lastbook-Medium.zip" "$T/req.log" && grep -q "no Lastbook pack fits the budget" "$T/err"'
+check "nothing-fits message never quotes a pack with no size as needing 0 B" '! grep -q "Medium, needs 0 B" "$T/err" && grep -q "the smallest, Small, needs" "$T/err"'
 
 # auto never leaves a held, verified pack because the manifest over-reports another pack (R3)
 variant bigmed 'a=[p for p in m["packs"] if p["id"]=="medium"][0]; a["installed_bytes"]=10**15'

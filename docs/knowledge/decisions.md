@@ -162,6 +162,18 @@ later). See [README](README.md).
     recorded (`pack` in the stamps, else the kept manifest) under a different pack id, because then
     the ladder no longer says what is nested in what. It also never drops a file that a pack it
     keeps still names.
+- **Polish (#216):**
+  - *No intermediate upgrade after an unconfirmed claim (F1).* Once a larger pack's HEAD is
+    unconfirmed, `auto` downloads **no** pack that run. That rules out a smaller one, and also a
+    mid-size step up: with Small held and All unconfirmed, it no longer fetches about 67 GB of
+    Medium first. Only a pack already held and verified can still be chosen, so it keeps the held
+    pack and retries next run. The log names the held file and says no pack was downloaded.
+  - *Accurate rc-3 reason (F2).* When no pack is chosen, the message names the held pack file and
+    says either that it "is not in this release" (a renamed re-release) or that it "is listed in
+    this release with a different size" (same name, over- or under-claimed).
+  - *Real-box check (F3).* HEAD on `downloads.lastbook.org` returns a Content-Length equal to the
+    manifest size for all three pack zips (checked 2026-11), so genuine upgrades are not blocked by
+    the HEAD gate.
 - **Follow-up (not done):** feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
   rank) so value-per-byte, not a fixed share, decides its room.
 

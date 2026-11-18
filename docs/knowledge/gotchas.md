@@ -251,11 +251,19 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   partial. Before any of this, if `git ls-remote --heads --tags` equals the bundle's
   `git bundle list-heads` (peeled `^{}` lines and `HEAD` ignored) and the default branch has not
   moved, nothing is rebuilt or re-copied and the repo is recorded as `unchanged: true`, so a
-  multi-GB file on the share is not rewritten monthly for nothing. State records
-  `incremental: true|false`. Regression: `tests/test-git-bundle-mirror.sh` cases 12-16:
+  multi-GB file on the share is not rewritten monthly for nothing. **That skip also requires the
+  archived bundle's size and sha256 to match its `.source.json`.** `list-heads` reads only the
+  header, and git 2.43's `bundle verify` passes a *truncated* bundle, so without the hash a torn
+  or bit-rotted bundle would stay "unchanged" forever. The `verify` subcommand checks the same
+  provenance. **`git bundle verify` needs a repository:** run from a non-repo cwd it fails every
+  bundle ("need a repository to verify a bundle"). That broke `verify` and silently discarded
+  built bundles in the copy-only resume, so every call goes through `bundle_verify(bundle, repo)`,
+  which passes `-C` (an empty scratch repo is enough for full bundles). State records
+  `incremental: true|false`. Regression: `tests/test-git-bundle-mirror.sh` cases 3, 8 and 12-16:
+  - 3, 8: run from a non-repo cwd
   - 12: the trace shows `have` lines and no `deepen`
-  - 14: unchanged / moved tag
-  - 15: incremental-fetch fallback
+  - 14: unchanged, a moved default branch, a truncated / bit-flipped bundle, a moved tag
+  - 15: the incremental fetch is retried once, then falls back to the chunked fetch
   - 16: a rebuilt bundle that fails verify leaves the archived one byte-identical
 
 ## Storage / data root

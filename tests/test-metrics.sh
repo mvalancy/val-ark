@@ -10,6 +10,7 @@
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib/ports.sh"   # free_port / trap_signals: no fixed ports (parallel runs)
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
@@ -17,10 +18,11 @@ NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/
 
 T="$(mktemp -d)"; SRV_PID=""
 trap 'rm -rf "$T"; [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null' EXIT
+trap_signals
 mkdir -p "$T/state" "$T/content/zim" "$T/models"   # EMPTY state — no influx, no reports
 
 # --- server on an empty box (no telegraf/influxd anywhere) --------------------
-PORT=3931; B="http://127.0.0.1:$PORT"
+PORT=$(free_port); B="http://127.0.0.1:$PORT"
 VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" \
   VALARK_STATE_DIR="$T/state" VALARK_CONTENT_DIR="$T/content" VALARK_MODELS_DIR="$T/models" \
   "$NODE" "$ROOT/scripts/server.js" "$PORT" >"$T/srv.log" 2>&1 &
@@ -60,7 +62,7 @@ kill "$SRV_PID" 2>/dev/null; SRV_PID=""
 mkdir -p "$T/s2"
 "$NODE" -e 'const a=require(process.argv[1]);const d=process.argv[2];a.setPassword("metricspass",("admin"),d);a.setUseMode("passworded",d);' \
     "$ROOT/scripts/lib/auth.js" "$T/s2"
-PORT=3932; B="http://127.0.0.1:$PORT"
+PORT=$(free_port); B="http://127.0.0.1:$PORT"
 VALARK_TEST_FORCE_REMOTE=1 VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" \
   VALARK_STATE_DIR="$T/s2" VALARK_CONTENT_DIR="$T/content" VALARK_MODELS_DIR="$T/models" \
   "$NODE" "$ROOT/scripts/server.js" "$PORT" >"$T/srv2.log" 2>&1 &

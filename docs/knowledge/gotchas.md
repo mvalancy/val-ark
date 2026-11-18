@@ -311,6 +311,21 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Test / VM harness
 
+- <a id="parallel-test-ports"></a>**A test server on a fixed port breaks parallel runs.** Several
+  worktrees or workers often run `tests/run-all.sh` on one box at once. With a literal port
+  (`test-server-limits.sh` had 3700; `test-health.sh` and `test-moderation-api.sh` even shared
+  3927/3928), the second run either fails "server did not start" or quietly talks to the *first*
+  run's server and fails on its state (404 on a temp dir that server never had). Worse, bash does
+  **not** run an EXIT trap when the script is killed by a signal it doesn't trap, so a timed-out
+  or ^C'd run leaves `server.js` holding the port for every run after it. **Fix:** source
+  `tests/lib/ports.sh` and:
+  - pick ports with `free_port` (kernel-chosen), including a separate `free_port` for
+    `VALARK_HTTPS_PORT` (`port + 9000` overflows 65535 on an ephemeral port);
+  - call `trap_signals` after the EXIT trap, so INT/TERM run the cleanup;
+  - stop servers with `stop_pids` (TERM, then KILL after about 3s).
+
+  `tests/test-port-hygiene.sh` fails on a new literal port. If you find a stray `server.js`,
+  only kill the ones your own run started; another worker may be mid-test. (#195)
 - **`run-all.sh`'s green/red gate must not depend on node.** The runner's exit code came
   solely from `report/generate.mjs`; with no node on the host (fresh appliance, minimal
   container) it exited 0 even when suites failed. Every suite writes `results/*.json` with an

@@ -10,6 +10,9 @@
 #  * a failing remote marks the repo failed (exit 2) without killing the run.
 #  * a refresh seeds from the existing bundle and fetches only new objects;
 #    a corrupt old bundle falls back to the full fetch (#179).
+#  * unchanged upstream refs skip the rebuild + re-copy; a failing incremental
+#    fetch falls back to the chunked path; a rebuilt bundle that fails verify
+#    never replaces the archived one.
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -171,6 +174,73 @@ python3 -c "import json,sys;s=json.load(open(sys.argv[1]))['acme/widget'];sys.ex
     "$T/dest/.mirror-state.json" && pass || fail "corrupt bundle was not a full-fetch fallback"
 rm -rf "$T/r13"; git clone -q "$B" "$T/r13" 2>/dev/null
 [ "$(git -C "$T/r13" rev-list --count HEAD 2>/dev/null)" = "41" ] && pass || fail "fallback bundle lacks full history"
+
+# 14. unchanged upstream (ls-remote == bundle list-heads): no rebuild, no re-copy.
+ino0=$(stat -c '%i %Y %s' "$B"); sum0=$(sha256sum < "$B"); touch -d '2 days ago' "$B"; m0=$(stat -c %Y "$B")
+run --refresh-days 0 --repo acme/widget 2>"$T/log14" && pass || fail "unchanged refresh failed: $(cat "$T/log14")"
+python3 -c "import json,sys;s=json.load(open(sys.argv[1]))['acme/widget'];sys.exit(0 if s['status']=='complete' and s.get('unchanged') and s['bytes']>0 and len(s['head'])==40 else 1)" \
+    "$T/dest/.mirror-state.json" && pass || fail "unchanged upstream not recorded as unchanged"
+[ "$(stat -c %Y "$B")" = "$m0" ] && [ "$(sha256sum < "$B")" = "$sum0" ] && pass || fail "unchanged upstream still rewrote the bundle"
+grep -q '^acme/widget	' "$T/dest/INDEX.txt" && [ ! -e "$T/stage/acme__widget.git" ] && pass || fail "unchanged: index lost or staging left"
+# A moved tag is a change: must rebuild, not short-circuit.
+git -C "$R" tag -f v1.0 main >/dev/null
+run --refresh-days 0 --repo acme/widget 2>/dev/null
+python3 -c "import json,sys;s=json.load(open(sys.argv[1]))['acme/widget'];sys.exit(0 if s['status']=='complete' and not s.get('unchanged') else 1)" \
+    "$T/dest/.mirror-state.json" && [ "$(git bundle list-heads "$B" | awk '$2=="refs/tags/v1.0"{print $1}')" = "$(git -C "$R" rev-parse main)" ] \
+    && pass || fail "a moved tag was treated as unchanged"
+
+# 15. the single incremental fetch keeps failing -> chunked shallow/deepen fallback, same run.
+echo 42 > "$T/work/f"; git -C "$T/work" commit -qam c42; git -C "$T/work" push -q "$R" main
+python3 - "$ROOT/scripts/lib" "$T" <<'PY' && pass || fail "failing incremental fetch did not fall back to the chunked path"
+import json, subprocess, sys
+sys.path.insert(0, sys.argv[1]); T = sys.argv[2]
+import git_bundle_mirror as g
+g.repo_info = lambda n: dict(full_name="acme/widget", size=1, default_branch="main", html_url="x")
+calls, real = [], g.git
+def flaky(local, *args, **k):
+    calls.append(args)
+    if args[:4] == ("fetch", "--quiet", "--prune", "origin"):
+        raise RuntimeError("fetch: early EOF")
+    return real(local, *args, **k)
+g.git = flaky
+assert g.main(["mirror", "--dest", T + "/dest", "--stage", T + "/stage", "--tries", "6", "--retry-wait", "0",
+               "--refresh-days", "0", "--repo", "acme/widget"]) == 0
+st = json.load(open(T + "/dest/.mirror-state.json"))["acme/widget"]
+assert st["status"] == "complete" and not st["incremental"], st
+incr = [c for c in calls if c[:4] == ("fetch", "--quiet", "--prune", "origin")]
+assert len(incr) == 1, calls          # flaky() is one call; real retries are bounded inside git()
+assert any("--depth=1" in c for c in calls), calls
+out = subprocess.run(["git", "bundle", "list-heads", T + "/dest/acme/widget.bundle"], capture_output=True, text=True).stdout
+head = subprocess.run(["git", "-C", T + "/remote/acme/widget.git", "rev-parse", "main"], capture_output=True, text=True).stdout.strip()
+assert head + " refs/heads/main" in out, out
+PY
+python3 -c "import sys;sys.path.insert(0,'$ROOT/scripts/lib');import git_bundle_mirror as g;sys.exit(0 if 1<=g.INCR_TRIES<=3 else 1)" \
+    && pass || fail "incremental fetch must get only a few tries before falling back"
+rm -rf "$T/r15"; git clone -q "$B" "$T/r15" 2>/dev/null
+[ "$(git -C "$T/r15" rev-list --count HEAD 2>/dev/null)" = "42" ] && pass || fail "fallback bundle lacks full history"
+
+# 16. a rebuilt bundle that fails `git bundle verify` never replaces the archived one.
+echo 43 > "$T/work/f"; git -C "$T/work" commit -qam c43; git -C "$T/work" push -q "$R" main
+python3 - "$ROOT/scripts/lib" "$T" <<'PY' && pass || fail "a broken rebuilt bundle replaced the good archived bundle"
+import hashlib, json, os, subprocess, sys
+sys.path.insert(0, sys.argv[1]); T = sys.argv[2]
+import git_bundle_mirror as g
+g.repo_info = lambda n: dict(full_name="acme/widget", size=0, default_branch="main", html_url="x")
+B = T + "/dest/acme/widget.bundle"
+before = hashlib.sha256(open(B, "rb").read()).hexdigest()
+real = subprocess.run
+def run(cmd, *a, **k):  # the post-build verify (git -C <staging> bundle verify) reports a corrupt bundle
+    if isinstance(cmd, list) and cmd[:1] == ["git"] and "-C" in cmd and cmd[3:5] == ["bundle", "verify"]:
+        return subprocess.CompletedProcess(cmd, 1, "", "error: simulated corrupt bundle")
+    return real(cmd, *a, **k)
+g.subprocess.run = run
+assert g.main(["mirror", "--dest", T + "/dest", "--stage", T + "/stage", "--tries", "1", "--retry-wait", "0",
+               "--refresh-days", "0", "--repo", "acme/widget"]) == 2
+assert hashlib.sha256(open(B, "rb").read()).hexdigest() == before
+assert not os.path.exists(B + ".part") and not os.path.exists(T + "/stage/acme__widget.bundle")
+st = json.load(open(T + "/dest/.mirror-state.json"))["acme/widget"]
+assert st["status"] == "complete" and "bundle verify" in st["last_error"], st
+PY
 
 echo "git-bundle-mirror: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

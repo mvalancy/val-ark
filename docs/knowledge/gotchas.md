@@ -355,10 +355,12 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
     the EXIT trap and mid-test;
   - `trap_signals` is optional belt and braces (exit 130/143 through the EXIT trap).
 
-  `tests/test-port-hygiene.sh` fails on a literal port, a `PORT+N` offset, or a server test
-  that never calls `stop_pids`. Its §3 includes a negative control showing it does catch a
+  `tests/test-port-hygiene.sh` fails on a literal port, on any `PORT+N` offset (`$((PORT+1))`,
+  `$(($PORT + 1))`, `$((1+PORT))`), on a server test whose EXIT trap doesn't `stop_pids` the
+  variable holding that server's PID, and on a mid-test `stop_pids "$X"` that doesn't clear
+  `X=""` (otherwise the trap later signals a PID that may have been reused). Its §3 includes a negative control showing it does catch a
   trap that never kills the server. If you find a stray `server.js`,
-  only kill the ones your own run started; another worker may be mid-test. (#195, #199)
+  only kill the ones your own run started; another worker may be mid-test. (#195, #199, #208)
 - **`run-all.sh`'s green/red gate must not depend on node.** The runner's exit code came
   solely from `report/generate.mjs`; with no node on the host (fresh appliance, minimal
   container) it exited 0 even when suites failed. Every suite writes `results/*.json` with an

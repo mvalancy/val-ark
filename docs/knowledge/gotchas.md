@@ -95,6 +95,11 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   `Filename` has none, so name files after the URL basename or the flat-repo index and the SHA
   lookup silently miss ~5% of packages. Resolve against an **empty dpkg status** in a throwaway
   APT root so every dependency (even libc6) is included and the set is truly self-contained.
+- <a id="argparse-exit-2"></a>**argparse exits 2 on a usage error**, which silently collides with any
+  CLI that documents its own `2` (`apt_offline.py`: "a download failed"), so a typo'd set id looked
+  like a flaky mirror. Override `ArgumentParser.error()` to exit **64** (`EX_USAGE`), and when one run
+  can hit several failure classes, report the **most severe** one through a single `worst()` instead
+  of `return 2 if failed else status` (which hid a set whose resolve failed). (#178)
 - **hf‑repo model downloads (e.g. `rhasspy/piper-voices`) fail with exit 127 if the `hf` CLI
   is missing** — silent for a while, then "command not found." **Fix:** `pip install -U
   huggingface_hub` (provides `hf`); `setup.sh` marks it optional but it's required for repo pulls.

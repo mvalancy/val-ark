@@ -342,7 +342,7 @@ id=$(start_tool zzquiet); st=$(wait_job "$id" 30)
 # B14. server restart mid-job: history survives, the interrupted job is reported FAILED (not 'running' forever)
 id=$(start_tool zzstall); sleep 1.0
 OPID="$(python3 -c 'import json; d=json.load(open("'"$R"'/state/jobs.json")); print([j for j in d["jobs"] if j["id"]=="'"$id"'"][0].get("pid",""))' 2>/dev/null)"
-stop_pids "$SRV_PID"
+stop_pids "$SRV_PID"; SRV_PID=""
 # the job's process group would be orphaned; the new server must still report it honestly
 start_server && pass || fail "B14 server restart failed"
 st="$(job "$id" "['status']")"
@@ -356,7 +356,7 @@ job "$id" "['error']" | grep -qi 'leftover download process was stopped' && pass
 
 # B17. a jobs.json with the wrong shape must never stop the server from booting
 for bad in 'null' '{"jobs":{"a":1}}' '[1,2]' '{"jobs":[null,5,{"id":"9","status":"running"}]}'; do
-    stop_pids "$SRV_PID"
+    stop_pids "$SRV_PID"; SRV_PID=""
     printf '%s' "$bad" > "$R/state/jobs.json"
     start_server && pass || fail "B17 server must boot with jobs.json = $bad (see $T/srv.log)"
 done

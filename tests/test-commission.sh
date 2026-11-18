@@ -90,7 +90,7 @@ if [ "$up" = 1 ]; then
 else
     fail "test server did not start on :$PORT (see srv.log)"
 fi
-stop_pids "$SRV_PID"
+stop_pids "$SRV_PID"; SRV_PID=""
 
 echo "commission: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

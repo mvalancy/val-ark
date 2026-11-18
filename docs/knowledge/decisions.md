@@ -191,6 +191,21 @@ later). See [README](README.md).
     `lastbook.sh`'s rc-3 line now names both causes (budget, or upstream size).
   - *Nothing-fits message (G2).* It now quotes the smallest pack's need **plus** the room reserved
     for the base maps and installers, and the total, which is what the fit actually compares.
+- **Step up, never down; prune on a skip-only exit 3 (#220):**
+  - *Never below the held pack (K1).* `auto` never downloads a pack smaller than the largest pack
+    held and verified on disk, whatever happened to the better candidates. Before, after a "broken
+    upstream" skip of a renamed All-2, it could fetch about 67 GB of Medium beside the held All.
+    The one exception is a same-id re-release of at least half the held size, which replaces the
+    held file (R1). The pack id comes from the stamps, else the kept manifest. If that leaves
+    nothing to choose, the run exits 3 and says every offered pack is smaller than the held file.
+  - *Prune after a skip-only exit 3 (K2).* When the run exits 3 **only** because `auto` passed over
+    a larger pack upstream (everything selected was fetched and verified; nothing deferred, over
+    budget or failed; a pack was chosen), prune runs with exactly the guards of an exit-0 prune.
+    So the smaller pack nested in the verified choice no longer lingers while upstream is wrong.
+    Any other exit 3, and every exit 1, still prunes nothing.
+  - *Messages (K3).* When every candidate is contradicted upstream, the note says "no Lastbook pack
+    could be confirmed upstream" (not "fits the budget"), and an unlimited budget prints as
+    "unlimited", never "?".
 - **Follow-up (not done):** feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
   rank) so value-per-byte, not a fixed share, decides its room.
 

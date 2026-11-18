@@ -17,7 +17,8 @@
 #    copy-only resume work from a non-repo cwd, also with relative --dest/--stage;
 #    a bundle with no .source.json is UNVERIFIED until --adopt checks it fully;
 #    empty/[]/garbage sidecars are UNVERIFIED (never a match or crash); --adopt
-#    runs fsck; stale .adopt-* dirs are swept; bundle + sidecar are fsync'd.
+#    runs fsck; stale .adopt-* dirs and .bundle.part files are swept; bundle +
+#    sidecar are fsync'd (read-only fd); a per-bundle verify error never stops the walk.
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -379,6 +380,50 @@ i, j = ev.index("replace widget.bundle"), ev.index("replace widget.bundle.source
 assert i > 0 and ev[i - 1] == "fsync", ev          # bundle bytes durable before it is renamed in
 assert ev[i + 1] == "fsync" and i < j, ev          # its directory entry durable, then the sidecar
 assert ev[j - 1] == "fsync" and ev[j + 1] == "fsync", ev
+PY
+
+# 23. verify(): an error inside one bundle's check (here sha256() raising after git's verify
+#     passed) is that bundle's BAD line; the walk goes on and the exit is 2, not a traceback.
+python3 - "$ROOT/scripts/lib" "$T" <<'PY' 2>"$T/log23" && pass || fail "verify must catch a per-bundle error and keep walking: $(tail -3 "$T/log23")"
+import shutil, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1]); T = Path(sys.argv[2])
+import git_bundle_mirror as g
+d = T / "dest11"; shutil.rmtree(d, ignore_errors=True)
+for name in ("a/one", "b/two"):
+    (d / name).parent.mkdir(parents=True)
+    shutil.copy(T / "dest10/acme/widget.bundle", d / (name + ".bundle"))
+    shutil.copy(T / "dest10/acme/widget.bundle.source.json", d / (name + ".bundle.source.json"))
+real = g.sha256
+def flaky(p):
+    if Path(p).name == "one.bundle":
+        raise OSError(5, "Input/output error")
+    return real(p)
+g.sha256 = flaky
+assert g.verify(d, T / "stage11") == 2
+PY
+grep -q '^BAD a/one.bundle: OSError' "$T/log23" && grep -q '^verified 2 bundles, 1 bad' "$T/log23" && pass \
+    || fail "per-bundle error not reported as BAD with the walk finished ($(cat "$T/log23"))"
+
+# 24. stale .bundle.part files (a copy killed mid-way) older than a day are swept at mirror start;
+#     a fresh one (a copy in flight) and a .part directory are left alone.
+mkdir -p "$T/dest10/old" "$T/dest10/new" "$T/dest10/dir/x.bundle.part"
+echo junk > "$T/dest10/old/x.bundle.part"; touch -d '2 days ago' "$T/dest10/old/x.bundle.part" "$T/dest10/dir/x.bundle.part"
+echo junk > "$T/dest10/new/x.bundle.part"
+python3 "$M" mirror --dest "$T/dest10" --stage "$T/stage10" --tries 1 --retry-wait 0 --repo acme/widget 2>/dev/null
+[ ! -e "$T/dest10/old/x.bundle.part" ] && [ -f "$T/dest10/new/x.bundle.part" ] && [ -d "$T/dest10/dir/x.bundle.part" ] \
+    && pass || fail "stale .bundle.part not swept (or a fresh one / a directory removed)"
+
+# 25. fsync_file needs no write permission (read-only fd first, read-write fallback).
+python3 - "$ROOT/scripts/lib" "$T" <<'PY' && pass || fail "fsync_file failed on a read-only file"
+import os, sys
+sys.path.insert(0, sys.argv[1]); T = sys.argv[2]
+import git_bundle_mirror as g
+p = os.path.join(T, "ro.bin"); open(p, "w").write("x"); os.chmod(p, 0o444)
+flags, real = [], os.open
+g.os.open = lambda path, fl, *a: (flags.append(fl), real(path, fl, *a))[1]
+g.fsync_file(p)
+assert flags == [os.O_RDONLY], flags
 PY
 
 echo "git-bundle-mirror: $PASS passed, $FAIL failed"

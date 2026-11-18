@@ -297,8 +297,23 @@ def fsync_dir(d):
 
 
 def fsync_file(path):
-    with open(path, "rb+") as f:
-        os.fsync(f.fileno())
+    """fsync through a read-only fd (enough on Linux, and needs no write permission); fall
+    back to read-write where a platform/filesystem refuses fsync on a read-only fd."""
+    for flags in (os.O_RDONLY, os.O_RDWR):
+        try:
+            fd = os.open(str(path), flags)
+        except OSError:
+            if flags == os.O_RDWR:
+                raise
+            continue
+        try:
+            os.fsync(fd)
+            return
+        except OSError:
+            if flags == os.O_RDWR:
+                raise
+        finally:
+            os.close(fd)
 
 
 def write_atomic(path, text):
@@ -387,6 +402,19 @@ def has_provenance(bundle):
 
 
 ADOPT_STALE_S = 86400
+
+
+def sweep_stale_parts(dest):
+    """Remove `<owner>/<repo>.bundle.part` FILES older than a day: a copy killed mid-way
+    (power cut, unplugged share) leaves up to one repo of dead space next to the bundle.
+    A fresh .part may belong to a copy in flight, so it is left alone."""
+    for f in dest.glob("*/*.bundle.part"):
+        try:
+            if f.is_file() and time.time() - f.stat().st_mtime > ADOPT_STALE_S:
+                f.unlink()
+                print(f"removed stale {f.relative_to(dest)}", file=sys.stderr)
+        except OSError:
+            pass
 
 
 def sweep_adopt_scratch(stage):
@@ -519,6 +547,7 @@ def main(argv=None):
         return verify(dest, stage, a.adopt)
     dest.mkdir(parents=True, exist_ok=True)
     stage.mkdir(parents=True, exist_ok=True)
+    sweep_stale_parts(dest)
     state_file = dest / ".mirror-state.json"
     try:
         state = json.loads(state_file.read_text())

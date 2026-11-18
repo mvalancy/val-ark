@@ -282,6 +282,9 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   - 20: `--adopt` refuses a bundle that clones but fails fsck
   - 21: the stale `.adopt-*` sweep
   - 22: fsync order
+  - 23: a per-bundle error inside `verify` is that bundle's BAD line and the walk goes on
+  - 24: stale `.bundle.part` sweep at mirror start
+  - 25: `fsync_file` works through a read-only fd
 
 ## Storage / data root
 

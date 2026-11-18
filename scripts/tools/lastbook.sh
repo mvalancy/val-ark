@@ -13,11 +13,13 @@
 # content/ is a served tree: LAN users download the installer and the packs from the Ark.
 #
 # DEFAULT (part of `download-tools.sh all`, so the weekly refresh keeps it current):
-#   --pack auto     the largest pack (Small 7.7 GB / Medium 67.5 GB / All 388 GB) that fits
-#                   VALARK_LASTBOOK_BUDGET_PCT (default 50) percent of the librarian's budget
-#                   (disk headroom above the reserve, capped by VALARK_MAX_GB), so the librarian
-#                   keeps the other half. Files already held cost nothing, so a pack once
-#                   fetched stays chosen when the disk later fills.
+#   --pack auto     the largest pack (Small 7.7 GB / Medium 67.5 GB / All 388 GB) that fits, with
+#                   room left for the base maps + installers, in Lastbook's share: it may hold
+#                   VALARK_LASTBOOK_BUDGET_PCT (default 50) percent of (headroom above the reserve on
+#                   the disk that holds content/lastbook, capped by VALARK_MAX_GB, + what it already
+#                   holds), so the librarian keeps the rest. Files already held cost nothing, so a
+#                   pack once fetched stays chosen when the disk later fills. Once a larger pack is
+#                   verified, the smaller packs nested in it are pruned (never with --pack every).
 #   --maps auto     state maps in manifest order (largest states first) while they fit; addresses follow the maps
 #   --model auto    the 16.9 GB GGUF when it still fits after the pack
 #   --apps current  every installer of the current app version (mac, windows, Ubuntu debs)
@@ -41,22 +43,45 @@ download_lastbook() {
     local cmd=mirror
     if [ "${1:-}" = plan ]; then cmd=plan; shift; fi
 
-    # The bytes this run may ADD: an explicit budget, else a share of the librarian's budget.
-    # -1 = unknown (no limit).
+    # The bytes this run may ADD: an explicit VALARK_LASTBOOK_BUDGET (-1 = no limit), else
+    # lastbook_mirror.py works it out: headroom above the reserve on the filesystem that holds
+    # LASTBOOK_DIR (not DATA_ROOT: it may be another disk), capped by what VALARK_MAX_GB still
+    # allows (only when LASTBOOK_DIR is inside the data trees that cap accounts for), and Lastbook may hold PCT percent of (that headroom + what it already holds), so its
+    # share never compounds across runs. Downloads also stop at the reserve.
     local budget="${VALARK_LASTBOOK_BUDGET:-}" pct="${VALARK_LASTBOOK_BUDGET_PCT:-50}"
     case "$pct" in ''|*[!0-9]*) log_error "${TOOL_NAME}: VALARK_LASTBOOK_BUDGET_PCT wants 1-100"; return 2 ;; esac
     pct=$((10#$pct)); [ "$pct" -lt 1 ] && pct=1; [ "$pct" -gt 100 ] && pct=100
+    local size_args=(--budget "$budget")
     if [ -z "$budget" ]; then
-        budget=-1
-        if declare -F valark_budget_bytes >/dev/null; then
-            budget=$(valark_budget_bytes 2>/dev/null)
-            case "$budget" in ''|*[!0-9]*) budget=-1 ;; *) budget=$(( budget / 100 * pct )) ;; esac
+        size_args=(--share "$pct")
+        # VALARK_MAX_GB bounds Val Ark's own data trees (valark_data_used_bytes). A Lastbook dir
+        # outside them is not in that accounting, so the cap would not count what Lastbook holds:
+        # then it is not applied (the dest disk's headroom + reserve + share still are).
+        local in_trees=0 d real_lb; real_lb=$(realpath -m "$LASTBOOK_DIR" 2>/dev/null || echo "$LASTBOOK_DIR")
+        for d in "${MODELS_DIR:-}" "${TOOLS_DIR:-}" "${CONTENT_DIR:-}" "${SOURCES_DIR:-}" "${ASSETS_DIR:-}" "${INSTALLERS_DIR:-}" "${PRIVATE_DIR:-}"; do
+            [ -n "$d" ] || continue
+            d=$(realpath -m "$d" 2>/dev/null || echo "$d")
+            case "$real_lb/" in "$d"/*) in_trees=1 ;; esac
+        done
+        if [ -n "${VALARK_MAX_GB:-}" ] && [ "$in_trees" = 0 ]; then
+            log_info "${TOOL_NAME}: ${LASTBOOK_DIR} is outside the Val Ark data trees, so VALARK_MAX_GB does not bound it"
         fi
+        local max_gb="${VALARK_MAX_GB:-}"; [ "$in_trees" = 1 ] || max_gb=""
+        case "$max_gb" in
+            ''|*[!0-9]*) ;;
+            *) if declare -F valark_data_used_bytes >/dev/null; then
+                   local used cap; used=$(valark_data_used_bytes 2>/dev/null)
+                   case "$used" in ''|*[!0-9]*) ;; *)
+                       cap=$(( VALARK_MAX_GB * 1073741824 - used )); [ "$cap" -lt 0 ] && cap=0
+                       size_args+=(--cap "$cap") ;;
+                   esac
+               fi ;;
+        esac
     fi
 
     local sel=(--pack "${VALARK_LASTBOOK_PACK:-auto}" --maps "${VALARK_LASTBOOK_MAPS:-auto}"
                --addresses "${VALARK_LASTBOOK_ADDRESSES:-follow}" --model "${VALARK_LASTBOOK_MODEL:-auto}"
-               --apps "${VALARK_LASTBOOK_APPS:-current}" --budget "$budget")
+               --apps "${VALARK_LASTBOOK_APPS:-current}" "${size_args[@]}")
     if [ "$cmd" = plan ]; then
         python3 "$LASTBOOK_PY" plan --dest "$LASTBOOK_DIR" "${sel[@]}" "$@"
         return $?
@@ -76,7 +101,7 @@ download_lastbook() {
         0)  DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
             log_success "${TOOL_NAME}: current release mirrored (pack: $(_lb packs || echo none); app $(_lb app_version); $(valark_human "$(_lb added_bytes)") added; $(du -sh "$LASTBOOK_DIR" 2>/dev/null | cut -f1) held)" ;;
         3)  DOWNLOAD_SKIPPED=$((DOWNLOAD_SKIPPED + 1))
-            log_warn "${TOOL_NAME}: incomplete - part of the selection did not fit the budget ($(valark_human "$budget")); pack: $(_lb packs || echo none). Free space, raise VALARK_LASTBOOK_BUDGET_PCT / VALARK_MAX_GB, then re-run" ;;
+            log_warn "${TOOL_NAME}: incomplete - part of the selection did not fit the budget (${budget:-${pct}% share}); pack: $(_lb packs || echo none). Free space, raise VALARK_LASTBOOK_BUDGET_PCT / VALARK_MAX_GB, then re-run" ;;
         64) log_error "${TOOL_NAME}: bad option (see the header of scripts/tools/lastbook.sh)"; return 2 ;;
         *)  log_error "${TOOL_NAME}: mirror failed (exit ${rc}); partial downloads resume next run"; return 1 ;;
     esac

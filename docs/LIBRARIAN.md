@@ -38,6 +38,14 @@ The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
    critical ~20 items and a big disk later upgrades to the full variants in
    phases 1–3. Rows can target an owner profile (`focus`), e.g. Army field manuals
    only for `survival`.
+   Once the full variant is complete on disk, the end of each `fill` removes the
+   now-redundant small copy (managed + unpinned only; never while a STOP halted the
+   fill). **Known trade-off:** on a big disk an essential ZIM is downloaded twice
+   (the mini first, the maxi later, then the mini is pruned), and on a disk where
+   the maxi would fit alone but not beside the mini, the maxi is not fetched and
+   that essential stays on its mini. This is on purpose: getting a critical copy
+   onto the disk fast beats saving the mini's bytes (see
+   [decisions](knowledge/decisions.md#mini-then-maxi)).
 1. **Diversity first** — one item (the *smallest*) from every category before
    deepening any single one. Guarantees breadth across ~40+ categories (22 ZIM
    topics, 17 model modalities, and netboot / OS-install / router-firmware /
@@ -84,7 +92,9 @@ Downloads prefer **aria2** (8 connections, ~3x faster on per-connection-throttle
 mirrors), falling back to single-stream `curl -C -` (and `hf` for repo pulls). All
 are resumable, retried, size-verified, atomically renamed, recorded in
 `state/manifest.tsv`, and a single `flock` ensures only one filler runs at a time.
-A `state/STOP` flag halts filling. Resumers never mix: an aria2 partial (marked by
+A `state/STOP` flag halts filling, and a fill that stopped because of it also skips the
+superseded-variant prune, so nothing is deleted after you ask it to stop (the prune runs at the end
+of the next fill). Resumers never mix: an aria2 partial (marked by
 its `.aria2` control file) is only ever resumed by aria2 — the curl fallback skips
 it, because an aria2 `.part` is segmented and `curl -C -` would "complete" it with
 holes. Failed attempts keep the partial + control file so the next cycle resumes

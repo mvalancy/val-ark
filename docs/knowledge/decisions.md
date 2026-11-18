@@ -678,3 +678,23 @@ domains, loopback, and `$`/`{}`/`<>` placeholders pass automatically.
   video). Every profile still gets the `all` rows. Grid-down topics also get a +80 value boost for all
   profiles in `catalog.sh`.
 - Backward compatible: without `--essentials` the planner is unchanged (tested).
+- <a id="prune-after-stop"></a>**The superseded prune is skipped after a STOP halt (#177).** A
+  `state/STOP` flag means "stop changing the disk" (the owner may be about to unplug or inspect it)
+  and the plan ran only partway, so `cmd_fill` does not delete anything after a STOP — the prune just
+  runs at the end of the next un-halted fill. Every other early exit (time / byte / item budget, low
+  headroom) still prunes, because freeing the redundant small copy is exactly what helps then. The
+  prune's manifest rewrite is an exact first-column match (`awk '$1!=id'`), so an id that is a prefix
+  or extension of the pruned id is never dropped; `tests/test-essentials.sh` §8 runs the real
+  `prune_superseded` + `cmd_fill` against a fixture to hold both rules.
+- <a id="mini-then-maxi"></a>**Known trade-off, kept on purpose: mini first, maxi later.** On a big
+  disk an essential ZIM is fetched twice — the mini in phase 0, the maxi in phase 1–3, then the mini is
+  pruned — so its small variant's bytes are downloaded and thrown away. And on a disk where the maxi
+  would fit alone but not beside the mini (budget between `maxi` and `mini + maxi`), the maxi is never
+  planned; that essential stays on its mini. We considered "skip the mini when the maxi is also planned":
+  it would either move a multi-GB download into phase 0 (delaying every lower-ranked life-safety item
+  behind it on a time-bounded `maintain` fill) or leave the essential with *no* copy until phase 3
+  reaches it. Crediting the mini's bytes back to the maxi's budget doesn't work either: the prune runs
+  after the fill, so the disk briefly holds both, and the fill's live headroom check would then stop the
+  whole fill before the maxi. The waste is bounded by the small variants' size (typically ~10% of the
+  full ones), while getting the critical small copy onto the disk fast is the point of phase 0, so the
+  behavior stays as is (documented in `docs/LIBRARIAN.md`).

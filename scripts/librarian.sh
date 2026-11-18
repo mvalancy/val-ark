@@ -273,10 +273,10 @@ cmd_fill() {
     build_plan "$budget" > "${TMPDIR_VA}/plan.tsv"
     cat "${TMPDIR_VA}/plan.summary" >&2
     local start; start=$(date +%s)
-    local n_ok=0 n_fail=0 bytes_done=0 items=0
+    local n_ok=0 n_fail=0 bytes_done=0 items=0 halted=0
     log "fill: starting (budget $(human "$budget"), $(wc -l < "${TMPDIR_VA}/plan.tsv") planned)"
     while IFS=$'\t' read -r id bucket cat value bytes source url dest extra phase; do
-        [ -f "$STOP_FLAG" ] && { warn "STOP flag; halting fill"; break; }
+        [ -f "$STOP_FLAG" ] && { warn "STOP flag; halting fill"; halted=1; break; }
         [ "$max_items" -gt 0 ] && [ "$items" -ge "$max_items" ] && break
         [ "$max_bytes" -gt 0 ] && [ "$bytes_done" -ge "$max_bytes" ] && break
         if [ "$time_budget" -gt 0 ]; then
@@ -297,7 +297,17 @@ cmd_fill() {
         fi
     done < "${TMPDIR_VA}/plan.tsv"
     log "fill done: ${GREEN}${n_ok} ok${NC}, ${RED}${n_fail} failed${NC}, $(human "$bytes_done") added, $(human "$(valark_fillable_bytes)") fillable left"
-    prune_superseded >&2
+    # STOP means "stop changing the disk": the owner may be about to unplug or
+    # inspect it, and the plan ran only partway. Pruning deletes files, so it is
+    # skipped after a STOP halt (also when STOP appeared after the last item) and
+    # simply runs on the next un-halted fill. Other early exits (time/byte/item
+    # budget, low headroom) still prune — that is exactly when freeing the
+    # redundant small copy helps. (#177)
+    if [ "$halted" = 1 ] || [ -f "$STOP_FLAG" ]; then
+        warn "STOP flag: skipping superseded-variant prune (runs on the next fill)"
+    else
+        prune_superseded >&2
+    fi
     echo "$n_ok"
 }
 

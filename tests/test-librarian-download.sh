@@ -13,6 +13,7 @@
 #   e) curl-only box: stale aria2 partial is discarded (fresh start), curl's own
 #      linear .part still resumes
 #   f) verify age-GCs abandoned partials (VALARK_PARTIAL_MAX_AGE_DAYS)
+#   g) manifest rows are removed by EXACT id in manifest_add + cmd_evict (#192)
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -166,6 +167,38 @@ rm -f "$new_p"
 printf 'x' > "$old_p"; touch -d "20 days ago" "$old_p"
 VALARK_PARTIAL_MAX_AGE_DAYS=30 PATH="$BIN" cmd_verify >/dev/null 2>&1
 [ -f "$old_p" ] && pass || fail "a 20-day partial must survive when VALARK_PARTIAL_MAX_AGE_DAYS=30"
+
+# === 10. manifest rows are removed by EXACT id (#192) ==========================
+# manifest_add (re-record) and cmd_evict used `grep -v -F "id<TAB>"`: an id that
+# ENDS in the target (xzim:a for zim:a) was dropped too, and when the target was
+# the only row grep exited 1 so the rewrite never happened.
+mrow() { printf '%s\tcontent\tzim:other\t%s\t%s\t%s\tzim\t0\n' "$1" "$2" "$3" "$4"; }
+mids() { cut -f1 "$MANIFEST" | tr '\n' ' '; }
+rm -f "$MANIFEST"
+manifest_add zim:a content zim:other "$ZIM_DIR/a.zim" 10 5 zim
+manifest_add zim:a content zim:other "$ZIM_DIR/a.zim" 20 5 zim
+[ "$(mids)" = "zim:a " ] && [ "$(cut -f5 "$MANIFEST")" = 20 ] && pass \
+    || fail "re-recording the only manifest row must replace it, not duplicate it (got '$(mids)')"
+mrow xzim:a "$ZIM_DIR/xa.zim" 10 5 > "$MANIFEST"
+manifest_add zim:a content zim:other "$ZIM_DIR/a.zim" 10 5 zim
+manifest_add zim:a content zim:other "$ZIM_DIR/a.zim" 10 5 zim
+[ "$(mids)" = "xzim:a zim:a " ] && pass || fail "manifest_add must not drop an id that ends in the re-recorded id (got '$(mids)')"
+# evict: zim:a is the cheapest value/byte victim; xzim:a (a suffix match) must stay.
+truncate -s 10 "$ZIM_DIR/a.zim" "$ZIM_DIR/xa.zim" "$ZIM_DIR/b.zim"
+{ mrow xzim:a "$ZIM_DIR/xa.zim" 10 900; mrow zim:a "$ZIM_DIR/a.zim" 10 1; mrow zim:b "$ZIM_DIR/b.zim" 10 900; } > "$MANIFEST"
+gen_candidates() { :; }
+cmd_evict --need 5 >/dev/null 2>&1
+[ ! -e "$ZIM_DIR/a.zim" ] && [ "$(mids)" = "xzim:a zim:b " ] && pass \
+    || fail "evict must drop exactly the victim's row (got '$(mids)')"
+[ -e "$ZIM_DIR/xa.zim" ] && pass || fail "evict must keep the suffix-id file"
+# pins: a pinned id is "present" only via its OWN manifest row, never a suffix-id row.
+mrow xzim:a "$ZIM_DIR/xa.zim" 10 900 > "$MANIFEST"
+printf 'content\tzim:a\t0\t\n' > "$PINS"
+P=$(cmd_pins 2>&1)
+grep -E 'zim:a .*missing' <<<"$P" | grep -qv xzim && pass || fail "pins: a suffix-id row must not make zim:a show present (got: $P)"
+mrow zim:a "$ZIM_DIR/xa.zim" 10 900 >> "$MANIFEST"
+cmd_pins 2>&1 | grep -qE '^ +content +zim:a +.*present' && pass || fail "pins: zim:a with its own row + file must show present"
+rm -f "$PINS" "$ZIM_DIR/b.zim" "$ZIM_DIR/xa.zim"
 
 echo "librarian-download: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

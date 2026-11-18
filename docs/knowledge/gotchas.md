@@ -63,6 +63,13 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   remote host `setsid nohup … </dev/null & disown`.
 - **`date +%s%3N` isn't portable** (busybox in a VM emits garbage) → nonsense durations. **Fix:**
   clamp absurd values in consumers (the report does).
+- <a id="tsv-exact-id"></a>**Never remove a TSV row with `grep -v -F "id<TAB>"`.** It is a substring
+  match, so removing `zim:a` also removes `xzim:a` (any id that *ends* in the target). And when the row
+  is the file's only line, `grep -v` prints nothing and exits 1, so `grep … > f.tmp && mv f.tmp f` never
+  runs and the row stays put. In `scripts/librarian.sh` this left duplicate manifest rows on re-record
+  and dropped unrelated items from the manifest on evict. Match the first column exactly instead:
+  `awk -F'\t' -v id="$id" '$1!=id' f > f.tmp && mv f.tmp f`. That is `manifest_drop` in
+  `librarian.sh` (and `cmd_pins` looks rows up the same way); tested in `tests/test-librarian-download.sh` §10. (#192)
 
 ## Cross‑architecture (arm64 boxes: Jetson-, Grace‑Blackwell-, Rockchip-class)
 

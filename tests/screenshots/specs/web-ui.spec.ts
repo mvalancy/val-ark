@@ -764,8 +764,10 @@ test.describe('Val Ark - Model File Verification', () => {
   });
 });
 
-// Content Library IDs and expected data
+// Content Library IDs and expected data (the Kiwix ZIM cards; CONTENT_CARD_IDS adds the
+// script-fed content releases, e.g. Lastbook, whose detail page is not ZIM-shaped)
 const CONTENT_IDS = ['wikipedia-simple', 'wikipedia-full'];
+const CONTENT_CARD_IDS = [...CONTENT_IDS, 'lastbook'];
 const CONTENT_DATA: Record<string, { name: string; size: string; articles: string; updated: string; file: string; source: string; featureCount: number }> = {
   'wikipedia-simple': {
     name: 'Wikipedia Simple English',
@@ -843,7 +845,7 @@ test.describe('Val Ark - Content Library', () => {
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('.card', { timeout: 5000 });
     const cards = page.locator('a.card[href*="#/content/"]');
-    await expect(cards).toHaveCount(CONTENT_IDS.length);
+    await expect(cards).toHaveCount(CONTENT_CARD_IDS.length);
   });
 
   test('Content cards are inside a cards-grid container', async ({ page }) => {
@@ -852,7 +854,7 @@ test.describe('Val Ark - Content Library', () => {
     await page.waitForSelector('.card', { timeout: 5000 });
     // Must use 'cards-grid' (with 's') to match CSS grid layout
     const gridCards = page.locator('.cards-grid a.card[href*="#/content/"]');
-    await expect(gridCards).toHaveCount(CONTENT_IDS.length);
+    await expect(gridCards).toHaveCount(CONTENT_CARD_IDS.length);
   });
 
   test('Content cards use same structure as tool cards (h3 for title, no card-body wrapper)', async ({ page }) => {
@@ -1097,6 +1099,34 @@ test.describe('Val Ark - Content Library', () => {
       expect(text!.length).toBeGreaterThan(10);
     });
   }
+
+  // ─── Lastbook (a content release fed by scripts/tools/lastbook.sh) ─────────────
+
+  test('Lastbook card: title, size, status, links to its detail page', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/content`);
+    await page.waitForSelector('.card', { timeout: 5000 });
+    const card = page.locator('a.card[href="#/content/lastbook"]');
+    await expect(card.locator('h3')).toHaveText('Lastbook');
+    await expect(card.locator('.card-icon')).toHaveText('L');
+    await expect(card.locator('.card-meta')).toContainText('388 GB');
+    await expect(card.locator('.card-meta')).toContainText(/Mirrored|Not Mirrored|Mirroring/);
+    await card.click();
+    await expect(page.locator('h1').first()).toHaveText('Lastbook');
+  });
+
+  test('Lastbook detail: source, location, lastbook.sh usage (not kiwix-serve), no empty Articles row', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/content/lastbook`);
+    await page.waitForSelector('.detail-table', { timeout: 5000 });
+    const table = page.locator('.detail-table');
+    await expect(table.locator('a[href="https://lastbook.org"]')).toBeVisible();
+    await expect(table).toContainText('content/lastbook/');
+    await expect(table).not.toContainText('Articles');
+    await expect(table).not.toContainText('undefined');
+    const usage = page.locator('.detail-section h3:has-text("Usage")').locator('..');
+    await expect(usage.locator('.code-block code').first()).toContainText('scripts/tools/lastbook.sh');
+    await expect(usage).not.toContainText('kiwix-serve');
+    await expect(page.locator('.detail-section h3:has-text("What\'s Included")').locator('..').locator('li')).toHaveCount(5);
+  });
 
   // ─── Edge Cases ───────────────────────────────────────────────────────────────
 

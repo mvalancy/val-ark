@@ -2389,6 +2389,34 @@ const CONTENT_LIBRARY = [
                 'The definitive offline reference'
             ]
         }
+    },
+    {
+        id: 'lastbook', name: 'Lastbook', category: 'survival', icon: 'L', iconBg: '#7a4a1c', downloadTarget: 'lastbook',
+        desc: 'Free offline survival library — manuals, videos, offline maps, address search and a local AI model, plus the app that reads them',
+        size: '7.7–388 GB',
+        // Not a ZIM: scripts/tools/lastbook.sh writes the current release under content/lastbook/, and
+        // /api/status/content (a walk of content/) feeds this card. A held pack = mirrored.
+        file: 'content/lastbook/',
+        match: '^lastbook/packs/Lastbook-[A-Za-z0-9._+-]+\\.zip$',
+        // Files LAN users download straight from the Ark (installers, packs), listed from the same walk.
+        filesMatch: '^lastbook/(app/[0-9][^/]*|packs)/[^/]+$',
+        source: 'https://lastbook.org',
+        updated: 'current release',
+        details: {
+            overview: 'Lastbook (MIT) is a free offline survival library: first aid, water, food, shelter and repair manuals, how-to videos, offline street maps with address search, and a local AI model, read by its own app on Mac, Windows and Ubuntu. Val Ark keeps the current release, sha256-verified, sized to the disk: the largest pack (Small 7.7 GB, Medium 67.5 GB or All 388 GB) that fits Lastbook\'s share, then state maps, address indexes and the model while they fit. Servers and NAS mirrors can opt in to every pack.',
+            features: [
+                'One content pack sized to the disk (Small / Medium / All); smaller packs are pruned once a larger one is verified',
+                'Offline state maps with address search, base map included',
+                'Its local AI model (GGUF) when it fits',
+                'Every installer of the current app version (Mac, Windows, Ubuntu debs), downloadable from this Ark',
+                'sha256-verified, resumable, refreshed weekly with the other mirrors'
+            ]
+        },
+        usage: [
+            {cmd: 'scripts/tools/lastbook.sh plan', desc: 'Preview what would be fetched at this disk size'},
+            {cmd: 'scripts/tools/lastbook.sh', desc: 'Mirror (or refresh) the current release into content/lastbook/'},
+            {cmd: 'scripts/tools/lastbook.sh --pack every --maps all --model yes', desc: 'Servers / NAS mirrors: everything (~570 GB)'}
+        ]
     }
 ];
 
@@ -5909,8 +5937,8 @@ function renderContentDetail(contentId) {
 
     html += '<div class="detail-section"><h3>Details</h3><table class="detail-table">';
     html += `<tr><td>Size</td><td>${item.size}</td></tr>`;
-    html += `<tr><td>Articles</td><td>${item.articles}</td></tr>`;
-    html += `<tr><td>Updated</td><td>${item.updated}</td></tr>`;
+    if (item.articles) html += `<tr><td>Articles</td><td>${item.articles}</td></tr>`;
+    if (item.updated) html += `<tr><td>Updated</td><td>${esc(item.updated)}</td></tr>`;
     html += `<tr><td>Status</td><td><span style="color:${statusColor};font-weight:600">${statusLabel}</span></td></tr>`;
     html += `<tr><td>Source</td><td><a href="${item.source}" target="_blank">${item.source}</a></td></tr>`;
     html += `<tr><td>File</td><td><code>${item.file}</code></td></tr>`;
@@ -5918,7 +5946,10 @@ function renderContentDetail(contentId) {
     if (statusClass !== 'installed' && _apiAvailable) {
         // Route through the per-item request path when we have a live-catalog id
         // (resolves the current dated build + auto-evicts to fit); else the legacy bulk target.
-        if (item.requestId) {
+        if (item.downloadTarget) {
+            // A content release a tool script mirrors (Lastbook): the same honest tool-mirror job.
+            html += `<button class="dl-action-btn" data-mirror-target="${escAttr(item.downloadTarget)}" onclick="mirrorFromEl(this)" style="margin-top:12px">Mirror</button>`;
+        } else if (item.requestId) {
             html += `<button class="dl-action-btn" data-kind="content" data-id="${escAttr(item.requestId)}" onclick="triggerRequestFromEl(this)" style="margin-top:12px">Mirror (${item.size})</button>`;
         } else {
             html += `<button class="dl-action-btn" onclick="triggerDownload('content','${item.id}')" style="margin-top:12px">Mirror</button>`;
@@ -5937,9 +5968,28 @@ function renderContentDetail(contentId) {
         }
     }
 
+    if (item.filesMatch && _contentRaw) {
+        let re; try { re = new RegExp(item.filesMatch); } catch (_) { re = null; }
+        const keys = re ? Object.keys(_contentRaw).filter(k => re.test(k) && !k.endsWith('.part')).sort() : [];
+        if (keys.length) {
+            html += '<div class="detail-section"><h3>Download from this Ark</h3><ul class="content-files">';
+            for (const k of keys) {
+                const url = '/api/archive/content/' + k.split('/').map(encodeURIComponent).join('/');
+                html += `<li><a href="${escAttr(url)}" download>${esc(k.split('/').pop())}</a> <span style="color:var(--text-muted)">${esc(formatBytes(_contentRaw[k].size || 0))}</span></li>`;
+            }
+            html += '</ul></div>';
+        }
+    }
+
     html += `<div class="detail-section"><h3>Usage</h3>`;
-    html += `<div class="code-block"><code>kiwix-serve --port 8888 ${item.file}</code></div>`;
-    html += `<p style="margin-top:0.5rem;color:var(--text-muted)">Or serve all ZIMs: <code>./scripts/download-zims.sh serve</code></p>`;
+    if (item.usage) {
+        for (const u of item.usage) {
+            html += `<div class="code-block"><code>${esc(u.cmd)}</code></div><p style="margin:0.25rem 0 0.75rem;color:var(--text-muted)">${esc(u.desc)}</p>`;
+        }
+    } else {
+        html += `<div class="code-block"><code>kiwix-serve --port 8888 ${item.file}</code></div>`;
+        html += `<p style="margin-top:0.5rem;color:var(--text-muted)">Or serve all ZIMs: <code>./scripts/download-zims.sh serve</code></p>`;
+    }
     html += '</div>';
 
     html += '</div>';
@@ -5949,6 +5999,7 @@ function renderContentDetail(contentId) {
 // Check content download status
 const CONTENT_STATUS = {};
 const CONTENT_INFO = {}; // {filename: {size, lastModified}}
+let _contentRaw = null;  // the last /api/status/content walk ({relpath: {size, lastModified}})
 
 // Presence match that survives the mirror rotating ZIM dates. Kiwix filenames carry
 // a build date (wikipedia_en_all_maxi_2026-02.zim), so an exact-filename check would
@@ -5970,6 +6021,7 @@ async function checkContentStatus() {
         const resp = await fetch('/api/status/content');
         if (resp.ok) {
             const contentData = await resp.json();
+            _contentRaw = contentData;
             for (const item of CONTENT_LIBRARY) {
                 const hit = contentPresent(item, contentData);
                 if (hit) {
@@ -6907,6 +6959,7 @@ async function initFromAPI() {
 
         // Populate content
         if (data.content) {
+            _contentRaw = data.content;
             for (const item of CONTENT_LIBRARY) {
                 const hit = contentPresent(item, data.content);
                 if (hit) {

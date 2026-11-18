@@ -161,6 +161,53 @@ test.describe('Val Ark - Install vs Download', () => {
     }
   });
 
+  test('Lastbook card is fed by the content walk: Mirrored + direct installer downloads', async ({ page }) => {
+    // What scripts/tools/lastbook.sh leaves under content/lastbook/, as /api/status/content reports it.
+    const LB = {
+      'lastbook/packs/Lastbook-Small-20261113.zip': { size: 7691528852, lastModified: '2026-11-14T00:00:00.000Z' },
+      'lastbook/app/1.1.11/Lastbook-1.1.11-mac.dmg': { size: 120000000, lastModified: '2026-11-14T00:00:00.000Z' },
+      'lastbook/app/1.1.11/Lastbook_1.1.11_amd64.deb.part': { size: 1000, lastModified: '2026-11-14T00:00:00.000Z' },
+      'lastbook/maps/Lastbook-Map-CA.zip': { size: 3218756405, lastModified: '2026-11-14T00:00:00.000Z' },
+    };
+    await page.route('**/api/status/content', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(LB) }));
+    await page.route('**/api/status/all', async (route) => {
+      const resp = await route.fetch();
+      const j = await resp.json();
+      j.content = { ...(j.content || {}), ...LB };
+      await route.fulfill({ response: resp, json: j });
+    });
+    await page.goto(`${BASE_URL}/#/content`);
+    const card = page.locator('a.card[href="#/content/lastbook"]');
+    await expect(card.locator('.card-meta')).toContainText('Mirrored', { timeout: 10000 });
+    await expect(card.locator('.card-meta')).not.toContainText('Not Mirrored');
+    await page.goto(`${BASE_URL}/#/content/lastbook`);
+    const files = page.locator('.content-files a');
+    await expect(files).toHaveCount(2, { timeout: 10000 });   // the installer + the pack; never a .part or a map
+    await expect(page.locator('.content-files a[href="/api/archive/content/lastbook/app/1.1.11/Lastbook-1.1.11-mac.dmg"]')).toBeVisible();
+    await expect(page.locator('.dl-action-btn[data-mirror-target="lastbook"]')).toHaveCount(0);   // mirrored: no Mirror button
+  });
+
+  test('Lastbook not mirrored: Mirror starts the lastbook tool job', async ({ page }) => {
+    await page.route('**/api/status/content', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+    await page.route('**/api/status/all', async (route) => {
+      const resp = await route.fetch();
+      const j = await resp.json();
+      j.content = {};
+      await route.fulfill({ response: resp, json: j });
+    });
+    await page.goto(`${BASE_URL}/#/content/lastbook`);
+    const btn = page.locator('.dl-action-btn[data-mirror-target="lastbook"]');
+    await expect(btn).toHaveCount(1, { timeout: 10000 });
+    expect(await btn.getAttribute('onclick')).toContain('mirrorFromEl(this)');
+    await page.route('**/api/download/**', (route) =>
+      route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'stubbed' }) }));
+    const reqPromise = page.waitForRequest((r) => r.url().includes('/api/download/') && r.method() === 'POST');
+    await btn.click();
+    const req = await reqPromise;
+    expect(req.url()).toContain('/api/download/tools');
+    expect(req.postDataJSON()).toEqual({ target: 'lastbook' });
+  });
+
   test('content items show Install button (not Download)', async ({ page }) => {
     await page.goto(BASE_URL);
     await page.waitForLoadState('load');

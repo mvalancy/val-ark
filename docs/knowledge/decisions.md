@@ -49,8 +49,9 @@ later). See [README](README.md).
 - **Decision:** `scripts/tools/lastbook.sh` + `scripts/lib/lastbook_mirror.py` keep the **current
   release only** under `content/lastbook/` (served: Lastbook and its packs are freely published, and
   LAN users install the app from the Ark). It **is** in `download-tools.sh all` with `--pack auto`:
-  the largest pack whose bytes still to fetch fit `VALARK_LASTBOOK_BUDGET_PCT` (default 50) percent of
-  `valark_budget_bytes`, then base maps, the installers, the model (`auto`: only if it still fits),
+  the largest pack whose bytes still to fetch (plus the base maps and installers) fit Lastbook's
+  share, `VALARK_LASTBOOK_BUDGET_PCT` (default 50) percent of (headroom on its disk + what it holds;
+  see #183 below), then base maps, the installers, the model (`auto`: only if it still fits),
   then state maps (in manifest order, largest states first) each with its address index, while they fit. `--pack every`
   (all three packs, ~463 GB; ~570 GB with every map and the model) is **opt-in** via `.env`.
 - **Why auto for users:** a household box should hold the survival library without anyone choosing,
@@ -77,15 +78,34 @@ later). See [README](README.md).
   pruned when the release looks truncated: a section that holds files comes back empty, or the run
   would drop more than half of the held files *and* bytes (a normal pack re-release or app bump drops
   less), so one bad upstream publish cannot wipe every box's maps on the weekly refresh.
-- **Follow-up (not done):** auto mode keeps a smaller pack after a larger one is verified (~75 GB
-  duplicates on a box that grew Small→Medium→All); pack choice does not reserve room for the base
-  maps + installers, so a budget just above a pack size reports `3` every run; the 50% share is of
-  the *current* headroom each run (repeated runs compound) and is measured on `DATA_ROOT` even when
-  `VALARK_LASTBOOK_DIR` is on another disk, whose fetch-time free check keeps no reserve; a 206's
-  `Content-Range` start is not checked (the sha256 still catches it) and a 404 is retried. Also:
-  feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
-  rank) so value-per-byte, not a fixed share, decides its room; the Software/Library UI has no
-  Lastbook card yet.
+- **Follow-ups resolved (#183):**
+  - *Per-section guard.* Prune is also refused when maps, addresses or models would each lose more
+    than half of their own held files **while the release lists fewer files in that section than are
+    held**. The whole-mirror AND check missed the All-pack box whose manifest lists only a few states
+    (most maps go, but under half the bytes). The "lists fewer" qualifier lets a like-for-like
+    replacement (a new model file, renamed maps) still prune; packs and `app/` are left out because
+    their names change every release by design.
+  - *Nested packs (N3).* With `--pack auto` or one explicit pack, once every file of the chosen pack
+    is verified (rc 0), the smaller packs of the ladder are pruned (only recorded files). `every`, a
+    list, `none` and `--keep-old` never do this.
+  - *Fit reserves the extras (N5).* `auto` picks the largest pack whose need **plus** the base maps
+    and installers fits; if none does, a pack already held (need 0) stays chosen.
+  - *Share without compounding (N4).* `lastbook.sh` no longer passes a budget from
+    `valark_budget_bytes` on `DATA_ROOT`. `lastbook_mirror.py --share PCT [--cap N]` measures headroom
+    above the reserve on the filesystem that holds the Lastbook dir, caps it with what `VALARK_MAX_GB`
+    still allows, and lets Lastbook hold PCT% of (headroom + the bytes it already holds), so
+    repeated runs stay at the share. The fetch-time free check keeps the reserve too.
+  - *Downloads (N7).* A 206 whose `Content-Range` start is not the `.part` size deletes the `.part`
+    and restarts; 404 / 410 fail the file at once (no back-off).
+  - *Pre-change `.part`s.* A stray unrecorded `*.part` in `packs|maps|addresses|models|app/<ver>` is
+    pruned only when its final name is one the current or the previously kept manifests name (read
+    before the new ones overwrite them); anything else stays.
+  - *Library card.* Lastbook is a `CONTENT_LIBRARY` card (Library ▸ Content): its state comes from the
+    `/api/status/content` walk of `content/` (a held pack = Mirrored), its Mirror button starts the
+    `lastbook` tool job, and the detail page lists the installers and packs held as direct
+    `/api/archive/content/lastbook/…` downloads. No server change.
+- **Follow-up (not done):** feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
+  rank) so value-per-byte, not a fixed share, decides its room.
 
 ## 2026‑11 — cad-agent references: a private, content-addressed archive of every cited source (cad-agent#323)
 - **Context:** cad-agent keeps a reference knowledge base of ~760 sources (≈330 GitHub repos, ≈350

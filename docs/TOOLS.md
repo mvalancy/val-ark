@@ -154,17 +154,24 @@ and run GPU inference on the served models over the network. The 24/7 verify loo
 ## Content mirrors
 
 Tool scripts that mirror a content release rather than an app, so they have no Software card.
+They are also the exception to "tool output goes to `${TOOLS_DIR}`": Lastbook writes to
+`content/lastbook/` (served; its card is in **Library ▸ Content**, fed by the `/api/status/content`
+walk) and cad-agent-references writes to `private/` (never served, no card).
 
 | Script | What it keeps | Where | In `download-tools.sh all`? |
 |--------|---------------|-------|------------------------------|
-| `scripts/tools/lastbook.sh` | [Lastbook](https://lastbook.org) (MIT), a free offline survival library: one content pack (Small 7.7 GB / Medium 67.5 GB / All 388 GB), state maps (~85 GB), address indexes (~5 GB), its GGUF model (16.9 GB), and every installer of the current app version (mac, Windows, both Ubuntu debs). Current release only, sha256-verified, resumable. | `content/lastbook/{packs,maps,addresses,models,app/<ver>}` + the three upstream manifests | **Yes, sized:** `--pack auto` takes the largest pack that fits half the librarian's budget (`VALARK_LASTBOOK_BUDGET_PCT`), then maps / addresses / model while they fit. **Every pack is opt-in** (`VALARK_LASTBOOK_PACK=every`, `MAPS=all`, `MODEL=yes`, ~570 GB) for servers and NAS mirrors. Preview: `scripts/tools/lastbook.sh plan`. |
+| `scripts/tools/lastbook.sh` | [Lastbook](https://lastbook.org) (MIT), a free offline survival library: one content pack (Small 7.7 GB / Medium 67.5 GB / All 388 GB), state maps (~85 GB), address indexes (~5 GB), its GGUF model (16.9 GB), and every installer of the current app version (mac, Windows, both Ubuntu debs). Current release only, sha256-verified, resumable. | `content/lastbook/{packs,maps,addresses,models,app/<ver>}` + the three upstream manifests | **Yes, sized:** `--pack auto` takes the largest pack that fits Lastbook's share, with room left for the base maps and installers, then maps / addresses / model while they fit. The share: Lastbook may hold `VALARK_LASTBOOK_BUDGET_PCT` (default 50) percent of (headroom above the reserve on the disk that holds `content/lastbook`, capped by `VALARK_MAX_GB`, + what it already holds), so it never compounds across runs; downloads also stop at the reserve. Once a larger pack is verified, the smaller packs nested in it are pruned (not with `every`). **Every pack is opt-in** (`VALARK_LASTBOOK_PACK=every`, `MAPS=all`, `MODEL=yes`, ~570 GB) for servers and NAS mirrors. Preview: `scripts/tools/lastbook.sh plan`. |
 | `scripts/tools/cad-agent-references.sh` | A private archive of every source cad-agent cites (git bundles, pages, PDFs) | `private/cad-agent-references/` (never served) | No: opt-in, run by hand (~37 GB, a day-long first pass) |
 
 `scripts/lib/lastbook_mirror.py` exit codes: `0` complete, `1` failure (manifest unreadable or
 failed validation, a download or sha256 check failed), `3` incomplete (the budget or the disk left
 part of the selection out, or `--pack auto` found no pack that fits), `64` usage. Only https URLs on
 `downloads.lastbook.org`, `lastbook.org` and `huggingface.co` are fetched; any other URL in a
-manifest fails the run. Decision record:
+manifest fails the run. A 206 whose `Content-Range` does not start at the `.part` size restarts
+from 0; a 404 / 410 fails that file at once instead of retrying. Prune removes only files the tool
+recorded (plus stray `*.part`s whose name a current or previously kept manifest gives) and refuses
+when the release looks truncated, including maps, addresses or models each losing more than half of
+their held files while the release lists fewer than are held. Decision record:
 [decisions.md](knowledge/decisions.md#202611--lastbook-auto-sized-by-default-every-pack-opt-in-181).
 
 ---

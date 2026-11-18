@@ -21,6 +21,14 @@
 #     all when the release looks truncated
 #   - a server ignoring Range restarts from 0; a 416 resets the .part; an off-list
 #     redirect is refused (a same-host redirect of a rewritten base is followed)
+#   - a 206 starting anywhere but the .part size restarts from 0; a 404 is not retried
+#   - --pack auto reserves room for the base maps + installers, else keeps a held pack;
+#     the default budget is a share of (dest-filesystem headroom + bytes held), and a
+#     fetch never cuts into the reserve
+#   - a verified single pack (auto / one id) prunes the smaller packs nested in it
+#     (never with every or a list); maps / addresses / models each refuse a prune that
+#     loses most of the section while the release lists fewer; stray unrecorded .parts
+#     go only when a current or kept manifest names them
 #   - exit codes 0 / 1 / 3 / 64; argparse errors are 64, not 2
 ###############################################################################
 PASS=0; FAIL=0
@@ -36,6 +44,9 @@ command -v python3 >/dev/null 2>&1 || { echo "SKIP: no python3" >&2; exit 0; }
 T="$(mktemp -d)"; SRV_PID=""
 trap 'rm -rf "${T:?}"; [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null' EXIT
 export VAL_ARK_CONFIG="$T/empty.conf" VAL_ARK_DATA="$T/disk" FORCE_COLOR=0 LC_ALL=C
+# No disk reserve by default: fetches stop at the reserve, and a CI runner has little free space.
+export VALARK_RESERVE_PCT=0 VALARK_RESERVE_MIN_GB=0
+unset VALARK_MAX_GB
 unset VALARK_LASTBOOK_REWRITE VALARK_LASTBOOK_DIR VALARK_LASTBOOK_PACK VALARK_LASTBOOK_MAPS \
       VALARK_LASTBOOK_ADDRESSES VALARK_LASTBOOK_MODEL VALARK_LASTBOOK_APPS VALARK_LASTBOOK_BUDGET VALARK_LASTBOOK_BUDGET_PCT
 : > "$VAL_ARK_CONFIG"; mkdir -p "$VAL_ARK_DATA"
@@ -70,16 +81,20 @@ class H(http.server.BaseHTTPRequestHandler):
             self.send_response(416); self.send_header("Content-Length", "0"); self.end_headers(); return
         if os.path.exists(p + ".norange"):  # persistent: ignore Range, always 200 + the whole file
             rng = None
+        end = len(data)
         if rng and rng.startswith("bytes="):
             start = int(rng[6:].split("-")[0])
             if start >= len(data):
                 self.send_response(416); self.send_header("Content-Length", "0"); self.end_headers(); return
             code = 206
-        body = data[start:]
+            if body_too and os.path.exists(p + ".shiftonce"):  # one-shot: a 206 from 10 bytes too early,
+                os.remove(p + ".shiftonce")                    # as long as the rest (sizes still add up)
+                start, end = start - 10, len(data) - 10
+        body = data[start:end]
         self.send_response(code)
         self.send_header("Content-Length", str(len(body)))
         if code == 206:
-            self.send_header("Content-Range", f"bytes {start}-{len(data) - 1}/{len(data)}")
+            self.send_header("Content-Range", f"bytes {start}-{end - 1}/{len(data)}")
         self.end_headers()
         if not body_too:
             return
@@ -407,6 +422,19 @@ mir --dest "$T/m13" --pack none --maps CA --addresses none --apps none --model n
 check "same-host redirect of a rewritten base: followed + verified" '[ "$rc" = 0 ] && cmp -s "$T/ca.keep" "$T/m13/maps/Lastbook-Map-CA.zip"'
 rm -f "$CA.redirect"; mv "$T/ca.keep" "$CA"
 
+# a 206 that does not continue where the .part ends restarts from 0 (N7)
+D14="$T/m14"; mkdir -p "$D14/packs"; head -c 100 "$PK" > "$D14/packs/Lastbook-Small-20261113.zip.part"
+touch "$PK.shiftonce"; : > "$T/req.log"
+mir --dest "$D14" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+rm -f "$PK.shiftonce"
+check "206 with the wrong Content-Range start: restart from 0, verified" '[ "$rc" = 0 ] && cmp -s "$PK" "$D14/packs/Lastbook-Small-20261113.zip" && grep -q "does not start at byte 100" "$T/err" && grep -q "^GET /tiny/dl/Lastbook-Small-20261113.zip -$" "$T/req.log"'
+# a 404 fails fast: one request, no retry back-off (N7)
+mv "$CA" "$T/ca.keep"; : > "$T/req.log"
+VALARK_LASTBOOK_REWRITE="$TINY" timeout 60 python3 "$PY" mirror --dest "$T/m15" --tries 4 --retry-wait 30 --budget -1 \
+    --pack none --maps CA --addresses none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+mv "$T/ca.keep" "$CA"
+check "404: exit 1 after ONE request, not retried" '[ "$rc" = 1 ] && [ "$(grep -c "^GET /tiny/dl/maps/Lastbook-Map-CA.zip" "$T/req.log")" = 1 ] && grep -q "HTTP 404" "$T/err"'
+
 # version sort never crashes on text parts (N6)
 mkdir -p "$T/www/rc"
 python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); a["windows"]["version"]="1.1.rc1"; json.dump(a,open(sys.argv[2],"w"))' "$FIX/app-v1.json" "$T/www/rc/app-v1.json"
@@ -416,6 +444,91 @@ python3 - "$ROOT/scripts/lib" <<'EOF' && pass || fail "version_key orders mixed 
 import sys; sys.path.insert(0, sys.argv[1]); import lastbook_mirror as l
 assert sorted(["1.1.rc1", "1.1.11", "1.1.9", "1.2", "1.1.1"], key=l.version_key) == ["1.1.rc1", "1.1.1", "1.1.9", "1.1.11", "1.2"]
 EOF
+
+# --- 10c. sizing: base maps + installers reserved in the pack fit (N5), share + reserve (N4) ---------
+plan --budget 67600000000 > "$T/plan.out"; rc=$?   # Medium alone fits; Medium + base map does not
+check "auto reserves room for the base map: Small (not Medium) at a budget just above Medium, exit 0" '[ "$(got get pack)" = small ] && got get map | grep -qw base && [ "$rc" = 0 ]'
+D16="$T/m16"
+mir --dest "$D16" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+rm -f "$D16/maps/Lastbook-Map-base.zip"
+VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" plan --dest "$D16" --budget 1 > "$T/plan.out" 2>"$T/plan.err"; rc=$?
+check "auto with no room for the extras keeps a pack already held (need 0), extras deferred" '[ "$(got get pack)" = small ] && [ "$(got deferred map)" = base ] && [ "$rc" = 3 ]'
+python3 - "$ROOT/scripts/lib" "$T/m17" <<'PYEOF' && pass || fail "budget share counts held bytes; headroom is measured on the dest filesystem"
+import os, sys; from pathlib import Path
+sys.path.insert(0, sys.argv[1]); import lastbook_mirror as l
+d = Path(sys.argv[2]); (d / "packs").mkdir(parents=True)
+(d / "packs" / "Lastbook-Small.zip").write_bytes(b"x" * 400)
+(d / "maps").mkdir(); (d / "maps" / "foreign.zip").write_bytes(b"y" * 5000)   # unrecorded: not Lastbook's
+stamps = {"packs/Lastbook-Small.zip": {"size": 400}}
+class V:
+    def __init__(s, free, total): s.f_bavail, s.f_frsize, s.f_blocks = free, 1, total
+real = os.statvfs
+os.statvfs = lambda p: V(1000, 10**6) if str(p).startswith(str(d)) else V(10**12, 10**13)
+os.environ.update(VALARK_RESERVE_PCT="0", VALARK_RESERVE_MIN_GB="0")
+assert l.headroom(d / "packs") == 1000                          # the dest's own filesystem
+assert l.headroom(d / "not-yet" / "deeper") == 1000             # nearest existing ancestor
+assert l.held_bytes(d, stamps) == 400                           # recorded files only
+assert l.default_budget(d, stamps, 50) == (1000 + 400) // 2 - 400 == 300
+assert l.default_budget(d, stamps, 50) == l.default_budget(d, stamps, 50)  # stable: no compounding
+assert l.default_budget(d, stamps, 50, cap=200) == 0            # held already beyond its share: never negative
+assert l.default_budget(d, stamps, 100) == 1000 and l.default_budget(d, stamps, 100, cap=5) == 5
+os.environ["VALARK_RESERVE_PCT"] = "50"
+assert l.headroom(d) == 0                                       # a reserve of 50% of the disk > free
+os.statvfs = real
+PYEOF
+# the fetch-time check keeps the reserve, even with --budget -1 (N4)
+VALARK_RESERVE_MIN_GB=999999 mir --dest "$T/m18" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "fetch keeps the reserve: deferred, exit 3, nothing finalized" '[ "$rc" = 3 ] && [ ! -e "$T/m18/packs/Lastbook-Small-20261113.zip" ] && grep -q "not enough free space" "$T/err"'
+
+# --- 10d. pack upgrades prune the nested smaller packs (N3) ---------------------------------------
+D19="$T/m19"
+mir --dest "$D19" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+mir --dest "$D19" --pack every --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "--pack every keeps every pack (never superseded)" '[ "$rc" = 0 ] && [ "$(ls "$D19/packs" | wc -l)" = 3 ]'
+mir --dest "$D19" --pack small,medium --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "--pack with a list keeps the listed packs" '[ "$rc" = 0 ] && [ -s "$D19/packs/Lastbook-Small-20261113.zip" ]'
+mir --dest "$D19" --pack medium --maps none --apps none --model no --keep-old > "$T/out" 2>"$T/err"
+check "--keep-old keeps the nested packs" '[ "$(ls "$D19/packs" | wc -l)" = 3 ]'
+echo mine > "$D19/packs/Lastbook-Tiny.zip"   # unrecorded: must survive
+mir --dest "$D19" --pack medium --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "explicit single pack: the smaller nested pack goes, the larger stays" '[ "$rc" = 0 ] && [ ! -e "$D19/packs/Lastbook-Small-20261113.zip" ] && [ -s "$D19/packs/Lastbook-Medium.zip" ] && [ -s "$D19/packs/Lastbook-All.zip" ] && grep -q "nested in the verified medium pack" "$T/err"'
+mir --dest "$D19" --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "auto upgrade to All: Medium pruned once All is verified; unrecorded file survives" '[ "$rc" = 0 ] && [ "$(ls "$D19/packs" | sort | tr "\n" " ")" = "Lastbook-All.zip Lastbook-Tiny.zip " ]'
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert not any("Small" in k or "Medium" in k for k in s)' "$D19/.lastbook-verified.json" && pass || fail "superseded packs leave the stamps file"
+mkdir -p "$T/www/sup"
+python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); m["packs"][2]["files"][0]["sha256"]="0"*64; json.dump(m,open(sys.argv[2],"w"))' "$T/www/tiny/dl/manifest-v1.json" "$T/www/sup/manifest-v1.json"
+mir --dest "$T/m20" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/manifest-v1.json=$B/sup/manifest-v1.json $TINY" \
+    python3 "$PY" mirror --dest "$T/m20" --tries 1 --budget -1 --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "a larger pack that fails its sha256 never supersedes the held one" '[ "$rc" = 1 ] && [ -s "$T/m20/packs/Lastbook-Small-20261113.zip" ]'
+
+# --- 10e. per-section truncation guard + stray pre-change .parts -----------------------------------
+D21="$T/m21"
+mir --dest "$D21" --pack small --maps all --addresses none --model yes > "$T/out" 2>"$T/err"
+mkdir -p "$T/www/sec"
+python3 - "$T/www/tiny/dl/manifest-v1.json" "$T/www/sec" <<'PYEOF'
+import json, os, sys
+m = json.load(open(sys.argv[1])); m["maps"] = [e for e in m["maps"] if e.get("kind") != "state"]
+json.dump(m, open(os.path.join(sys.argv[2], "few-maps.json"), "w"))      # base map only: 3 of 4 maps go
+m = json.load(open(sys.argv[1])); m["models"][0]["file"] = "gemma-next.gguf"
+json.dump(m, open(os.path.join(sys.argv[2], "new-model.json"), "w"))     # a model replaced, not dropped
+PYEOF
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/manifest-v1.json=$B/sec/few-maps.json $TINY" \
+    python3 "$PY" mirror --dest "$D21" --budget -1 --pack none --maps none --addresses none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "a manifest listing only a few maps: no prune (per-section guard), says why" '[ "$rc" = 0 ] && [ "$(ls "$D21/maps" | wc -l)" = 4 ] && grep -q "NOT pruning: the release would drop 3 of the 4 maps held" "$T/err"'
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/manifest-v1.json=$B/sec/new-model.json $TINY" \
+    python3 "$PY" mirror --dest "$D21" --budget -1 --pack none --maps none --addresses none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "a replaced model (release lists as many as held) is still pruned" '[ "$rc" = 0 ] && [ ! -e "$D21/models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf" ] && ! grep -q "NOT pruning" "$T/err"'
+# stray .parts from before .part stamps existed: only names the kept / current manifests give
+python3 - "$D21/manifest-v1.json" <<'PYEOF'
+import json, sys
+m = json.load(open(sys.argv[1])); e = json.loads(json.dumps(m["maps"][0])); e["id"] = "GONE"
+e["files"][0]["name"] = "Lastbook-Map-GONE.zip"; m["maps"].append(e); json.dump(m, open(sys.argv[1], "w"))
+PYEOF
+mkdir -p "$D21/addresses"; for f in maps/Lastbook-Map-GONE.zip.part maps/random.part maps/hiking.mbtiles.part maps/Lastbook-Map-TX.zip.part addresses/mine.zip.part; do echo x > "$D21/$f"; done
+mir --dest "$D21" --pack small --maps CA --addresses none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "stray .part named by the previously kept manifest: pruned" '[ "$rc" = 0 ] && [ ! -e "$D21/maps/Lastbook-Map-GONE.zip.part" ]'
+check "stray .parts with other names, or of a file the release still lists, survive" '[ -e "$D21/maps/random.part" ] && [ -e "$D21/maps/hiking.mbtiles.part" ] && [ -e "$D21/maps/Lastbook-Map-TX.zip.part" ] && [ -e "$D21/addresses/mine.zip.part" ]'
 
 # --- 11. the tool entry --------------------------------------------------------------------------
 : > "$T/req.log"
@@ -432,6 +545,14 @@ VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_PACK=nope bash "$SH" > "$T/sh.ou
 check "lastbook.sh: bad option -> non-zero + error" '[ "$rc" != 0 ] && grep -q "bad option" "$T/sh.out"'
 VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_BUDGET_PCT=500 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
 check "lastbook.sh: BUDGET_PCT over 100 is clamped, not rejected" '[ "$rc" != 64 ] && grep -q "^# Lastbook manifest" "$T/sh.out"'
+# the default budget is worked out by lastbook_mirror.py on the Lastbook dir (not DATA_ROOT), as a share
+mkdir -p "$T/bin"; REALPY=$(command -v python3)
+printf '#!/bin/sh\n[ "$(basename "$1")" = lastbook_mirror.py ] && echo "$*" >> "%s"\nexec "%s" "$@"\n' "$T/py.args" "$REALPY" > "$T/bin/python3"; chmod +x "$T/bin/python3"
+: > "$T/py.args"
+PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$T/elsewhere/lastbook" VALARK_MAX_GB=1 \
+    bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh: default budget = --share PCT (+ --cap from VALARK_MAX_GB) on the Lastbook dir, no DATA_ROOT --budget" \
+    'grep -q -- "--dest $T/elsewhere/lastbook .*--share 50 --cap [0-9]" "$T/py.args" && ! grep -q -- "--budget" "$T/py.args" && grep -q "^# Lastbook manifest" "$T/sh.out"'
 check "lastbook comes last in download-tools.sh ordered_tools" 'sed -n "/local ordered_tools=(/,/^    )/p" "$ROOT/scripts/download-tools.sh" | grep -v "^ *#" | tr -s " \n" " " | grep -q "cad-agent lastbook )"'
 check "lastbook is in download-tools.sh list (default refresh)" 'bash "$ROOT/scripts/download-tools.sh" list 2>/dev/null | grep -q "  lastbook$"'
 check "source-repos.tsv lists Immortal-Protocols/lastbook" 'grep -q "^[0-9]*|Immortal-Protocols/lastbook|" "$ROOT/data/source-repos.tsv"'

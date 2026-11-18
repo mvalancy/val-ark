@@ -436,18 +436,19 @@ def codes(spec, valid, what, unavailable=None, notes=None):
     return out
 
 
-def held_pack_floor(dest, stamps):
-    """Bytes of the largest pack file this tool recorded that is still on disk at its recorded size."""
-    best = 0
+def held_pack_top(dest, stamps):
+    """(bytes, key) of the largest pack file recorded and still on disk at its recorded size; (0, None)."""
+    best, key = 0, None
     for k, v in stamps.items():
         if k.startswith("packs/") and not k.endswith(".part") and OWNED_KEY.match(k) and v.get("size"):
             try:
                 st = os.lstat(dest / k)
             except OSError:
                 continue
-            if os.path.isfile(dest / k) and not os.path.islink(dest / k) and st.st_size == v["size"]:
-                best = max(best, v["size"])
-    return best
+            if os.path.isfile(dest / k) and not os.path.islink(dest / k) and st.st_size == v["size"] \
+                    and v["size"] > best:
+                best, key = v["size"], k
+    return best, key
 
 
 def pack_bytes(p):
@@ -509,7 +510,7 @@ def select(rel, args, budget, dest, stamps, probe=None):
 
         # The largest pack file held and verified on disk, listed in this release or not (a renamed
         # re-release leaves the old All unlisted, H2).
-        floor = held_pack_floor(dest, stamps) if dest else 0
+        floor, floor_key = held_pack_top(dest, stamps) if dest else (0, None)
         rejected = []
 
         def confirmed(p):
@@ -523,14 +524,18 @@ def select(rel, args, budget, dest, stamps, probe=None):
                 if n != f["size"]:
                     said = f"the server says {human(n)}" if n is not None else "the server did not confirm its size"
                     notes.append(f"pack {p['id']}: the manifest says {f['name']} is {human(f['size'])} but {said}; "
-                                 f"keeping the held pack ({human(floor)}), nothing downloaded for it")
+                                 f"not downloading it or any other pack this run, keeping the held {floor_key} "
+                                 f"({human(floor)}); retried next run")
                     rejected.append(p["id"])
                     return False
             return True
 
         def acceptable(p):
-            if rejected and disk_bytes(dest, stamps, p) is None and rank(p) < floor:
-                return False  # after an unconfirmed claim, never trade the held pack for a smaller download
+            if rejected and disk_bytes(dest, stamps, p) is None:
+                # after an unconfirmed claim, download no pack this run: not a smaller one, and not an
+                # intermediate upgrade either (Small held + All unconfirmed must not fetch ~67 GB of
+                # Medium first, F1). Only a pack already held and verified can still be chosen.
+                return False
             return fits(need(p) + extras) and confirmed(p)
         pick = next((p for p in by_size if acceptable(p)), None)
         if pick is None:  # a pack already held costs nothing: keep it chosen when the disk fills
@@ -540,8 +545,14 @@ def select(rel, args, budget, dest, stamps, probe=None):
             take(pick, True, f"pack {pick['id']}")
         if not chosen and rejected:
             incomplete = True
-            notes.append("no Lastbook pack chosen: a larger pack's size could not be confirmed and the held pack is "
-                         "not in this release; keeping what is held (re-checked next run)")
+            listed = {rel_path(f): f for pk in rel["packs"] for f in pk["files"]}
+            if floor_key in listed:  # F2: listed, but the manifest's size is not the one held
+                why = (f"the held {floor_key} ({human(floor)}) is listed in this release with a different size "
+                       f"({human(listed[floor_key]['size'])})")
+            else:
+                why = f"the held {floor_key} ({human(floor)}) is not in this release"
+            notes.append(f"no Lastbook pack chosen: a larger pack's size could not be confirmed and {why}; "
+                         "nothing downloaded, keeping what is held (re-checked next run)")
         elif not chosen:
             incomplete = True
             smallest = min(rel["packs"], key=lambda p: need(p), default=None)

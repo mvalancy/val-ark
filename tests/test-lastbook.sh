@@ -630,6 +630,22 @@ D30="$T/m30"; mir --dest "$D30" --pack all --maps none --apps none --model no > 
 : > "$T/req.log"
 vrun rrbig --dest "$D30" --pack auto; rc=$?
 check "renamed re-release over-claiming its size, auto: no pack chosen, nothing downloaded, the held All kept" '[ "$rc" = 3 ] && [ -s "$D30/packs/Lastbook-All.zip" ] && grep -q "the server says" "$T/err" && grep -q "no Lastbook pack chosen" "$T/err" && ! grep -q "^GET .*Lastbook-\(All-2\|Medium\|Small\)" "$T/req.log"'
+check "renamed re-release: the rc-3 message says the held pack is not in this release" 'grep -q "the held packs/Lastbook-All.zip (.*) is not in this release" "$T/err"'
+# the held All listed under its own name with an over-claimed size: the message says so (F2)
+variant samebig 'a=[x for x in m["packs"] if x["id"]=="all"][0]; a["files"][0]["size"]=2*a["files"][0]["size"]; a["installed_bytes"]=a["files"][0]["size"]'
+D33="$T/m33"; mir --dest "$D33" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+: > "$T/req.log"
+vrun samebig --dest "$D33" --pack auto; rc=$?
+check "held All listed with an over-claimed size: rc 3, nothing downloaded, message says listed with a different size" '[ "$rc" = 3 ] && [ -s "$D33/packs/Lastbook-All.zip" ] && grep -q "the held packs/Lastbook-All.zip (.*) is listed in this release with a different size" "$T/err" && ! grep -q "is not in this release" "$T/err" && ! grep -q "^GET .*Lastbook-\(All\|Medium\|Small\)" "$T/req.log"'
+# Small held, All unconfirmed (HEAD fails), Medium confirmable: no intermediate upgrade this run (F1)
+variant allnohead ''
+touch "$(find "$T/www/allnohead" -name Lastbook-All.zip).nohead"
+D34="$T/m34"; mir --dest "$D34" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+: > "$T/req.log"
+vrun allnohead --dest "$D34" --pack auto; rc=$?
+check "Small held + All unconfirmed: no Medium either, Small kept, log says nothing downloaded" '[ "$rc" = 0 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"small\"\]" && [ ! -e "$D34/packs/Lastbook-Medium.zip" ] && [ -s "$D34/packs/Lastbook-Small-20261113.zip" ] && ! grep -q "^GET .*Lastbook-\(All\|Medium\)" "$T/req.log" && grep -q "not downloading it or any other pack this run, keeping the held packs/Lastbook-Small-20261113.zip" "$T/err"'
+vrun tiny --dest "$D34" --pack auto; rc=$?
+check "next run with HEAD answering: the upgrade to All goes ahead" '[ "$rc" = 0 ] && [ -s "$D34/packs/Lastbook-All.zip" ]'
 : > "$T/req.log"
 vrun rrbig --dest "$D30" --pack all; rc=$?
 check "renamed re-release over-claiming its size, --pack all: a clear error before any GET (not \"range not satisfiable\")" '[ "$rc" = 1 ] && grep -q "but the server has .*: not downloading; an upstream manifest error" "$T/err" && ! grep -q "range not satisfiable" "$T/err" && ! grep -q "^GET .*Lastbook-All-2.zip" "$T/req.log" && [ -s "$D30/packs/Lastbook-All.zip" ]'

@@ -168,6 +168,10 @@ Dev CLI Bundle (ripgrep, fd, bat, jq, fzf, lazygit)
 ### Content Library
 Offline ZIM files (Wikipedia and much more) served via Kiwix, selected live from
 the Kiwix OPDS catalog by the Librarian — so titles and sizes are never stale.
+Plus [Lastbook](https://lastbook.org) (MIT), a free offline survival library: its
+largest content pack that fits, state maps, address search, its local AI model and the
+mac / Windows / Ubuntu installers, kept current by `scripts/tools/lastbook.sh` under
+`content/lastbook/` (servers can opt in to every pack; see [docs/TOOLS.md](docs/TOOLS.md#content-mirrors)).
 
 ### AI Models
 A diverse model set spanning modalities, filled by value-per-byte. `download-models.sh`

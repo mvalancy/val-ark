@@ -11,6 +11,7 @@ later). See [README](README.md).
 
 | Date | Decision | Issue / Phase |
 |------|----------|---------------|
+| 2026‑11 | [Lastbook: auto-sized by default, every pack opt-in](#202611--lastbook-auto-sized-by-default-every-pack-opt-in-181) | #181 |
 | 2026‑11 | [cad-agent references: a private, content-addressed archive of every cited source](#202611--cad-agent-references-a-private-content-addressed-archive-of-every-cited-source-cad-agent323) | cad-agent#323 |
 | 2026‑11 | [Python wheelhouses + container archives as tool artifacts](#202611--python-wheelhouses--container-archives-as-tool-artifacts-149) | #149 |
 | 2026‑07 | [CI guards: doc-link integrity + secret/host-leak scan](#202607--ci-guards-doc-link-integrity--secrethost-leak-scan-130) | #130 |
@@ -38,6 +39,38 @@ later). See [README](README.md).
 | 2026‑07 | [Notification center: bell/inbox slice 1](#202607--notification-center-bellinbox-slice-1-69) | #69 |
 
 ---
+
+## 2026‑11 — Lastbook: auto-sized by default, every pack opt-in (#181)
+- **Context:** [Lastbook](https://lastbook.org) (MIT, `Immortal-Protocols/lastbook`) is a free offline
+  survival library. Its release is three live files: `manifest-v1.json` (packs Small 7.7 GB / Medium
+  67.5 GB / All 388 GB, each a superset of the one before; 52 state maps ~85 GB; 52 address indexes
+  ~5 GB; a 16.9 GB GGUF on huggingface.co), `app-v1.json` (current installers) and `SHA256SUMS.txt`
+  (every installer, including the Ubuntu 26.04 deb that `app-v1.json` omits). Every file has a sha256.
+- **Decision:** `scripts/tools/lastbook.sh` + `scripts/lib/lastbook_mirror.py` keep the **current
+  release only** under `content/lastbook/` (served: Lastbook and its packs are freely published, and
+  LAN users install the app from the Ark). It **is** in `download-tools.sh all` with `--pack auto`:
+  the largest pack whose bytes still to fetch fit `VALARK_LASTBOOK_BUDGET_PCT` (default 50) percent of
+  `valark_budget_bytes`, then base maps, the installers, the model (`auto`: only if it still fits),
+  then state maps (in manifest order, largest states first) each with its address index, while they fit. `--pack every`
+  (all three packs, ~463 GB; ~570 GB with every map and the model) is **opt-in** via `.env`.
+- **Why auto for users:** a household box should hold the survival library without anyone choosing,
+  and the pack ladder lets one rule fit any disk, from a small one (Small) to a big drive (All).
+  Budgeting on bytes *still to fetch* makes the choice stable: once a pack is held it costs 0, so a
+  later full disk never makes `auto` drop it or flap. The 50% share leaves the librarian (Wikipedia,
+  models, installers) the other half instead of letting whichever runs first take the disk. All
+  downloads resume from `.part`, so the loop's 2-hour refresh window just continues a big pack next time.
+- **Why every-pack is opt-in for servers:** the packs nest, so `every` stores Small and Medium again
+  inside All: worth it only for a mirror that hands packs to other machines of different sizes. On a
+  household disk that is ~75 GB of duplicates, so only an operator who knows the space is there
+  turns it on (the NAS mirror role sets `VALARK_LASTBOOK_PACK=every`).
+- **Fail closed:** only https URLs on `downloads.lastbook.org`, `lastbook.org` and `huggingface.co`
+  (redirects: those or HF's `*.hf.co` / `*.huggingface.co` CDN), no credentials or odd ports, plain
+  file names, 64-hex sha256s; one bad entry anywhere in a manifest fails the whole run. A file is
+  renamed into place only after its sha256 matches; a mismatched `.part` is deleted. Exit codes `0` ok,
+  `1` failure, `3` incomplete (budget), `64` usage (argparse's `2` is remapped so it can't collide).
+- **Follow-up (not done):** feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
+  rank) so value-per-byte, not a fixed share, decides its room; the Software/Library UI has no
+  Lastbook card yet.
 
 ## 2026‑11 — cad-agent references: a private, content-addressed archive of every cited source (cad-agent#323)
 - **Context:** cad-agent keeps a reference knowledge base of ~760 sources (≈330 GitHub repos, ≈350

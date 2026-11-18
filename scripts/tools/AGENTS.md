@@ -11,7 +11,13 @@ One self-contained `download_<tool>()` script per mirrored app (~50 of them) plu
 |------|---------|
 | `_common.sh` | Sourced helper contract for every tool script: logging, GitHub release lookup, retrying/size-verified downloads, extract, version gating, source clone, install hints. **Read the function index at its top before touching a tool script.** |
 | `README.md` | Short per-tool template + platform matrix (this is only *step 1* of adding a tool). |
-| `<tool>.sh` (~50) | One script per tool; each sources `_common.sh`, sets `TOOL_NAME`/`PINNED_VERSION`, defines `download_<tool>()`, and self-runs via `[ "${BASH_SOURCE[0]}" = "$0" ] && download_<tool>`. Outputs land in `${TOOLS_DIR}/<platform>/<tool>/`. |
+| `<tool>.sh` (~50) | One script per tool; each sources `_common.sh`, sets `TOOL_NAME`/`PINNED_VERSION`, defines `download_<tool>()`, and self-runs via `[ "${BASH_SOURCE[0]}" = "$0" ] && download_<tool>`. Outputs land in `${TOOLS_DIR}/<platform>/<tool>/`, except the content mirrors (below). |
+
+**Content-mirror exception.** Two scripts mirror a content release, not an app, and write outside
+`${TOOLS_DIR}`: `lastbook.sh` → `content/lastbook/` (served; a Library ▸ Content card fed by the
+`/api/status/content` walk, not a TOOLS entry; in `all`, last) and `cad-agent-references.sh` →
+`private/cad-agent-references/` (never served, no card, opt-in: not one-click and not in the
+server's tool-target list). See [docs/TOOLS.md "Content mirrors"](../../docs/TOOLS.md#content-mirrors).
 
 `scripts/download-tools.sh` discovers these automatically (`list` / `<tool>` / `all` / `validate`);
 the weekly `loop.sh` refresh re-mirrors only the **version-gated** ones (see Gotchas).

@@ -15,15 +15,23 @@ Commands (stdlib only; needs apt-get + the ubuntu-archive-keyring on the host):
   build   --suite S --arch A --set ID --dest DIR   resolve + fetch + index
 
 Missing packages (not in that suite/arch) are reported on stderr and skipped.
-Exit codes: 0 complete; 1 usage/resolve failure; 2 a download failed;
-3 INCOMPLETE (packages missing for this suite/arch, nothing resolved, an empty
-index, or .debs left unindexed). Pass --allow-missing to accept missing packages.
+Exit codes (when several apply, the MOST SEVERE wins, in this order):
+  64 usage error (bad/unknown option or set id, a required flag missing, an unreadable
+     or malformed --tsv; EX_USAGE, so it can never be confused with argparse's default 2)
+   1 apt-get update or a set's dependency resolve failed (a whole set is absent), or the
+     environment is broken (apt-get not installed, --dest not writable): a clean message,
+     never a traceback (VALARK_DEBUG=1 also prints the traceback)
+   2 a download failed (size/sha256 mismatch or network). A rerun skips files already
+     complete and re-downloads each failed file whole (no byte-level resume)
+   3 INCOMPLETE (packages missing for this suite/arch, nothing resolved, an empty
+     index, or .debs left unindexed). Pass --allow-missing to accept missing packages.
+   0 complete
 
 The APT root is fully isolated from the host: a private APT_CONFIG and an empty
 apt.conf.d, so host hooks, extra index targets (Contents, DEP-11) and settings
 such as Acquire::GzipIndexes never leak in.
 """
-import argparse, gzip, hashlib, os, re, shutil, subprocess, sys, urllib.parse, urllib.request
+import argparse, gzip, hashlib, os, re, shutil, subprocess, sys, traceback, urllib.parse, urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -201,8 +209,34 @@ def fetch(rows, dest):
     return failed
 
 
+EX_OK, EX_RESOLVE, EX_FETCH, EX_INCOMPLETE, EX_USAGE = 0, 1, 2, 3, 64
+SEVERITY = (EX_USAGE, EX_RESOLVE, EX_FETCH, EX_INCOMPLETE, EX_OK)  # most severe first
+
+
+def worst(*codes):
+    """The most severe of several exit codes (see the module docstring)."""
+    return min(codes, key=SEVERITY.index)
+
+
+class Parser(argparse.ArgumentParser):
+    """argparse exits 2 on a usage error, which would read as "a download failed"."""
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        self.exit(EX_USAGE, f"{self.prog}: error: {message}\n")
+
+
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    try:
+        return _main(argv)
+    except OSError as e:  # apt-get/apt-cache missing, unwritable --dest, ...: environment failure
+        if os.environ.get("VALARK_DEBUG") == "1":
+            traceback.print_exc()  # a real bug that happens to raise OSError stays debuggable
+        print(f"apt_offline: {e}", file=sys.stderr)
+        return EX_RESOLVE
+
+
+def _main(argv=None):
+    ap = Parser(description=__doc__.split("\n")[0])
     ap.add_argument("command", choices=["sets", "resolve", "fetch", "index", "build"])
     ap.add_argument("--tsv", default=str(DEFAULT_TSV))
     ap.add_argument("--suite")
@@ -214,11 +248,14 @@ def main(argv=None):
     ap.add_argument("--no-update", action="store_true", help="reuse the cached APT lists")
     ap.add_argument("--allow-missing", action="store_true", help="exit 0 even if some packages are not in this suite/arch")
     a = ap.parse_args(argv)
-    sets = load_sets(a.tsv)
+    try:
+        sets = load_sets(a.tsv)
+    except (OSError, ValueError) as e:
+        ap.error(f"cannot read --tsv: {e}")
     if a.command == "sets":
         for s in sorted(sets.values(), key=lambda s: -s["value"]):
             print(f"{s['set']}\t{s['value']}\t{len(s['packages'])}\t{s['note']}")
-        return 0
+        return EX_OK
     if not (a.suite and a.arch):
         ap.error("--suite and --arch are required")
     root = AptRoot(a.suite, a.arch, a.cache)
@@ -230,13 +267,13 @@ def main(argv=None):
                 root.update()
             except RuntimeError as e:
                 print(e, file=sys.stderr)
-                return 1
+                return EX_RESOLVE
         if not root.has_lists():
             print(f"no APT lists for {a.suite}/{a.arch}; refusing to write an empty index", file=sys.stderr)
-            return 3
+            return EX_INCOMPLETE
         return report_index(*write_index(root.stanzas(), a.debs or a.dest))
     ids = list(sets) if "all" in a.set or not a.set else a.set
-    unknown = [i for i in ids if i not in sets]
+    unknown = [i for i in a.set if i != "all" and i not in sets]   # `--set all --set bogus` still rejects bogus
     if unknown:
         ap.error(f"unknown set(s): {' '.join(unknown)}")
     if a.command in ("fetch", "build") and not a.dest:
@@ -246,10 +283,10 @@ def main(argv=None):
             root.update()
     except RuntimeError as e:
         print(e, file=sys.stderr)
-        return 1
+        return EX_RESOLVE
     if not root.has_lists():
         print(f"no APT lists for {a.suite}/{a.arch} (run without --no-update)", file=sys.stderr)
-        return 3
+        return EX_INCOMPLETE
     rows, seen, incomplete, errors = [], set(), False, 0
     for sid in ids:
         try:
@@ -268,21 +305,20 @@ def main(argv=None):
     nosha = sum(1 for r in rows if not r[3])
     if nosha:
         print(f"{nosha} package(s) have no SHA256 in the lists (size-checked only)", file=sys.stderr)
-    status = 1 if errors else 3 if not rows or (incomplete and not a.allow_missing) else 0
+    status = EX_RESOLVE if errors else EX_INCOMPLETE if not rows or (incomplete and not a.allow_missing) else EX_OK
     if a.command == "resolve":
         for url, name, size, sha in rows:
             print(f"{url}\t{name}\t{size}\t{sha}")
         return status
     failed = fetch(rows, a.dest)
     if a.command == "build":
-        istatus = report_index(*write_index(root.stanzas(), a.dest))
-        status = status or istatus
-    return 2 if failed else status
+        status = worst(status, report_index(*write_index(root.stanzas(), a.dest)))
+    return worst(status, EX_FETCH if failed else EX_OK)
 
 
 def report_index(n, unindexed):
     print(f"indexed {n} packages" + (f"; {len(unindexed)} .deb not in lists" if unindexed else ""), file=sys.stderr)
-    return 3 if n == 0 or unindexed else 0
+    return EX_INCOMPLETE if n == 0 or unindexed else EX_OK
 
 
 if __name__ == "__main__":

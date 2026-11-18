@@ -52,11 +52,20 @@ ensure_state() { mkdir -p "$STATE_DIR" "$LOG_DIR" "$TMPDIR_VA" "$ZIM_DIR" "$INST
 
 # --- manifest --------------------------------------------------------------
 # id  bucket  category  dest  bytes  value  source  epoch
+# Drop the row whose FIRST column is exactly $1. Not `grep -v -F "id<TAB>"`: that
+# substring match also drops any id ENDING in $1 (xzim:a for zim:a), and when the
+# row is the only line grep exits 1, so `&& mv` never ran and the row stayed. (#192)
+# The id goes in via ENVIRON, not `awk -v` (which expands backslash escapes, so
+# `C:\temp` became `C:<TAB>emp`), and both sides get `""` appended to force a STRING
+# compare (strnum fields made id `1` also drop row `1.0`).
+manifest_drop() {
+    [ -f "$MANIFEST" ] || return 0
+    VA_ID="$1" awk -F'\t' '$1"" != ENVIRON["VA_ID"]""' "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
+}
 manifest_add() {
     local id="$1" bucket="$2" cat="$3" dest="$4" bytes="$5" value="$6" source="$7"
     ensure_state
-    grep -qF "$(printf '%s\t' "$id")" "$MANIFEST" 2>/dev/null && \
-        grep -v -F "$(printf '%s\t' "$id")" "$MANIFEST" > "${MANIFEST}.tmp" 2>/dev/null && mv "${MANIFEST}.tmp" "$MANIFEST"
+    manifest_drop "$id"
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$bucket" "$cat" "$dest" "$bytes" "$value" "$source" "$(date +%s)" >> "$MANIFEST"
 }
 
@@ -73,7 +82,7 @@ pin_add() {
 }
 pin_remove() {
     [ -f "$PINS" ] || return 0
-    awk -F'\t' -v id="$1" '$2!=id' "$PINS" > "${PINS}.tmp" 2>/dev/null && mv "${PINS}.tmp" "$PINS"
+    VA_ID="$1" awk -F'\t' '$2"" != ENVIRON["VA_ID"]""' "$PINS" > "${PINS}.tmp" 2>/dev/null && mv "${PINS}.tmp" "$PINS"
 }
 
 # Is a single resolved candidate (9-col fields) already fully on disk?
@@ -297,7 +306,17 @@ cmd_fill() {
         fi
     done < "${TMPDIR_VA}/plan.tsv"
     log "fill done: ${GREEN}${n_ok} ok${NC}, ${RED}${n_fail} failed${NC}, $(human "$bytes_done") added, $(human "$(valark_fillable_bytes)") fillable left"
-    prune_superseded >&2
+    # STOP means "stop changing the disk": the owner may be about to unplug or
+    # inspect it, and the plan ran only partway. Pruning deletes files, so it is
+    # skipped whenever STOP is set as the fill ends (a mid-fill halt, or STOP raised
+    # after the last item) and simply runs on the next un-halted fill. Other early exits (time/byte/item
+    # budget, low headroom) still prune — that is exactly when freeing the
+    # redundant small copy helps. (#177)
+    if [ -f "$STOP_FLAG" ]; then
+        warn "STOP flag: skipping superseded-variant prune (runs on the next fill)"
+    else
+        prune_superseded >&2
+    fi
     echo "$n_ok"
 }
 
@@ -338,8 +357,7 @@ prune_superseded() {
     while IFS=$'\t' read -r id cat dest bytes value; do
         [ -n "$dest" ] && [ -f "$dest" ] || continue
         log "superseded: $id ($(human "$bytes")) -> full variant is on disk; removing the small copy"
-        # exact first-column match; works even when it was the manifest's only line
-        rm -f "$dest" 2>/dev/null && awk -F'\t' -v id="$id" '$1!=id' "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
+        rm -f "$dest" 2>/dev/null && manifest_drop "$id"
     done
 }
 
@@ -350,7 +368,7 @@ cmd_evict() {
     gen_candidates | python3 "$PLANNER" --budget 1 --evict-need "$need" --manifest "$MANIFEST" --pins "$PINS" | \
     while IFS=$'\t' read -r id cat dest bytes value; do
         warn "evict $id ($cat, $(human "$bytes"), value $value) -> $dest"
-        rm -f "$dest" 2>/dev/null && grep -v -F "$(printf '%s\t' "$id")" "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
+        rm -f "$dest" 2>/dev/null && manifest_drop "$id"
     done
 }
 
@@ -489,10 +507,11 @@ cmd_pins() {
         [ -n "$id" ] || continue
         if [ "$kind" = "tool" ]; then
             tool_present "${id#tool:}" && present="${GREEN}present${NC}" || present="${YELLOW}missing${NC}"
-        elif grep -qF "$(printf '%s\t' "$id")" "$MANIFEST" 2>/dev/null; then
-            local dest; dest=$(grep -F "$(printf '%s\t' "$id")" "$MANIFEST" 2>/dev/null | head -1 | cut -f4)
-            { [ -e "$dest" ]; } && present="${GREEN}present${NC}" || present="${YELLOW}missing${NC}"
-        else present="${YELLOW}missing${NC}"; fi
+        else
+            # exact first-column match: an id merely ENDING in $id must not count (#192)
+            local dest; dest=$(VA_ID="$id" awk -F'\t' '$1"" == ENVIRON["VA_ID"]"" {print $4; exit}' "$MANIFEST" 2>/dev/null)
+            { [ -n "$dest" ] && [ -e "$dest" ]; } && present="${GREEN}present${NC}" || present="${YELLOW}missing${NC}"
+        fi
         printf "  %-8s %-46s %b\n" "$kind" "$id" "$present"
     done < "$PINS"
 }

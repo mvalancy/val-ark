@@ -13,6 +13,9 @@
 #   e) curl-only box: stale aria2 partial is discarded (fresh start), curl's own
 #      linear .part still resumes
 #   f) verify age-GCs abandoned partials (VALARK_PARTIAL_MAX_AGE_DAYS)
+#   g) manifest rows are removed by EXACT id in manifest_add + cmd_evict (#192)
+#   h) ids compare as exact STRINGS: backslashes and numeric-looking ids (1 vs 1.0)
+#      in manifest_drop, pin_remove, cmd_pins and prune_superseded
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -166,6 +169,65 @@ rm -f "$new_p"
 printf 'x' > "$old_p"; touch -d "20 days ago" "$old_p"
 VALARK_PARTIAL_MAX_AGE_DAYS=30 PATH="$BIN" cmd_verify >/dev/null 2>&1
 [ -f "$old_p" ] && pass || fail "a 20-day partial must survive when VALARK_PARTIAL_MAX_AGE_DAYS=30"
+
+# === 10. manifest rows are removed by EXACT id (#192) ==========================
+# manifest_add (re-record) and cmd_evict used `grep -v -F "id<TAB>"`: an id that
+# ENDS in the target (xzim:a for zim:a) was dropped too, and when the target was
+# the only row grep exited 1 so the rewrite never happened.
+mrow() { printf '%s\tcontent\tzim:other\t%s\t%s\t%s\tzim\t0\n' "$1" "$2" "$3" "$4"; }
+mids() { cut -f1 "$MANIFEST" | tr '\n' ' '; }
+rm -f "$MANIFEST"
+manifest_add zim:a content zim:other "$ZIM_DIR/a.zim" 10 5 zim
+manifest_add zim:a content zim:other "$ZIM_DIR/a.zim" 20 5 zim
+[ "$(mids)" = "zim:a " ] && [ "$(cut -f5 "$MANIFEST")" = 20 ] && pass \
+    || fail "re-recording the only manifest row must replace it, not duplicate it (got '$(mids)')"
+mrow xzim:a "$ZIM_DIR/xa.zim" 10 5 > "$MANIFEST"
+manifest_add zim:a content zim:other "$ZIM_DIR/a.zim" 10 5 zim
+manifest_add zim:a content zim:other "$ZIM_DIR/a.zim" 10 5 zim
+[ "$(mids)" = "xzim:a zim:a " ] && pass || fail "manifest_add must not drop an id that ends in the re-recorded id (got '$(mids)')"
+# evict: zim:a is the cheapest value/byte victim; xzim:a (a suffix match) must stay.
+truncate -s 10 "$ZIM_DIR/a.zim" "$ZIM_DIR/xa.zim" "$ZIM_DIR/b.zim"
+{ mrow xzim:a "$ZIM_DIR/xa.zim" 10 900; mrow zim:a "$ZIM_DIR/a.zim" 10 1; mrow zim:b "$ZIM_DIR/b.zim" 10 900; } > "$MANIFEST"
+gen_candidates() { :; }
+cmd_evict --need 5 >/dev/null 2>&1
+[ ! -e "$ZIM_DIR/a.zim" ] && [ "$(mids)" = "xzim:a zim:b " ] && pass \
+    || fail "evict must drop exactly the victim's row (got '$(mids)')"
+[ -e "$ZIM_DIR/xa.zim" ] && pass || fail "evict must keep the suffix-id file"
+# pins: a pinned id is "present" only via its OWN manifest row, never a suffix-id row.
+mrow xzim:a "$ZIM_DIR/xa.zim" 10 900 > "$MANIFEST"
+printf 'content\tzim:a\t0\t\n' > "$PINS"
+P=$(cmd_pins 2>&1)
+grep -E 'zim:a .*missing' <<<"$P" | grep -qv xzim && pass || fail "pins: a suffix-id row must not make zim:a show present (got: $P)"
+mrow zim:a "$ZIM_DIR/xa.zim" 10 900 >> "$MANIFEST"
+cmd_pins 2>&1 | grep -qE '^ +content +zim:a +.*present' && pass || fail "pins: zim:a with its own row + file must show present"
+rm -f "$PINS" "$ZIM_DIR/b.zim" "$ZIM_DIR/xa.zim"
+
+# === 11. ids compare as exact strings (backslashes, numeric-looking ids) =========
+# `awk -v id=...` expands escapes (C:\temp -> C:<TAB>emp) and compares strnums
+# numerically (id 1 matched row 1.0). Ids now go in via ENVIRON as forced strings.
+{ mrow 'zim:C:\temp' "$ZIM_DIR/bs.zim" 10 5; mrow 1.0 "$ZIM_DIR/n.zim" 10 5; mrow 1 "$ZIM_DIR/n1.zim" 10 5; } > "$MANIFEST"
+manifest_drop 'zim:C:\temp'
+[ "$(mids)" = "1.0 1 " ] && pass || fail "manifest_drop must remove a backslash id exactly (got '$(mids)')"
+manifest_drop 1
+[ "$(mids)" = "1.0 " ] && pass || fail "manifest_drop 1 must not drop row 1.0 (got '$(mids)')"
+printf 'content\t1.0\t0\t\ncontent\tzim:C:\\temp\t0\t\ncontent\t1\t0\t\n' > "$PINS"
+pin_remove 1; pin_remove 'zim:C:\temp'
+[ "$(cut -f2 "$PINS" | tr '\n' ' ')" = "1.0 " ] && pass || fail "pin_remove must compare ids as exact strings (got '$(cut -f2 "$PINS" | tr '\n' ' ')')"
+mrow 1.0 "$ZIM_DIR/n.zim" 10 5 > "$MANIFEST"; truncate -s 10 "$ZIM_DIR/n.zim"; printf 'content\t1\t0\t\n' > "$PINS"
+cmd_pins 2>&1 | grep -qE '^ +content +1 +.*missing' && pass || fail "pins: id 1 must not be 'present' via row 1.0"
+rm -f "$ZIM_DIR/n.zim"
+# prune_superseded removes rows through manifest_drop (exact, backslash-safe).
+truncate -s 10 "$ZIM_DIR/bs.zim"
+{ mrow 'zim:C:\temp' "$ZIM_DIR/bs.zim" 10 5; mrow zim:keep "$ZIM_DIR/k.zim" 10 5; } > "$MANIFEST"; : > "$PINS"
+cat > "$T/planner-stub.py" <<PY
+print("zim:C:\\\\temp\tzim:other\t$ZIM_DIR/bs.zim\t10\t5")
+PY
+_PL="$PLANNER"; PLANNER="$T/planner-stub.py"
+prune_superseded >/dev/null 2>&1
+PLANNER="$_PL"
+[ ! -e "$ZIM_DIR/bs.zim" ] && [ "$(mids)" = "zim:keep " ] && pass || fail "prune_superseded must drop exactly the superseded row (got '$(mids)')"
+declare -f prune_superseded | grep -q manifest_drop && pass || fail "prune_superseded must reuse manifest_drop"
+rm -f "$PINS"
 
 echo "librarian-download: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

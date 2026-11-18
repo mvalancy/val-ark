@@ -8,6 +8,9 @@
 #  * scripts/lib/apt_offline.py: print-uris parsing names files like the pool
 #    (no epoch), and the flat-repo index keeps only present .debs with
 #    Filename rewritten to ./<name> (Packages == gunzip Packages.gz).
+#  * apt_offline.py exit codes: usage errors exit 64 (never argparse's 2 =
+#    "a download failed"), and the most severe class wins (1 > 2 > 3 > 0).
+#  * bad --tsv / `--set all --set bogus` -> 64; no apt-get / unwritable --dest -> 1, no traceback.
 # No network: every check runs on repo files and fixtures.
 ###############################################################################
 PASS=0; FAIL=0
@@ -103,10 +106,18 @@ assert "pool/" not in text
 assert gzip.open(sys.argv[2] + "/Packages.gz", "rt").read() == text
 EOF
 
-# 5. CLI rejects an unknown set id (argparse error: exit 2 + message), not silently nothing.
+# 5. CLI rejects an unknown set id with a USAGE error (exit 64 = EX_USAGE + message), never
+#    argparse's default 2 (which reads as "a download failed") and never silently nothing (#178).
 ERR=$(python3 "$ROOT/scripts/lib/apt_offline.py" resolve --suite noble --arch amd64 --set no-such-set --no-update \
     --cache "$T/cache" 2>&1 >/dev/null); RC=$?
-[ "$RC" = 2 ] && grep -q "unknown set" <<<"$ERR" && pass || fail "unknown set id: want exit 2 + message (got $RC: $ERR)"
+[ "$RC" = 64 ] && grep -q "unknown set" <<<"$ERR" && pass || fail "unknown set id: want exit 64 + message (got $RC: $ERR)"
+python3 "$ROOT/scripts/lib/apt_offline.py" no-such-command >/dev/null 2>&1; RC=$?
+[ "$RC" = 64 ] && pass || fail "an unknown command must exit 64 (got $RC)"
+python3 "$ROOT/scripts/lib/apt_offline.py" resolve --set lamp >/dev/null 2>&1; RC=$?
+[ "$RC" = 64 ] && pass || fail "missing --suite/--arch must exit 64 (got $RC)"
+python3 "$ROOT/scripts/lib/apt_offline.py" fetch --suite noble --arch amd64 --set lamp --no-update --cache "$T/cache" >/dev/null 2>&1; RC=$?
+[ "$RC" = 64 ] && pass || fail "fetch without --dest must exit 64 (got $RC)"
+python3 "$ROOT/scripts/lib/apt_offline.py" --help >/dev/null 2>&1 && pass || fail "--help must still exit 0"
 
 # 6. Never report success on a hollow repo (exit 3 = incomplete).
 A="$ROOT/scripts/lib/apt_offline.py"
@@ -116,7 +127,7 @@ mkdir -p "$T/empty-cache/noble-amd64/var/lib/apt/lists"          # dir exists bu
 python3 "$A" index --suite noble --arch amd64 --no-update --cache "$T/empty-cache" --debs "$T/repo" >/dev/null 2>&1
 [ $? = 3 ] && [ ! -s "$T/repo/Packages.new" ] && pass || fail "index with an empty lists dir must exit 3"
 python3 "$A" index --suite noble --arch amd64 --no-update --cache "$T/empty-cache" >/dev/null 2>&1
-[ $? = 2 ] && pass || fail "index without --debs must be a usage error"
+[ $? = 64 ] && pass || fail "index without --debs must be a usage error (64)"
 
 # 7. stanzas() + index against a fake lists dir: complete -> 0, an unindexed .deb -> 3.
 L="$T/fake/noble-amd64/var/lib/apt/lists"; mkdir -p "$L" "$T/flat"
@@ -134,6 +145,71 @@ r = ao.AptRoot("noble", "amd64", sys.argv[2])
 assert r.has_lists() and r.sha256_map() == {"hello_2.10_amd64.deb": "b" * 64}
 assert 'Dir::Etc::parts' in (r.prepare() or (r.dir / "apt.conf").read_text())   # isolation config is written
 PY
+
+# 8. The most severe class wins (#178): a download failure (2) must not mask a set whose resolve
+#    failed (1); 2 still beats incomplete (3); build's index result never hides either.
+#    AptRoot + fetch are stubbed in-process, so no apt-get and no network.
+python3 - "$ROOT/scripts/lib" "$T/sev" <<'PY' && pass || fail "apt_offline exit-code severity"
+import sys; sys.path.insert(0, sys.argv[1]); import apt_offline as ao
+dest = sys.argv[2]
+ROW = ("http://archive.example/pool/a_1_amd64.deb", "a_1_amd64.deb", 1, "")
+def run(*, bad_set=False, missing=False, fail_fetch=False, cmd="fetch", extra=()):
+    def resolve(self, pkgs):
+        if bad_set and "BAD" in pkgs:
+            raise RuntimeError("conflict")
+        return [ROW], (["nope"] if missing else [])
+    ao.AptRoot.update = lambda self: None
+    ao.AptRoot.has_lists = lambda self: True
+    ao.AptRoot.resolve = resolve
+    ao.AptRoot.stanzas = lambda self: iter(())
+    ao.fetch = lambda rows, d: 1 if fail_fetch else 0
+    ao.write_index = lambda it, d: (1, [])
+    tsv = dest + ".tsv"
+    open(tsv, "w").write("1|good|pkg|n\n2|bad|BAD|n\n")
+    return ao.main([cmd, "--tsv", tsv, "--suite", "noble", "--arch", "amd64", "--dest", dest, *extra])
+import io, contextlib
+with contextlib.redirect_stderr(io.StringIO()):
+    assert run() == 0
+    assert run(fail_fetch=True) == 2
+    assert run(bad_set=True) == 1
+    assert run(bad_set=True, fail_fetch=True) == 1, "a download failure masked a resolve error"
+    assert run(bad_set=True, fail_fetch=True, cmd="build") == 1
+    assert run(missing=True) == 3
+    assert run(missing=True, fail_fetch=True) == 2
+    assert run(missing=True, extra=("--allow-missing",)) == 0
+assert ao.worst(0, 3) == 3 and ao.worst(3, 2) == 2 and ao.worst(2, 1) == 1 and ao.worst(1, 64) == 64
+assert ao.worst(0) == 0 and ao.worst(0, 0) == 0
+PY
+
+# 9. Clean errors, never a traceback (#197): an unreadable/malformed --tsv is a usage error (64);
+#    `--set all --set bogus` still rejects bogus (64); a missing apt-get or an unwritable --dest is
+#    an environment failure (1) with a one-line message.
+noerr() { ! grep -q Traceback <<<"$1"; }
+ERR=$(python3 "$A" sets --tsv "$T/no-such.tsv" 2>&1); RC=$?
+[ "$RC" = 64 ] && grep -q "cannot read --tsv" <<<"$ERR" && noerr "$ERR" && pass || fail "missing --tsv: want 64 + message (got $RC: $ERR)"
+printf 'not|enough\n' > "$T/bad.tsv"
+ERR=$(python3 "$A" sets --tsv "$T/bad.tsv" 2>&1); RC=$?
+[ "$RC" = 64 ] && noerr "$ERR" && pass || fail "malformed --tsv: want 64, no traceback (got $RC: $ERR)"
+ERR=$(python3 "$A" resolve --suite noble --arch amd64 --set all --set bogus --no-update --cache "$T/cache" 2>&1); RC=$?
+[ "$RC" = 64 ] && grep -q "unknown set(s): bogus" <<<"$ERR" && pass || fail "--set all --set bogus must reject bogus with 64 (got $RC: $ERR)"
+ERR=$(PATH="$T/empty-path" "$(command -v python3)" "$A" resolve --suite noble --arch amd64 --set lamp --cache "$T/nopath" 2>&1); RC=$?
+[ "$RC" = 1 ] && noerr "$ERR" && grep -q "apt_offline:" <<<"$ERR" && pass || fail "no apt-get on PATH: want 1 + clean message (got $RC: $ERR)"
+: > "$T/a-file"
+python3 - "$ROOT/scripts/lib" "$T/a-file/dest" <<'PY' && pass || fail "unwritable --dest must exit 1 cleanly"
+import sys, io, contextlib; sys.path.insert(0, sys.argv[1]); import apt_offline as ao
+ao.AptRoot.update = lambda self: None
+ao.AptRoot.has_lists = lambda self: True
+ao.AptRoot.resolve = lambda self, pkgs: ([("http://archive.example/a.deb", "a.deb", 1, "")], [])
+err = io.StringIO()
+with contextlib.redirect_stderr(err):
+    rc = ao.main(["fetch", "--suite", "noble", "--arch", "amd64", "--set", "lamp", "--dest", sys.argv[2]])
+assert rc == 1, rc
+assert "apt_offline:" in err.getvalue() and "Traceback" not in err.getvalue(), err.getvalue()
+PY
+
+ERR=$(VALARK_DEBUG=1 PATH="$T/empty-path" "$(command -v python3)" "$A" resolve --suite noble --arch amd64 --set lamp --cache "$T/nopath2" 2>&1); RC=$?
+[ "$RC" = 1 ] && grep -q Traceback <<<"$ERR" && grep -q "apt_offline:" <<<"$ERR" && pass \
+    || fail "VALARK_DEBUG=1 must add the traceback to an environment failure (got $RC: $ERR)"
 
 echo "server-stack: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

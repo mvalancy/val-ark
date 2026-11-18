@@ -12,13 +12,16 @@
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib/ports.sh"   # free_port / trap_signals: no fixed ports (parallel runs)
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
 [ -n "$NODE" ] || { echo "SKIP: no node runtime for commission.js" >&2; exit 0; }
 
-T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
+SRV_PID=""
+T="$(mktemp -d)"; trap 'stop_pids "$SRV_PID"; rm -rf "$T"' EXIT   # the trap must stop the server too
+trap_signals
 export VALARK_STATE_DIR="$T/state" VALARK_CONTENT_DIR="$T/content" VALARK_MODELS_DIR="$T/models"
 mkdir -p "$T/content/zim" "$T/models/llm"
 echo "WIKIPEDIA" > "$T/content/zim/w.zim"; echo "GGUF" > "$T/models/llm/m.gguf"
@@ -61,7 +64,7 @@ SUM_AFTER="$(cat "$T/content/zim/w.zim" "$T/models/llm/m.gguf" | sha256sum)"
 # ---- server-level regression: grandfather-flip must be impossible ---------------
 # (A LAN peer must not be able to seed the library to fake "already set up", and a
 #  library appearing after boot must not flip an un-owned box.)
-PORT=3917
+PORT=$(free_port)
 S2="$T/srv"; mkdir -p "$S2/content/zim" "$S2/models"
 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" \
   VALARK_STATE_DIR="$S2/state" VALARK_CONTENT_DIR="$S2/content" VALARK_MODELS_DIR="$S2/models" \
@@ -87,7 +90,7 @@ if [ "$up" = 1 ]; then
 else
     fail "test server did not start on :$PORT (see srv.log)"
 fi
-kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null
+stop_pids "$SRV_PID"; SRV_PID=""
 
 echo "commission: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

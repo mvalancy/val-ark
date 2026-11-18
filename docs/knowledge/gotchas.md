@@ -63,6 +63,18 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   remote host `setsid nohup … </dev/null & disown`.
 - **`date +%s%3N` isn't portable** (busybox in a VM emits garbage) → nonsense durations. **Fix:**
   clamp absurd values in consumers (the report does).
+- <a id="tsv-exact-id"></a>**Never remove a TSV row with `grep -v -F "id<TAB>"`.** It is a substring
+  match, so removing `zim:a` also removes `xzim:a` (any id that *ends* in the target). And when the row
+  is the file's only line, `grep -v` prints nothing and exits 1, so `grep … > f.tmp && mv f.tmp f` never
+  runs and the row stays put. In `scripts/librarian.sh` this left duplicate manifest rows on re-record
+  and dropped unrelated items from the manifest on evict. Match the first column exactly, as a
+  STRING, with the id passed through the environment:
+  `ID="$id" awk -F'\t' '$1"" != ENVIRON["ID"]""' f > f.tmp && mv f.tmp f`. Not `awk -v id=…`:
+  `-v` expands backslash escapes (`C:\temp` becomes `C:<TAB>emp`, so the row is never matched),
+  and fields and `-v` values are strnums, so without the `""` id `1` also matches row `1.0`. That is
+  `manifest_drop` in `librarian.sh`, which `manifest_add`, `cmd_evict` and `prune_superseded` all
+  call; `pin_remove` and `cmd_pins` compare the same way. Tested in
+  `tests/test-librarian-download.sh` §10-11. (#192)
 
 ## Cross‑architecture (arm64 boxes: Jetson-, Grace‑Blackwell-, Rockchip-class)
 
@@ -95,6 +107,11 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   `Filename` has none, so name files after the URL basename or the flat-repo index and the SHA
   lookup silently miss ~5% of packages. Resolve against an **empty dpkg status** in a throwaway
   APT root so every dependency (even libc6) is included and the set is truly self-contained.
+- <a id="argparse-exit-2"></a>**argparse exits 2 on a usage error**, which silently collides with any
+  CLI that documents its own `2` (`apt_offline.py`: "a download failed"), so a typo'd set id looked
+  like a flaky mirror. Override `ArgumentParser.error()` to exit **64** (`EX_USAGE`), and when one run
+  can hit several failure classes, report the **most severe** one through a single `worst()` instead
+  of `return 2 if failed else status` (which hid a set whose resolve failed). (#178)
 - **hf‑repo model downloads (e.g. `rhasspy/piper-voices`) fail with exit 127 if the `hf` CLI
   is missing** — silent for a while, then "command not found." **Fix:** `pip install -U
   huggingface_hub` (provides `hf`); `setup.sh` marks it optional but it's required for repo pulls.
@@ -220,6 +237,55 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   `http.lowSpeedTime=1800` and HTTP/1.1, and **keeps the shallow staging dir on failure** so the
   next run resumes. Fetch only `refs/heads/*` + `refs/tags/*`: GitHub's `refs/pull/*` can double
   a bundle.
+- <a id="git-bundle-incremental-refresh"></a>**A bundle refresh must not refetch history it already
+  holds (#179).** Deleting staging and re-cloning every `--refresh-days` re-downloads Linux-sized
+  histories monthly. `git_bundle_mirror.py` seeds a fresh bare staging repo by `git fetch`ing the
+  archived `<dest>/<owner>/<repo>.bundle` (heads + tags), then runs one `git fetch --prune origin`,
+  so upstream negotiates with our `have`s and sends only new objects; deleted upstream branches are
+  pruned and orphaned objects drop out of `bundle create --all`. The rebuilt bundle is
+  `git bundle verify`d before the `.part` rename replaces the old one. If the old bundle is
+  missing, unreadable or yields a shallow/empty repo, staging is wiped and the full chunked fetch
+  runs. The single incremental fetch gets only `INCR_TRIES` (2) attempts. A huge delta (an upstream
+  history rewrite) over a flaky link would otherwise fail the same transfer every run, so it then
+  falls back in the same run to the chunked shallow/deepen path, which leaves a resumable shallow
+  partial. Before any of this, if `git ls-remote --heads --tags` equals the bundle's
+  `git bundle list-heads` (peeled `^{}` lines and `HEAD` ignored) and the default branch has not
+  moved, nothing is rebuilt or re-copied and the repo is recorded as `unchanged: true`, so a
+  multi-GB file on the share is not rewritten monthly for nothing. **That skip also requires the
+  archived bundle's size and sha256 to match its `.source.json`.** `list-heads` reads only the
+  header, and git 2.43's `bundle verify` passes a *truncated* bundle, so without the hash a torn
+  or bit-rotted bundle would stay "unchanged" forever. The `verify` subcommand checks the same
+  provenance. **`git bundle verify` needs a repository:** run from a non-repo cwd it fails every
+  bundle ("need a repository to verify a bundle"). That broke `verify` and silently discarded
+  built bundles in the copy-only resume, so every call goes through `bundle_verify(bundle, repo)`,
+  which passes `-C` (an empty scratch repo is enough for full bundles). State records
+  `incremental: true|false`. **Resolve `--dest`/`--stage` to absolute paths first:** every git call
+  runs with `-C <staging repo>`, so a relative bundle path resolved inside staging
+  (`…/acme__widget.git/rel/stage/…bundle.lock: No such file`). **No `.source.json` means
+  UNVERIFIED** (exit 3) and never a pass. `verify --adopt` writes one only after `bundle verify`,
+  a full bare clone and `fsck --full`. Verify alone adopted a truncated bundle in testing, and clone
+  alone accepts a commit with no author email (index-pack skips fsck's object checks). **Read the
+  sidecar through ONE strict helper** (`read_provenance`). It accepts only an object with an int
+  `bytes` and a 64-hex `sha256`. An earlier "exists" check plus a parse that treated an unparseable
+  file as "no mismatch" let a truncated bundle with an empty `.source.json` verify clean. A `[]`
+  sidecar crashed `verify` and made every refresh fail. Write bundle and sidecar with fsync, then
+  rename, then directory fsync (bundle first) so a power cut cannot produce that pair.
+  Regression: `tests/test-git-bundle-mirror.sh` cases 3, 8, 12-22:
+  - 3, 8: run from a non-repo cwd
+  - 12: the trace shows `have` lines and no `deepen`
+  - 14: unchanged, a moved default branch, a truncated / bit-flipped bundle, a moved tag
+  - 15: the incremental fetch is retried once, then falls back to the chunked fetch
+  - 16: a rebuilt bundle that fails verify leaves the archived one byte-identical
+  - 17: relative `--dest`/`--stage` from a non-repo cwd
+  - 18: UNVERIFIED and `--adopt`, including refusing a truncated bundle
+  - 19: empty / `[]` / garbage / bad-sha sidecars, a refresh over `[]`
+  - 20: `--adopt` refuses a bundle that clones but fails fsck
+  - 21: the stale `.adopt-*` sweep
+  - 22: fsync order
+  - 23: a per-bundle error inside `verify` is that bundle's BAD line and the walk goes on
+  - 24: stale `.bundle.part` sweep at mirror start. It never follows a symlinked owner dir out of
+    `--dest`, and never deletes a symlinked `.part` (`lstat`).
+  - 25: `fsync_file` works through a read-only fd
 
 ## Storage / data root
 
@@ -227,6 +293,24 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   got pruned overnight). **Fix:** set `VAL_ARK_DATA` explicitly in `.env` on multi‑mount hosts.
 - **Default footprint cap can be tiny** — a box with 7 TB free had `VALARK_MAX_GB=500`, so almost
   nothing mirrored. Check the cap when "nothing downloads."
+- <a id="apparent-vs-allocated-size"></a>**Allocated-block sizes read ~0 on ZFS, compressed or
+  delayed-allocation filesystems (#176).** Right after a write, `st_blocks` (and so `du` without
+  `-b`, and `git count-objects -v`'s `size`/`size-pack`) can report almost nothing until the
+  filesystem commits, and compression shrinks it for good. `references_mirror.py` sized a fresh
+  fetch with `count-objects -v`, so on a ZFS root `--max-repo-mb` and the budget stop let an
+  oversized repo through (6 cases of `tests/test-cad-agent-references.sh` failed there while ext4
+  CI passed). **Rule:** any cap, budget or footprint check uses apparent size: `os.stat().st_size`
+  summed over the tree, `du -sb`, or `stat -c %s`. Use `du -sh` only for human-readable display.
+  The test pins this on any filesystem with a `git` shim that reports `count-objects` as zeros.
+- <a id="smb-reserved-chars"></a>**SMB/CIFS shares reject `: * ? " < > | \` in file and directory
+  names.** NAS targets are commonly SMB; a name like `run-12:39:51` fails to write, and some clients
+  (GVFS) report it as `ENOTDIR` "Not a directory" on the *child* when a *parent* directory name holds
+  a `:`, which sends debugging the wrong way. **Rule:** a mirror that writes upstream-chosen names onto
+  a share maps those characters (e.g. to `-`) before writing, and does it *before* deriving any id or
+  hash from the destination path, so re-discovery maps to the same place and stays idempotent.
+  `git_bundle_mirror.py` (`SAFE_NAME` whitelist) and `references_mirror.py` (`ID_RE` ids,
+  sha256-named blobs) never write upstream-chosen characters, and `lastbook_mirror.py` rejects
+  names outside its `SAFE_NAME` whitelist. Check any new mirror against this rule.
 - <a id="data-disk-mount-guard"></a>**A late/failed data-disk mount at `@reboot` would rebuild the
   tree on the ROOT fs** — the writability probe (`valark_ensure_writable`) *passes* on an empty,
   user-writable mountpoint, so `loop.sh`'s unconditional `mkdir` seeded `state/`+`content/` on the
@@ -271,6 +355,45 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Test / VM harness
 
+- <a id="parallel-test-ports"></a>**A test server on a fixed port breaks parallel runs.** Several
+  worktrees or workers often run `tests/run-all.sh` on one box at once. With a literal port
+  (`test-server-limits.sh` had 3700; `test-health.sh` and `test-moderation-api.sh` even shared
+  3927/3928), the second run either fails "server did not start" or quietly talks to the *first*
+  run's server and fails on its state (404 on a temp dir that server never had). A leftover
+  `server.js` then holds the port for every run after it. (Bash 5.x *does* run the EXIT trap on
+  TERM and INT, so a ^C'd or TERM'd run cleans up if its trap is right.) The real ways a server
+  gets left behind are:
+  - the EXIT trap never kills it: `test-commission.sh`'s trap only removed the temp dir;
+  - the trap kills an empty or stale PID because `$!` was read inside `$(...)` or a subshell;
+  - the test is SIGKILLed (`timeout -s KILL`, an OOM kill), so no trap can run;
+  - the server outlives a plain TERM.
+
+  **Fix:** source `tests/lib/ports.sh` and:
+  - pick every port with `free_port` (kernel-chosen), including a separate `free_port` for
+    `VALARK_HTTPS_PORT`. `port + 9000` overflows 65535 on an ephemeral port, and `PORT+1` can
+    land on another run's port;
+  - stop every server you started with `stop_pids` (TERM, then KILL after about 3s), both in
+    the EXIT trap and mid-test;
+  - `trap_signals` is optional belt and braces (exit 130/143 through the EXIT trap).
+
+  The lint behind `tests/test-port-hygiene.sh` lives in `tests/lib/port_hygiene.py`. It
+  reads bash line by line, joining `\` continuations, and when unsure it reports rather than
+  passes. It fails on:
+  - a literal port;
+  - any port arithmetic (`$((PORT+1))`, `$(($PORT + 1))`, `$((1+PORT))`, or `$((SP + 1))` on
+    any variable assigned from `free_port`);
+  - a server launch whose PID variable it can't find;
+  - a **last** EXIT trap that doesn't `stop_pids` the variable holding that server's PID. Bash
+    keeps only the last trap; a trap that names a function, quoted or not, counts that
+    function's body plus the helpers it calls, one level deep;
+  - a mid-test `stop_pids $X` (quoted or not) that doesn't clear `X=""` on the same line,
+    since the trap would later signal a PID that may have been reused.
+
+  Each rule has a fixture in §1d, which also holds the cases that must stay clean: `PIDS+=($!)`,
+  a `$(start)` capture of `echo $!`, and helper indirection. §3 includes a negative control
+  showing it does catch a trap that never kills the server. If you find a stray `server.js`,
+  only kill the ones your own run started; another worker may be mid-test.
+  (#195, #199, #208, #224)
 - **`run-all.sh`'s green/red gate must not depend on node.** The runner's exit code came
   solely from `report/generate.mjs`; with no node on the host (fresh appliance, minimal
   container) it exited 0 even when suites failed. Every suite writes `results/*.json` with an

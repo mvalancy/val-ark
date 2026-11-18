@@ -12,6 +12,9 @@
 #  * data/essentials.tsv parses, ranks unique, kinds/focus valid, and every
 #    model/inst entry matches a real catalog row.
 #  * the survival profile exists end to end (catalog weight, wizard, commission).
+#  * the librarian's REAL prune_superseded: the superseded file is deleted and
+#    only its exact manifest id dropped (prefix ids kept); pinned and in-progress
+#    (.part) entries untouched; a STOP-halted fill skips the prune (#177).
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -147,6 +150,68 @@ grep -q "id: 'survival'" "$ROOT/web-ui/index.html" && pass || fail "wizard lacks
 grep -q -- '--essentials' "$ROOT/scripts/librarian.sh" && pass || fail "librarian does not pass --essentials"
 W=$( VALARK_PROFILE=survival bash -c "unset _VALARK_CATALOG_LOADED _VALARK_ENV_LOADED; export VAL_ARK_DATA='$ROOT'; source '$ROOT/scripts/lib/catalog.sh'; _valark_profile_weight content" )
 [ "$W" = "1.4" ] && pass || fail "survival content weight (got '$W')"
+
+# 8. the librarian's REAL prune (rm + exact-id manifest rewrite), and its STOP-flag rule (#177).
+#    Runs in a child bash (sourcing librarian.sh sets env/options); it prints PASS / FAIL: lines.
+PR=$(T="$T" ROOT="$ROOT" bash <<'EOS' 2>/dev/null
+export VAL_ARK_DATA="$T/prune-data"; mkdir -p "$VAL_ARK_DATA"
+export VAL_ARK_CONFIG="$T/prune.env"; : > "$VAL_ARK_CONFIG"
+. "$ROOT/scripts/librarian.sh"; ensure_state
+ok_() { echo PASS; }; no_() { echo "FAIL: $1"; }
+Z="$ZIM_DIR"; MB=1048576
+r() { printf '%s\tcontent\tzim:other\t500\t%s\tzim\thttps://x/%s\t%s\t%s\n' "$1" "$2" "$1" "$Z/$3" "$4"; }
+m() { printf '%s\tcontent\tzim:other\t%s\t1\t1\tzim\t0\n' "$1" "$Z/$2"; }
+cands() {
+  r zim:med_en_mini_eng     $MB      med-mini.zim   med_en      # superseded -> removed
+  r zim:med_en_maxi_eng     $((4*MB)) med-maxi.zim  med_en      # full variant, complete
+  r zim:med_en_mini_eng_old $MB      med-old.zim    medold_en   # id has the superseded id as a PREFIX
+  r zim:med_en_mini         $MB      med-pfx.zim    medpfx_en   # id is a PREFIX of the superseded id
+  r zim:knots_en_mini_eng   $MB      knots-mini.zim knots_en    # pinned small variant -> kept
+  r zim:knots_en_maxi_eng   $((4*MB)) knots-maxi.zim knots_en
+  r zim:food_en_mini_eng    $MB      food-mini.zim  food_en     # full variant still a .part -> kept
+  r zim:food_en_maxi_eng    $((4*MB)) food-maxi.zim food_en
+}
+gen_candidates() { cands; }
+setup() {
+  rm -f "$Z"/*.zim "$Z"/*.part
+  for f in med-mini med-old med-pfx knots-mini food-mini; do truncate -s $MB "$Z/$f.zim"; done
+  for f in med-maxi knots-maxi; do truncate -s $((4*MB)) "$Z/$f.zim"; done
+  truncate -s $((2*MB)) "$Z/food-maxi.zim.part"
+  { m zim:med_en_mini_eng med-mini.zim; m zim:med_en_maxi_eng med-maxi.zim
+    m zim:med_en_mini_eng_old med-old.zim; m zim:med_en_mini med-pfx.zim
+    m zim:knots_en_mini_eng knots-mini.zim; m zim:knots_en_maxi_eng knots-maxi.zim
+    m zim:food_en_mini_eng food-mini.zim; } > "$MANIFEST"
+  printf 'content\tzim:knots_en_mini_eng\t0\tpinned\n' > "$PINS"
+}
+ids() { cut -f1 "$MANIFEST" | sort | tr '\n' ' '; }
+KEEP="zim:food_en_mini_eng zim:knots_en_maxi_eng zim:knots_en_mini_eng zim:med_en_maxi_eng zim:med_en_mini zim:med_en_mini_eng_old "
+
+setup; prune_superseded >/dev/null
+[ ! -e "$Z/med-mini.zim" ] && ok_ || no_ "prune: the superseded mini must be deleted"
+[ "$(ids)" = "$KEEP" ] && ok_ || no_ "prune: manifest must drop exactly the superseded id (got '$(ids)')"
+for f in med-maxi med-old med-pfx knots-mini knots-maxi food-mini; do   # one result per file
+  [ -e "$Z/$f.zim" ] && ok_ || no_ "prune: $f.zim must be kept"
+done
+[ -e "$Z/food-maxi.zim.part" ] && ok_ || no_ "prune: an in-progress .part must be untouched"
+prune_superseded >/dev/null; [ "$(ids)" = "$KEEP" ] && ok_ || no_ "prune: second run must be a no-op"
+
+# The fill path: STOP mid-fill skips the prune; an un-halted fill prunes.
+catalog_refresh_zim() { :; }; valark_budget_bytes() { echo $((100*1024*MB)); }
+valark_fillable_bytes() { echo $((100*1024*MB)); }
+build_plan() {   # two planned items, so a STOP raised by the first halts before the second
+  for i in a b; do printf 'zim:%s\tcontent\tzim:other\t1\t0\tzim\tu\t%s\t-\t1\n' "$i" "$Z/$i"; done
+  : > "$TMPDIR_VA/plan.summary"; }
+download_one() { [ -n "${STOP_ON_DL:-}" ] && : > "$STOP_FLAG"; return 0; }
+setup; STOP_ON_DL=1 cmd_fill >"$T/fill.err" 2>&1
+[ -e "$Z/med-mini.zim" ] && grep -q 'skipping superseded-variant prune' "$T/fill.err" && ok_ \
+  || no_ "fill halted by STOP must not prune (it deletes files while the owner asked to stop)"
+grep -q 'med_en_mini_eng	' "$MANIFEST" && ok_ || no_ "STOP-halted fill must leave the manifest alone"
+rm -f "$STOP_FLAG"; cmd_fill >/dev/null 2>&1
+[ ! -e "$Z/med-mini.zim" ] && [ "$(ids)" = "$KEEP" ] && ok_ || no_ "an un-halted fill must prune the superseded mini"
+EOS
+)
+[ -n "$PR" ] || fail "real-prune fixture produced no results"
+while IFS= read -r l; do case "$l" in PASS) pass ;; FAIL:*) fail "${l#FAIL: }" ;; esac; done <<<"$PR"
 
 echo "essentials: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

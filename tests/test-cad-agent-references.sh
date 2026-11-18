@@ -14,7 +14,7 @@
 #   - content addressing: identical bytes are stored once; by-id/<id>.<ext> points
 #     at the latest copy; a changed source keeps the old blob
 #   - --max-repo-mb keeps a pointer only (before cloning when the size is known,
-#     after fetching otherwise); no cap by default
+#     after fetching otherwise, by apparent file size, never allocated blocks); no cap by default
 #   - 403/429 and robots.txt -> blocked, 404 -> gone, no URL -> no-url, bad ids rejected
 #   - a rerun is idempotent (no new lines, no page requests); --refresh sends
 #     If-None-Match (304 -> unchanged) and ls-remote (same refs -> unchanged)
@@ -24,6 +24,7 @@
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib/ports.sh"   # free_port / trap_signals: no fixed ports (parallel runs)
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 check() { if eval "$2"; then pass; else fail "$1"; fi; }
@@ -33,7 +34,9 @@ command -v python3 >/dev/null 2>&1 || { echo "SKIP: no python3" >&2; exit 0; }
 command -v git >/dev/null 2>&1 || { echo "SKIP: no git" >&2; exit 0; }
 
 T="$(mktemp -d)"; SRV_PID=""
-trap 'rm -rf "${T:?}"; [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null' EXIT
+NPID=""
+trap 'rm -rf "${T:?}"; stop_pids "$SRV_PID" "$NPID"' EXIT
+trap_signals
 export VAL_ARK_CONFIG="$T/empty.conf" VAL_ARK_DATA="$T/disk" FORCE_COLOR=0 VALARK_REFS_HOST_INTERVAL=0
 export GIT_CONFIG_GLOBAL="$T/gitconfig" GIT_CONFIG_NOSYSTEM=1 GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid \
        GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
@@ -417,6 +420,19 @@ GITHUB_TOKEN=fixture mirror --store "$T/store7" --budget 1000000 > "$T/b1.json" 
 check "a repo larger than the budget left stops the run" 'j "$T/b1.json" "d[\"stopped\"]" | grep -q "budget reached: bigrepo needs"' || cat "$T/b1.json" >&2
 check "nothing over budget is written" '[ "$(j "$T/b1.json" "d[\"added_bytes\"]")" -le 1000000 ] && ! grep -q "\"id\":\"bigrepo\"" "$T/store7/manifest.jsonl" && [ -z "$(ls -A "$T/store7/tmp")" ]'
 check "the tool says why it stopped" 'grep -q "references: stopped, budget reached" "$T/b1.err"'
+# #176: allocated-block sizes read ~0 on ZFS/compressed filesystems. A git shim that reports
+# `count-objects -v` as all zeros (as on such a disk) must not let bigrepo past the cap or budget.
+mkdir -p "$T/allocbin"; REALGIT="$(command -v git)"
+cat > "$T/allocbin/git" <<EOF2
+#!/bin/bash
+for a in "\$@"; do [ "\$a" = count-objects ] && { printf 'count: 0\nsize: 0\nin-pack: 0\npacks: 0\nsize-pack: 0\n'; exit 0; }; done
+exec "$REALGIT" "\$@"
+EOF2
+chmod +x "$T/allocbin/git"
+PATH="$T/allocbin:$PATH" GITHUB_TOKEN=fixture mirror --store "$T/store-alloc" --max-repo-mb 1 > /dev/null 2>&1
+check "post-fetch size uses apparent bytes, not allocated blocks (cap)" '[ "$(line "$T/store-alloc" bigrepo | j - "d[\"status\"]")" = too-large ]'
+PATH="$T/allocbin:$PATH" GITHUB_TOKEN=fixture mirror --store "$T/store-alloc2" --budget 1000000 > "$T/b-alloc.json" 2>/dev/null
+check "post-fetch size uses apparent bytes, not allocated blocks (budget)" 'j "$T/b-alloc.json" "d[\"stopped\"]" | grep -q "budget reached: bigrepo needs"'
 mkindex big "[('bigfile', '$H/big.bin', 'open')]"
 python3 "$PY" mirror --store "$T/store8" --index "$T/site/big/index.json" --monolith "" --budget 2097160 > "$T/b2.json" 2>/dev/null
 check "a file larger than the budget left stops the run, nothing kept" 'j "$T/b2.json" "d[\"stopped\"]" | grep -q "budget reached: bigfile" && [ ! -s "$T/store8/manifest.jsonl" ] && [ -z "$(ls "$T/store8/blobs")" ]'
@@ -463,9 +479,9 @@ NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/
 if [ -n "$NODE" ] && command -v curl >/dev/null 2>&1; then
     MADE_PRIVATE=0; [ -e "${ROOT:?}/private" ] || MADE_PRIVATE=1
     PD="${ROOT:?}/private/refs-test-$$"; mkdir -p "$PD"; echo SECRET > "$PD/copy.html"
-    SP=3962; B="http://127.0.0.1:$SP"
+    SP=$(free_port); B="http://127.0.0.1:$SP"
     env VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 \
-        VALARK_WEB_PORT="$SP" VALARK_HTTPS_PORT="$((SP + 9000))" VALARK_STATE_DIR="$T/srvstate" \
+        VALARK_WEB_PORT="$SP" VALARK_HTTPS_PORT="$(free_port)" VALARK_STATE_DIR="$T/srvstate" \
         "$NODE" "$ROOT/scripts/server.js" "$SP" >"$T/srv.log" 2>&1 &
     NPID=$!
     up=0; for _ in $(seq 1 30); do sleep 0.4; curl -sf --max-time 2 "$B/api/health" >/dev/null 2>&1 && { up=1; break; }; done
@@ -478,7 +494,7 @@ if [ -n "$NODE" ] && command -v curl >/dev/null 2>&1; then
     else
         fail "server.js did not start on :$SP"
     fi
-    kill "$NPID" 2>/dev/null
+    stop_pids "$NPID"; NPID=""
     rm -f "${PD:?}/copy.html"; rmdir "${PD:?}"
     [ "$MADE_PRIVATE" = 1 ] && rmdir "${ROOT:?}/private"
 else

@@ -37,7 +37,7 @@ line (e.g. `grep -n "function renderHealth" web-ui/index.html`).
 - `PLATFORMS` ≈ 26 · `ARM64_ALIAS_PLATFORMS` ≈ 94 · `OPENWRT_TOOLS` ≈ 97
 - `GLOSSARY` ≈ 120 · `TOOL_CATEGORIES` ≈ 150 · `TOOLS` (big array) ≈ 163
 - `TOOL_META` ≈ 2221 · `TOOL_INFO` ≈ 2330 · `INSTALLED_TOOLS` ≈ 2329
-- `CONTENT_LIBRARY` ≈ 2276 · `CONTENT_STATUS`/`CONTENT_INFO` ≈ 5654
+- `CONTENT_LIBRARY` ≈ 2344 · `CONTENT_STATUS`/`CONTENT_INFO`/`_contentRaw` ≈ 6000. An entry is a Kiwix ZIM card by default; a script-fed content release (Lastbook) adds `downloadTarget` (Mirror starts that tool job), `filesMatch` (held files listed as `/api/archive/content/…` downloads) `usage` (replaces the kiwix-serve block) and `probe: false` (no HEAD-probe fallback), and omits `articles`; content entries flagged `external` (an out-of-tree `VALARK_LASTBOOK_DIR`, which `server.js` lists from that dir's `.lastbook-verified.json` records only, never by walking it) count as present but get no download links
 - `MODEL_FAMILIES` ≈ 2644 · `MODEL_META` ≈ 2489 · `MODEL_PATHS` ≈ 2593 (no `MODEL_SLUGS` here — that lives in the Playwright spec)
 - `STORAGE_DATA` ≈ 3012 · `TESTIMONIALS` ≈ 2512 · `SETTINGS_SECTIONS` ≈ 3755 · `COMMUNITY_NAV_LABELS` ≈ 3455
 

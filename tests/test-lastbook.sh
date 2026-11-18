@@ -21,6 +21,20 @@
 #     all when the release looks truncated
 #   - a server ignoring Range restarts from 0; a 416 resets the .part; an off-list
 #     redirect is refused (a same-host redirect of a rewritten base is followed)
+#   - a 206 starting anywhere but the .part size restarts from 0; a 404 is not retried
+#   - --pack auto reserves room for the base maps + installers, else keeps a held pack;
+#     the default budget is a share of (dest-filesystem headroom + bytes held), and a
+#     fetch never cuts into the reserve
+#   - a verified single pack (auto / one id) prunes the smaller packs nested in it
+#     (never with every or a list); maps / addresses / models each refuse a prune that
+#     loses most of the section while the release lists fewer; stray unrecorded .parts
+#     go only when a current or kept manifest names them
+#   - a pack re-released under a new name replaces the old file (not a gutted one); auto
+#     stays on a held, verified pack when the manifest over-reports another; an
+#     out-of-tree Lastbook dir is listed by server.js from its records only
+#   - a size claim that would displace a held pack must be HEAD-confirmed (a failed HEAD is
+#     not confirmation); a pack whose HEAD disagrees is never downloaded; swapped pack ids
+#     never make the nested prune delete a file the release still names
 #   - exit codes 0 / 1 / 3 / 64; argparse errors are 64, not 2
 ###############################################################################
 PASS=0; FAIL=0
@@ -33,9 +47,13 @@ SH="$ROOT/scripts/tools/lastbook.sh"
 FIX="$ROOT/tests/fixtures/lastbook"
 command -v python3 >/dev/null 2>&1 || { echo "SKIP: no python3" >&2; exit 0; }
 
-T="$(mktemp -d)"; SRV_PID=""
-trap 'rm -rf "${T:?}"; [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null' EXIT
+. "$ROOT/tests/lib/ports.sh"
+T="$(mktemp -d)"; SRV_PID=""; NPID=""
+trap 'stop_pids $SRV_PID $NPID; rm -rf "${T:?}"' EXIT; trap_signals
 export VAL_ARK_CONFIG="$T/empty.conf" VAL_ARK_DATA="$T/disk" FORCE_COLOR=0 LC_ALL=C
+# No disk reserve by default: fetches stop at the reserve, and a CI runner has little free space.
+export VALARK_RESERVE_PCT=0 VALARK_RESERVE_MIN_GB=0
+unset VALARK_MAX_GB
 unset VALARK_LASTBOOK_REWRITE VALARK_LASTBOOK_DIR VALARK_LASTBOOK_PACK VALARK_LASTBOOK_MAPS \
       VALARK_LASTBOOK_ADDRESSES VALARK_LASTBOOK_MODEL VALARK_LASTBOOK_APPS VALARK_LASTBOOK_BUDGET VALARK_LASTBOOK_BUDGET_PCT
 : > "$VAL_ARK_CONFIG"; mkdir -p "$VAL_ARK_DATA"
@@ -59,6 +77,8 @@ class H(http.server.BaseHTTPRequestHandler):
             f.write(f"{self.command} {urllib.parse.urlsplit(self.path).path} {self.headers.get('Range', '-')}\n")
         if not p:
             self.send_error(404); return
+        if not body_too and os.path.exists(p + ".nohead"):  # persistent: HEAD fails (no size to confirm)
+            self.send_error(500); return
         if os.path.exists(p + ".redirect"):  # persistent: 302 to the URL in the flag file
             self.send_response(302); self.send_header("Location", open(p + ".redirect").read().strip())
             self.send_header("Content-Length", "0"); self.end_headers(); return
@@ -70,16 +90,20 @@ class H(http.server.BaseHTTPRequestHandler):
             self.send_response(416); self.send_header("Content-Length", "0"); self.end_headers(); return
         if os.path.exists(p + ".norange"):  # persistent: ignore Range, always 200 + the whole file
             rng = None
+        end = len(data)
         if rng and rng.startswith("bytes="):
             start = int(rng[6:].split("-")[0])
             if start >= len(data):
                 self.send_response(416); self.send_header("Content-Length", "0"); self.end_headers(); return
             code = 206
-        body = data[start:]
+            if body_too and os.path.exists(p + ".shiftonce"):  # one-shot: a 206 from 10 bytes too early,
+                os.remove(p + ".shiftonce")                    # as long as the rest (sizes still add up)
+                start, end = start - 10, len(data) - 10
+        body = data[start:end]
         self.send_response(code)
         self.send_header("Content-Length", str(len(body)))
         if code == 206:
-            self.send_header("Content-Range", f"bytes {start}-{len(data) - 1}/{len(data)}")
+            self.send_header("Content-Range", f"bytes {start}-{end - 1}/{len(data)}")
         self.end_headers()
         if not body_too:
             return
@@ -407,6 +431,19 @@ mir --dest "$T/m13" --pack none --maps CA --addresses none --apps none --model n
 check "same-host redirect of a rewritten base: followed + verified" '[ "$rc" = 0 ] && cmp -s "$T/ca.keep" "$T/m13/maps/Lastbook-Map-CA.zip"'
 rm -f "$CA.redirect"; mv "$T/ca.keep" "$CA"
 
+# a 206 that does not continue where the .part ends restarts from 0 (N7)
+D14="$T/m14"; mkdir -p "$D14/packs"; head -c 100 "$PK" > "$D14/packs/Lastbook-Small-20261113.zip.part"
+touch "$PK.shiftonce"; : > "$T/req.log"
+mir --dest "$D14" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+rm -f "$PK.shiftonce"
+check "206 with the wrong Content-Range start: restart from 0, verified" '[ "$rc" = 0 ] && cmp -s "$PK" "$D14/packs/Lastbook-Small-20261113.zip" && grep -q "does not start at byte 100" "$T/err" && grep -q "^GET /tiny/dl/Lastbook-Small-20261113.zip -$" "$T/req.log"'
+# a 404 fails fast: one request, no retry back-off (N7)
+mv "$CA" "$T/ca.keep"; : > "$T/req.log"
+VALARK_LASTBOOK_REWRITE="$TINY" timeout 60 python3 "$PY" mirror --dest "$T/m15" --tries 4 --retry-wait 30 --budget -1 \
+    --pack none --maps CA --addresses none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+mv "$T/ca.keep" "$CA"
+check "404: exit 1 after ONE request, not retried" '[ "$rc" = 1 ] && [ "$(grep -c "^GET /tiny/dl/maps/Lastbook-Map-CA.zip" "$T/req.log")" = 1 ] && grep -q "HTTP 404" "$T/err"'
+
 # version sort never crashes on text parts (N6)
 mkdir -p "$T/www/rc"
 python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); a["windows"]["version"]="1.1.rc1"; json.dump(a,open(sys.argv[2],"w"))' "$FIX/app-v1.json" "$T/www/rc/app-v1.json"
@@ -416,6 +453,265 @@ python3 - "$ROOT/scripts/lib" <<'EOF' && pass || fail "version_key orders mixed 
 import sys; sys.path.insert(0, sys.argv[1]); import lastbook_mirror as l
 assert sorted(["1.1.rc1", "1.1.11", "1.1.9", "1.2", "1.1.1"], key=l.version_key) == ["1.1.rc1", "1.1.1", "1.1.9", "1.1.11", "1.2"]
 EOF
+
+# --- 10c. sizing: base maps + installers reserved in the pack fit (N5), share + reserve (N4) ---------
+plan --budget 67600000000 > "$T/plan.out"; rc=$?   # Medium alone fits; Medium + base map does not
+check "auto reserves room for the base map: Small (not Medium) at a budget just above Medium, exit 0" '[ "$(got get pack)" = small ] && got get map | grep -qw base && [ "$rc" = 0 ]'
+D16="$T/m16"
+mir --dest "$D16" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+rm -f "$D16/maps/Lastbook-Map-base.zip"
+VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" plan --dest "$D16" --budget 1 > "$T/plan.out" 2>"$T/plan.err"; rc=$?
+check "auto with no room for the extras keeps a pack already held (need 0), extras deferred" '[ "$(got get pack)" = small ] && [ "$(got deferred map)" = base ] && [ "$rc" = 3 ]'
+python3 - "$ROOT/scripts/lib" "$T/m17" <<'PYEOF' && pass || fail "budget share counts held bytes; headroom is measured on the dest filesystem"
+import os, sys; from pathlib import Path
+sys.path.insert(0, sys.argv[1]); import lastbook_mirror as l
+d = Path(sys.argv[2]); (d / "packs").mkdir(parents=True)
+(d / "packs" / "Lastbook-Small.zip").write_bytes(b"x" * 400)
+(d / "maps").mkdir(); (d / "maps" / "foreign.zip").write_bytes(b"y" * 5000)   # unrecorded: not Lastbook's
+stamps = {"packs/Lastbook-Small.zip": {"size": 400}}
+class V:
+    def __init__(s, free, total): s.f_bavail, s.f_frsize, s.f_blocks = free, 1, total
+real = os.statvfs
+os.statvfs = lambda p: V(1000, 10**6) if str(p).startswith(str(d)) else V(10**12, 10**13)
+os.environ.update(VALARK_RESERVE_PCT="0", VALARK_RESERVE_MIN_GB="0")
+assert l.headroom(d / "packs") == 1000                          # the dest's own filesystem
+assert l.headroom(d / "not-yet" / "deeper") == 1000             # nearest existing ancestor
+assert l.held_bytes(d, stamps) == 400                           # recorded files only
+assert l.default_budget(d, stamps, 50) == (1000 + 400) // 2 - 400 == 300
+assert l.default_budget(d, stamps, 50) == l.default_budget(d, stamps, 50)  # stable: no compounding
+assert l.default_budget(d, stamps, 50, cap=200) == 0            # held already beyond its share: never negative
+assert l.default_budget(d, stamps, 100) == 1000 and l.default_budget(d, stamps, 100, cap=5) == 5
+os.environ["VALARK_RESERVE_PCT"] = "50"
+assert l.headroom(d) == 0                                       # a reserve of 50% of the disk > free
+os.statvfs = real
+PYEOF
+# the fetch-time check keeps the reserve, even with --budget -1 (N4)
+VALARK_RESERVE_MIN_GB=999999 mir --dest "$T/m18" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "fetch keeps the reserve: deferred, exit 3, nothing finalized" '[ "$rc" = 3 ] && [ ! -e "$T/m18/packs/Lastbook-Small-20261113.zip" ] && grep -q "not enough free space" "$T/err"'
+
+# --- 10d. pack upgrades prune the nested smaller packs (N3) ---------------------------------------
+D19="$T/m19"
+mir --dest "$D19" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+mir --dest "$D19" --pack every --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "--pack every keeps every pack (never superseded)" '[ "$rc" = 0 ] && [ "$(ls "$D19/packs" | wc -l)" = 3 ]'
+mir --dest "$D19" --pack small,medium --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "--pack with a list keeps the listed packs" '[ "$rc" = 0 ] && [ -s "$D19/packs/Lastbook-Small-20261113.zip" ]'
+mir --dest "$D19" --pack medium --maps none --apps none --model no --keep-old > "$T/out" 2>"$T/err"
+check "--keep-old keeps the nested packs" '[ "$(ls "$D19/packs" | wc -l)" = 3 ]'
+echo mine > "$D19/packs/Lastbook-Tiny.zip"   # unrecorded: must survive
+mir --dest "$D19" --pack medium --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "explicit single pack: the smaller nested pack goes, the larger stays" '[ "$rc" = 0 ] && [ ! -e "$D19/packs/Lastbook-Small-20261113.zip" ] && [ -s "$D19/packs/Lastbook-Medium.zip" ] && [ -s "$D19/packs/Lastbook-All.zip" ] && grep -q "nested in the verified medium pack" "$T/err"'
+mir --dest "$D19" --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "auto upgrade to All: Medium pruned once All is verified; unrecorded file survives" '[ "$rc" = 0 ] && [ "$(ls "$D19/packs" | sort | tr "\n" " ")" = "Lastbook-All.zip Lastbook-Tiny.zip " ]'
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert not any("Small" in k or "Medium" in k for k in s)' "$D19/.lastbook-verified.json" && pass || fail "superseded packs leave the stamps file"
+mkdir -p "$T/www/sup"
+python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); m["packs"][2]["files"][0]["sha256"]="0"*64; json.dump(m,open(sys.argv[2],"w"))' "$T/www/tiny/dl/manifest-v1.json" "$T/www/sup/manifest-v1.json"
+mir --dest "$T/m20" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/manifest-v1.json=$B/sup/manifest-v1.json $TINY" \
+    python3 "$PY" mirror --dest "$T/m20" --tries 1 --budget -1 --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "a larger pack that fails its sha256 never supersedes the held one" '[ "$rc" = 1 ] && [ -s "$T/m20/packs/Lastbook-Small-20261113.zip" ]'
+
+# --- 10e. per-section truncation guard + stray pre-change .parts -----------------------------------
+D21="$T/m21"
+mir --dest "$D21" --pack small --maps all --addresses none --model yes > "$T/out" 2>"$T/err"
+mkdir -p "$T/www/sec"
+python3 - "$T/www/tiny/dl/manifest-v1.json" "$T/www/sec" <<'PYEOF'
+import json, os, sys
+m = json.load(open(sys.argv[1])); m["maps"] = [e for e in m["maps"] if e.get("kind") != "state"]
+json.dump(m, open(os.path.join(sys.argv[2], "few-maps.json"), "w"))      # base map only: 3 of 4 maps go
+m = json.load(open(sys.argv[1])); m["models"][0]["file"] = "gemma-next.gguf"
+json.dump(m, open(os.path.join(sys.argv[2], "new-model.json"), "w"))     # a model replaced, not dropped
+PYEOF
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/manifest-v1.json=$B/sec/few-maps.json $TINY" \
+    python3 "$PY" mirror --dest "$D21" --budget -1 --pack none --maps none --addresses none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "a manifest listing only a few maps: no prune (per-section guard), says why" '[ "$rc" = 0 ] && [ "$(ls "$D21/maps" | wc -l)" = 4 ] && grep -q "NOT pruning: the release would drop 3 of the 4 maps held" "$T/err"'
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/manifest-v1.json=$B/sec/new-model.json $TINY" \
+    python3 "$PY" mirror --dest "$D21" --budget -1 --pack none --maps none --addresses none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "a replaced model (release lists as many as held) is still pruned" '[ "$rc" = 0 ] && [ ! -e "$D21/models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf" ] && ! grep -q "NOT pruning" "$T/err"'
+# stray .parts from before .part stamps existed: only names the kept / current manifests give
+python3 - "$D21/manifest-v1.json" <<'PYEOF'
+import json, sys
+m = json.load(open(sys.argv[1])); e = json.loads(json.dumps(m["maps"][0])); e["id"] = "GONE"
+e["files"][0]["name"] = "Lastbook-Map-GONE.zip"; m["maps"].append(e); json.dump(m, open(sys.argv[1], "w"))
+PYEOF
+mkdir -p "$D21/addresses" "$D21/app/2024photos"
+for f in maps/Lastbook-Map-GONE.zip.part maps/random.part maps/hiking.mbtiles.part maps/Lastbook-Map-TX.zip.part addresses/mine.zip.part \
+         models/Lastbook-Map-GONE.zip.part maps/Lastbook-Medium.zip.part app/2024photos/Lastbook-Map-GONE.zip.part; do echo x > "$D21/$f"; done
+mir --dest "$D21" --pack small --maps CA --addresses none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "stray .part named by the previously kept manifest: pruned" '[ "$rc" = 0 ] && [ ! -e "$D21/maps/Lastbook-Map-GONE.zip.part" ]'
+check "stray .parts with other names, or of a file the release still lists, survive" '[ -e "$D21/maps/random.part" ] && [ -e "$D21/maps/hiking.mbtiles.part" ] && [ -e "$D21/maps/Lastbook-Map-TX.zip.part" ] && [ -e "$D21/addresses/mine.zip.part" ]'
+check "stray .parts match the whole recorded path, not the bare name (other section / non-version app dir survive)" '[ -e "$D21/models/Lastbook-Map-GONE.zip.part" ] && [ -e "$D21/maps/Lastbook-Medium.zip.part" ] && [ -e "$D21/app/2024photos/Lastbook-Map-GONE.zip.part" ]'
+
+# nested-pack prune never trusts manifest sizes alone (PR #194 review B1): a held, verified All
+# must survive a manifest that omits or under-reports pack sizes
+variant() {  # variant NAME PYTHON-EDIT-OF-m : a copy of tiny/ with an altered manifest
+    rm -rf "$T/www/$1"; cp -r "$T/www/tiny" "$T/www/$1"
+    python3 -c 'import json,sys; p=sys.argv[1]; m=json.load(open(p)); exec(sys.argv[2]); json.dump(m,open(p,"w"))' "$T/www/$1/dl/manifest-v1.json" "$2"
+}
+vrun() { local v=$1; shift; VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/$v/dl/ https://lastbook.org/=$B/$v/site/ https://huggingface.co/=$B/$v/hf/" \
+    python3 "$PY" mirror --tries 1 --retry-wait 0 --budget -1 --maps none --apps none --model no "$@" > "$T/out" 2>"$T/err"; }
+held_all() { mir --dest "$1" --pack every --maps none --apps none --model no > "$T/out" 2>"$T/err"; }
+variant nosize 'a=[p for p in m["packs"] if p["id"]=="all"][0]; a.pop("installed_bytes",None); a["files"][0].pop("size",None)'
+variant onesize 'a=[p for p in m["packs"] if p["id"]=="all"][0]; a["installed_bytes"]=1; a["files"][0]["size"]=1'
+variant onlysmall 'm["packs"]=[p for p in m["packs"] if p["id"]=="small"]'
+D22="$T/m22"; held_all "$D22"
+vrun nosize --dest "$D22" --pack auto; rc=$?
+check "manifest without All's sizes, auto: the held All is kept (and stays chosen)" '[ "$rc" = 0 ] && [ -s "$D22/packs/Lastbook-All.zip" ] && ! grep -q "pruned packs/Lastbook-All" "$T/err" && tail -1 "$T/out" | grep -q "\"packs\": \[\"all\"\]"'
+vrun nosize --dest "$D22" --pack medium; rc=$?
+check "manifest without All's sizes, --pack medium: All never superseded" '[ "$rc" = 0 ] && [ -s "$D22/packs/Lastbook-All.zip" ]'
+D23="$T/m23"; held_all "$D23"
+vrun onesize --dest "$D23" --pack medium; rc=$?
+check "manifest under-reporting All (size 1), --pack medium: All kept, Small (smaller on disk) superseded" '[ "$rc" = 0 ] && [ -s "$D23/packs/Lastbook-All.zip" ] && [ ! -e "$D23/packs/Lastbook-Small-20261113.zip" ]'
+vrun onesize --dest "$D23" --pack auto; rc=$?
+check "manifest under-reporting All (size 1), auto: nothing of All deleted" '[ -s "$D23/packs/Lastbook-All.zip" ] && ! grep -q "pruned packs/Lastbook-All" "$T/err"'
+# a packs list truncated to Small never costs a larger held pack (review N1)
+D24="$T/m24"; held_all "$D24"
+vrun onlysmall --dest "$D24" --pack auto; rc=$?
+check "packs list truncated to Small: Medium + All kept (no verified pack as large), says why" '[ "$rc" = 0 ] && [ -s "$D24/packs/Lastbook-All.zip" ] && [ -s "$D24/packs/Lastbook-Medium.zip" ] && grep -q "keeping packs/Lastbook-All.zip: no pack verified this run is at least as large" "$T/err"'
+vrun onlysmall --dest "$D24" --pack none; rc=$?
+check "--pack none never drops a held pack" '[ "$rc" = 0 ] && [ -s "$D24/packs/Lastbook-All.zip" ] && [ -s "$D24/packs/Lastbook-Small-20261113.zip" ]'
+python3 - "$ROOT/scripts/lib" <<'PYEOF' && pass || fail "app version dirs must be real versions"
+import sys; sys.path.insert(0, sys.argv[1]); import lastbook_mirror as l
+assert l.OWNED_KEY.match("app/1.1.11/x") and l.OWNED_KEY.match("app/1.1.rc1/x")
+assert not l.OWNED_KEY.match("app/2024photos/x") and not l.OWNED_KEY.match("app/1/x") and not l.OWNED_KEY.match("app/1..2/x")
+PYEOF
+
+
+# a pack re-released under a new file name replaces the old file once the new one verifies (R1)
+ALLF=$(find "$T/www/tiny" -name Lastbook-All.zip); ALLSZ=$(stat -c %s "$ALLF")
+rerelease() {  # rerelease NAME BYTES : All republished as Lastbook-All-2.zip, its first BYTES bytes
+    variant "$1" ''
+    head -c "$2" "$ALLF" > "$(dirname "$(find "$T/www/$1" -name Lastbook-All.zip)")/Lastbook-All-2.zip"
+    python3 - "$T/www/$1/dl/manifest-v1.json" "$(find "$T/www/$1" -name Lastbook-All-2.zip)" <<'PYEOF'
+import hashlib, json, sys
+p, f = sys.argv[1], sys.argv[2]; m = json.load(open(p)); d = open(f, "rb").read()
+a = [x for x in m["packs"] if x["id"] == "all"][0]; fl = a["files"][0]
+fl["name"] = "Lastbook-All-2.zip"; fl["url"] = fl["url"].replace("Lastbook-All.zip", "Lastbook-All-2.zip")
+fl["size"] = len(d); fl["sha256"] = hashlib.sha256(d).hexdigest(); a["installed_bytes"] = len(d)
+json.dump(m, open(p, "w"))
+PYEOF
+}
+rerelease rr $((ALLSZ - 50))       # a little smaller than the held All
+rerelease rrgut 10                 # gutted: 10 bytes
+D25="$T/m25"; mir --dest "$D25" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["packs/Lastbook-All.zip"]["pack"] == "all"' "$D25/.lastbook-verified.json" && pass || fail "a verified pack file records its pack id"
+vrun rr --dest "$D25" --pack auto; rc=$?
+check "All re-released under a new name, slightly smaller: the old file is replaced, not kept twice" '[ "$rc" = 0 ] && [ -s "$D25/packs/Lastbook-All-2.zip" ] && [ ! -e "$D25/packs/Lastbook-All.zip" ] && grep -q "pruned packs/Lastbook-All.zip (replaced by the verified re-release of the all pack)" "$T/err"'
+D26="$T/m26"; mir --dest "$D26" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+python3 -c 'import json,sys; f=sys.argv[1]; s=json.load(open(f)); [v.pop("pack", None) for v in s.values()]; json.dump(s, open(f, "w"))' "$D26/.lastbook-verified.json"
+vrun rr --dest "$D26" --pack all; rc=$?
+check "re-release on a box stamped before pack ids: the kept manifest names the old file's pack, replaced" '[ "$rc" = 0 ] && [ ! -e "$D26/packs/Lastbook-All.zip" ] && [ -s "$D26/packs/Lastbook-All-2.zip" ]'
+D27="$T/m27"; mir --dest "$D27" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+vrun rrgut --dest "$D27" --pack all; rc=$?
+check "a gutted re-release (under half the bytes) never replaces the held All" '[ "$rc" = 0 ] && [ -s "$D27/packs/Lastbook-All.zip" ] && grep -q "keeping packs/Lastbook-All.zip" "$T/err"'
+# auto chooses no pack (step up, never down) but one is held: maps, addresses, model and apps still refresh
+D41="$T/m41"; mir --dest "$D41" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+: > "$T/req.log"
+vrun rrgut --dest "$D41" --pack auto --maps CA --model auto --apps current; rc=$?
+check "no pack chosen, a verified one held: the held All stays, base + state map, addresses, model and apps refresh, exit 3" '[ "$rc" = 3 ] && [ -s "$D41/packs/Lastbook-All.zip" ] && [ ! -e "$D41/packs/Lastbook-All-2.zip" ] && [ -s "$D41/maps/Lastbook-Map-CA.zip" ] && [ -s "$D41/maps/Lastbook-Map-base.zip" ] && [ -s "$D41/addresses/Lastbook-Addresses-CA.zip" ] && [ -s "$D41/models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf" ] && [ "$(ls "$D41/app/1.1.11" | wc -l)" = 4 ] && grep -q "the held pack stays as it is this run" "$T/err" && ! grep -q "^GET .*Lastbook-\(All-2\|Medium\|Small\)" "$T/req.log"'
+vrun rrgut --dest "$T/m42" --pack auto --maps CA --budget 1; rc=$?
+check "fresh box, no pack fits, nothing held: no frozen-pack refresh (no maps without a pack)" '[ "$rc" = 3 ] && ! grep -q "the held pack stays" "$T/err" && [ ! -e "$T/m42/maps/Lastbook-Map-CA.zip" ]'
+
+# auto never leaves a held, verified pack because the manifest over-reports another pack (R3)
+variant bigmed 'a=[p for p in m["packs"] if p["id"]=="medium"][0]; a["installed_bytes"]=10**15'
+variant bigmedfile 'a=[p for p in m["packs"] if p["id"]=="medium"][0]; a["installed_bytes"]=10**12; a["files"][0]["size"]=10**12'
+D28="$T/m28"; mir --dest "$D28" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+vrun bigmed --dest "$D28" --pack auto; rc=$?
+check "Medium's installed_bytes over-reported: auto stays on the held All" '[ "$rc" = 0 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"all\"\]" && [ ! -e "$D28/packs/Lastbook-Medium.zip" ]'
+: > "$T/req.log"
+vrun bigmedfile --dest "$D28" --pack auto; rc=$?
+check "Medium's file size over-reported: HEAD disagrees, Medium skipped as broken, auto stays on the held All, exit 3" '[ "$rc" = 3 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"all\"\]" && grep -q "the server says .*: broken upstream" "$T/err" && ! grep -q "^GET .*Lastbook-Medium.zip" "$T/req.log"'
+
+# an unconfirmed size claim never displaces a held pack (H1): a failed HEAD is not confirmation
+variant bigmednohead 'a=[p for p in m["packs"] if p["id"]=="medium"][0]; a["installed_bytes"]=10**12; a["files"][0]["size"]=10**12'
+touch "$(find "$T/www/bigmednohead" -name Lastbook-Medium.zip).nohead"
+D29="$T/m29"; mir --dest "$D29" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+: > "$T/req.log"
+vrun bigmednohead --dest "$D29" --pack auto; rc=$?
+check "HEAD fails for an over-claiming Medium: auto stays on the held All, no download, says why, exit 3" '[ "$rc" = 3 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"all\"\]" && grep -q "the server did not confirm its size" "$T/err" && ! grep -q "^GET .*Lastbook-Medium.zip" "$T/req.log"'
+
+# a renamed re-release that over-claims its size is caught before any download (H2)
+rerelease rrbig $((ALLSZ - 50))
+python3 -c 'import json,sys; p=sys.argv[1]; m=json.load(open(p)); a=[x for x in m["packs"] if x["id"]=="all"][0]; a["files"][0]["size"]=2*a["files"][0]["size"]; a["installed_bytes"]=a["files"][0]["size"]; json.dump(m,open(p,"w"))' "$T/www/rrbig/dl/manifest-v1.json"
+D30="$T/m30"; mir --dest "$D30" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+: > "$T/req.log"
+vrun rrbig --dest "$D30" --pack auto; rc=$?
+check "renamed re-release whose HEAD contradicts its size: skipped as broken, and no smaller pack is fetched beside the held All (K1), exit 3" '[ "$rc" = 3 ] && [ -s "$D30/packs/Lastbook-All.zip" ] && [ ! -e "$D30/packs/Lastbook-Medium.zip" ] && grep -q "Lastbook-All-2.zip .*broken upstream" "$T/err" && grep -q "every pack this release offers that is not already held is smaller than the held packs/Lastbook-All.zip" "$T/err" && ! grep -q "^GET .*Lastbook-\(All-2\|Medium\|Small\)" "$T/req.log"'
+# the same re-release whose HEAD gives no size: wait a run, nothing chosen, and the message says why (F2)
+rm -rf "$T/www/rrnohead"; cp -r "$T/www/rrbig" "$T/www/rrnohead"; touch "$(find "$T/www/rrnohead" -name Lastbook-All-2.zip).nohead"
+D35="$T/m35"; mir --dest "$D35" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+: > "$T/req.log"
+vrun rrnohead --dest "$D35" --pack auto; rc=$?
+check "renamed re-release, HEAD without a size: no pack chosen, nothing downloaded, message says not in this release" '[ "$rc" = 3 ] && [ -s "$D35/packs/Lastbook-All.zip" ] && grep -q "no Lastbook pack chosen" "$T/err" && grep -q "the held packs/Lastbook-All.zip (.*) is not in this release" "$T/err" && ! grep -q "^GET .*Lastbook-\(All-2\|Medium\|Small\)" "$T/req.log"'
+# the held All listed under its own name with an over-claimed size: the message says so (F2)
+variant samebig 'a=[x for x in m["packs"] if x["id"]=="all"][0]; a["files"][0]["size"]=2*a["files"][0]["size"]; a["installed_bytes"]=a["files"][0]["size"]'
+touch "$(find "$T/www/samebig" -name Lastbook-All.zip).nohead"   # no size to confirm: wait a run
+D33="$T/m33"; mir --dest "$D33" --pack all --maps none --apps none --model no > "$T/out" 2>"$T/err"
+: > "$T/req.log"
+vrun samebig --dest "$D33" --pack auto; rc=$?
+check "held All listed with an over-claimed size: rc 3, nothing downloaded, message says listed with a different size" '[ "$rc" = 3 ] && [ -s "$D33/packs/Lastbook-All.zip" ] && grep -q "the held packs/Lastbook-All.zip (.*) is listed in this release with a different size" "$T/err" && ! grep -q "is not in this release" "$T/err" && ! grep -q "^GET .*Lastbook-\(All\|Medium\|Small\)" "$T/req.log"'
+# Small held, All unconfirmed (HEAD fails), Medium confirmable: no intermediate upgrade this run (F1)
+variant allnohead ''
+touch "$(find "$T/www/allnohead" -name Lastbook-All.zip).nohead"
+D34="$T/m34"; mir --dest "$D34" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+: > "$T/req.log"
+vrun allnohead --dest "$D34" --pack auto; rc=$?
+check "Small held + All unconfirmed: no Medium either, Small kept, log says nothing downloaded, exit 3" '[ "$rc" = 3 ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"small\"\]" && [ ! -e "$D34/packs/Lastbook-Medium.zip" ] && [ -s "$D34/packs/Lastbook-Small-20261113.zip" ] && ! grep -q "^GET .*Lastbook-\(All\|Medium\)" "$T/req.log" && grep -q "not downloading it or any other pack this run, keeping the held packs/Lastbook-Small-20261113.zip" "$T/err"'
+vrun tiny --dest "$D34" --pack auto; rc=$?
+check "next run with HEAD answering: the upgrade to All goes ahead" '[ "$rc" = 0 ] && [ -s "$D34/packs/Lastbook-All.zip" ]'
+# a HEAD that contradicts the manifest marks that pack broken: skip it, let the next confirmed pack through (G1)
+variant allbig 'a=[x for x in m["packs"] if x["id"]=="all"][0]; a["files"][0]["size"]=2*a["files"][0]["size"]; a["installed_bytes"]=a["files"][0]["size"]'
+D36="$T/m36"; mir --dest "$D36" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+: > "$T/req.log"
+vrun allbig --dest "$D36" --pack auto; rc=$?
+check "Small held + All's HEAD contradicts its size: Medium goes through, All never fetched, exit 3, and the nested Small is pruned (K2)" '[ "$rc" = 3 ] && [ ! -e "$D36/packs/Lastbook-Small-20261113.zip" ] && grep -q "pruned packs/Lastbook-Small-20261113.zip (nested in the verified medium pack)" "$T/err" && [ -s "$D36/packs/Lastbook-Medium.zip" ] && tail -1 "$T/out" | grep -q "\"packs\": \[\"medium\"\]" && grep -q "Lastbook-All.zip .*broken upstream" "$T/err" && ! grep -q "^GET .*Lastbook-All.zip" "$T/req.log"'
+: > "$T/req.log"
+vrun allbig --dest "$T/m37" --pack auto; rc=$?
+check "fresh box + All's HEAD contradicts its size: auto's pick is HEAD-checked, Medium goes through, exit 3" '[ "$rc" = 3 ] && [ -s "$T/m37/packs/Lastbook-Medium.zip" ] && [ ! -e "$T/m37/packs/Lastbook-All.zip" ] && ! grep -q "^GET .*Lastbook-All.zip" "$T/req.log"'
+vrun allnohead --dest "$T/m38" --pack auto; rc=$?
+check "fresh box + All's HEAD gives no size: nothing to displace, All downloads (sha256 guards it), exit 0" '[ "$rc" = 0 ] && [ -s "$T/m38/packs/Lastbook-All.zip" ]'
+# K2 only when the skip upstream is the ONLY reason for exit 3: a failed file still means no prune
+variant allbigbadmap 'a=[x for x in m["packs"] if x["id"]=="all"][0]; a["files"][0]["size"]=2*a["files"][0]["size"]; a["installed_bytes"]=a["files"][0]["size"]
+ca=[x for x in m["maps"] if x["id"]=="CA"][0]; ca["files"][0]["sha256"]="0"*64'
+D39="$T/m39"; mir --dest "$D39" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+vrun allbigbadmap --dest "$D39" --pack auto --maps CA --addresses none; rc=$?
+check "skip upstream + a failed file: exit 1, nothing pruned (Small kept beside Medium)" '[ "$rc" = 1 ] && [ -s "$D39/packs/Lastbook-Small-20261113.zip" ] && [ -s "$D39/packs/Lastbook-Medium.zip" ]'
+# every pack contradicted upstream on a fresh box: the message says so, not "fits the budget" (K3)
+variant allbroken 'for x in m["packs"]: x["files"][0]["size"]=2*x["files"][0]["size"]; x["installed_bytes"]=x["files"][0]["size"]'
+: > "$T/req.log"
+vrun allbroken --dest "$T/m40" --pack auto; rc=$?
+check "fresh box, every pack contradicted upstream: \"no Lastbook pack could be confirmed upstream\", nothing fetched, exit 3" '[ "$rc" = 3 ] && grep -q "no Lastbook pack could be confirmed upstream" "$T/err" && ! grep -q "fits the budget" "$T/err" && ! grep -q "^GET .*Lastbook-\(All\|Medium\|Small\)" "$T/req.log"'
+# an unlimited budget prints as "unlimited", never "?" (K3)
+variant nopacks 'm["packs"]=[]'
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/nopacks/dl/ https://lastbook.org/=$B/nopacks/site/ https://huggingface.co/=$B/nopacks/hf/" \
+    python3 "$PY" plan --budget -1 > "$T/plan.out" 2>&1; rc=$?
+check "no pack at all, unlimited budget: the note says \"unlimited available\", not \"?\"" '[ "$rc" = 3 ] && grep -q "no Lastbook pack fits the budget (unlimited available" "$T/plan.out" && ! grep -q "(? available" "$T/plan.out"'
+# the nothing-fits message quotes the pack AND the room reserved for base maps + installers (G2)
+plan --budget 8G > "$T/plan.out"; rc=$?
+check "nothing fits: the message adds the base-map + installer room to the smallest pack" '[ "$rc" = 3 ] && grep -q "the smallest, .*, needs .* plus .* for the base maps and installers = " "$T/plan.out"'
+: > "$T/req.log"
+vrun rrbig --dest "$D30" --pack all; rc=$?
+check "renamed re-release over-claiming its size, --pack all: a clear error before any GET (not \"range not satisfiable\")" '[ "$rc" = 1 ] && grep -q "but the server has .*: not downloading; an upstream manifest error" "$T/err" && ! grep -q "range not satisfiable" "$T/err" && ! grep -q "^GET .*Lastbook-All-2.zip" "$T/req.log" && [ -s "$D30/packs/Lastbook-All.zip" ]'
+
+# swapped / aliased pack ids never make the nested prune delete a file the release still names (H4)
+rm -rf "$T/www/swap"; cp -r "$T/www/tiny" "$T/www/swap"
+python3 - "$T/www/swap/dl/manifest-v1.json" "$(dirname "$(find "$T/www/swap" -name Lastbook-Medium.zip)")/Lastbook-Medium-2.zip" <<'PYEOF'
+import hashlib, json, sys
+p, new = sys.argv[1], sys.argv[2]; m = json.load(open(p)); P = {x["id"]: x for x in m["packs"]}
+P["all"]["files"] = [dict(P["medium"]["files"][0])]; P["all"]["installed_bytes"] = P["all"]["files"][0]["size"]
+d = b"medium two " * 900; open(new, "wb").write(d)   # larger than every old pack file
+f = P["medium"]["files"][0]; f["name"] = "Lastbook-Medium-2.zip"; f["url"] = f["url"].replace("Lastbook-Medium.zip", "Lastbook-Medium-2.zip")
+f["size"] = len(d); f["sha256"] = hashlib.sha256(d).hexdigest(); P["medium"]["installed_bytes"] = len(d)
+json.dump(m, open(p, "w"))
+PYEOF
+D31="$T/m31"; held_all "$D31"
+vrun swap --dest "$D31" --pack medium; rc=$?
+check "ids swapped (all names the old Medium file): the nested prune keeps that file" '[ "$rc" = 0 ] && [ -s "$D31/packs/Lastbook-Medium-2.zip" ] && [ -s "$D31/packs/Lastbook-Medium.zip" ] && ! grep -q "pruned packs/Lastbook-Medium.zip" "$T/err"'
+# a file one superseded pack shares with a pack that is kept stays (still named by the release)
+variant shared 'P={p["id"]: p for p in m["packs"]}; P["all"]["files"]=P["all"]["files"]+[dict(P["small"]["files"][0])]'
+D32="$T/m32"; mir --dest "$D32" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+vrun shared --dest "$D32" --pack medium; rc=$?
+check "a superseded pack's file that a kept pack also names is not pruned" '[ "$rc" = 0 ] && [ -s "$D32/packs/Lastbook-Small-20261113.zip" ] && [ -s "$D32/packs/Lastbook-Medium.zip" ]'
 
 # --- 11. the tool entry --------------------------------------------------------------------------
 : > "$T/req.log"
@@ -432,6 +728,52 @@ VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_PACK=nope bash "$SH" > "$T/sh.ou
 check "lastbook.sh: bad option -> non-zero + error" '[ "$rc" != 0 ] && grep -q "bad option" "$T/sh.out"'
 VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_BUDGET_PCT=500 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
 check "lastbook.sh: BUDGET_PCT over 100 is clamped, not rejected" '[ "$rc" != 64 ] && grep -q "^# Lastbook manifest" "$T/sh.out"'
+# the default budget is worked out by lastbook_mirror.py on the Lastbook dir (not DATA_ROOT), as a share;
+# --cap (VALARK_MAX_GB) only when the dir is inside the data trees that cap accounts for
+mkdir -p "$T/bin"; REALPY=$(command -v python3)
+printf '#!/bin/sh\n[ "$(basename "$1")" = lastbook_mirror.py ] && echo "$*" >> "%s"\nexec "%s" "$@"\n' "$T/py.args" "$REALPY" > "$T/bin/python3"; chmod +x "$T/bin/python3"
+: > "$T/py.args"
+PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_MAX_GB=1 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh: default budget = --share PCT + --cap (VALARK_MAX_GB) for content/lastbook, no DATA_ROOT --budget" \
+    'grep -q -- "--dest .*/content/lastbook .*--share 50 --cap [0-9]" "$T/py.args" && ! grep -q -- "--budget" "$T/py.args" && grep -q "^# Lastbook manifest" "$T/sh.out"'
+: > "$T/py.args"
+PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$T/elsewhere/lastbook" VALARK_MAX_GB=1 \
+    bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh: a Lastbook dir outside the data trees gets --share but no --cap, and says so" \
+    'grep -q -- "--dest $T/elsewhere/lastbook .*--share 50" "$T/py.args" && ! grep -q -- "--cap\|--budget" "$T/py.args" && grep -q "outside the Val Ark data trees" "$T/sh.out"'
+
+# server.js reports a VALARK_LASTBOOK_DIR outside content/ under lastbook/, flagged external (not served)
+NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
+if [ -n "$NODE" ] && command -v curl >/dev/null 2>&1; then
+    # a mirror kept outside content/: one recorded pack, plus things the listing must NOT reveal (R2)
+    X="$T/ext/lastbook"; mkdir -p "$X/packs" "$X/docs" "$T/ext/elsewhere"
+    echo pack > "$X/packs/Lastbook-Small-20261113.zip"
+    echo mine > "$X/secret.txt"; echo mine > "$X/packs/unrecorded.zip"; echo mine > "$X/docs/notes.txt"   # unrecorded / not a section
+    echo mine > "$T/ext/elsewhere/Lastbook-Map-CA.zip"; ln -s "$T/ext/elsewhere" "$X/maps"                  # symlinked section dir
+    ln -s "$T/ext/elsewhere/Lastbook-Map-CA.zip" "$X/packs/Lastbook-Medium.zip"                             # symlinked file
+    stamp "$X" packs/Lastbook-Small-20261113.zip docs/notes.txt
+    python3 -c 'import json,sys; f=sys.argv[1]; s=json.load(open(f)); s.update({"maps/Lastbook-Map-CA.zip": {"size": 5}, "packs/Lastbook-Medium.zip": {"size": 5}, "../secret.txt": {"size": 5}, "app/2024photos/x.zip": {"size": 5}}); json.dump(s, open(f, "w"))' "$X/.lastbook-verified.json"
+    SP=$(free_port); SP2=$(free_port)
+    env VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 \
+        VALARK_WEB_PORT="$SP" VALARK_HTTPS_PORT="$SP2" VALARK_STATE_DIR="$T/srvstate" VALARK_LASTBOOK_DIR="$T/ext/lastbook" \
+        "$NODE" "$ROOT/scripts/server.js" "$SP" >"$T/srv.log" 2>&1 &
+    NPID=$!
+    up=0; for _ in $(seq 1 30); do sleep 0.4; curl -sf --max-time 2 "http://127.0.0.1:$SP/api/health" >/dev/null 2>&1 && { up=1; break; }; done
+    if [ "$up" = 1 ]; then
+        curl -s --max-time 5 "http://127.0.0.1:$SP/api/status/content" > "$T/content.json"
+        python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); e=d["lastbook/packs/Lastbook-Small-20261113.zip"]; assert e["external"] is True and e["size"] == 5' "$T/content.json" \
+            && pass || fail "server.js: an out-of-tree VALARK_LASTBOOK_DIR shows in /api/status/content as lastbook/..., external"
+        python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); ks=sorted(k for k in d if k.startswith("lastbook/")); assert ks == ["lastbook/packs/Lastbook-Small-20261113.zip"], ks; assert not any("secret" in k or "notes" in k or "unrecorded" in k for k in d)' "$T/content.json" \
+            && pass || fail "server.js: only recorded files in Lastbook sections are listed (no unrecorded files, no symlinks, no other dirs)"
+        code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$SP/api/archive/content/lastbook/packs/Lastbook-Small-20261113.zip")
+        check "server.js: the external Lastbook dir is not served (got $code)" '[ "$code" != 200 ]'
+    else
+        fail "server.js did not start on :$SP"; cat "$T/srv.log" >&2
+    fi
+    stop_pids "$NPID"; NPID=""
+else
+    echo "  SKIP: server.js external Lastbook dir (no node or curl)" >&2
+fi
 check "lastbook comes last in download-tools.sh ordered_tools" 'sed -n "/local ordered_tools=(/,/^    )/p" "$ROOT/scripts/download-tools.sh" | grep -v "^ *#" | tr -s " \n" " " | grep -q "cad-agent lastbook )"'
 check "lastbook is in download-tools.sh list (default refresh)" 'bash "$ROOT/scripts/download-tools.sh" list 2>/dev/null | grep -q "  lastbook$"'
 check "source-repos.tsv lists Immortal-Protocols/lastbook" 'grep -q "^[0-9]*|Immortal-Protocols/lastbook|" "$ROOT/data/source-repos.tsv"'

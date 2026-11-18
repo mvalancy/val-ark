@@ -154,18 +154,66 @@ and run GPU inference on the served models over the network. The 24/7 verify loo
 ## Content mirrors
 
 Tool scripts that mirror a content release rather than an app, so they have no Software card.
+They are also the exception to "tool output goes to `${TOOLS_DIR}`": Lastbook writes to
+`content/lastbook/` (served; its card is in **Library ▸ Content**, fed by the `/api/status/content`
+walk) and cad-agent-references writes to `private/` (never served, no card).
 
 | Script | What it keeps | Where | In `download-tools.sh all`? |
 |--------|---------------|-------|------------------------------|
-| `scripts/tools/lastbook.sh` | [Lastbook](https://lastbook.org) (MIT), a free offline survival library: one content pack (Small 7.7 GB / Medium 67.5 GB / All 388 GB), state maps (~85 GB), address indexes (~5 GB), its GGUF model (16.9 GB), and every installer of the current app version (mac, Windows, both Ubuntu debs). Current release only, sha256-verified, resumable. | `content/lastbook/{packs,maps,addresses,models,app/<ver>}` + the three upstream manifests | **Yes, sized:** `--pack auto` takes the largest pack that fits half the librarian's budget (`VALARK_LASTBOOK_BUDGET_PCT`), then maps / addresses / model while they fit. **Every pack is opt-in** (`VALARK_LASTBOOK_PACK=every`, `MAPS=all`, `MODEL=yes`, ~570 GB) for servers and NAS mirrors. Preview: `scripts/tools/lastbook.sh plan`. |
+| `scripts/tools/lastbook.sh` | [Lastbook](https://lastbook.org) (MIT), a free offline survival library: one content pack (Small 7.7 GB / Medium 67.5 GB / All 388 GB), state maps (~85 GB), address indexes (~5 GB), its GGUF model (16.9 GB), and every installer of the current app version (mac, Windows, both Ubuntu debs). Current release only, sha256-verified, resumable. | `content/lastbook/{packs,maps,addresses,models,app/<ver>}` + the three upstream manifests | **Yes, sized:** `--pack auto` takes the largest pack that fits Lastbook's share, with room left for the base maps and installers, then maps / addresses / model while they fit. The share: Lastbook may hold `VALARK_LASTBOOK_BUDGET_PCT` (default 50) percent of (headroom above the reserve on the disk that holds `content/lastbook`, capped by `VALARK_MAX_GB` when the dir is inside the data trees, + what it already holds), so it never compounds across runs; downloads also stop at the reserve. Once a larger pack is verified, the smaller packs nested in it are pruned, ranked by verified on-disk bytes, never by manifest sizes alone (not with `every`). `auto` steps up, never down: it never downloads a pack smaller than the one held (a same-id re-release of at least half its size excepted), so the held pack can be **frozen** (kept, not updated, exit 3) while the maps, addresses, model and installers keep refreshing. To force the current pack anyway: `VALARK_LASTBOOK_PACK=all`. **Every pack is opt-in** (`VALARK_LASTBOOK_PACK=every`, `MAPS=all`, `MODEL=yes`, ~570 GB) for servers and NAS mirrors. Preview: `scripts/tools/lastbook.sh plan`. |
 | `scripts/tools/cad-agent-references.sh` | A private archive of every source cad-agent cites (git bundles, pages, PDFs) | `private/cad-agent-references/` (never served) | No: opt-in, run by hand (~37 GB, a day-long first pass) |
+| `scripts/lib/git_bundle_mirror.py` | Full-history single-file git bundles of `data/source-repos.tsv` (+ `--top N` most-starred), each with a `.source.json` (sha256, bytes, head) and an `INDEX.txt` | `--dest DIR` (any disk or share; relative paths are fine) | No: opt-in, run by hand or from cron (`mirror --dest DIR`) |
 
 `scripts/lib/lastbook_mirror.py` exit codes: `0` complete, `1` failure (manifest unreadable or
 failed validation, a download or sha256 check failed), `3` incomplete (the budget or the disk left
 part of the selection out, or `--pack auto` found no pack that fits), `64` usage. Only https URLs on
 `downloads.lastbook.org`, `lastbook.org` and `huggingface.co` are fetched; any other URL in a
-manifest fails the run. Decision record:
+manifest fails the run. A 206 whose `Content-Range` does not start at the `.part` size restarts
+from 0; a 404 / 410 fails that file at once instead of retrying. Prune removes only files the tool
+recorded (plus stray `*.part`s whose section/[version/]name path a current or previously kept
+manifest gives), never a held pack unless this run verified a pack at least as large on disk (a pack re-released
+under a new name replaces its old file once the new one verifies with at least half its bytes; a
+pack that would displace a held one is HEAD-confirmed first, and a failed HEAD keeps the held pack), and refuses
+when the release looks truncated, including maps, addresses or models each losing more than half of
+their held files while the release lists fewer than are held. Decision record:
 [decisions.md](knowledge/decisions.md#202611--lastbook-auto-sized-by-default-every-pack-opt-in-181).
+
+**Source bundles: I/O cost.** `git_bundle_mirror.py` I/O:
+- **Every refresh reads each due bundle in full.** Each `--refresh-days` (30 by default), every
+  repo that is due gets its archived bundle read and sha256-hashed against `.source.json` before
+  the "unchanged" skip is trusted. A torn or bit-rotted bundle is rebuilt instead of kept.
+- **An unchanged repo is never rewritten.** Over a network share, one refresh still reads about the
+  whole mirror (hundreds of GB for the full catalog).
+- **A changed repo is also read once** to seed the incremental fetch, then rewritten.
+- **`verify` is a full read:** `git bundle verify` plus a sha256 of every byte of every bundle.
+  Schedule it like a scrub, not like a health ping.
+
+`verify` exit codes:
+- `0`: every bundle is good.
+- `2`: any bundle is bad, or there are none.
+- `3`: the only problem is bundles with no valid `.source.json`. That means missing, empty,
+  `[]`, garbage, or lacking an integer `bytes` and a 64-hex `sha256`. They are listed as
+  `UNVERIFIED … no provenance`, because git's own verify passes a truncated bundle and so cannot
+  vouch for them. One bad bundle or sidecar never stops the walk over the rest.
+
+`verify --adopt` writes a `.source.json` for those from their current bytes, but only after
+`git bundle verify`, a full bare clone, and `git fsck --full` in a scratch dir under `--stage`.
+Clone alone accepts a malformed commit. That needs about one repo's worth of free space there.
+A bundle that fails any step is reported `BAD` and is not adopted. Leftover `.adopt-*` scratch
+dirs older than a day (from a killed run) are removed when `verify` starts. Likewise,
+`<owner>/<repo>.bundle.part` files older than a day, left by a copy that was killed mid-way, are
+removed when `mirror` starts. A fresh `.part` may belong to a copy in flight and is kept. The
+sweep never leaves the `--dest` tree. A `.part` whose owner directory is a symlink, or resolves
+outside `--dest`, is skipped, and a `.part` that is itself a symlink is not a regular file
+(checked with `lstat`), so it is skipped too.
+
+**Adopting trusts the bundle's current header.** Ref names and the commits they point to carry no
+checksum, so a renamed or repointed ref (to an object that exists) cannot be detected. Only adopt
+bundles whose origin you trust. A refresh from upstream replaces the adopted provenance anyway.
+
+Bundle bytes are fsync'd before the `.part` rename and the sidecar after it, each followed by a
+directory fsync. After a power cut you may get a new bundle with the old sidecar: that reads as a
+mismatch and gets rebuilt. You never get a torn pair that passes.
 
 ---
 

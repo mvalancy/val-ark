@@ -14,13 +14,15 @@
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib/ports.sh"   # free_port / trap_signals: no fixed ports (parallel runs)
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
 [ -n "$NODE" ] || { echo "SKIP: no node runtime" >&2; exit 0; }
 
 SRV_PID=""
-T="$(mktemp -d)"; trap 'rm -rf "$T"; [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null' EXIT
+T="$(mktemp -d)"; trap 'rm -rf "$T"; stop_pids "$SRV_PID"' EXIT
+trap_signals
 mkdir -p "$T/state" "$T/content/zim" "$T/models"
 
 # A stub classifier standing in for a real model: emits the RAW verdict the parser
@@ -42,7 +44,7 @@ chmod +x "$T/stub"
 # in onFirstBind must remove it so screened content never lingers at rest.
 mkdir -p "$T/state/moderation/scan"; echo "leaked screened content" > "$T/state/moderation/scan/stale.bin"
 
-PORT=3927; B="http://127.0.0.1:$PORT"
+PORT=$(free_port); B="http://127.0.0.1:$PORT"
 VALARK_TEST_FORCE_REMOTE=1 VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 \
   VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" VALARK_MODERATION_CMD="$T/stub" \
   VALARK_MODERATION_MAX_BYTES=4096 \
@@ -134,12 +136,12 @@ curl -s -b "$T/cj" --max-time 6 "$B/api/moderation/queue" | grep -q '"count":0' 
 #        (planted by a same-uid process / NFS-mesh peer) must NOT redirect the write
 #        outside <state> — the staged bytes must never land in the symlink target.
 #        Needs its own server (the symlink would break the happy-path checks above).
-kill "$SRV_PID" 2>/dev/null; SRV_PID=""
+stop_pids "$SRV_PID"; SRV_PID=""
 mkdir -p "$T/state2/moderation" "$T/external"
 ln -s "$T/external" "$T/state2/moderation/scan"        # scan → outside <state>
 "$NODE" -e 'const a=require(process.argv[1]);const d=process.argv[2];a.setPassword("modtestpass","admin",d);' \
     "$ROOT/scripts/lib/auth.js" "$T/state2"
-PORT2=3928; B2="http://127.0.0.1:$PORT2"
+PORT2=$(free_port); B2="http://127.0.0.1:$PORT2"
 VALARK_TEST_FORCE_REMOTE=1 VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 \
   VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT2" VALARK_MODERATION_CMD="$T/stub" \
   VALARK_STATE_DIR="$T/state2" VALARK_CONTENT_DIR="$T/content" VALARK_MODELS_DIR="$T/models" \

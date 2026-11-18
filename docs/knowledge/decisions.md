@@ -49,8 +49,9 @@ later). See [README](README.md).
 - **Decision:** `scripts/tools/lastbook.sh` + `scripts/lib/lastbook_mirror.py` keep the **current
   release only** under `content/lastbook/` (served: Lastbook and its packs are freely published, and
   LAN users install the app from the Ark). It **is** in `download-tools.sh all` with `--pack auto`:
-  the largest pack whose bytes still to fetch fit `VALARK_LASTBOOK_BUDGET_PCT` (default 50) percent of
-  `valark_budget_bytes`, then base maps, the installers, the model (`auto`: only if it still fits),
+  the largest pack whose bytes still to fetch (plus the base maps and installers) fit Lastbook's
+  share, `VALARK_LASTBOOK_BUDGET_PCT` (default 50) percent of (headroom on its disk + what it holds;
+  see #183 below), then base maps, the installers, the model (`auto`: only if it still fits),
   then state maps (in manifest order, largest states first) each with its address index, while they fit. `--pack every`
   (all three packs, ~463 GB; ~570 GB with every map and the model) is **opt-in** via `.env`.
 - **Why auto for users:** a household box should hold the survival library without anyone choosing,
@@ -77,15 +78,148 @@ later). See [README](README.md).
   pruned when the release looks truncated: a section that holds files comes back empty, or the run
   would drop more than half of the held files *and* bytes (a normal pack re-release or app bump drops
   less), so one bad upstream publish cannot wipe every box's maps on the weekly refresh.
-- **Follow-up (not done):** auto mode keeps a smaller pack after a larger one is verified (~75 GB
-  duplicates on a box that grew Small→Medium→All); pack choice does not reserve room for the base
-  maps + installers, so a budget just above a pack size reports `3` every run; the 50% share is of
-  the *current* headroom each run (repeated runs compound) and is measured on `DATA_ROOT` even when
-  `VALARK_LASTBOOK_DIR` is on another disk, whose fetch-time free check keeps no reserve; a 206's
-  `Content-Range` start is not checked (the sha256 still catches it) and a 404 is retried. Also:
-  feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
-  rank) so value-per-byte, not a fixed share, decides its room; the Software/Library UI has no
-  Lastbook card yet.
+- **Follow-ups resolved (#183):**
+  - *Per-section guard.* Prune is also refused when maps, addresses or models would each lose more
+    than half of their own held files **while the release lists fewer files in that section than are
+    held**. The whole-mirror AND check missed the All-pack box whose manifest lists only a few states
+    (most maps go, but under half the bytes). The "lists fewer" qualifier lets a like-for-like
+    replacement (a new model file, renamed maps) still prune; packs and `app/` are left out because
+    their names change every release by design. All three checks trigger on **more than** half, so a
+    release that keeps exactly half (26 of 52 states) still prunes the other half: a deliberate
+    line, since an even split is as likely to be a real re-scope as a truncation.
+  - *Nested packs (N3).* With `--pack auto` or one explicit pack, once every file of the chosen pack
+    is verified (rc 0), the smaller packs of the ladder are pruned (only recorded files). `every`, a
+    list, `none` and `--keep-old` never do this. **Ranked on disk, not by the manifest (PR #194
+    review):** a manifest that omitted or under-reported All's size made `auto` pick Medium and then
+    delete the verified All as "smaller". Now a pack is superseded only when every manifest size (its
+    and the chosen pack's) is present and positive, its recorded on-disk sizes match the manifest,
+    its held bytes are strictly below the chosen pack's *verified* bytes, and it shares no file with
+    it; files of a pack verified this run are never dropped, and `auto` ranks packs by the larger of
+    the manifest size and the recorded bytes, so a held All stays chosen.
+  - *No held pack without a larger verified one.* Any held pack file (superseded or no longer in the
+    release) is dropped only when a pack this run verified is at least as large on disk. A packs
+    list truncated to Small therefore keeps Medium and All, and `--pack none` keeps every held pack.
+  - *Fit reserves the extras (N5).* `auto` picks the largest pack whose need **plus** the base maps
+    and installers fits; if none does, a pack already held (need 0) stays chosen.
+  - *Share without compounding (N4).* `lastbook.sh` no longer passes a budget from
+    `valark_budget_bytes` on `DATA_ROOT`. `lastbook_mirror.py --share PCT [--cap N]` measures headroom
+    above the reserve on the filesystem that holds the Lastbook dir, caps it with what `VALARK_MAX_GB`
+    still allows, and lets Lastbook hold PCT% of (headroom + the bytes it already holds), so
+    repeated runs stay at the share. The fetch-time free check keeps the reserve too. `--cap` is
+    passed only when the Lastbook dir is inside the data trees `VALARK_MAX_GB` accounts for
+    (`valark_data_used_bytes`); a dir elsewhere is not bounded by that cap (logged), only by its own
+    disk's headroom, the reserve and the share.
+  - *Downloads (N7).* A 206 whose `Content-Range` start is not the `.part` size deletes the `.part`
+    and restarts; 404 / 410 fail the file at once (no back-off).
+  - *Pre-change `.part`s.* A stray unrecorded `*.part` in `packs|maps|addresses|models|app/<ver>` is
+    pruned only when its final **path** (section/[version/]name) is one the current or the previously
+    kept manifests name (those are re-parsed with the live validation, read before the new ones
+    overwrite them); a bare name in another section stays. `app/<ver>` must be a real version
+    (`1.1.11`, `1.1.rc1`; not `2024photos`).
+  - *Library card.* Lastbook is a `CONTENT_LIBRARY` card (Library ▸ Content): its state comes from the
+    `/api/status/content` walk of `content/` (a held pack = Mirrored), its Mirror button starts the
+    `lastbook` tool job, and the detail page lists the installers and packs held as direct
+    `/api/archive/content/lastbook/…` downloads. Without the API there is no HEAD-probe guess (an
+    empty directory can answer 200), so it says Not Mirrored. A `VALARK_LASTBOOK_DIR` outside
+    `content/` is still reported by `server.js` under `lastbook/…` but flagged `external`: the card
+    shows Mirrored and explains that those files are not served (no links), since `/api/archive`
+    stays confined to the served trees.
+- **Re-review follow-ups (#204):**
+  - *Re-released packs are replaced (R1).* The held-pack guard ("a verified pack at least as large")
+    kept the old All whenever upstream re-released it under a new file name that was even one byte
+    smaller, so a box held two copies of All. Each verified pack file now records its pack id in
+    `.lastbook-verified.json` (boxes stamped before that fall back to the kept manifest, which names
+    the old file's pack). A held pack file is dropped as **replaced** when this run verified the same
+    pack id under another name and the new copy holds at least half the old one's bytes. A gutted
+    re-release (under half) keeps the old file, and the truncation guards still apply.
+  - *External listing from records only (R2).* For a `VALARK_LASTBOOK_DIR` outside `content/`,
+    `server.js` no longer walks the tree. It lists only keys recorded in that dir's
+    `.lastbook-verified.json` that are shaped like Lastbook's sections
+    (`packs|maps|addresses|models/<name>`, `app/<version>/<name>`), are regular files, and have no
+    symlink on the way. With no stamps file it lists nothing, so pointing the variable at `$HOME` by
+    mistake cannot enumerate the operator's files to the LAN.
+  - *Auto ranking (R3).* A held, verified pack ranks by its recorded bytes. Any other pack ranks by
+    its manifest file sizes; `installed_bytes` counts only when a size is missing. An unheld pack
+    that would outrank the held one needs a HEAD whose Content-Length equals every manifest size
+    (see #214 for what happens when HEAD fails). So an over-reported Medium (`installed_bytes` or
+    file size) no longer moves auto off a held All.
+- **HEAD confirmation and id swaps (#214):**
+  - *A failed HEAD is not confirmation (H1).* A HEAD that errors, or answers without a
+    Content-Length, counts as **unconfirmed** when the pack would displace a held one. The held
+    pack stays chosen, the claimant is not downloaded, and the run logs why. The floor it is
+    compared against is the largest pack file held and verified on disk, listed in this release or
+    not. A side effect: a genuine upgrade (Small held, All now fits) also needs a working HEAD, and
+    without one it waits for the next run.
+  - *Renamed re-release that over-claims (H2).* When the larger candidate is a renamed re-release,
+    the old All is no longer listed, so it cannot be "kept chosen". If the claim is unconfirmed,
+    `auto` chooses no pack rather than a smaller download below the held size: rc 3, "no Lastbook
+    pack chosen", nothing fetched or pruned. Separately, every pack download now starts with a HEAD.
+    If the server's size disagrees with the manifest, the file fails at once with "the manifest
+    says X but the server has Y: not downloading; an upstream manifest error", instead of a GET that
+    ends in "range not satisfiable" or a sha mismatch. A failed HEAD there just proceeds, since the
+    sha256 still guards the file.
+  - *Swapped or aliased ids (H4).* The nested-pack prune skips a pack if any of its files was
+    recorded (`pack` in the stamps, else the kept manifest) under a different pack id, because then
+    the ladder no longer says what is nested in what. It also never drops a file that a pack it
+    keeps still names.
+- **Polish (#216):**
+  - *No intermediate upgrade after an unconfirmed claim (F1).* Once a larger pack's HEAD is
+    unconfirmed, `auto` downloads **no** pack that run. That rules out a smaller one, and also a
+    mid-size step up: with Small held and All unconfirmed, it no longer fetches about 67 GB of
+    Medium first. Only a pack already held and verified can still be chosen, so it keeps the held
+    pack and retries next run. The log names the held file and says no pack was downloaded.
+  - *Accurate rc-3 reason (F2).* When no pack is chosen, the message names the held pack file and
+    says either that it "is not in this release" (a renamed re-release) or that it "is listed in
+    this release with a different size" (same name, over- or under-claimed).
+  - *Superseded by #218:* the wait-a-run rule now applies only to a HEAD that gives **no** size;
+    a HEAD that contradicts the manifest marks the pack broken and the next pack goes through.
+  - *Real-box check (F3).* HEAD on `downloads.lastbook.org` returns a Content-Length equal to the
+    manifest size for all three pack zips (checked 2026-11), so genuine upgrades are not blocked by
+    the HEAD gate.
+- **Broken upstream vs not confirmed (#218):**
+  - *A definite mismatch skips only that pack (G1).* `auto`'s HEAD check now has two outcomes.
+    - **A HEAD that answers with a size different from the manifest** means that pack is broken
+      upstream: it is skipped this run and the next pack that confirms goes through. Before, a
+      lying All kept a Small box on Small, or failed a fresh box with rc 1, for as long as upstream
+      stayed wrong.
+    - **A HEAD that gives no size** is still the transient case. On a box holding a pack it would
+      displace, nothing is downloaded and the held pack is kept (F1).
+  - *Fresh boxes are checked too.* `auto`'s pick is now HEAD-checked even with nothing held. On a
+    fresh box a HEAD with no size still proceeds (nothing to displace; the sha256 guards it).
+  - *Exit 3 when a larger pack is passed over.* Whenever a larger pack was skipped (broken) or not
+    confirmed, the run exits 3, so the weekly job shows "incomplete" instead of "mirrored".
+    `lastbook.sh`'s rc-3 line now names both causes (budget, or upstream size).
+  - *Nothing-fits message (G2).* It now quotes the smallest pack's need **plus** the room reserved
+    for the base maps and installers, and the total, which is what the fit actually compares.
+- **Step up, never down; prune on a skip-only exit 3 (#220):**
+  - *Never below the held pack (K1).* `auto` never downloads a pack smaller than the largest pack
+    held and verified on disk, whatever happened to the better candidates. Before, after a "broken
+    upstream" skip of a renamed All-2, it could fetch about 67 GB of Medium beside the held All.
+    The one exception is a same-id re-release of at least half the held size, which replaces the
+    held file (R1). The pack id comes from the stamps, else the kept manifest. If that leaves
+    nothing to choose, the run exits 3 and says every offered pack is smaller than the held file.
+  - *Prune after a skip-only exit 3 (K2).* When the run exits 3 **only** because `auto` passed over
+    a larger pack upstream (everything selected was fetched and verified; nothing deferred, over
+    budget or failed; a pack was chosen), prune runs with exactly the guards of an exit-0 prune.
+    So the smaller pack nested in the verified choice no longer lingers while upstream is wrong.
+    Any other exit 3, and every exit 1, still prunes nothing.
+  - *Messages (K3).* When every candidate is contradicted upstream, the note says "no Lastbook pack
+    could be confirmed upstream" (not "fits the budget"), and an unlimited budget prints as
+    "unlimited", never "?".
+- **A frozen pack still refreshes everything else (#222).** "Step up, never down" means `auto`
+  never trades a held, verified pack for a smaller download. So when the only candidates are
+  smaller (for example a same-id re-release under half the held size), or the larger one cannot be
+  confirmed upstream, no pack is chosen and the held one is **frozen**: kept as it is, not updated,
+  and the run exits 3. Before, a frozen pack also stopped the base map, state maps, address indexes
+  and model, which only ride with a chosen pack. Now a held, verified pack counts as the pack for
+  them: they keep refreshing within the budget (installers always did), and the log says so. A
+  fresh box with no pack held still gets no maps without a pack.
+  - **Escape hatch:** to take a re-release that `auto` refuses, set `VALARK_LASTBOOK_PACK=all` (or
+    run `lastbook.sh --pack all`). That fetches the current All whatever its size. The old file is
+    kept while it is larger than the verified new one (the held-pack guard), so delete it by hand
+    once the new one is verified if the disk is tight.
+- **Follow-up (not done):** feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
+  rank) so value-per-byte, not a fixed share, decides its room.
 
 ## 2026‑11 — cad-agent references: a private, content-addressed archive of every cited source (cad-agent#323)
 - **Context:** cad-agent keeps a reference knowledge base of ~760 sources (≈330 GitHub repos, ≈350
@@ -678,3 +812,23 @@ domains, loopback, and `$`/`{}`/`<>` placeholders pass automatically.
   video). Every profile still gets the `all` rows. Grid-down topics also get a +80 value boost for all
   profiles in `catalog.sh`.
 - Backward compatible: without `--essentials` the planner is unchanged (tested).
+- <a id="prune-after-stop"></a>**The superseded prune is skipped after a STOP halt (#177).** A
+  `state/STOP` flag means "stop changing the disk" (the owner may be about to unplug or inspect it)
+  and the plan ran only partway, so `cmd_fill` does not delete anything after a STOP — the prune just
+  runs at the end of the next un-halted fill. Every other early exit (time / byte / item budget, low
+  headroom) still prunes, because freeing the redundant small copy is exactly what helps then. The
+  prune's manifest rewrite is an exact first-column match (`awk '$1!=id'`), so an id that is a prefix
+  or extension of the pruned id is never dropped; `tests/test-essentials.sh` §8 runs the real
+  `prune_superseded` + `cmd_fill` against a fixture to hold both rules.
+- <a id="mini-then-maxi"></a>**Known trade-off, kept on purpose: mini first, maxi later.** On a big
+  disk an essential ZIM is fetched twice — the mini in phase 0, the maxi in phase 1–3, then the mini is
+  pruned — so its small variant's bytes are downloaded and thrown away. And on a disk where the maxi
+  would fit alone but not beside the mini (budget between `maxi` and `mini + maxi`), the maxi is never
+  planned; that essential stays on its mini. We considered "skip the mini when the maxi is also planned":
+  it would either move a multi-GB download into phase 0 (delaying every lower-ranked life-safety item
+  behind it on a time-bounded `maintain` fill) or leave the essential with *no* copy until phase 3
+  reaches it. Crediting the mini's bytes back to the maxi's budget doesn't work either: the prune runs
+  after the fill, so the disk briefly holds both, and the fill's live headroom check would then stop the
+  whole fill before the maxi. The waste is bounded by the small variants' size (typically ~10% of the
+  full ones), while getting the critical small copy onto the disk fast is the point of phase 0, so the
+  behavior stays as is (documented in `docs/LIBRARIAN.md`).

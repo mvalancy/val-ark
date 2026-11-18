@@ -14,7 +14,7 @@
 #   - content addressing: identical bytes are stored once; by-id/<id>.<ext> points
 #     at the latest copy; a changed source keeps the old blob
 #   - --max-repo-mb keeps a pointer only (before cloning when the size is known,
-#     after fetching otherwise); no cap by default
+#     after fetching otherwise, by apparent file size, never allocated blocks); no cap by default
 #   - 403/429 and robots.txt -> blocked, 404 -> gone, no URL -> no-url, bad ids rejected
 #   - a rerun is idempotent (no new lines, no page requests); --refresh sends
 #     If-None-Match (304 -> unchanged) and ls-remote (same refs -> unchanged)
@@ -417,6 +417,19 @@ GITHUB_TOKEN=fixture mirror --store "$T/store7" --budget 1000000 > "$T/b1.json" 
 check "a repo larger than the budget left stops the run" 'j "$T/b1.json" "d[\"stopped\"]" | grep -q "budget reached: bigrepo needs"' || cat "$T/b1.json" >&2
 check "nothing over budget is written" '[ "$(j "$T/b1.json" "d[\"added_bytes\"]")" -le 1000000 ] && ! grep -q "\"id\":\"bigrepo\"" "$T/store7/manifest.jsonl" && [ -z "$(ls -A "$T/store7/tmp")" ]'
 check "the tool says why it stopped" 'grep -q "references: stopped, budget reached" "$T/b1.err"'
+# #176: allocated-block sizes read ~0 on ZFS/compressed filesystems. A git shim that reports
+# `count-objects -v` as all zeros (as on such a disk) must not let bigrepo past the cap or budget.
+mkdir -p "$T/allocbin"; REALGIT="$(command -v git)"
+cat > "$T/allocbin/git" <<EOF2
+#!/bin/bash
+for a in "\$@"; do [ "\$a" = count-objects ] && { printf 'count: 0\nsize: 0\nin-pack: 0\npacks: 0\nsize-pack: 0\n'; exit 0; }; done
+exec "$REALGIT" "\$@"
+EOF2
+chmod +x "$T/allocbin/git"
+PATH="$T/allocbin:$PATH" GITHUB_TOKEN=fixture mirror --store "$T/store-alloc" --max-repo-mb 1 > /dev/null 2>&1
+check "post-fetch size uses apparent bytes, not allocated blocks (cap)" '[ "$(line "$T/store-alloc" bigrepo | j - "d[\"status\"]")" = too-large ]'
+PATH="$T/allocbin:$PATH" GITHUB_TOKEN=fixture mirror --store "$T/store-alloc2" --budget 1000000 > "$T/b-alloc.json" 2>/dev/null
+check "post-fetch size uses apparent bytes, not allocated blocks (budget)" 'j "$T/b-alloc.json" "d[\"stopped\"]" | grep -q "budget reached: bigrepo needs"'
 mkindex big "[('bigfile', '$H/big.bin', 'open')]"
 python3 "$PY" mirror --store "$T/store8" --index "$T/site/big/index.json" --monolith "" --budget 2097160 > "$T/b2.json" 2>/dev/null
 check "a file larger than the budget left stops the run, nothing kept" 'j "$T/b2.json" "d[\"stopped\"]" | grep -q "budget reached: bigfile" && [ ! -s "$T/store8/manifest.jsonl" ] && [ -z "$(ls "$T/store8/blobs")" ]'

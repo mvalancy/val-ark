@@ -528,6 +528,20 @@ def _git(args, cwd=None, timeout=600):
     return subprocess.run(["git"] + args, cwd=cwd, env=env, timeout=timeout, capture_output=True, text=True)
 
 
+def _apparent_bytes(top):
+    """Sum of file sizes (st_size) under top. Not `git count-objects -v` / du: those report
+    allocated blocks, which read ~0 right after a write on ZFS, compressed or delayed-allocation
+    filesystems, letting an oversized repo past --max-repo-mb and the budget (#176)."""
+    n = 0
+    for d, _, files in os.walk(top):
+        for f in files:
+            try:
+                n += os.lstat(os.path.join(d, f)).st_size
+            except OSError:
+                pass
+    return n
+
+
 def _refs(text):
     """{ref: sha} for refs/heads/* and refs/tags/* (peeled ^{} lines dropped), and HEAD's target."""
     refs, head = {}, None
@@ -580,8 +594,7 @@ def _mirror_git(remote, prev_blob, store, cap_bytes, timeout, budget_left):
         f = _git(["fetch", "-q", "--prune", "--no-tags", remote] + specs, cwd=repo, timeout=timeout)
         if f.returncode != 0:
             return {"status": "failed", "error": "git fetch: " + (f.stderr.strip().splitlines() or ["?"])[-1][:300]}
-        co = _git(["count-objects", "-v"], cwd=repo)
-        kb = sum(int(v) for k, v in re.findall(r"^(size|size-pack): (\d+)$", co.stdout, re.M))
+        kb = _apparent_bytes(os.path.join(repo, "objects")) // 1024
         if cap_bytes and kb * 1024 > cap_bytes:
             return {"status": "too-large", "repo_kb": kb, "cap_mb": cap_bytes // MIB}
         if budget_left is not None and kb * 1024 > budget_left:

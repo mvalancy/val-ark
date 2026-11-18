@@ -495,10 +495,11 @@ cmd_pins() {
         [ -n "$id" ] || continue
         if [ "$kind" = "tool" ]; then
             tool_present "${id#tool:}" && present="${GREEN}present${NC}" || present="${YELLOW}missing${NC}"
-        elif grep -qF "$(printf '%s\t' "$id")" "$MANIFEST" 2>/dev/null; then
-            local dest; dest=$(grep -F "$(printf '%s\t' "$id")" "$MANIFEST" 2>/dev/null | head -1 | cut -f4)
-            { [ -e "$dest" ]; } && present="${GREEN}present${NC}" || present="${YELLOW}missing${NC}"
-        else present="${YELLOW}missing${NC}"; fi
+        else
+            # exact first-column match: an id merely ENDING in $id must not count (#192)
+            local dest; dest=$(awk -F'\t' -v id="$id" '$1==id {print $4; exit}' "$MANIFEST" 2>/dev/null)
+            { [ -n "$dest" ] && [ -e "$dest" ]; } && present="${GREEN}present${NC}" || present="${YELLOW}missing${NC}"
+        fi
         printf "  %-8s %-46s %b\n" "$kind" "$id" "$present"
     done < "$PINS"
 }

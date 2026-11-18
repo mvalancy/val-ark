@@ -69,7 +69,7 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   runs and the row stays put. In `scripts/librarian.sh` this left duplicate manifest rows on re-record
   and dropped unrelated items from the manifest on evict. Match the first column exactly instead:
   `awk -F'\t' -v id="$id" '$1!=id' f > f.tmp && mv f.tmp f`. That is `manifest_drop` in
-  `librarian.sh`; tested in `tests/test-librarian-download.sh` §10. (#192)
+  `librarian.sh` (and `cmd_pins` looks rows up the same way); tested in `tests/test-librarian-download.sh` §10. (#192)
 
 ## Cross‑architecture (arm64 boxes: Jetson-, Grace‑Blackwell-, Rockchip-class)
 

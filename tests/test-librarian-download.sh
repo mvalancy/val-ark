@@ -191,7 +191,14 @@ cmd_evict --need 5 >/dev/null 2>&1
 [ ! -e "$ZIM_DIR/a.zim" ] && [ "$(mids)" = "xzim:a zim:b " ] && pass \
     || fail "evict must drop exactly the victim's row (got '$(mids)')"
 [ -e "$ZIM_DIR/xa.zim" ] && pass || fail "evict must keep the suffix-id file"
-rm -f "$ZIM_DIR/b.zim" "$ZIM_DIR/xa.zim"
+# pins: a pinned id is "present" only via its OWN manifest row, never a suffix-id row.
+mrow xzim:a "$ZIM_DIR/xa.zim" 10 900 > "$MANIFEST"
+printf 'content\tzim:a\t0\t\n' > "$PINS"
+P=$(cmd_pins 2>&1)
+grep -E 'zim:a .*missing' <<<"$P" | grep -qv xzim && pass || fail "pins: a suffix-id row must not make zim:a show present (got: $P)"
+mrow zim:a "$ZIM_DIR/xa.zim" 10 900 >> "$MANIFEST"
+cmd_pins 2>&1 | grep -qE '^ +content +zim:a +.*present' && pass || fail "pins: zim:a with its own row + file must show present"
+rm -f "$PINS" "$ZIM_DIR/b.zim" "$ZIM_DIR/xa.zim"
 
 echo "librarian-download: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

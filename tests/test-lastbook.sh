@@ -41,8 +41,9 @@ SH="$ROOT/scripts/tools/lastbook.sh"
 FIX="$ROOT/tests/fixtures/lastbook"
 command -v python3 >/dev/null 2>&1 || { echo "SKIP: no python3" >&2; exit 0; }
 
-T="$(mktemp -d)"; SRV_PID=""
-trap 'rm -rf "${T:?}"; [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null' EXIT
+. "$ROOT/tests/lib/ports.sh"   # free_port / stop_pids: no fixed ports, no leaked servers
+T="$(mktemp -d)"; SRV_PID=""; NPID=""
+trap 'stop_pids $SRV_PID $NPID; rm -rf "${T:?}"' EXIT
 export VAL_ARK_CONFIG="$T/empty.conf" VAL_ARK_DATA="$T/disk" FORCE_COLOR=0 LC_ALL=C
 # No disk reserve by default: fetches stop at the reserve, and a CI runner has little free space.
 export VALARK_RESERVE_PCT=0 VALARK_RESERVE_MIN_GB=0
@@ -601,9 +602,9 @@ check "lastbook.sh: a Lastbook dir outside the data trees gets --share but no --
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
 if [ -n "$NODE" ] && command -v curl >/dev/null 2>&1; then
     mkdir -p "$T/ext/lastbook/packs"; echo pack > "$T/ext/lastbook/packs/Lastbook-Small-20261113.zip"
-    SP=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+    SP=$(free_port); SPS=$(free_port)
     env VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 \
-        VALARK_WEB_PORT="$SP" VALARK_HTTPS_PORT="$((SP + 1))" VALARK_STATE_DIR="$T/srvstate" VALARK_LASTBOOK_DIR="$T/ext/lastbook" \
+        VALARK_WEB_PORT="$SP" VALARK_HTTPS_PORT="$SPS" VALARK_STATE_DIR="$T/srvstate" VALARK_LASTBOOK_DIR="$T/ext/lastbook" \
         "$NODE" "$ROOT/scripts/server.js" "$SP" >"$T/srv.log" 2>&1 &
     NPID=$!
     up=0; for _ in $(seq 1 30); do sleep 0.4; curl -sf --max-time 2 "http://127.0.0.1:$SP/api/health" >/dev/null 2>&1 && { up=1; break; }; done
@@ -616,7 +617,7 @@ if [ -n "$NODE" ] && command -v curl >/dev/null 2>&1; then
     else
         fail "server.js did not start on :$SP"; cat "$T/srv.log" >&2
     fi
-    kill "$NPID" 2>/dev/null
+    stop_pids "$NPID"; NPID=""
 else
     echo "  SKIP: server.js external Lastbook dir (no node or curl)" >&2
 fi

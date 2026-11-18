@@ -202,7 +202,10 @@ Clone alone accepts a malformed commit. That needs about one repo's worth of fre
 A bundle that fails any step is reported `BAD` and is not adopted. Leftover `.adopt-*` scratch
 dirs older than a day (from a killed run) are removed when `verify` starts. Likewise,
 `<owner>/<repo>.bundle.part` files older than a day, left by a copy that was killed mid-way, are
-removed when `mirror` starts. A fresh `.part` may belong to a copy in flight and is kept.
+removed when `mirror` starts. A fresh `.part` may belong to a copy in flight and is kept. The
+sweep never leaves the `--dest` tree. A `.part` whose owner directory is a symlink, or resolves
+outside `--dest`, is skipped, and a `.part` that is itself a symlink is not a regular file
+(checked with `lstat`), so it is skipped too.
 
 **Adopting trusts the bundle's current header.** Ref names and the commits they point to carry no
 checksum, so a renamed or repointed ref (to an object that exists) cannot be detected. Only adopt

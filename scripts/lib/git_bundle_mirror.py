@@ -34,7 +34,7 @@ Commands (stdlib + git; GITHUB_TOKEN raises API limits, never printed):
 Exit 0 on success, 2 if any repo failed (others still complete); verify also
 exits 3 when the only problem is bundles with no provenance.
 """
-import argparse, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time, urllib.request
+import argparse, hashlib, json, os, re, shutil, stat, subprocess, sys, tempfile, time, urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -407,10 +407,16 @@ ADOPT_STALE_S = 86400
 def sweep_stale_parts(dest):
     """Remove `<owner>/<repo>.bundle.part` FILES older than a day: a copy killed mid-way
     (power cut, unplugged share) leaves up to one repo of dead space next to the bundle.
-    A fresh .part may belong to a copy in flight, so it is left alone."""
+    A fresh .part may belong to a copy in flight, so it is left alone. Never leaves the
+    dest tree: a .part whose owner dir is a symlink, or resolves outside dest, is skipped,
+    and the type/age checks use lstat (a symlinked .part is not a regular file)."""
+    root = dest.resolve()
     for f in dest.glob("*/*.bundle.part"):
         try:
-            if f.is_file() and time.time() - f.stat().st_mtime > ADOPT_STALE_S:
+            if f.parent.is_symlink() or f.parent.resolve().parent != root:
+                continue
+            st = f.lstat()
+            if stat.S_ISREG(st.st_mode) and time.time() - st.st_mtime > ADOPT_STALE_S:
                 f.unlink()
                 print(f"removed stale {f.relative_to(dest)}", file=sys.stderr)
         except OSError:

@@ -410,9 +410,17 @@ grep -q '^BAD a/one.bundle: OSError' "$T/log23" && grep -q '^verified 2 bundles,
 mkdir -p "$T/dest10/old" "$T/dest10/new" "$T/dest10/dir/x.bundle.part"
 echo junk > "$T/dest10/old/x.bundle.part"; touch -d '2 days ago' "$T/dest10/old/x.bundle.part" "$T/dest10/dir/x.bundle.part"
 echo junk > "$T/dest10/new/x.bundle.part"
+# A symlinked owner dir points OUT of dest: its day-old .part must survive; so must a
+# day-old .part that is itself a symlink (lstat: not a regular file).
+mkdir -p "$T/outside"; echo keep > "$T/outside/y.bundle.part"; touch -d '2 days ago' "$T/outside/y.bundle.part"
+ln -sfn "$T/outside" "$T/dest10/linked"
+echo keep > "$T/outside/target"; touch -d "2 days ago" "$T/outside/target"; ln -sfn "$T/outside/target" "$T/dest10/new/l.bundle.part"; touch -h -d '2 days ago' "$T/dest10/new/l.bundle.part"
 python3 "$M" mirror --dest "$T/dest10" --stage "$T/stage10" --tries 1 --retry-wait 0 --repo acme/widget 2>/dev/null
 [ ! -e "$T/dest10/old/x.bundle.part" ] && [ -f "$T/dest10/new/x.bundle.part" ] && [ -d "$T/dest10/dir/x.bundle.part" ] \
     && pass || fail "stale .bundle.part not swept (or a fresh one / a directory removed)"
+[ -f "$T/outside/y.bundle.part" ] && pass || fail "sweep followed a symlinked owner dir out of dest"
+[ -L "$T/dest10/new/l.bundle.part" ] && [ -f "$T/outside/target" ] && pass || fail "sweep removed a symlinked .part"
+rm -f "$T/dest10/linked" "$T/dest10/new/l.bundle.part"
 
 # 25. fsync_file needs no write permission (read-only fd first, read-write fallback).
 python3 - "$ROOT/scripts/lib" "$T" <<'PY' && pass || fail "fsync_file failed on a read-only file"

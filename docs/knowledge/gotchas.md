@@ -283,7 +283,8 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   - 21: the stale `.adopt-*` sweep
   - 22: fsync order
   - 23: a per-bundle error inside `verify` is that bundle's BAD line and the walk goes on
-  - 24: stale `.bundle.part` sweep at mirror start
+  - 24: stale `.bundle.part` sweep at mirror start. It never follows a symlinked owner dir out of
+    `--dest`, and never deletes a symlinked `.part` (`lstat`).
   - 25: `fsync_file` works through a read-only fd
 
 ## Storage / data root

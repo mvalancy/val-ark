@@ -263,8 +263,11 @@ def gnu_listing(ref):
                     got = hrefs(f"{mirror}/{ref}/", tries=1)
                     LIVE_MIRRORS.add(mirror)
                     return mirror, got
+                except urllib.error.HTTPError:
+                    LIVE_MIRRORS.add(mirror)  # it answered (404 = this package only, 5xx = a blip)
+                    raise
                 except Exception as e:
-                    if transient(e):  # unreachable, not just missing this package
+                    if transient(e):  # DNS / connect / timeout: unreachable for this run
                         DEAD_MIRRORS.add(mirror)
                     raise
         except Exception as e:

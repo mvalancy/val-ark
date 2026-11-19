@@ -1,6 +1,6 @@
 # data/ — the catalog TSVs
 
-Two pipe-delimited (`|`) catalogs the librarian reads to decide what to mirror. Edit here to add
+Pipe-delimited (`|`) catalogs the librarian reads to decide what to mirror. Edit here to add
 freely-redistributable install media or a small high-value model; the header comment inside each
 file is the canonical schema.
 
@@ -11,9 +11,10 @@ file is the canonical schema.
 | File | Purpose |
 |------|---------|
 | `installers.tsv` | Freely-redistributable OS / router-firmware / netboot / Jetson-BSP images for PXE commissioning of the mesh. |
-| `apt-sets.tsv` | Offline APT package **sets** (LAMP, LAN core: DHCP/DNS/NTP/PXE/firewall, routing/VPN, file, mail/chat, directory, apps, containers, ops). Resolved per Ubuntu suite+arch with all dependencies by `scripts/lib/apt_offline.py` into a flat local repo. |
+| `apt-sets.tsv` | Offline APT package **sets** (LAMP, LAN core: DHCP/DNS/NTP/PXE/firewall, routing/VPN, file, mail/chat, directory, apps, containers, ops, plus dev-toolchain, security, reverse-eng and virt-cloud). Resolved per Ubuntu suite+arch with all dependencies by `scripts/lib/apt_offline.py` into a flat local repo. |
 | `essentials.tsv` | Grid-down **essentials**, ranked: what the box must hold first if the internet disappears (water, medicine, food, shelter, a pocket encyclopedia + small assistant, repair/power/radio, netboot). The planner takes these in rank order before any other phase, smallest variant first. Schema `rank\|kind\|match\|focus\|note` (`kind` = zim/model/inst, `focus` = `all` or profiles). |
 | `models-extra.tsv` | Curated small, high-value models that broaden modality diversity (embeddings, rerankers, tiny VLMs, OCR, speech, safety, plus setup-assistant chat LLMs). |
+| `dev-stack.tsv` | The developer + security stack: projects (not files) whose **current release** `scripts/lib/release_mirror.py` resolves live for every platform: Python, compilers, decompilers, security tools, containers/Kubernetes, cloud, S3 storage, databases, everyday CLI tools. Schema `rank\|kind\|ref\|match\|group\|note`; `match` is a regex and may contain `\|` (ref, group and note never do). |
 | `source-repos.tsv` | Curated upstream source repos (`value\|owner/repo\|group`, ~240: toolchains/OS, firmware, containers, CAD, robotics, Jetson, ML, LLM inference, LAMP/LAN servers, self-hosted apps) mirrored as full-history git bundles by `scripts/lib/git_bundle_mirror.py`. |
 
 ## Schemas (field order the consumers depend on)

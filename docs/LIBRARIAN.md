@@ -118,10 +118,16 @@ GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/
   The keyring comes from the same mirror as the tarballs, so this proves the files match each
   other and were signed by a key in that keyring. It is not independent proof they came from
   GNU; for that, compare the keyring with a copy you got some other way.
+- **Sidecars and long names.** Next to the files sit `<file>.verified` stamps (for files with a
+  digest) and `<file>.source.json` (for volatile files with no digest). Upstream names longer
+  than 180 characters are stored under a shortened name with a hash suffix (the extension is
+  kept). A file mirrored before 0.1.24 under the old cut-off name is downloaded again under the
+  new one, and the old copy is left in place.
 - **GNU mirrors.** `VALARK_GNU_BASE` is a comma list tried in order (default ftp.gnu.org, then
-  mirrors.kernel.org). Every mirror but the last gets one attempt, and a mirror that is
-  unreachable once is skipped for the rest of the run. So an unreachable ftp.gnu.org costs one
-  timeout per run, not four per package.
+  mirrors.kernel.org). Every mirror but the last gets one attempt. A mirror that can't be
+  reached (DNS, connect, timeout) is skipped for the rest of the run; one that answers with
+  any HTTP status, even a 404 or 5xx for one package, stays in use. So an unreachable
+  ftp.gnu.org costs one timeout per run, not four per package.
 - **GitHub token.** Set `GITHUB_TOKEN`. A plan makes roughly 250 GitHub API calls, and the
   anonymous limit is 60 an hour.
 - **Stale "latest" releases.** A `gh:` template whose GitHub latest release isn't a plain version
@@ -144,7 +150,7 @@ GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/
   connection errors, 5xx and 429. A malformed row (an index with no regex, a template with
   no URLs, a non-numeric pypi-top) is reported as 64 before any network request.
 
-**Last real-network run (2026-11-19, Ubuntu 24.04 x86_64, a `gh`, `go`, `gnu` and `=latest`
+**Last real-network run (2026-11-19 UTC, Ubuntu 24.04 x86_64, a `gh`, `go`, `gnu` and `=latest`
 template row):**
 - The first fetch exited 0 with 7 files, including the 406 MB Metasploit `.msi` (volatile, with
   a HEAD sidecar).

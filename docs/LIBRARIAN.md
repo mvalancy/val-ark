@@ -126,8 +126,8 @@ GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/
 - **GNU mirrors.** `VALARK_GNU_BASE` is a comma list tried in order (default ftp.gnu.org, then
   mirrors.kernel.org). Every mirror but the last gets one attempt. A mirror that can't be
   reached (DNS, connect, timeout) is skipped for the rest of the run; one that answers with
-  any HTTP status, even a 404 or 5xx for one package, stays in use. So an unreachable ftp.gnu.org costs one
-  timeout per run, not four per package.
+  any HTTP status, even a 404 or 5xx for one package, stays in use. So an unreachable
+  ftp.gnu.org costs one timeout per run, not four per package.
 - **GitHub token.** Set `GITHUB_TOKEN`. A plan makes roughly 250 GitHub API calls, and the
   anonymous limit is 60 an hour.
 - **Stale "latest" releases.** A `gh:` template whose GitHub latest release isn't a plain version

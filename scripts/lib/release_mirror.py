@@ -24,8 +24,9 @@ everything between ref and the last two fields is the match)
   gnu       ref GNU package name: the newest release tarball (one compression: xz > gz >
             bz2 > lz > zst) + .sig, plus gnu-keyring.gpg to check the .sig offline. Mirrors
             in $VALARK_GNU_BASE (comma list) are tried in order: ftp.gnu.org, then kernel.org;
-            one attempt each but the last, and a mirror that is unreachable once is skipped
-            for the rest of the run.
+            one attempt each but the last; a mirror unreachable at the network level (DNS,
+            connect, timeout) is skipped for the rest of the run, one that answers any HTTP
+            status stays in use.
   go        ref ignored ('-'): the newest stable Go release (every OS/arch, sha256).
   python    ref comma list of minor versions: python.org source for the newest final
             patch of each, plus Windows/macOS installers from the newest patch that still

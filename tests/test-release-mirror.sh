@@ -54,7 +54,7 @@ BLOB = {name: (name * 50).encode() for name in ["tool-linux-amd64.tar.gz", "tool
         "python-3.13.8-amd64.exe", "python-3.13.8-macos11.pkg", "Python-3.13.8.tar.xz", "Python-3.14.0.tar.xz", "python-3.14.0-amd64.exe", "Python-3.14.1a1.tar.xz",
         "demo-2.0-py3-none-any.whl", "demo-2.0.tar.gz", "demo-2.0-cp313-win_amd64.whl", "k-v1.2.3-linux.tar.gz",
         "k-1.2.3-mac.zip", "latest.bin", "snap-amd64", "snap-arm64", "snap-edge", "src.tar.gz", "tagsrc.tar.gz",
-        "bz-1.0.tar.bz2", "short.bin", "norange.bin", "wrongoff.bin"]}
+        "bz-1.0.tar.bz2", "gnu-keyring.gpg", "short.bin", "norange.bin", "wrongoff.bin"]}
 STATE = {"latest": 1, "short": 0}
 sha = lambda n: hashlib.sha256(BLOB[n]).hexdigest()
 def listing(*names): return "".join(f'<a href="{n}">{n}</a>\n' for n in names).encode()
@@ -117,6 +117,8 @@ class H(http.server.BaseHTTPRequestHandler):
         elif p == "/t/nohead.bin": body = BLOB["latest.bin"]
         elif p == "/t/latest.bin": body = BLOB["latest.bin"] + str(STATE["latest"]).encode()
         elif p.startswith("/t/"): body = BLOB[p.rsplit("/", 1)[-1]]
+        elif p == "/gnu/gnu-keyring.gpg": body = BLOB["gnu-keyring.gpg"]
+        elif p.startswith("/flaky/"): return self.send_error(503)
         elif p == "/br/":
             # like a CDN that sends Brotli even when asked for identity (stdlib cannot decode it)
             self.send_response(200); self.send_header("Content-Encoding", "br"); self.send_header("Content-Length", "4"); self.end_headers(); self.wfile.write(b"\x8b\x00\x80\x03"); return
@@ -199,9 +201,12 @@ check "safe(): long names stay distinct" 'python3 -I -c "
 import importlib.util,sys
 s=importlib.util.spec_from_file_location(\"rm\",\"$PY\");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 a,b=m.safe(\"x\"*200+\"a\"),m.safe(\"x\"*200+\"b\")
-sys.exit(0 if a!=b and len(a)<=180 and m.safe(\"short\")==\"short\" else 1)"'
+t=m.safe(\"y\"*200+\".tar.gz\")
+sys.exit(0 if a!=b and len(a)<=180 and len(t)<=180 and t.endswith(\".tar.gz\") and m.safe(\"short\")==\"short\" else 1)"'
 VALARK_GNU_BASE="$B/dead,$B/gnu" run plan --tsv "$T/c.tsv" --only hello > "$T/gm" 2>&1
 check "gnu: an unreachable first mirror falls back to the next" 'grep -q "gnu/hello/2.10/hello-2.10.tar.xz" "$T/gm"'
+: > "$T/access.log"; VALARK_GNU_BASE="$B/flaky,$B/gnu" run plan --tsv "$T/c.tsv" --only hello --only bz > "$T/gm3" 2>&1; rc=$?
+check "gnu: an unreachable mirror gets ONE request per run, not per package or per retry" '[ $rc -eq 0 ] && [ "$(grep -c "GET /flaky/" "$T/access.log")" -eq 1 ] && grep -q "bz-1.0.tar.bz2" "$T/gm3" && grep -q "hello-2.10.tar.xz" "$T/gm3"'
 VALARK_GNU_BASE="$B/dead" run plan --tsv "$T/c.tsv" --only hello > "$T/gm2" 2>&1; rc=$?
 check "gnu: no mirror answering -> exit 1, names the mirrors" '[ $rc -eq 1 ] && grep -q "no mirror answered" "$T/gm2"'
 check "index: SHA256SUMS digest + file mirrored" 'row app-1.10.tgz | grep -q "sha256:" && row "/SHA256SUMS" >/dev/null && ! row README >/dev/null'
@@ -310,6 +315,26 @@ os.utime(f, ns=(1, 1)); print("rehash", m.check(f, 0, dg, trust_stamp=True), len
 print("wrong", m.check(f, 0, "sha256:" + "0" * 64, trust_stamp=True) is not None)
 PYEOF
 check "verified stamp: written, trusted, invalidated by mtime, never for another digest" 'grep -q "stamp True" "$T/st.out" && grep -q "trusted None 0" "$T/st.out" && grep -q "rehash None 1" "$T/st.out" && grep -q "wrong True" "$T/st.out"' || cat "$T/st.out" >&2
+
+# the stamp through fetch: a second fetch skips a digest file WITHOUT hashing it; VALARK_REHASH=1 re-hashes
+python3 -I - "$PY" "$T/c.tsv" "$T/stampdest" <<'PYEOF' > "$T/sf.out" 2>&1
+import importlib.util, io, contextlib, sys
+spec = importlib.util.spec_from_file_location("rm", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+calls = []; real = m.hashlib.new; m.hashlib.new = lambda a: calls.append(a) or real(a)
+args = ["fetch", "--tsv", sys.argv[2], "--only", "o/tool", "--dest", sys.argv[3]]
+with contextlib.redirect_stdout(io.StringIO()): r1 = m.main(args)
+n1 = len(calls)
+with contextlib.redirect_stdout(io.StringIO()) as o: r2 = m.main(args)
+n2 = len(calls) - n1
+m.REHASH = True
+with contextlib.redirect_stdout(io.StringIO()): r3 = m.main(args)
+n3 = len(calls) - n1 - n2
+print("r", r1, r2, r3, "first", n1 > 0, "second", n2, "skips", o.getvalue().count("skip"), "rehash", n3 > 0)
+PYEOF
+check "stamp via fetch: rerun skips without hashing; VALARK_REHASH=1 re-hashes" 'grep -q "r 0 0 0 first True second 0 skips 3 rehash True" "$T/sf.out"' || cat "$T/sf.out" >&2
+# the GNU keyring is actually fetched (gnu rows through fetch)
+run fetch --tsv "$T/c.tsv" --only hello --dest "$T/gnudest" > "$T/gf" 2>&1; rc=$?
+check "gnu fetch: tarball, .sig and keyring land" '[ $rc -eq 0 ] && [ -f "$T/gnudest/toolchains/gnu/gnu-keyring.gpg" ] && [ -f "$T/gnudest/toolchains/gnu/hello/2.10/hello-2.10.tar.xz.sig" ]' || cat "$T/gf" >&2
 
 # a volatile .part with no digest is never resumed (its bytes may be an older upstream file)
 printf '838|template|=latest|%s/t/latest.bin|storage|literal\n' "$B" > "$T/v.tsv"; V2="$T/vol2"

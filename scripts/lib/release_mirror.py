@@ -23,7 +23,9 @@ everything between ref and the last two fields is the match)
             style files in the directory supply digests and are mirrored too.
   gnu       ref GNU package name: the newest release tarball (one compression: xz > gz >
             bz2 > lz > zst) + .sig, plus gnu-keyring.gpg to check the .sig offline. Mirrors
-            in $VALARK_GNU_BASE (comma list) are tried in order: ftp.gnu.org, then kernel.org.
+            in $VALARK_GNU_BASE (comma list) are tried in order: ftp.gnu.org, then kernel.org;
+            one attempt each but the last, and a mirror that is unreachable once is skipped
+            for the rest of the run.
   go        ref ignored ('-'): the newest stable Go release (every OS/arch, sha256).
   python    ref comma list of minor versions: python.org source for the newest final
             patch of each, plus Windows/macOS installers from the newest patch that still
@@ -46,11 +48,12 @@ server that ignores Range restarts the file); the length is checked against the 
 or the server's Content-Length / Content-Range total, then the digest, before the rename. A
 cut-short body keeps the .part and is retried (4 attempts per file, as for metadata
 requests). A complete .part (killed before the rename, or a 416) is verified and kept.
-A file verified against a digest gets a <file>.verified stamp (digest, size, mtime), so a
-later run does not re-hash it while all three still match. Rows without an upstream digest
+A file verified against a digest gets a <file>.verified stamp (digest, size, whole-second
+mtime), so a later run does not re-hash it while all three still match; VALARK_REHASH=1
+ignores the stamps (bit rot that keeps size + mtime is only caught that way). Rows without an upstream digest
 (gnu tarballs, GitHub source tarballs) are checked by length only; the .sig files and the GNU
 keyring allow a gpg check offline. Volatile rows with a digest are checked against this
-run's digest; those without one are
+run's digest (through the stamp); those without one are
 re-checked with HEAD (Content-Length / ETag / Last-Modified, kept in a <file>.source.json
 sidecar; a server refusing HEAD means re-download) and re-downloaded when upstream changed. Nothing is written
 outside --dest.
@@ -59,7 +62,7 @@ Exit codes: 0 complete · 1 an entry failed to resolve, or nothing resolved (the
 entries are still planned and fetched) · 2 a download failed · 64 usage (bad option, an
 unreadable --tsv, a bad catalog row, kind or regex). The most severe wins (64 > 1 > 2 > 0).
 """
-import argparse, concurrent.futures, gzip, hashlib, http.client, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
+import argparse, concurrent.futures, gzip, hashlib, http.client, json, os, re, sys, threading, time, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -140,7 +143,9 @@ def vkey(s):
 def safe(part):
     part = SAFE.sub("-", str(part)).strip(".-") or "_"
     if len(part) > 180:  # keep distinct long names distinct (plan() de-duplicates by dest)
-        part = part[:167] + "-" + hashlib.sha256(part.encode()).hexdigest()[:12]
+        stem, dot, ext = part.partition(".")
+        ext = (dot + ext)[-20:] if dot and len(dot + ext) <= 20 else ""  # keep .tar.gz etc.
+        part = part[:167 - len(ext)] + "-" + hashlib.sha256(part.encode()).hexdigest()[:12] + ext
     return part
 
 
@@ -230,19 +235,34 @@ def r_index(ref, match, group):
     # version group (a "current/" dir): both are VOLATILE (re-checked on every fetch).
     versioned = "v" in rx.groupindex
     rows = [row(u, group, *where, n, volatile=True) for n, u in sumfiles]
-    rows += [row(u, group, *where, n, digest=sums.get(n, ""), volatile=not versioned) for n, u in dict.fromkeys((n, u) for n, u, _ in hits)]
+    rows += [row(u, group, *where, n, digest=sums.get(n, ""), volatile=not versioned) for n, u, _ in hits]  # repeats share a dest; plan() keeps one
     return rows
 
 
 GNU_EXT = ["xz", "gz", "bz2", "lz", "zst"]  # preference order: one compression is enough
 
 
+MIRROR_LOCK = threading.Lock()
+DEAD_MIRRORS = set()  # mirrors that failed with a network error: skipped for the rest of the run
+
+
 def gnu_listing(ref):
     errors = []
     mirrors = [m.strip().rstrip("/") for m in GNU.split(",") if m.strip()]
     for i, mirror in enumerate(mirrors):
+        last = i == len(mirrors) - 1
         try:  # one attempt per mirror before falling back; the full retries only on the last
-            return mirror, hrefs(f"{mirror}/{ref}/", tries=TRIES if i == len(mirrors) - 1 else 1)
+            if last:
+                return mirror, hrefs(f"{mirror}/{ref}/")
+            with MIRROR_LOCK:  # resolver threads would otherwise all time out on a dead mirror at once
+                if mirror in DEAD_MIRRORS:
+                    continue
+                try:
+                    return mirror, hrefs(f"{mirror}/{ref}/", tries=1)
+                except Exception as e:
+                    if transient(e):  # unreachable, not just missing this package
+                        DEAD_MIRRORS.add(mirror)
+                    raise
         except Exception as e:
             errors.append(f"{mirror}: {e}")
     raise LookupError(f"gnu {ref}: no mirror answered ({'; '.join(errors)})")
@@ -460,15 +480,19 @@ def stamp_path(path):
     return path.with_name(path.name + ".verified")
 
 
+REHASH = os.environ.get("VALARK_REHASH") == "1"  # ignore .verified stamps: re-hash everything
+
+
 def verified_stamp(path, digest):
     st = path.stat()
-    return json.dumps({"digest": digest, "size": st.st_size, "mtime_ns": st.st_mtime_ns})
+    # whole seconds: SMB / some NFS round sub-second mtimes, which would never match again
+    return json.dumps({"digest": digest, "size": st.st_size, "mtime": int(st.st_mtime)})
 
 
 def check(path, size, digest, trust_stamp=False):
     if size and path.stat().st_size != size:
         return f"size {path.stat().st_size} != {size}"
-    if digest and trust_stamp:
+    if digest and trust_stamp and not REHASH:
         # A file this tool already hashed against the SAME digest, untouched since (size +
         # mtime), is not re-read: multi-GB ISOs would otherwise be re-hashed every run.
         try:

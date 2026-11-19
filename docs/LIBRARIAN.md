@@ -102,19 +102,26 @@ GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/
   beside the old one. Index rows land at `<group>/<host>/<dir path>/<file>`.
 - **Volatile rows.** These are files whose name stays the same across upstream versions:
   `=latest` templates such as the Metasploit installers, `SHA256SUMS`, and `current/`
-  directories. Those with a digest (the Kali ISOs) are re-hashed against this run's digest.
-  Those without one are re-checked with a HEAD request against a `<file>.source.json` sidecar,
-  and downloaded again when upstream changed or the server refuses HEAD.
+  directories. Those with a digest (the Kali ISOs) are checked against this run's digest,
+  through the `.verified` stamp, so they're re-hashed only when the digest, size or mtime
+  changed. Those without one are re-checked with a HEAD request against a `<file>.source.json`
+  sidecar, and downloaded again when upstream changed or the server refuses HEAD.
 - **Size.** About 130 GB without the wheelhouse (late 2026). The top-1000 wheelhouse adds about
   64 GB (13,000 files): the newest version of each project, every platform's wheels.
 - **Integrity.** A file checked against an upstream digest gets a `<file>.verified` stamp
-  (digest, size, mtime), so later runs don't re-hash multi-GB ISOs while all three still match.
+  (digest, size, whole-second mtime), so later runs don't re-hash multi-GB ISOs while all
+  three still match. Corruption that keeps the size and mtime (bit rot, a bad NAS write) is
+  caught only by a full re-hash: run with `VALARK_REHASH=1`, or delete the `*.verified` files.
   GNU tarballs and GitHub source tarballs have no upstream digest, so they are checked by length
   only. The GNU `.sig` files and `gnu-keyring.gpg` are mirrored, so you can check them offline:
   `gpg --no-default-keyring --keyring ./gnu-keyring.gpg --verify X.tar.xz.sig X.tar.xz`.
+  The keyring comes from the same mirror as the tarballs, so this proves the files match each
+  other and were signed by a key in that keyring. It is not independent proof they came from
+  GNU; for that, compare the keyring with a copy you got some other way.
 - **GNU mirrors.** `VALARK_GNU_BASE` is a comma list tried in order (default ftp.gnu.org, then
-  mirrors.kernel.org). Every mirror but the last gets one attempt, so an unreachable
-  ftp.gnu.org costs one timeout, not four.
+  mirrors.kernel.org). Every mirror but the last gets one attempt, and a mirror that is
+  unreachable once is skipped for the rest of the run. So an unreachable ftp.gnu.org costs one
+  timeout per run, not four per package.
 - **GitHub token.** Set `GITHUB_TOKEN`. A plan makes roughly 250 GitHub API calls, and the
   anonymous limit is 60 an hour.
 - **Stale "latest" releases.** A `gh:` template whose GitHub latest release isn't a plain version

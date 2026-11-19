@@ -204,9 +204,17 @@ a,b=m.safe(\"x\"*200+\"a\"),m.safe(\"x\"*200+\"b\")
 t=m.safe(\"y\"*200+\".tar.gz\"); u=m.safe(\"tool-1.2.3-\"+\"z\"*200+\".zip\")
 sys.exit(0 if a!=b and len(a)<=180 and len(t)<=180 and t.endswith(\".tar.gz\") and u.endswith(\".zip\") and u.startswith(\"tool-1.2.3-\") and len(u)<=180 and m.safe(\"short\")==\"short\" else 1)"'
 VALARK_GNU_BASE="$B/dead,$B/gnu" run plan --tsv "$T/c.tsv" --only hello > "$T/gm" 2>&1
-check "gnu: an unreachable first mirror falls back to the next" 'grep -q "gnu/hello/2.10/hello-2.10.tar.xz" "$T/gm"'
-: > "$T/access.log"; VALARK_GNU_BASE="$B/flaky,$B/gnu" run plan --tsv "$T/c.tsv" --only hello --only bz > "$T/gm3" 2>&1; rc=$?
-check "gnu: an unreachable mirror gets ONE request per run, not per package or per retry" '[ $rc -eq 0 ] && [ "$(grep -c "GET /flaky/" "$T/access.log")" -eq 1 ] && grep -q "bz-1.0.tar.bz2" "$T/gm3" && grep -q "hello-2.10.tar.xz" "$T/gm3"'
+check "gnu: a first mirror without the package (404) falls back to the next" 'grep -q "gnu/hello/2.10/hello-2.10.tar.xz" "$T/gm"'
+python3 -I - "$PY" "$T/c.tsv" <<'PYEOF' > "$T/gm3" 2>&1; rc=$?
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("rm", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.GNU = "http://127.0.0.1:1," + m.GNU.split(",")[0]  # port 1: connection refused (unreachable)
+dead = []; real = m.hrefs
+m.hrefs = lambda url, tries=m.TRIES: (dead.append(tries) if url.startswith("http://127.0.0.1:1/") else None) or real(url, tries)
+rows, fails = m.plan([e for e in m.load(sys.argv[2]) if e["ref"] in ("hello", "bz")])
+print("dead-calls", dead, "rows", len(rows), "fails", len(fails))
+PYEOF
+check "gnu: an unreachable mirror gets ONE single-try request per run, not per package" 'grep -q "dead-calls \[1\] rows" "$T/gm3" && grep -q "fails 0" "$T/gm3"' || cat "$T/gm3" >&2
 VALARK_GNU_BASE="$B/dead" run plan --tsv "$T/c.tsv" --only hello > "$T/gm2" 2>&1; rc=$?
 check "gnu: no mirror answering -> exit 1, names the mirrors" '[ $rc -eq 1 ] && grep -q "no mirror answered" "$T/gm2"'
 python3 -I - "$PY" "$B" <<'PYEOF' > "$T/lk.out" 2>&1
@@ -217,14 +225,22 @@ m.gnu_listing("hello")  # first answer marks the mirror live
 held = []; real = m.hrefs
 def spy(url, tries=m.TRIES): held.append(m.MIRROR_LOCK.locked()); return real(url, tries)
 m.hrefs = spy; m.gnu_listing("bz")
-m.GNU = f"{sys.argv[2]}/flaky,{sys.argv[2]}/dead"; m.hrefs = real
+m.GNU = f"http://127.0.0.1:1,{sys.argv[2]}/dead"; m.hrefs = real
 try: m.gnu_listing("hello")
 except LookupError: pass
 try: m.gnu_listing("bz")
 except LookupError as e: print("msg", "skipped (unreachable earlier" in str(e))
 print("live-unlocked", held == [False])
+m.DEAD_MIRRORS.clear(); m.LIVE_MIRRORS.clear()
+m.GNU = f"{sys.argv[2]}/flaky,{sys.argv[2]}/gnu"  # /flaky/ answers 503: reachable, so NOT dead
+m.gnu_listing("hello")
+print("http-error-not-dead", f"{sys.argv[2]}/flaky" not in m.DEAD_MIRRORS and f"{sys.argv[2]}/flaky" in m.LIVE_MIRRORS)
+m.GNU = f"http://127.0.0.1:1,{sys.argv[2]}/gnu"  # nothing listens on port 1: connection refused
+m.gnu_listing("hello")
+print("refused-dead", "http://127.0.0.1:1" in m.DEAD_MIRRORS)
 PYEOF
 check "gnu: a mirror that answered is used without the lock; a skipped dead mirror is named" 'grep -q "live-unlocked True" "$T/lk.out" && grep -q "msg True" "$T/lk.out"' || cat "$T/lk.out" >&2
+check "gnu: an HTTP error keeps a mirror live; only a network failure marks it dead" 'grep -q "http-error-not-dead True" "$T/lk.out" && grep -q "refused-dead True" "$T/lk.out"' || cat "$T/lk.out" >&2
 check "index: SHA256SUMS digest + file mirrored" 'row app-1.10.tgz | grep -q "sha256:" && row "/SHA256SUMS" >/dev/null && ! row README >/dev/null'
 check "volatile flag: SUMS + =literal 1, versioned 0" 'row "/SHA256SUMS" | grep -q "	1$" && row latest.bin | grep -q "	1$" && row app-1.10.tgz | grep -q "	0$" && row "/t/k-1.2.3-mac.zip" | grep -q "	0$"'
 check "gnu: 2.10 > 2.9, xz preferred, sig kept" 'row hello-2.10.tar.xz >/dev/null && row hello-2.10.tar.xz.sig >/dev/null && ! row hello-2.9 >/dev/null && ! row hello-2.10.tar.gz >/dev/null'

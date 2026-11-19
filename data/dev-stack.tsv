@@ -180,8 +180,8 @@
 925|gh|nats-io/nats-server||cloud|NATS
 925|gh|coder/code-server||cloud|code-server (VS Code in the browser)
 # --- S3-compatible object storage ---------------------------------------------------------
-922|template|=latest|https://dl.min.io/server/minio/release/linux-amd64/minio https://dl.min.io/server/minio/release/linux-amd64/minio.sha256sum https://dl.min.io/server/minio/release/linux-arm64/minio https://dl.min.io/server/minio/release/linux-arm64/minio.sha256sum https://dl.min.io/server/minio/release/darwin-arm64/minio https://dl.min.io/server/minio/release/windows-amd64/minio.exe https://dl.min.io/client/mc/release/linux-amd64/mc https://dl.min.io/client/mc/release/linux-arm64/mc https://dl.min.io/client/mc/release/darwin-arm64/mc https://dl.min.io/client/mc/release/windows-amd64/mc.exe|storage|MinIO server + mc client
-922|gh|minio/minio||storage|MinIO source
+922|gh|minio/minio||storage|MinIO source (upstream stopped publishing binaries: dl.min.io is 410 Gone)
+922|gh|minio/mc||storage|MinIO client (mc) binaries for every platform + source
 922|gh|seaweedfs/seaweedfs||storage|SeaweedFS (S3 gateway, filer, volume servers)
 922|gh|rustfs/rustfs||storage|RustFS S3-compatible store
 922|gh|versity/versitygw||storage|Versity S3 gateway (S3 over any POSIX filesystem)
@@ -191,7 +191,7 @@
 922|gh|borgbackup/borg||storage|Borg backups
 # --- Databases ----------------------------------------------------------------------------
 920|gh|relatedb/relate||databases|Relate by Neo4j: embedded Rust graph DB (openCypher/GQL) for agents
-920|template|gh:neo4j/neo4j|https://dist.neo4j.org/neo4j-community-{V}-unix.tar.gz https://dist.neo4j.org/neo4j-community-{V}-windows.zip|databases|Neo4j Community server
+920|template|ghtag:neo4j/neo4j|https://dist.neo4j.org/neo4j-community-{V}-unix.tar.gz https://dist.neo4j.org/neo4j-community-{V}-windows.zip|databases|Neo4j Community server
 920|gh|milvus-io/milvus||databases|Milvus vector DB
 920|gh|qdrant/qdrant||databases|Qdrant vector DB
 920|gh|chroma-core/chroma||databases|Chroma vector DB

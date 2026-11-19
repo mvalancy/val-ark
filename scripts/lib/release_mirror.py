@@ -31,7 +31,9 @@ everything between ref and the last two fields is the match)
   pypi-top  ref N: the N most-downloaded PyPI projects, as `pypi` (match = skip regex).
             Projects that fail are reported (exit 1); the rest are still planned.
   template  ref version source: a URL whose body is the version, gh:owner/repo for its
-            latest release tag, or =TEXT for a literal such as =latest (volatile rows);
+            latest release tag (must be a plain version), ghtag:owner/repo for its newest
+            plain version tag (projects whose GitHub "latest release" is stale), or =TEXT
+            for a literal such as =latest (volatile rows);
             match = space-separated URL templates using {v} ({V} = without a leading v).
   snap      ref snap name; match = channel (default latest/stable). Every architecture's
             .snap (sha3-384); install offline with `snap install --dangerous`.
@@ -43,15 +45,16 @@ server that ignores Range restarts the file); the length is checked against the 
 or the server's Content-Length / Content-Range total, then the digest, before the rename. A
 cut-short body keeps the .part and is retried (4 attempts per file, as for metadata
 requests). A complete .part (killed before the rename, or a 416) is verified and kept.
-Volatile rows are re-checked with HEAD (Content-Length / ETag / Last-Modified, kept in a
-<file>.source.json sidecar) and re-downloaded when upstream changed. Nothing is written
+Volatile rows with a digest are re-hashed against this run's digest; those without one are
+re-checked with HEAD (Content-Length / ETag / Last-Modified, kept in a <file>.source.json
+sidecar; a server refusing HEAD means re-download) and re-downloaded when upstream changed. Nothing is written
 outside --dest.
 
 Exit codes: 0 complete · 1 an entry failed to resolve, or nothing resolved (the other
 entries are still planned and fetched) · 2 a download failed · 64 usage (bad option, an
 unreadable --tsv, a bad catalog row, kind or regex). The most severe wins (64 > 1 > 2 > 0).
 """
-import argparse, concurrent.futures, gzip, hashlib, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
+import argparse, concurrent.futures, gzip, hashlib, http.client, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -91,7 +94,7 @@ BACKOFF = float(os.environ.get("VALARK_RETRY_SLEEP", "1"))  # seconds scale; the
 def transient(e):
     if isinstance(e, urllib.error.HTTPError):
         return e.code >= 500 or e.code == 429
-    return isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError))
+    return isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead))
 
 
 def get(url, accept=None, token=False):
@@ -158,6 +161,16 @@ def row(url, group, *path, size=0, digest="", volatile=False):
     return (url, "/".join([safe(group)] + [safe(p) for p in path]), int(size or 0), digest or "", int(bool(volatile)))
 
 
+def newest_tag(ref):
+    """Newest plain version tag (v1.2 / 1.2.3) of a GitHub repo. matching-refs lists every
+    tag in one call; the tags API pages by name, so the newest are often not on page 1."""
+    refs = getjson(f"{GH_API}/repos/{ref}/git/matching-refs/tags", token=True)
+    stable = [t for t in (r["ref"].removeprefix("refs/tags/") for r in refs) if STABLE_TAG.fullmatch(t)]
+    if not stable:
+        raise LookupError(f"gh {ref}: no plain version tags")
+    return max(stable, key=lambda t: vkey(t.lstrip("vV")))
+
+
 # --- resolvers: each returns a list of rows -------------------------------------------
 def r_gh(ref, match, group):
     try:
@@ -166,14 +179,7 @@ def r_gh(ref, match, group):
         if e.code != 404:
             raise
         # Tag-only projects (no GitHub releases): the newest VERSION tag's source tarball.
-        # matching-refs lists every tag in one call (the tags API pages by name, 100 at a time,
-        # so a project's newest tags are often not on page 1).
-        refs = getjson(f"{GH_API}/repos/{ref}/git/matching-refs/tags", token=True)
-        names = [r["ref"].removeprefix("refs/tags/") for r in refs]
-        stable = [t for t in names if STABLE_TAG.fullmatch(t)]
-        if not stable:
-            raise LookupError(f"gh {ref}: no releases and no plain version tags")
-        rel = {"tag_name": max(stable, key=lambda t: vkey(t.lstrip("vV"))), "assets": [], "tag_only": True}
+        rel = {"tag_name": newest_tag(ref), "assets": [], "tag_only": True}
     tag = rel["tag_name"]
     owner, repo = ref.split("/", 1)
     rows = [row(f"{GH_WEB}/{ref}/archive/refs/tags/{urllib.parse.quote(tag)}.tar.gz", group, owner, repo, tag, f"{repo}-{tag}-source.tar.gz")]
@@ -328,8 +334,12 @@ def r_pypi_top(ref, match, group):
 def r_template(ref, match, group):
     if ref.startswith("="):  # literal, for upstreams that only publish a moving "latest" URL
         v = ref[1:]
+    elif ref.startswith("ghtag:"):  # projects whose GitHub "latest release" is stale or absent
+        v = newest_tag(ref[6:])
     elif ref.startswith("gh:"):
         v = getjson(f"{GH_API}/repos/{ref[3:]}/releases/latest", token=True)["tag_name"]
+        if not STABLE_TAG.fullmatch(v):  # e.g. a years-old "latest" pre-release
+            raise LookupError(f"template {ref}: latest release {v!r} is not a plain version (use ghtag:)")
     else:
         v = get(ref).decode().strip().splitlines()[0].strip()
     if not re.fullmatch(r"[A-Za-z0-9._+-]{1,64}", v):
@@ -449,17 +459,16 @@ def sidecar(dest):
     return dest.with_name(dest.name + ".source.json")
 
 
-def finish(part, dest, size, digest, headers, volatile):
+def finish(part, dest, size, digest, headers, volatile, fresh=True):
     bad = check(part, size, digest)
     if bad:
         part.unlink(missing_ok=True)
+        if not fresh:  # a .part left by an earlier run: start over within this run
+            raise Retry(f"{dest.name}: leftover .part failed verification ({bad}); restarting")
         raise OSError(f"{dest.name}: {bad}")
     os.replace(part, dest)
-    if volatile:
-        info = stamp(headers)
-        if "Content-Range" in headers:  # a resumed body's length is not the file's
-            info["Content-Length"] = str(dest.stat().st_size)
-        sidecar(dest).write_text(json.dumps(info))
+    if volatile:  # volatile + no digest never resumes, so these headers describe the whole file
+        sidecar(dest).write_text(json.dumps(stamp(headers)))
 
 
 def download(url, dest, size, digest, volatile):
@@ -473,7 +482,7 @@ def download(url, dest, size, digest, volatile):
         part.unlink()
         have = 0
     if size and have == size:  # killed after the last byte, before the rename
-        return finish(part, dest, size, digest, {}, False)
+        return finish(part, dest, size, digest, {}, False, fresh=False)
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Encoding": "identity", **({"Range": f"bytes={have}-"} if have else {})})
     try:
         r = urllib.request.urlopen(req, timeout=120)
@@ -481,7 +490,7 @@ def download(url, dest, size, digest, volatile):
         if e.code == 416 and have:
             m = re.search(r"\*/(\d+)", e.headers.get("Content-Range") or "")
             if m and int(m[1]) == have:  # the .part already holds the whole file
-                return finish(part, dest, size or have, digest, e.headers, volatile)
+                return finish(part, dest, size or have, digest, e.headers, volatile, fresh=False)
             part.unlink()
             raise Retry(f"{dest.name}: 416 for a {have}-byte .part; restarting")
         raise
@@ -520,9 +529,20 @@ def current(url, dest, size, digest, volatile):
     except (OSError, ValueError):
         return False
     req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": UA, "Accept-Encoding": "identity"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        now = stamp(r.headers)
-    return bool(now) and now == old
+    for attempt in range(TRIES):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                now = stamp(r.headers)
+            return bool(now) and now == old
+        except urllib.error.HTTPError as e:
+            if not transient(e):  # a server that refuses HEAD: re-download with GET
+                return False
+            if attempt == TRIES - 1:
+                raise
+        except Exception as e:
+            if not transient(e) or attempt == TRIES - 1:
+                raise
+        time.sleep(BACKOFF * 2 * 3 ** attempt)
 
 
 def fetch_one(url, dest, size, digest, volatile=False):

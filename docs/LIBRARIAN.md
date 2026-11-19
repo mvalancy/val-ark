@@ -71,7 +71,7 @@ flavours (maxi/nopic/mini) collapse to the most complete one.
 | Kiwix ZIM library | live OPDS via `scripts/lib/kiwix_catalog.py` | **Always current** — ZIM dates never go stale. ~1700+ entries across 9 languages by default (`VALARK_ZIM_LANGS`). |
 | Models (diversity) | `data/models-extra.tsv` | Small high-value models across 17 modalities (embeddings, rerankers, tiny VLMs, OCR, depth, segmentation, detection, audio, time-series). |
 | OS / router / netboot / server source | `data/installers.tsv` | Distro ISOs (Alpine/Debian/Ubuntu/…), OpenWRT firmware, netboot.xyz, Jetson BSP — for PXE / mesh commissioning — plus `server-source`: upstream LAMP + LAN-infrastructure releases (httpd/APR, PHP, MariaDB, PostgreSQL, nginx, OpenSSL/OpenSSH, BIND, Kea, dnsmasq, Unbound, Samba, Dovecot, WordPress, Nextcloud, Gitea, …). |
-| Developer + security stack | `data/dev-stack.tsv` | The kit to build, run and secure software offline: every supported Python (python.org installers + relocatable builds + a top-1000 PyPI wheelhouse), compilers (LLVM, GCC/GNU sources, MinGW, Go, Rust, JDK, CMake…), decompilers/RE (Ghidra, radare2/rizin/Cutter, x64dbg, jadx, ILSpy, Frida…), security tools (Nmap, Wireshark, ZAP, Metasploit, nuclei, Trivy, Zeek, Suricata, Kali ISOs…), containers + Kubernetes (Docker static, Podman, kubeadm/kubectl, MicroK8s snaps, k3s, Helm…), cloud/IaC, S3-compatible storage (MinIO, SeaweedFS, RustFS, versitygw, rclone) and databases (Neo4j + Relate, Milvus, Qdrant, DuckDB, ClickHouse, Valkey, OpenSearch…). Current release of each, resolved live by `scripts/lib/release_mirror.py` (see below). |
+| Developer + security stack | `data/dev-stack.tsv` | The kit to build, run and secure software offline: every supported Python (python.org installers + relocatable builds + a top-1000 PyPI wheelhouse), compilers (LLVM, GCC/GNU sources, MinGW, Go, Rust, JDK, CMake…), decompilers/RE (Ghidra, radare2/rizin/Cutter, x64dbg, jadx, ILSpy, Frida…), security tools (Nmap, Wireshark, ZAP, Metasploit, nuclei, Trivy, Zeek, Suricata, Kali ISOs…), containers + Kubernetes (Docker static, Podman, kubeadm/kubectl, MicroK8s snaps, k3s, Helm…), cloud/IaC, S3-compatible storage (MinIO source, SeaweedFS, RustFS, versitygw, rclone) and databases (Neo4j + Relate, Milvus, Qdrant, DuckDB, ClickHouse, Valkey, OpenSearch…). Current release of each, resolved live by `scripts/lib/release_mirror.py` (see below). |
 | Offline .deb sets | `data/apt-sets.tsv` | Server + developer/security package sets resolved with all dependencies per Ubuntu suite+arch by `scripts/lib/apt_offline.py build --suite noble --arch arm64 --set lamp --dest <dir>` → a flat local APT repo for a LAN with no internet. |
 
 The big LLM/STT/TTS/VLM/image catalog is still managed by `download-models.sh`.
@@ -101,13 +101,16 @@ GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/
 - **Layout.** Versioned rows land at `<group>/<project>/<version>/<file>`, so a new release sits
   beside the old one. Index rows land at `<group>/<host>/<dir path>/<file>`.
 - **Volatile rows.** These are files whose name stays the same across upstream versions:
-  `=latest` templates such as MinIO and the Metasploit installers, `SHA256SUMS`, and `current/`
-  directories. Each fetch re-checks them with a HEAD request against a `<file>.source.json`
-  sidecar, and downloads them again when upstream changed.
+  `=latest` templates such as the Metasploit installers, `SHA256SUMS`, and `current/`
+  directories. Those with a digest (the Kali ISOs) are re-hashed against this run's digest.
+  Those without one are re-checked with a HEAD request against a `<file>.source.json` sidecar,
+  and downloaded again when upstream changed or the server refuses HEAD.
 - **Size.** About 130 GB without the wheelhouse (late 2026). The top-1000 wheelhouse adds
   several hundred GB, because it keeps every platform's wheels, CUDA builds included.
 - **GitHub token.** Set `GITHUB_TOKEN`. A plan makes roughly 250 GitHub API calls, and the
   anonymous limit is 60 an hour.
+- **Stale "latest" releases.** A `gh:` template whose GitHub latest release isn't a plain version
+  (Neo4j's is a 2017 alpha) is an error. Use `ghtag:owner/repo` for the newest plain version tag.
 - **Tag-only projects.** Projects with no GitHub releases get the source tarball of their newest
   plain version tag (`v1.2` / `1.2.3`). The tags come from `git/matching-refs/tags`, because the
   paged tags API often misses the newest ones.

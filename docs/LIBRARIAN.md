@@ -105,8 +105,16 @@ GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/
   directories. Those with a digest (the Kali ISOs) are re-hashed against this run's digest.
   Those without one are re-checked with a HEAD request against a `<file>.source.json` sidecar,
   and downloaded again when upstream changed or the server refuses HEAD.
-- **Size.** About 130 GB without the wheelhouse (late 2026). The top-1000 wheelhouse adds
-  several hundred GB, because it keeps every platform's wheels, CUDA builds included.
+- **Size.** About 130 GB without the wheelhouse (late 2026). The top-1000 wheelhouse adds about
+  64 GB (13,000 files): the newest version of each project, every platform's wheels.
+- **Integrity.** A file checked against an upstream digest gets a `<file>.verified` stamp
+  (digest, size, mtime), so later runs don't re-hash multi-GB ISOs while all three still match.
+  GNU tarballs and GitHub source tarballs have no upstream digest, so they are checked by length
+  only. The GNU `.sig` files and `gnu-keyring.gpg` are mirrored, so you can check them offline:
+  `gpg --no-default-keyring --keyring ./gnu-keyring.gpg --verify X.tar.xz.sig X.tar.xz`.
+- **GNU mirrors.** `VALARK_GNU_BASE` is a comma list tried in order (default ftp.gnu.org, then
+  mirrors.kernel.org). Every mirror but the last gets one attempt, so an unreachable
+  ftp.gnu.org costs one timeout, not four.
 - **GitHub token.** Set `GITHUB_TOKEN`. A plan makes roughly 250 GitHub API calls, and the
   anonymous limit is 60 an hour.
 - **Stale "latest" releases.** A `gh:` template whose GitHub latest release isn't a plain version
@@ -126,7 +134,19 @@ GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/
   - `64` usage (a bad catalog row, kind or regex).
 
   The most severe wins. Every metadata request and download gets 4 attempts on DNS and
-  connection errors, 5xx and 429.
+  connection errors, 5xx and 429. A malformed row (an index with no regex, a template with
+  no URLs, a non-numeric pypi-top) is reported as 64 before any network request.
+
+**Last real-network run (2026-11-19, Ubuntu 24.04 x86_64, a `gh`, `go`, `gnu` and `=latest`
+template row):**
+- The first fetch exited 0 with 7 files, including the 406 MB Metasploit `.msi` (volatile, with
+  a HEAD sidecar).
+- The rerun exited 0 with every file skipped: HEAD for the 2 volatile files, the `.verified`
+  stamp for the 2 digest files.
+- A 30 MB `.part` of the 70 MB Go tarball resumed with Range and matched go.dev's sha256.
+- `gpg --verify` of the mirrored m4 `.sig` against the mirrored keyring printed "Good signature".
+- ftp.gnu.org was unreachable from that host, and the kernel.org fallback served the GNU rows.
+- Not yet run: an offline `snap install --dangerous` of MicroK8s on a target box.
 - Offline-install hints: Python wheels install with `pip install --no-index --find-links <dir>`;
   MicroK8s with `snap install --dangerous core20_*.snap` then `snap install --dangerous --classic
   microk8s_*.snap`; Docker static binaries by unpacking `docker-*.tgz` into `/usr/local/bin`.

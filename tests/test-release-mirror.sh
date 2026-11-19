@@ -74,7 +74,7 @@ ROUTES = {
   "/empty/": listing("other.txt"),
   "/ver-bad.txt": b"<html><body>Moved</body></html>\n",
   "/api/repos/o/k/releases/latest": json.dumps({"tag_name": "v1.2.3", "assets": []}).encode(),
-  "/idx/": listing("app-1.9.tgz", "app-1.10.tgz", "app-1.2.tgz", "SHA256SUMS", "sub/", "README"),
+  "/idx/": listing("app-1.9.tgz", "app-1.10.tgz", "app-1.10.tgz", "app-1.2.tgz", "SHA256SUMS", "sub/", "README"),
   "/idx/SHA256SUMS": SUMS,
   "/gnu/hello/": listing("hello-2.9.tar.xz", "hello-2.10.tar.xz", "hello-2.10.tar.gz", "hello-2.10.tar.xz.sig", "hello-2.10.tar.gz.sig"),
   "/go.json": json.dumps([{"version": "go1.31rc1", "stable": False, "files": []}, {"version": "go1.30.1", "stable": True, "files": [
@@ -193,6 +193,17 @@ check "gh: sha256 digest + size carried" 'row tool-linux-amd64.tar.gz | grep -q 
 check "gh: tag source tarball" 'row "dev-tools/o/tool/v1.0/tool-v1.0-source.tar.gz" | grep -q "/web/o/tool/archive/refs/tags/v1.0.tar.gz"'
 check "gh: tag-only repo -> newest plain version tag (not show/sprint/rc/date)" 'row "dev-tools/o/tagonly/v2.10/" >/dev/null && [ "$(grep -c "o/tagonly/" "$T/plan")" -eq 1 ]'
 check "index: highest version only (1.10 > 1.9)" 'row app-1.10.tgz >/dev/null && ! row app-1.9.tgz >/dev/null && ! row app-1.2.tgz >/dev/null'
+check "index: a file listed twice is planned once" '[ "$(grep -c "/app-1.10.tgz	" "$T/plan")" -eq 1 ]'
+check "gnu: keyring mirrored for offline .sig checks" 'row "toolchains/gnu/gnu-keyring.gpg" | grep -q "	1$"'
+check "safe(): long names stay distinct" 'python3 -I -c "
+import importlib.util,sys
+s=importlib.util.spec_from_file_location(\"rm\",\"$PY\");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+a,b=m.safe(\"x\"*200+\"a\"),m.safe(\"x\"*200+\"b\")
+sys.exit(0 if a!=b and len(a)<=180 and m.safe(\"short\")==\"short\" else 1)"'
+VALARK_GNU_BASE="$B/dead,$B/gnu" run plan --tsv "$T/c.tsv" --only hello > "$T/gm" 2>&1
+check "gnu: an unreachable first mirror falls back to the next" 'grep -q "gnu/hello/2.10/hello-2.10.tar.xz" "$T/gm"'
+VALARK_GNU_BASE="$B/dead" run plan --tsv "$T/c.tsv" --only hello > "$T/gm2" 2>&1; rc=$?
+check "gnu: no mirror answering -> exit 1, names the mirrors" '[ $rc -eq 1 ] && grep -q "no mirror answered" "$T/gm2"'
 check "index: SHA256SUMS digest + file mirrored" 'row app-1.10.tgz | grep -q "sha256:" && row "/SHA256SUMS" >/dev/null && ! row README >/dev/null'
 check "volatile flag: SUMS + =literal 1, versioned 0" 'row "/SHA256SUMS" | grep -q "	1$" && row latest.bin | grep -q "	1$" && row app-1.10.tgz | grep -q "	0$" && row "/t/k-1.2.3-mac.zip" | grep -q "	0$"'
 check "gnu: 2.10 > 2.9, xz preferred, sig kept" 'row hello-2.10.tar.xz >/dev/null && row hello-2.10.tar.xz.sig >/dev/null && ! row hello-2.9 >/dev/null && ! row hello-2.10.tar.gz >/dev/null'
@@ -228,6 +239,9 @@ run plan --tsv "$T/n.tsv" >/dev/null 2>&1; check "nothing resolved, entry failed
 printf '900|nope|x||g|n\n' > "$T/u.tsv"; run plan --tsv "$T/u.tsv" >/dev/null 2>&1; check "unknown kind -> 64" '[ $? -eq 64 ]'
 printf '900|gh|o/tool|([|g|n\n' > "$T/u.tsv"; run plan --tsv "$T/u.tsv" >/dev/null 2>&1; check "bad regex -> 64" '[ $? -eq 64 ]'
 printf '900|index|%s/idx/||g|n\n' "$B" > "$T/u.tsv"; run plan --tsv "$T/u.tsv" >/dev/null 2>&1; check "index without a match -> 64" '[ $? -eq 64 ]'
+printf '900|template|%s/ver.txt| |g|n\n800|gh|o/tool||g|n\n' "$B" > "$T/u.tsv"; : > "$T/access.log"; run plan --tsv "$T/u.tsv" >/dev/null 2>&1; rc=$?
+check "template without URLs -> 64 before any request" '[ $rc -eq 64 ] && [ ! -s "$T/access.log" ]'
+printf '900|pypi-top|lots||g|n\n' > "$T/u.tsv"; run plan --tsv "$T/u.tsv" >/dev/null 2>&1; check "pypi-top with a non-number -> 64" '[ $? -eq 64 ]'
 run plan --bogus >/dev/null 2>&1; check "argparse error -> 64" '[ $? -eq 64 ]'
 run fetch --tsv "$T/c.tsv" >/dev/null 2>&1; check "fetch without --dest -> 64" '[ $? -eq 64 ]'
 run plan --tsv "$T/c.tsv" --group nothing >/dev/null 2>&1; check "filters matching nothing -> 64" '[ $? -eq 64 ]'
@@ -283,6 +297,19 @@ check "volatile file + sidecar written" '[ -f "$LB" ] && grep -q ETag "$LB.sourc
 check "volatile unchanged upstream -> HEAD only, skip" 'grep -q "^skip" "$T/v2" && grep -q "^HEAD /t/latest.bin" "$T/access.log" && ! grep -q "^GET /t/latest.bin" "$T/access.log"'
 curl -s "$B/ctl/bump" >/dev/null; run fetch --tsv "$T/v.tsv" --dest "$V" > "$T/v3" 2>&1
 check "volatile changed upstream -> re-downloaded" 'grep -q "^ok" "$T/v3" && grep -q "latest.bin2$" <(tail -c 20 "$LB"; echo)'
+
+# a digest-verified file is stamped; a later run trusts the stamp (no re-hash) until the file changes
+python3 -I - "$PY" "$D" <<'PYEOF' > "$T/st.out" 2>&1
+import importlib.util, os, pathlib, sys
+spec = importlib.util.spec_from_file_location("rm", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+f = next(pathlib.Path(sys.argv[2]).rglob("tool-linux-amd64.tar.gz")); dg = "sha256:" + __import__("hashlib").sha256(f.read_bytes()).hexdigest()
+calls = []; real = m.hashlib.new; m.hashlib.new = lambda a: calls.append(a) or real(a)
+print("stamp", m.stamp_path(f).exists())
+print("trusted", m.check(f, 0, dg, trust_stamp=True), len(calls))
+os.utime(f, ns=(1, 1)); print("rehash", m.check(f, 0, dg, trust_stamp=True), len(calls))
+print("wrong", m.check(f, 0, "sha256:" + "0" * 64, trust_stamp=True) is not None)
+PYEOF
+check "verified stamp: written, trusted, invalidated by mtime, never for another digest" 'grep -q "stamp True" "$T/st.out" && grep -q "trusted None 0" "$T/st.out" && grep -q "rehash None 1" "$T/st.out" && grep -q "wrong True" "$T/st.out"' || cat "$T/st.out" >&2
 
 # a volatile .part with no digest is never resumed (its bytes may be an older upstream file)
 printf '838|template|=latest|%s/t/latest.bin|storage|literal\n' "$B" > "$T/v.tsv"; V2="$T/vol2"

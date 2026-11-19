@@ -143,8 +143,8 @@ def vkey(s):
 def safe(part):
     part = SAFE.sub("-", str(part)).strip(".-") or "_"
     if len(part) > 180:  # keep distinct long names distinct (plan() de-duplicates by dest)
-        stem, dot, ext = part.partition(".")
-        ext = (dot + ext)[-20:] if dot and len(dot + ext) <= 20 else ""  # keep .tar.gz etc.
+        m = re.search(r"(\.[A-Za-z][A-Za-z0-9]{0,7}){1,2}$", part)  # .zip, .tar.gz, .tar.zst
+        ext = m.group(0) if m else ""
         part = part[:167 - len(ext)] + "-" + hashlib.sha256(part.encode()).hexdigest()[:12] + ext
     return part
 
@@ -242,7 +242,8 @@ def r_index(ref, match, group):
 GNU_EXT = ["xz", "gz", "bz2", "lz", "zst"]  # preference order: one compression is enough
 
 
-MIRROR_LOCK = threading.Lock()
+MIRROR_LOCK = threading.Lock()  # held only until a mirror has answered once (LIVE_MIRRORS)
+LIVE_MIRRORS = set()
 DEAD_MIRRORS = set()  # mirrors that failed with a network error: skipped for the rest of the run
 
 
@@ -252,13 +253,16 @@ def gnu_listing(ref):
     for i, mirror in enumerate(mirrors):
         last = i == len(mirrors) - 1
         try:  # one attempt per mirror before falling back; the full retries only on the last
-            if last:
-                return mirror, hrefs(f"{mirror}/{ref}/")
+            if last or mirror in LIVE_MIRRORS:  # known-good: no lock, normal concurrency
+                return mirror, hrefs(f"{mirror}/{ref}/", tries=TRIES if last else 1)
             with MIRROR_LOCK:  # resolver threads would otherwise all time out on a dead mirror at once
                 if mirror in DEAD_MIRRORS:
+                    errors.append(f"{mirror}: skipped (unreachable earlier this run)")
                     continue
                 try:
-                    return mirror, hrefs(f"{mirror}/{ref}/", tries=1)
+                    got = hrefs(f"{mirror}/{ref}/", tries=1)
+                    LIVE_MIRRORS.add(mirror)
+                    return mirror, got
                 except Exception as e:
                     if transient(e):  # unreachable, not just missing this package
                         DEAD_MIRRORS.add(mirror)

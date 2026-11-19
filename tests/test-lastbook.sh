@@ -785,5 +785,10 @@ check "lastbook is in download-tools.sh list (default refresh)" 'bash "$ROOT/scr
 check "source-repos.tsv lists Immortal-Protocols/lastbook" 'grep -q "^[0-9]*|Immortal-Protocols/lastbook|" "$ROOT/data/source-repos.tsv"'
 check ".env.example documents the knobs" 'grep -q "VALARK_LASTBOOK_PACK" "$ROOT/.env.example" && grep -q "VALARK_LASTBOOK_BUDGET_PCT" "$ROOT/.env.example"'
 
+check "disk_bytes: a pack with no files is not a verified pack (#239)" 'python3 -I -c "
+import importlib.util,sys
+s=importlib.util.spec_from_file_location(\"lb\",\"$PY\");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+sys.exit(0 if m.disk_bytes(\"/nonexistent\", {}, {\"id\": \"x\", \"files\": []}) is None else 1)"'
+
 echo "lastbook: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ]

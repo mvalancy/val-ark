@@ -826,8 +826,8 @@ def single_pack(args, rows):
 
 def disk_bytes(dest, stamps, pack):
     """Recorded on-disk bytes of a pack whose every file is present and verified, else None."""
-    if not all(stamped(dest, stamps, f) for f in pack["files"]):
-        return None
+    if not pack["files"] or not all(stamped(dest, stamps, f) for f in pack["files"]):
+        return None  # an empty file list is not a verified pack (it would count as 0 bytes held)
     return sum(stamps[rel_path(f)]["size"] for f in pack["files"])
 
 

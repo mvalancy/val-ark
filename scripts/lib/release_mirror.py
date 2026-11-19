@@ -22,7 +22,10 @@ everything between ref and the last two fields is the match)
             regex has a (?P<v>...) group, only the highest version is kept. SHA256SUMS-
             style files in the directory supply digests and are mirrored too.
   gnu       ref GNU package name: the newest release tarball (one compression: xz > gz >
-            bz2 > lz > zst) + .sig from ftp.gnu.org.
+            bz2 > lz > zst) + .sig, plus gnu-keyring.gpg to check the .sig offline. Mirrors
+            in $VALARK_GNU_BASE (comma list) are tried in order: ftp.gnu.org, then kernel.org;
+            one attempt each but the last, and a mirror that is unreachable once is skipped
+            for the rest of the run.
   go        ref ignored ('-'): the newest stable Go release (every OS/arch, sha256).
   python    ref comma list of minor versions: python.org source for the newest final
             patch of each, plus Windows/macOS installers from the newest patch that still
@@ -45,7 +48,12 @@ server that ignores Range restarts the file); the length is checked against the 
 or the server's Content-Length / Content-Range total, then the digest, before the rename. A
 cut-short body keeps the .part and is retried (4 attempts per file, as for metadata
 requests). A complete .part (killed before the rename, or a 416) is verified and kept.
-Volatile rows with a digest are re-hashed against this run's digest; those without one are
+A file verified against a digest gets a <file>.verified stamp (digest, size, whole-second
+mtime), so a later run does not re-hash it while all three still match; VALARK_REHASH=1
+ignores the stamps (bit rot that keeps size + mtime is only caught that way). Rows without an upstream digest
+(gnu tarballs, GitHub source tarballs) are checked by length only; the .sig files and the GNU
+keyring allow a gpg check offline. Volatile rows with a digest are checked against this
+run's digest (through the stamp); those without one are
 re-checked with HEAD (Content-Length / ETag / Last-Modified, kept in a <file>.source.json
 sidecar; a server refusing HEAD means re-download) and re-downloaded when upstream changed. Nothing is written
 outside --dest.
@@ -54,7 +62,7 @@ Exit codes: 0 complete · 1 an entry failed to resolve, or nothing resolved (the
 entries are still planned and fetched) · 2 a download failed · 64 usage (bad option, an
 unreadable --tsv, a bad catalog row, kind or regex). The most severe wins (64 > 1 > 2 > 0).
 """
-import argparse, concurrent.futures, gzip, hashlib, http.client, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
+import argparse, concurrent.futures, gzip, hashlib, http.client, json, os, re, sys, threading, time, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -63,7 +71,8 @@ UA = "val-ark-release-mirror/1"
 # Overridable for the offline test fixture.
 GH_API = os.environ.get("VALARK_GH_API", "https://api.github.com")
 GH_WEB = os.environ.get("VALARK_GH_WEB", "https://github.com")
-GNU = os.environ.get("VALARK_GNU_BASE", "https://ftp.gnu.org/gnu")
+# Comma list, tried in order: ftp.gnu.org is often unreachable, the kernel.org mirror rarely.
+GNU = os.environ.get("VALARK_GNU_BASE", "https://ftp.gnu.org/gnu,https://mirrors.kernel.org/gnu")
 GO_JSON = os.environ.get("VALARK_GO_JSON", "https://go.dev/dl/?mode=json")
 PYTHON_FTP = os.environ.get("VALARK_PYTHON_FTP", "https://www.python.org/ftp/python")
 PYPI = os.environ.get("VALARK_PYPI", "https://pypi.org/pypi")
@@ -97,7 +106,7 @@ def transient(e):
     return isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead))
 
 
-def get(url, accept=None, token=False):
+def get(url, accept=None, token=False, tries=TRIES):
     # identity: some CDNs send Brotli even to a client that asked for nothing, and an
     # undecoded body would parse as an EMPTY listing (silently mirroring nothing).
     headers = {"User-Agent": UA, "Accept-Encoding": "identity"}
@@ -107,7 +116,7 @@ def get(url, accept=None, token=False):
         headers["Authorization"] = "Bearer " + os.environ["GITHUB_TOKEN"]
     if url.startswith(SNAP_API):
         headers["Snap-Device-Series"] = "16"
-    for attempt in range(TRIES):
+    for attempt in range(tries):
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as r:
                 body, enc = r.read(), (r.headers.get("Content-Encoding") or "identity").lower()
@@ -117,7 +126,7 @@ def get(url, accept=None, token=False):
                 raise LookupError(f"{url}: undecodable Content-Encoding {enc}")
             return body
         except Exception as e:
-            if not transient(e) or attempt == TRIES - 1:
+            if not transient(e) or attempt == tries - 1:
                 raise
         time.sleep(BACKOFF * 2 * 3 ** attempt)
 
@@ -133,11 +142,15 @@ def vkey(s):
 
 def safe(part):
     part = SAFE.sub("-", str(part)).strip(".-") or "_"
-    return part[:180]
+    if len(part) > 180:  # keep distinct long names distinct (plan() de-duplicates by dest)
+        m = re.search(r"(\.[A-Za-z][A-Za-z0-9]{0,7}){1,2}$", part)  # .zip, .tar.gz, .tar.zst
+        ext = m.group(0) if m else ""
+        part = part[:167 - len(ext)] + "-" + hashlib.sha256(part.encode()).hexdigest()[:12] + ext
+    return part
 
 
-def hrefs(url):
-    text = get(url).decode(errors="replace")
+def hrefs(url, tries=TRIES):
+    text = get(url, tries=tries).decode(errors="replace")
     out = []
     for h in re.findall(r'href=["\']([^"\'#?]+)', text, re.I):
         name = urllib.parse.unquote(h.rstrip("/").rsplit("/", 1)[-1])
@@ -222,16 +235,45 @@ def r_index(ref, match, group):
     # version group (a "current/" dir): both are VOLATILE (re-checked on every fetch).
     versioned = "v" in rx.groupindex
     rows = [row(u, group, *where, n, volatile=True) for n, u in sumfiles]
-    rows += [row(u, group, *where, n, digest=sums.get(n, ""), volatile=not versioned) for n, u, _ in dict.fromkeys(hits)]
+    rows += [row(u, group, *where, n, digest=sums.get(n, ""), volatile=not versioned) for n, u, _ in hits]  # repeats share a dest; plan() keeps one
     return rows
 
 
 GNU_EXT = ["xz", "gz", "bz2", "lz", "zst"]  # preference order: one compression is enough
 
 
+MIRROR_LOCK = threading.Lock()  # held only until a mirror has answered once (LIVE_MIRRORS)
+LIVE_MIRRORS = set()
+DEAD_MIRRORS = set()  # mirrors that failed with a network error: skipped for the rest of the run
+
+
+def gnu_listing(ref):
+    errors = []
+    mirrors = [m.strip().rstrip("/") for m in GNU.split(",") if m.strip()]
+    for i, mirror in enumerate(mirrors):
+        last = i == len(mirrors) - 1
+        try:  # one attempt per mirror before falling back; the full retries only on the last
+            if last or mirror in LIVE_MIRRORS:  # known-good: no lock, normal concurrency
+                return mirror, hrefs(f"{mirror}/{ref}/", tries=TRIES if last else 1)
+            with MIRROR_LOCK:  # resolver threads would otherwise all time out on a dead mirror at once
+                if mirror in DEAD_MIRRORS:
+                    errors.append(f"{mirror}: skipped (unreachable earlier this run)")
+                    continue
+                try:
+                    got = hrefs(f"{mirror}/{ref}/", tries=1)
+                    LIVE_MIRRORS.add(mirror)
+                    return mirror, got
+                except Exception as e:
+                    if transient(e):  # unreachable, not just missing this package
+                        DEAD_MIRRORS.add(mirror)
+                    raise
+        except Exception as e:
+            errors.append(f"{mirror}: {e}")
+    raise LookupError(f"gnu {ref}: no mirror answered ({'; '.join(errors)})")
+
+
 def r_gnu(ref, match, group):
-    base = f"{GNU}/{ref}/"
-    links = hrefs(base)
+    mirror, links = gnu_listing(ref)
     rx = re.compile(rf"^{re.escape(ref)}-(\d+(?:\.\d+)+)(?:\.tar\.({'|'.join(GNU_EXT)}))?$")
     vers = {}
     for n, u, d in links:
@@ -257,7 +299,9 @@ def r_gnu(ref, match, group):
         picked = [(n, u) for n, u in files if n in (tar, tar + ".sig") or n.endswith(".sum") or "sha512" in n]
     if not picked:
         raise LookupError(f"gnu {ref} {v}: match {match!r} selects nothing")
-    return [row(u, group, "gnu", ref, v, n) for n, u in picked]
+    # GNU publishes signatures, not checksums: mirror the keyring so the .sig files can be
+    # checked offline (gpg --keyring ./gnu-keyring.gpg --verify X.tar.xz.sig X.tar.xz).
+    return [row(u, group, "gnu", ref, v, n) for n, u in picked] + [row(f"{mirror}/gnu-keyring.gpg", group, "gnu", "gnu-keyring.gpg", volatile=True)]
 
 
 def r_go(ref, match, group):
@@ -398,6 +442,13 @@ def load(tsv):
             re.compile(f[3]) if f[1] not in ("template", "snap") else None
         except re.error as e:
             raise Usage(f"{tsv}:{n}: bad regex: {e}")
+        # Fail fast on rows that can never resolve, before any network work starts.
+        if f[1] == "index" and not f[3]:
+            raise Usage(f"{tsv}:{n}: index needs a match regex")
+        if f[1] == "template" and not f[3].split():
+            raise Usage(f"{tsv}:{n}: template needs URL templates in match")
+        if f[1] == "pypi-top" and not f[2].isdigit():
+            raise Usage(f"{tsv}:{n}: pypi-top ref must be a number")
         entries.append(dict(rank=int(f[0]), kind=f[1], ref=f[2], match=f[3], group=f[4], note=f[5]))
     return sorted(entries, key=lambda e: e["rank"], reverse=True)
 
@@ -429,9 +480,30 @@ def plan(entries):
     return rows, failures
 
 
-def check(path, size, digest):
+def stamp_path(path):
+    return path.with_name(path.name + ".verified")
+
+
+REHASH = os.environ.get("VALARK_REHASH") == "1"  # ignore .verified stamps: re-hash everything
+
+
+def verified_stamp(path, digest):
+    st = path.stat()
+    # whole seconds: SMB / some NFS round sub-second mtimes, which would never match again
+    return json.dumps({"digest": digest, "size": st.st_size, "mtime": int(st.st_mtime)})
+
+
+def check(path, size, digest, trust_stamp=False):
     if size and path.stat().st_size != size:
         return f"size {path.stat().st_size} != {size}"
+    if digest and trust_stamp and not REHASH:
+        # A file this tool already hashed against the SAME digest, untouched since (size +
+        # mtime), is not re-read: multi-GB ISOs would otherwise be re-hashed every run.
+        try:
+            if stamp_path(path).read_text() == verified_stamp(path, digest):
+                return None
+        except OSError:
+            pass
     if digest:
         algo, want = digest.split(":", 1)
         h = hashlib.new(algo)
@@ -440,6 +512,11 @@ def check(path, size, digest):
                 h.update(chunk)
         if h.hexdigest() != want:
             return f"{algo} mismatch"
+        if trust_stamp:
+            try:
+                stamp_path(path).write_text(verified_stamp(path, digest))
+            except OSError:
+                pass
     return None
 
 
@@ -467,6 +544,11 @@ def finish(part, dest, size, digest, headers, volatile, fresh=True):
             raise Retry(f"{dest.name}: leftover .part failed verification ({bad}); restarting")
         raise OSError(f"{dest.name}: {bad}")
     os.replace(part, dest)
+    if digest:  # rename keeps the mtime, so this stamp matches the file just verified
+        try:
+            stamp_path(dest).write_text(verified_stamp(dest, digest))
+        except OSError:
+            pass
     if volatile:  # volatile + no digest never resumes, so these headers describe the whole file
         sidecar(dest).write_text(json.dumps(stamp(headers)))
 
@@ -520,7 +602,7 @@ def download(url, dest, size, digest, volatile):
 
 def current(url, dest, size, digest, volatile):
     """Is the file at dest complete and still upstream's current version?"""
-    if not dest.exists() or check(dest, size, digest):
+    if not dest.exists() or check(dest, size, digest, trust_stamp=True):
         return False
     if not volatile or digest:  # a versioned name, or a digest from this run's listing
         return True

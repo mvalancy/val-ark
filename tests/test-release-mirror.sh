@@ -54,7 +54,7 @@ BLOB = {name: (name * 50).encode() for name in ["tool-linux-amd64.tar.gz", "tool
         "python-3.13.8-amd64.exe", "python-3.13.8-macos11.pkg", "Python-3.13.8.tar.xz", "Python-3.14.0.tar.xz", "python-3.14.0-amd64.exe", "Python-3.14.1a1.tar.xz",
         "demo-2.0-py3-none-any.whl", "demo-2.0.tar.gz", "demo-2.0-cp313-win_amd64.whl", "k-v1.2.3-linux.tar.gz",
         "k-1.2.3-mac.zip", "latest.bin", "snap-amd64", "snap-arm64", "snap-edge", "src.tar.gz", "tagsrc.tar.gz",
-        "bz-1.0.tar.bz2", "short.bin", "norange.bin", "wrongoff.bin"]}
+        "bz-1.0.tar.bz2", "gnu-keyring.gpg", "short.bin", "norange.bin", "wrongoff.bin"]}
 STATE = {"latest": 1, "short": 0}
 sha = lambda n: hashlib.sha256(BLOB[n]).hexdigest()
 def listing(*names): return "".join(f'<a href="{n}">{n}</a>\n' for n in names).encode()
@@ -74,7 +74,7 @@ ROUTES = {
   "/empty/": listing("other.txt"),
   "/ver-bad.txt": b"<html><body>Moved</body></html>\n",
   "/api/repos/o/k/releases/latest": json.dumps({"tag_name": "v1.2.3", "assets": []}).encode(),
-  "/idx/": listing("app-1.9.tgz", "app-1.10.tgz", "app-1.2.tgz", "SHA256SUMS", "sub/", "README"),
+  "/idx/": listing("app-1.9.tgz", "app-1.10.tgz", "app-1.10.tgz", "app-1.2.tgz", "SHA256SUMS", "sub/", "README"),
   "/idx/SHA256SUMS": SUMS,
   "/gnu/hello/": listing("hello-2.9.tar.xz", "hello-2.10.tar.xz", "hello-2.10.tar.gz", "hello-2.10.tar.xz.sig", "hello-2.10.tar.gz.sig"),
   "/go.json": json.dumps([{"version": "go1.31rc1", "stable": False, "files": []}, {"version": "go1.30.1", "stable": True, "files": [
@@ -117,6 +117,8 @@ class H(http.server.BaseHTTPRequestHandler):
         elif p == "/t/nohead.bin": body = BLOB["latest.bin"]
         elif p == "/t/latest.bin": body = BLOB["latest.bin"] + str(STATE["latest"]).encode()
         elif p.startswith("/t/"): body = BLOB[p.rsplit("/", 1)[-1]]
+        elif p == "/gnu/gnu-keyring.gpg": body = BLOB["gnu-keyring.gpg"]
+        elif p.startswith("/flaky/"): return self.send_error(503)
         elif p == "/br/":
             # like a CDN that sends Brotli even when asked for identity (stdlib cannot decode it)
             self.send_response(200); self.send_header("Content-Encoding", "br"); self.send_header("Content-Length", "4"); self.end_headers(); self.wfile.write(b"\x8b\x00\x80\x03"); return
@@ -193,6 +195,36 @@ check "gh: sha256 digest + size carried" 'row tool-linux-amd64.tar.gz | grep -q 
 check "gh: tag source tarball" 'row "dev-tools/o/tool/v1.0/tool-v1.0-source.tar.gz" | grep -q "/web/o/tool/archive/refs/tags/v1.0.tar.gz"'
 check "gh: tag-only repo -> newest plain version tag (not show/sprint/rc/date)" 'row "dev-tools/o/tagonly/v2.10/" >/dev/null && [ "$(grep -c "o/tagonly/" "$T/plan")" -eq 1 ]'
 check "index: highest version only (1.10 > 1.9)" 'row app-1.10.tgz >/dev/null && ! row app-1.9.tgz >/dev/null && ! row app-1.2.tgz >/dev/null'
+check "index: a file listed twice is planned once" '[ "$(grep -c "/app-1.10.tgz	" "$T/plan")" -eq 1 ]'
+check "gnu: keyring mirrored for offline .sig checks" 'row "toolchains/gnu/gnu-keyring.gpg" | grep -q "	1$"'
+check "safe(): long names stay distinct" 'python3 -I -c "
+import importlib.util,sys
+s=importlib.util.spec_from_file_location(\"rm\",\"$PY\");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+a,b=m.safe(\"x\"*200+\"a\"),m.safe(\"x\"*200+\"b\")
+t=m.safe(\"y\"*200+\".tar.gz\"); u=m.safe(\"tool-1.2.3-\"+\"z\"*200+\".zip\")
+sys.exit(0 if a!=b and len(a)<=180 and len(t)<=180 and t.endswith(\".tar.gz\") and u.endswith(\".zip\") and u.startswith(\"tool-1.2.3-\") and len(u)<=180 and m.safe(\"short\")==\"short\" else 1)"'
+VALARK_GNU_BASE="$B/dead,$B/gnu" run plan --tsv "$T/c.tsv" --only hello > "$T/gm" 2>&1
+check "gnu: an unreachable first mirror falls back to the next" 'grep -q "gnu/hello/2.10/hello-2.10.tar.xz" "$T/gm"'
+: > "$T/access.log"; VALARK_GNU_BASE="$B/flaky,$B/gnu" run plan --tsv "$T/c.tsv" --only hello --only bz > "$T/gm3" 2>&1; rc=$?
+check "gnu: an unreachable mirror gets ONE request per run, not per package or per retry" '[ $rc -eq 0 ] && [ "$(grep -c "GET /flaky/" "$T/access.log")" -eq 1 ] && grep -q "bz-1.0.tar.bz2" "$T/gm3" && grep -q "hello-2.10.tar.xz" "$T/gm3"'
+VALARK_GNU_BASE="$B/dead" run plan --tsv "$T/c.tsv" --only hello > "$T/gm2" 2>&1; rc=$?
+check "gnu: no mirror answering -> exit 1, names the mirrors" '[ $rc -eq 1 ] && grep -q "no mirror answered" "$T/gm2"'
+python3 -I - "$PY" "$B" <<'PYEOF' > "$T/lk.out" 2>&1
+import importlib.util, sys, threading
+spec = importlib.util.spec_from_file_location("rm", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.GNU = f"{sys.argv[2]}/gnu,{sys.argv[2]}/dead"
+m.gnu_listing("hello")  # first answer marks the mirror live
+held = []; real = m.hrefs
+def spy(url, tries=m.TRIES): held.append(m.MIRROR_LOCK.locked()); return real(url, tries)
+m.hrefs = spy; m.gnu_listing("bz")
+m.GNU = f"{sys.argv[2]}/flaky,{sys.argv[2]}/dead"; m.hrefs = real
+try: m.gnu_listing("hello")
+except LookupError: pass
+try: m.gnu_listing("bz")
+except LookupError as e: print("msg", "skipped (unreachable earlier" in str(e))
+print("live-unlocked", held == [False])
+PYEOF
+check "gnu: a mirror that answered is used without the lock; a skipped dead mirror is named" 'grep -q "live-unlocked True" "$T/lk.out" && grep -q "msg True" "$T/lk.out"' || cat "$T/lk.out" >&2
 check "index: SHA256SUMS digest + file mirrored" 'row app-1.10.tgz | grep -q "sha256:" && row "/SHA256SUMS" >/dev/null && ! row README >/dev/null'
 check "volatile flag: SUMS + =literal 1, versioned 0" 'row "/SHA256SUMS" | grep -q "	1$" && row latest.bin | grep -q "	1$" && row app-1.10.tgz | grep -q "	0$" && row "/t/k-1.2.3-mac.zip" | grep -q "	0$"'
 check "gnu: 2.10 > 2.9, xz preferred, sig kept" 'row hello-2.10.tar.xz >/dev/null && row hello-2.10.tar.xz.sig >/dev/null && ! row hello-2.9 >/dev/null && ! row hello-2.10.tar.gz >/dev/null'
@@ -228,6 +260,9 @@ run plan --tsv "$T/n.tsv" >/dev/null 2>&1; check "nothing resolved, entry failed
 printf '900|nope|x||g|n\n' > "$T/u.tsv"; run plan --tsv "$T/u.tsv" >/dev/null 2>&1; check "unknown kind -> 64" '[ $? -eq 64 ]'
 printf '900|gh|o/tool|([|g|n\n' > "$T/u.tsv"; run plan --tsv "$T/u.tsv" >/dev/null 2>&1; check "bad regex -> 64" '[ $? -eq 64 ]'
 printf '900|index|%s/idx/||g|n\n' "$B" > "$T/u.tsv"; run plan --tsv "$T/u.tsv" >/dev/null 2>&1; check "index without a match -> 64" '[ $? -eq 64 ]'
+printf '900|template|%s/ver.txt| |g|n\n800|gh|o/tool||g|n\n' "$B" > "$T/u.tsv"; : > "$T/access.log"; run plan --tsv "$T/u.tsv" >/dev/null 2>&1; rc=$?
+check "template without URLs -> 64 before any request" '[ $rc -eq 64 ] && [ ! -s "$T/access.log" ]'
+printf '900|pypi-top|lots||g|n\n' > "$T/u.tsv"; run plan --tsv "$T/u.tsv" >/dev/null 2>&1; check "pypi-top with a non-number -> 64" '[ $? -eq 64 ]'
 run plan --bogus >/dev/null 2>&1; check "argparse error -> 64" '[ $? -eq 64 ]'
 run fetch --tsv "$T/c.tsv" >/dev/null 2>&1; check "fetch without --dest -> 64" '[ $? -eq 64 ]'
 run plan --tsv "$T/c.tsv" --group nothing >/dev/null 2>&1; check "filters matching nothing -> 64" '[ $? -eq 64 ]'
@@ -283,6 +318,39 @@ check "volatile file + sidecar written" '[ -f "$LB" ] && grep -q ETag "$LB.sourc
 check "volatile unchanged upstream -> HEAD only, skip" 'grep -q "^skip" "$T/v2" && grep -q "^HEAD /t/latest.bin" "$T/access.log" && ! grep -q "^GET /t/latest.bin" "$T/access.log"'
 curl -s "$B/ctl/bump" >/dev/null; run fetch --tsv "$T/v.tsv" --dest "$V" > "$T/v3" 2>&1
 check "volatile changed upstream -> re-downloaded" 'grep -q "^ok" "$T/v3" && grep -q "latest.bin2$" <(tail -c 20 "$LB"; echo)'
+
+# a digest-verified file is stamped; a later run trusts the stamp (no re-hash) until the file changes
+python3 -I - "$PY" "$D" <<'PYEOF' > "$T/st.out" 2>&1
+import importlib.util, os, pathlib, sys
+spec = importlib.util.spec_from_file_location("rm", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+f = next(pathlib.Path(sys.argv[2]).rglob("tool-linux-amd64.tar.gz")); dg = "sha256:" + __import__("hashlib").sha256(f.read_bytes()).hexdigest()
+calls = []; real = m.hashlib.new; m.hashlib.new = lambda a: calls.append(a) or real(a)
+print("stamp", m.stamp_path(f).exists())
+print("trusted", m.check(f, 0, dg, trust_stamp=True), len(calls))
+os.utime(f, ns=(1, 1)); print("rehash", m.check(f, 0, dg, trust_stamp=True), len(calls))
+print("wrong", m.check(f, 0, "sha256:" + "0" * 64, trust_stamp=True) is not None)
+PYEOF
+check "verified stamp: written, trusted, invalidated by mtime, never for another digest" 'grep -q "stamp True" "$T/st.out" && grep -q "trusted None 0" "$T/st.out" && grep -q "rehash None 1" "$T/st.out" && grep -q "wrong True" "$T/st.out"' || cat "$T/st.out" >&2
+
+# the stamp through fetch: a second fetch skips a digest file WITHOUT hashing it; VALARK_REHASH=1 re-hashes
+python3 -I - "$PY" "$T/c.tsv" "$T/stampdest" <<'PYEOF' > "$T/sf.out" 2>&1
+import importlib.util, io, contextlib, sys
+spec = importlib.util.spec_from_file_location("rm", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+calls = []; real = m.hashlib.new; m.hashlib.new = lambda a: calls.append(a) or real(a)
+args = ["fetch", "--tsv", sys.argv[2], "--only", "o/tool", "--dest", sys.argv[3]]
+with contextlib.redirect_stdout(io.StringIO()): r1 = m.main(args)
+n1 = len(calls)
+with contextlib.redirect_stdout(io.StringIO()) as o: r2 = m.main(args)
+n2 = len(calls) - n1
+m.REHASH = True
+with contextlib.redirect_stdout(io.StringIO()): r3 = m.main(args)
+n3 = len(calls) - n1 - n2
+print("r", r1, r2, r3, "first", n1 > 0, "second", n2, "skips", o.getvalue().count("skip"), "rehash", n3 > 0)
+PYEOF
+check "stamp via fetch: rerun skips without hashing; VALARK_REHASH=1 re-hashes" 'grep -q "r 0 0 0 first True second 0 skips 3 rehash True" "$T/sf.out"' || cat "$T/sf.out" >&2
+# the GNU keyring is actually fetched (gnu rows through fetch)
+run fetch --tsv "$T/c.tsv" --only hello --dest "$T/gnudest" > "$T/gf" 2>&1; rc=$?
+check "gnu fetch: tarball, .sig and keyring land" '[ $rc -eq 0 ] && [ -f "$T/gnudest/toolchains/gnu/gnu-keyring.gpg" ] && [ -f "$T/gnudest/toolchains/gnu/hello/2.10/hello-2.10.tar.xz.sig" ]' || cat "$T/gf" >&2
 
 # a volatile .part with no digest is never resumed (its bytes may be an older upstream file)
 printf '838|template|=latest|%s/t/latest.bin|storage|literal\n' "$B" > "$T/v.tsv"; V2="$T/vol2"

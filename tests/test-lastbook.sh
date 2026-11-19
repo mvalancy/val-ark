@@ -611,6 +611,12 @@ vrun rrgut --dest "$D41" --pack auto --maps CA --model auto --apps current; rc=$
 check "no pack chosen, a verified one held: the held All stays, base + state map, addresses, model and apps refresh, exit 3" '[ "$rc" = 3 ] && [ -s "$D41/packs/Lastbook-All.zip" ] && [ ! -e "$D41/packs/Lastbook-All-2.zip" ] && [ -s "$D41/maps/Lastbook-Map-CA.zip" ] && [ -s "$D41/maps/Lastbook-Map-base.zip" ] && [ -s "$D41/addresses/Lastbook-Addresses-CA.zip" ] && [ -s "$D41/models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf" ] && [ "$(ls "$D41/app/1.1.11" | wc -l)" = 4 ] && grep -q "the held pack stays as it is this run" "$T/err" && ! grep -q "^GET .*Lastbook-\(All-2\|Medium\|Small\)" "$T/req.log"'
 vrun rrgut --dest "$T/m42" --pack auto --maps CA --budget 1; rc=$?
 check "fresh box, no pack fits, nothing held: no frozen-pack refresh (no maps without a pack)" '[ "$rc" = 3 ] && ! grep -q "the held pack stays" "$T/err" && [ ! -e "$T/m42/maps/Lastbook-Map-CA.zip" ]'
+# the "held pack costs nothing" fallback never picks an unheld manifest entry that has no size (#230)
+variant medsizeless 'a=[x for x in m["packs"] if x["id"]=="medium"][0]; a.pop("installed_bytes", None); a["files"][0].pop("size", None)'
+: > "$T/req.log"
+vrun medsizeless --dest "$T/m43" --pack auto --budget 1; rc=$?
+check "nothing fits + an unheld pack with no size: not picked through the held-pack fallback, nothing fetched, exit 3" '[ "$rc" = 3 ] && [ ! -e "$T/m43/packs/Lastbook-Medium.zip" ] && ! grep -q "^GET .*Lastbook-Medium.zip" "$T/req.log" && grep -q "no Lastbook pack fits the budget" "$T/err"'
+check "nothing-fits message never quotes a pack with no size as needing 0 B" '! grep -q "Medium, needs 0 B" "$T/err" && grep -q "the smallest, Small, needs" "$T/err"'
 
 # auto never leaves a held, verified pack because the manifest over-reports another pack (R3)
 variant bigmed 'a=[p for p in m["packs"] if p["id"]=="medium"][0]; a["installed_bytes"]=10**15'

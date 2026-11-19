@@ -96,11 +96,16 @@ later). See [README](README.md).
     its held bytes are strictly below the chosen pack's *verified* bytes, and it shares no file with
     it; files of a pack verified this run are never dropped, and `auto` ranks packs by the larger of
     the manifest size and the recorded bytes, so a held All stays chosen.
+    - *Superseded by #204 (R3):* `auto` no longer takes the larger of the two. A held, verified pack
+      ranks by its recorded bytes only, and any other pack by its manifest file sizes (see "Auto
+      ranking (R3)" below).
   - *No held pack without a larger verified one.* Any held pack file (superseded or no longer in the
     release) is dropped only when a pack this run verified is at least as large on disk. A packs
     list truncated to Small therefore keeps Medium and All, and `--pack none` keeps every held pack.
   - *Fit reserves the extras (N5).* `auto` picks the largest pack whose need **plus** the base maps
-    and installers fits; if none does, a pack already held (need 0) stays chosen.
+    and installers fits; if none does, a pack already held (need 0) stays chosen. That fallback
+    requires the pack to be held **and verified on disk**: a manifest entry with no size also has
+    need 0, and must not be picked through it (#230).
   - *Share without compounding (N4).* `lastbook.sh` no longer passes a budget from
     `valark_budget_bytes` on `DATA_ROOT`. `lastbook_mirror.py --share PCT [--cap N]` measures headroom
     above the reserve on the filesystem that holds the Lastbook dir, caps it with what `VALARK_MAX_GB`
@@ -143,6 +148,10 @@ later). See [README](README.md).
     that would outrank the held one needs a HEAD whose Content-Length equals every manifest size
     (see #214 for what happens when HEAD fails). So an over-reported Medium (`installed_bytes` or
     file size) no longer moves auto off a held All.
+    - *Narrowed by #218:* the HEAD check now has two outcomes. A HEAD that answers with a different
+      size marks the pack broken upstream: it is skipped and the next confirmed pack goes through.
+      Only a HEAD with **no** size keeps the held pack and downloads nothing that run. `auto`'s pick
+      is HEAD-checked on fresh boxes too (see "Broken upstream vs not confirmed (#218)").
 - **HEAD confirmation and id swaps (#214):**
   - *A failed HEAD is not confirmation (H1).* A HEAD that errors, or answers without a
     Content-Length, counts as **unconfirmed** when the pack would displace a held one. The held

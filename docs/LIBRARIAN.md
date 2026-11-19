@@ -71,9 +71,70 @@ flavours (maxi/nopic/mini) collapse to the most complete one.
 | Kiwix ZIM library | live OPDS via `scripts/lib/kiwix_catalog.py` | **Always current** — ZIM dates never go stale. ~1700+ entries across 9 languages by default (`VALARK_ZIM_LANGS`). |
 | Models (diversity) | `data/models-extra.tsv` | Small high-value models across 17 modalities (embeddings, rerankers, tiny VLMs, OCR, depth, segmentation, detection, audio, time-series). |
 | OS / router / netboot / server source | `data/installers.tsv` | Distro ISOs (Alpine/Debian/Ubuntu/…), OpenWRT firmware, netboot.xyz, Jetson BSP — for PXE / mesh commissioning — plus `server-source`: upstream LAMP + LAN-infrastructure releases (httpd/APR, PHP, MariaDB, PostgreSQL, nginx, OpenSSL/OpenSSH, BIND, Kea, dnsmasq, Unbound, Samba, Dovecot, WordPress, Nextcloud, Gitea, …). |
-| Offline .deb sets | `data/apt-sets.tsv` | Server package sets resolved with all dependencies per Ubuntu suite+arch by `scripts/lib/apt_offline.py build --suite noble --arch arm64 --set lamp --dest <dir>` → a flat local APT repo for a LAN with no internet. |
+| Developer + security stack | `data/dev-stack.tsv` | The kit to build, run and secure software offline: every supported Python (python.org installers + relocatable builds + a top-1000 PyPI wheelhouse), compilers (LLVM, GCC/GNU sources, MinGW, Go, Rust, JDK, CMake…), decompilers/RE (Ghidra, radare2/rizin/Cutter, x64dbg, jadx, ILSpy, Frida…), security tools (Nmap, Wireshark, ZAP, Metasploit, nuclei, Trivy, Zeek, Suricata, Kali ISOs…), containers + Kubernetes (Docker static, Podman, kubeadm/kubectl, MicroK8s snaps, k3s, Helm…), cloud/IaC, S3-compatible storage (MinIO source, SeaweedFS, RustFS, versitygw, rclone) and databases (Neo4j + Relate, Milvus, Qdrant, DuckDB, ClickHouse, Valkey, OpenSearch…). Current release of each, resolved live by `scripts/lib/release_mirror.py` (see below). |
+| Offline .deb sets | `data/apt-sets.tsv` | Server + developer/security package sets resolved with all dependencies per Ubuntu suite+arch by `scripts/lib/apt_offline.py build --suite noble --arch arm64 --set lamp --dest <dir>` → a flat local APT repo for a LAN with no internet. |
 
 The big LLM/STT/TTS/VLM/image catalog is still managed by `download-models.sh`.
+
+### Developer + security stack (`release_mirror.py`)
+
+`data/dev-stack.tsv` lists upstream projects, not files: each row names a resolver `kind`
+(GitHub latest release, a directory index, a GNU package, go.dev, python.org, PyPI, the PyPI
+top-N list, a URL template, or a snap) and `release_mirror.py` turns it into the current files
+for every platform the project ships. Rows rank small, irreplaceable tools above bulk fill
+(Kali ISOs, the PyPI wheelhouse).
+
+```bash
+python3 scripts/lib/release_mirror.py plan                       # url, dest, size, digest, volatile rows; no downloads
+python3 scripts/lib/release_mirror.py plan --group security      # one group (or --only <ref>, repeatable)
+GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/val-ark/dev-stack"
+```
+
+- **Resume and verify.** `fetch` resumes `.part` files with Range. Before renaming a file into
+  place it checks the length, then the upstream digest: sha256, or sha3-384 for snaps. The
+  length comes from the planned size, or the server's `Content-Length` / `Content-Range` total
+  when the size isn't known up front (source tarballs, templates).
+- **Interrupted downloads.** A cut-short body keeps its `.part` and is resumed. A `.part` that
+  is already complete is verified and kept. That covers a run killed before the rename, and a
+  server answering 416.
+- **What gets skipped.** Files already complete are skipped. Nothing is written outside `--dest`.
+- **Layout.** Versioned rows land at `<group>/<project>/<version>/<file>`, so a new release sits
+  beside the old one. Index rows land at `<group>/<host>/<dir path>/<file>`.
+- **Volatile rows.** These are files whose name stays the same across upstream versions:
+  `=latest` templates such as the Metasploit installers, `SHA256SUMS`, and `current/`
+  directories. Those with a digest (the Kali ISOs) are re-hashed against this run's digest.
+  Those without one are re-checked with a HEAD request against a `<file>.source.json` sidecar,
+  and downloaded again when upstream changed or the server refuses HEAD.
+- **Size.** About 130 GB without the wheelhouse (late 2026). The top-1000 wheelhouse adds
+  several hundred GB, because it keeps every platform's wheels, CUDA builds included.
+- **GitHub token.** Set `GITHUB_TOKEN`. A plan makes roughly 250 GitHub API calls, and the
+  anonymous limit is 60 an hour.
+- **Stale "latest" releases.** A `gh:` template whose GitHub latest release isn't a plain version
+  (Neo4j's is a 2017 alpha) is an error. Use `ghtag:owner/repo` for the newest plain version tag.
+- **Tag-only projects.** Projects with no GitHub releases get the source tarball of their newest
+  plain version tag (`v1.2` / `1.2.3`). The tags come from `git/matching-refs/tags`, because the
+  paged tags API often misses the newest ones.
+- **Silent gaps are errors.** These all exit 1 rather than silently mirroring nothing:
+  - an index with no matching file;
+  - a `gh` regex that selects no asset;
+  - a Brotli-encoded listing (stdlib can't decode it, so pick a mirror that serves plain HTML);
+  - a template version source that returns something other than a version.
+- **Exit codes:**
+  - `0` complete;
+  - `1` an entry failed to resolve, or nothing resolved (the rest are still planned and fetched);
+  - `2` a download failed;
+  - `64` usage (a bad catalog row, kind or regex).
+
+  The most severe wins. Every metadata request and download gets 4 attempts on DNS and
+  connection errors, 5xx and 429.
+- Offline-install hints: Python wheels install with `pip install --no-index --find-links <dir>`;
+  MicroK8s with `snap install --dangerous core20_*.snap` then `snap install --dangerous --classic
+  microk8s_*.snap`; Docker static binaries by unpacking `docker-*.tgz` into `/usr/local/bin`.
+- The Ubuntu-packaged side of the same stack (compilers, debuggers, Linux security tools, KVM /
+  Ceph / cloud-init) is in the `dev-toolchain`, `security`, `reverse-eng` and `virt-cloud`
+  APT sets below.
+
+Tests: `tests/test-release-mirror.sh` (offline fixture for every kind).
 
 ### Offline .deb sets: exit codes and a real-box check
 
@@ -115,6 +176,19 @@ talks to the real Ubuntu archive. Before trusting a change to it, check on a rea
    packages: every dependency resolves from `<dir>`.
 6. **Exit codes.** `--set no-such-set` exits 64. An interrupted download (pull the network during
    step 3) exits 2, and rerunning re-fetches the failed files and finishes the job.
+
+**Last real-archive run (release 0.1.22, 2026-11-18, Ubuntu 24.04 x86_64 host, `noble`, `--set lamp`):**
+steps 1–4 passed. The arm64 resolve gave 281 rows, all on `ports.ubuntu.com`, with `libc6` included
+and a SHA256 on every row. The amd64 resolve gave 281 rows on `archive.ubuntu.com`. The arm64 build
+indexed 281 packages (98 MB) with no ".deb not in lists" lines and no `.part` left, and the
+`--no-update` rerun took 10 s. `/etc/apt` (checksums of every file) and `dpkg -l` were unchanged.
+Whether a host `apt.conf.d` hook ran was not checked directly.
+
+Step 5 ran on amd64, because the host had no arm64 emulation. A separate amd64 build (`build --suite
+noble --arch amd64 --set lamp`, which indexed 281 packages) went into an `ubuntu:24.04` container
+started with `--network none`. With that flat repo as the only source, the whole `lamp` set
+installed (apache2, mariadb-server, php 8.3). `--set no-such-set` exited 64. Not yet run: the interrupted-download half
+of step 6, and step 5 on a real arm64 target.
 
 ## Commands
 

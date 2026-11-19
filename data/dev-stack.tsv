@@ -1,0 +1,258 @@
+# Val Ark - developer + security stack: the kit to BUILD, RUN and SECURE software offline.
+# Resolved live (current stable release of each, every platform it ships) by
+# scripts/lib/release_mirror.py into <root>/val-ark/dev-stack/<group>/... (plan / fetch).
+# The flat offline APT repos (data/apt-sets.tsv dev-toolchain / security / reverse-eng /
+# virt-cloud) carry the Ubuntu-packaged side of the same stack.
+#
+# Schema (pipe-delimited):  rank|kind|ref|match|group|note
+#   rank   higher = fetched first. Small, irreplaceable tools rank above bulk fill.
+#   kind   gh | index | gnu | go | python | pypi | pypi-top | template | snap
+#          (meaning of ref/match per kind: see the header of scripts/lib/release_mirror.py)
+#   match  regex filter (gh/index/python/gnu), skip regex (pypi/pypi-top),
+#          URL templates with {v}/{V} (template), channel (snap). Empty = default/all.
+#   group  python | toolchains | reverse-engineering | security | containers | cloud |
+#          storage | databases | dev-tools | os-images
+#
+# --- Python: every supported interpreter for Windows/macOS/Linux + the packages ---------
+990|python|3.10,3.11,3.12,3.13,3.14||python|python.org installers (Windows x64/arm64 exe + embeddable zip, macOS pkg) + source, newest patch per minor
+985|gh|astral-sh/python-build-standalone|^cpython-3\.1[0-4]\.\d+\+\d+-(x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|x86_64-pc-windows-msvc|aarch64-pc-windows-msvc|aarch64-apple-darwin|x86_64-apple-darwin)-install_only\.tar\.gz$|python|Relocatable CPython builds (what uv uses): unpack-and-run on any Linux/macOS/Windows
+984|gh|astral-sh/uv||python|uv: Python + package manager (installs from a local wheelhouse with --find-links)
+983|gh|astral-sh/ruff||python|ruff linter/formatter
+982|gh|conda-forge/miniforge|^(Miniforge3|Mambaforge)-.*-(Linux|MacOSX|Windows)-(x86_64|aarch64|arm64)\.(sh|exe)$|python|conda-forge installer
+981|pypi|pip||python|pip itself
+981|pypi|setuptools||python|setuptools
+981|pypi|wheel||python|wheel
+980|pypi|virtualenv||python|virtualenv
+979|pypi|jupyterlab||python|JupyterLab
+979|pypi|notebook||python|Jupyter Notebook
+978|pypi|pwntools||security|pwntools exploit-dev / CTF framework
+978|pypi|impacket||security|Impacket network-protocol toolkit
+978|pypi|scapy||security|Scapy packet crafting
+978|pypi|angr||reverse-engineering|angr binary analysis
+978|pypi|capstone||reverse-engineering|Capstone disassembler bindings
+978|pypi|unicorn||reverse-engineering|Unicorn CPU emulator bindings
+978|pypi|keystone-engine||reverse-engineering|Keystone assembler bindings
+978|pypi|volatility3||security|Volatility 3 memory forensics
+978|pypi|ansible||cloud|Ansible (full collection bundle)
+978|pypi|ansible-core||cloud|ansible-core
+978|pypi|awscli||cloud|AWS CLI (v1, pure Python; works with any S3-compatible endpoint)
+978|pypi|s3cmd||storage|s3cmd S3 client
+978|pypi|python-openstackclient||cloud|OpenStack CLI
+978|pypi|azure-cli||cloud|Azure CLI
+978|pypi|platformio||toolchains|PlatformIO embedded build system
+# --- Compilers / build systems / runtimes ------------------------------------------------
+970|gh|llvm/llvm-project|^(LLVM|clang\+llvm)-.*\.(tar\.xz|exe)$|toolchains|LLVM/Clang/LLD/LLDB prebuilt for Linux x64/arm64, macOS, Windows
+969|gnu|gcc||toolchains|GCC source (bootstrap a compiler anywhere)
+969|gnu|binutils||toolchains|GNU binutils source
+969|gnu|gdb||toolchains|GDB source
+968|gnu|make||toolchains|GNU make
+968|gnu|glibc||toolchains|GNU C library source
+968|gnu|autoconf||toolchains|autoconf
+968|gnu|automake||toolchains|automake
+968|gnu|libtool||toolchains|libtool
+968|gnu|m4||toolchains|m4
+968|gnu|bison||toolchains|bison
+968|gnu|coreutils||toolchains|coreutils
+968|gnu|bash||toolchains|bash
+967|gh|westes/flex||toolchains|flex
+967|gh|niXman/mingw-builds-binaries||toolchains|MinGW-w64 GCC for Windows (all thread/exception/CRT variants)
+967|gh|mstorsjo/llvm-mingw||toolchains|LLVM-based MinGW toolchain (Windows x64/arm64, cross from Linux/macOS)
+967|gh|skeeto/w64devkit||toolchains|w64devkit: portable C/C++ dev kit for Windows
+967|gh|msys2/msys2-installer||toolchains|MSYS2 (Windows Unix environment + pacman)
+966|gh|Kitware/CMake||toolchains|CMake every platform
+966|gh|ninja-build/ninja||toolchains|Ninja
+966|gh|mesonbuild/meson||toolchains|Meson
+966|gh|bazelbuild/bazel|^bazel-[\d.]+-(linux|darwin|windows)-(x86_64|arm64)(\.exe)?(\.sha256)?$|toolchains|Bazel
+966|index|https://services.gradle.org/distributions/|^gradle-(?P<v>\d+\.\d+(\.\d+)?)-bin\.zip(\.sha256)?$|toolchains|Gradle
+965|go|-||toolchains|Go: every OS/arch archive + installer + source (sha256 from go.dev)
+965|template|gh:rust-lang/rust|https://static.rust-lang.org/dist/rust-{V}-x86_64-unknown-linux-gnu.tar.xz https://static.rust-lang.org/dist/rust-{V}-aarch64-unknown-linux-gnu.tar.xz https://static.rust-lang.org/dist/rust-{V}-aarch64-apple-darwin.tar.xz https://static.rust-lang.org/dist/rust-{V}-x86_64-pc-windows-msvc.msi https://static.rust-lang.org/dist/rustc-{V}-src.tar.xz https://static.rust-lang.org/dist/rust-src-{V}.tar.xz|toolchains|Rust standalone installers (offline, no rustup needed) + source
+964|gh|adoptium/temurin21-binaries|^OpenJDK21U-(jdk|jre)_(x64|aarch64)_(linux|mac|windows)_hotspot_.*\.(tar\.gz|zip|msi|pkg)$|toolchains|OpenJDK 21 LTS
+964|gh|adoptium/temurin25-binaries|^OpenJDK25U-(jdk|jre)_(x64|aarch64)_(linux|mac|windows)_hotspot_.*\.(tar\.gz|zip|msi|pkg)$|toolchains|OpenJDK 25 LTS
+963|gh|git-for-windows/git|^(Git|PortableGit|MinGit)-.*-(64|arm64)-bit\.(exe|7z\.exe|zip)$|toolchains|Git for Windows (+ Git Bash)
+963|gh|ziglang/zig||toolchains|Zig source (cross-compiling C/C++ toolchain)
+# --- Reverse engineering / decompilers ---------------------------------------------------
+950|gh|NationalSecurityAgency/ghidra||reverse-engineering|Ghidra SRE suite + decompiler
+950|gh|radareorg/radare2||reverse-engineering|radare2
+950|gh|rizinorg/rizin||reverse-engineering|rizin
+950|gh|rizinorg/cutter||reverse-engineering|Cutter GUI (rizin + Ghidra decompiler)
+950|gh|rizinorg/rz-ghidra||reverse-engineering|Ghidra decompiler plugin for rizin/Cutter
+949|gh|x64dbg/x64dbg||reverse-engineering|x64dbg Windows debugger
+949|gh|WerWolv/ImHex||reverse-engineering|ImHex hex editor + pattern language
+949|gh|skylot/jadx||reverse-engineering|jadx Android/Java decompiler
+949|gh|dnSpyEx/dnSpy||reverse-engineering|dnSpy .NET debugger/decompiler
+949|gh|icsharpcode/ILSpy||reverse-engineering|ILSpy .NET decompiler
+949|gh|iBotPeaches/Apktool||reverse-engineering|Apktool
+948|gh|Col-E/Recaf||reverse-engineering|Recaf Java bytecode editor
+948|gh|java-decompiler/jd-gui||reverse-engineering|JD-GUI
+948|gh|Konloch/bytecode-viewer||reverse-engineering|Bytecode Viewer
+948|gh|avast/retdec||reverse-engineering|RetDec retargetable decompiler
+948|gh|frida/frida|^frida-(server|gadget|inject|portal)-[\d.]+-(linux|android|windows|macos)-(x86_64|arm64)|reverse-engineering|Frida dynamic instrumentation (server/gadget)
+948|gh|mandiant/capa||reverse-engineering|capa capability detection
+948|gh|mandiant/flare-floss||reverse-engineering|FLOSS obfuscated-string extraction
+948|gh|horsicq/DIE-engine||reverse-engineering|Detect It Easy
+948|gh|ReFirmLabs/binwalk||reverse-engineering|binwalk firmware analysis
+948|gh|pwndbg/pwndbg||reverse-engineering|pwndbg GDB plugin
+948|gh|hugsy/gef||reverse-engineering|GEF GDB plugin
+948|gh|upx/upx||reverse-engineering|UPX packer
+947|gh|google/bindiff||reverse-engineering|BinDiff
+# --- Security / forensics / network analysis ---------------------------------------------
+940|index|https://nmap.org/dist/|^nmap-(?P<v>\d+\.\d+)(-setup\.exe|\.tar\.bz2|\.dmg|-1\.x86_64\.rpm)$|security|Nmap + Zenmap + Ncat (Windows/macOS/source)
+940|index|https://www.wireshark.org/download/src/|^wireshark-(?P<v>\d+\.\d+\.\d+)\.tar\.xz$|security|Wireshark source
+940|index|https://www.wireshark.org/download/win64/|^Wireshark-(?P<v>\d+\.\d+\.\d+)-x64\.(exe|msi)$|security|Wireshark Windows
+940|gh|zaproxy/zaproxy||security|OWASP ZAP web scanner
+940|gh|sqlmapproject/sqlmap||security|sqlmap
+940|gh|hashcat/hashcat||security|hashcat
+939|gh|projectdiscovery/nuclei||security|nuclei scanner
+939|gh|projectdiscovery/nuclei-templates||security|nuclei templates
+939|gh|projectdiscovery/subfinder||security|subfinder
+939|gh|projectdiscovery/httpx||security|httpx prober
+939|gh|projectdiscovery/naabu||security|naabu port scanner
+939|gh|projectdiscovery/katana||security|katana crawler
+939|gh|OJ/gobuster||security|gobuster
+939|gh|ffuf/ffuf||security|ffuf web fuzzer
+939|gh|epi052/feroxbuster||security|feroxbuster
+939|gh|RustScan/RustScan||security|RustScan
+938|gh|SpecterOps/BloodHound||security|BloodHound CE
+938|gh|aquasecurity/trivy||security|Trivy vulnerability scanner
+938|gh|anchore/syft||security|Syft SBOM generator
+938|gh|anchore/grype||security|Grype vulnerability scanner
+938|gh|gitleaks/gitleaks||security|gitleaks secret scanner
+938|gh|trufflesecurity/trufflehog||security|TruffleHog secret scanner
+938|gh|osquery/osquery||security|osquery endpoint visibility
+938|gh|Velocidex/velociraptor||security|Velociraptor DFIR
+938|gh|VirusTotal/yara||security|YARA
+938|gh|mitmproxy/mitmproxy||security|mitmproxy
+938|gh|bettercap/bettercap||security|bettercap
+938|gh|sleuthkit/sleuthkit||security|The Sleuth Kit + Autopsy libs
+938|gh|zeek/zeek||security|Zeek network monitor
+938|index|https://www.openinfosecfoundation.org/download/|^suricata-(?P<v>\d+\.\d+\.\d+)\.tar\.gz$|security|Suricata IDS/IPS source
+937|template|=latest|https://windows.metasploit.com/metasploitframework-latest.msi https://osx.metasploit.com/metasploitframework-latest.pkg|security|Metasploit Framework installers (Windows/macOS; source via gh tarball below)
+937|gh|rapid7/metasploit-framework||security|Metasploit Framework source (newest tag)
+# --- Containers / Kubernetes --------------------------------------------------------------
+930|index|https://download.docker.com/linux/static/stable/x86_64/|^docker-(rootless-extras-)?(?P<v>\d+\.\d+\.\d+)\.tgz$|containers|Docker Engine static binaries x86_64
+930|index|https://download.docker.com/linux/static/stable/aarch64/|^docker-(rootless-extras-)?(?P<v>\d+\.\d+\.\d+)\.tgz$|containers|Docker Engine static binaries arm64
+930|gh|docker/compose||containers|Docker Compose
+930|gh|docker/buildx||containers|Docker Buildx
+930|gh|containerd/containerd||containers|containerd
+930|gh|opencontainers/runc||containers|runc
+930|gh|containerd/nerdctl||containers|nerdctl (Docker-compatible CLI for containerd, full bundle)
+930|gh|containers/podman||containers|Podman (Windows/macOS installers + static remote client)
+930|gh|containers/podman-desktop||containers|Podman Desktop
+929|template|https://dl.k8s.io/release/stable.txt|https://dl.k8s.io/{v}/kubernetes-server-linux-amd64.tar.gz https://dl.k8s.io/{v}/kubernetes-server-linux-arm64.tar.gz https://dl.k8s.io/{v}/kubernetes-node-linux-amd64.tar.gz https://dl.k8s.io/{v}/kubernetes-node-linux-arm64.tar.gz https://dl.k8s.io/{v}/kubernetes-client-linux-amd64.tar.gz https://dl.k8s.io/{v}/kubernetes-client-linux-arm64.tar.gz https://dl.k8s.io/{v}/kubernetes-client-darwin-arm64.tar.gz https://dl.k8s.io/{v}/kubernetes-client-windows-amd64.tar.gz https://dl.k8s.io/{v}/kubernetes-src.tar.gz|containers|Kubernetes (kubeadm/kubelet/kube-apiserver/kubectl...) every platform + source
+929|snap|microk8s|latest/stable|containers|MicroK8s snap (amd64/arm64): snap install --dangerous microk8s_*.snap --classic
+929|snap|core20|latest/stable|containers|snap base for MicroK8s
+929|snap|core22|latest/stable|containers|snap base
+929|snap|core24|latest/stable|containers|snap base
+929|snap|snapd|latest/stable|containers|snapd itself
+929|gh|k3s-io/k3s||containers|k3s (+ airgap image bundles)
+929|gh|kubernetes-sigs/kind||containers|kind (Kubernetes in Docker)
+929|gh|kubernetes/minikube|^minikube[-_].*(linux|darwin|windows).*(amd64|arm64)|containers|minikube
+929|gh|helm/helm||containers|Helm (binaries are on get.helm.sh: see template below)
+929|template|gh:helm/helm|https://get.helm.sh/helm-{v}-linux-amd64.tar.gz https://get.helm.sh/helm-{v}-linux-arm64.tar.gz https://get.helm.sh/helm-{v}-darwin-arm64.tar.gz https://get.helm.sh/helm-{v}-windows-amd64.zip|containers|Helm binaries
+928|gh|derailed/k9s||containers|k9s cluster TUI
+928|gh|kubernetes-sigs/kustomize||containers|kustomize
+928|gh|rancher/rke2|^rke2(\.|-images\.).*(linux-amd64|linux-arm64)|containers|RKE2 + airgap images
+928|gh|siderolabs/talos||containers|Talos Linux
+928|gh|canonical/multipass||containers|Multipass VMs
+928|gh|argoproj/argo-cd||containers|Argo CD
+928|gh|fluxcd/flux2||containers|Flux CD
+928|gh|cilium/cilium-cli||containers|Cilium CLI
+928|gh|istio/istio||containers|Istio
+928|gh|goharbor/harbor||containers|Harbor registry (offline installer)
+928|gh|distribution/distribution||containers|Docker registry v2 (distribution)
+928|gh|portainer/portainer||containers|Portainer
+# --- Cloud infrastructure / IaC / ops -----------------------------------------------------
+925|gh|opentofu/opentofu||cloud|OpenTofu (Terraform-compatible IaC)
+925|gh|pulumi/pulumi||cloud|Pulumi
+925|gh|openbao/openbao||cloud|OpenBao secrets manager (Vault fork)
+925|gh|getsops/sops||cloud|SOPS
+925|gh|FiloSottile/age||cloud|age encryption
+925|gh|smallstep/certificates||cloud|step-ca private CA
+925|gh|smallstep/cli||cloud|step CLI
+925|gh|juanfont/headscale||cloud|Headscale (self-hosted Tailscale control)
+925|gh|prometheus/prometheus||cloud|Prometheus
+925|gh|prometheus/node_exporter||cloud|node_exporter
+925|gh|prometheus/alertmanager||cloud|Alertmanager
+925|gh|grafana/loki||cloud|Loki
+925|gh|go-gitea/gitea||cloud|Gitea git forge
+925|gh|caddyserver/caddy||cloud|Caddy web server
+925|gh|traefik/traefik||cloud|Traefik proxy
+925|gh|nats-io/nats-server||cloud|NATS
+925|gh|coder/code-server||cloud|code-server (VS Code in the browser)
+# --- S3-compatible object storage ---------------------------------------------------------
+922|gh|minio/minio||storage|MinIO source (upstream stopped publishing binaries: dl.min.io is 410 Gone)
+922|gh|minio/mc||storage|MinIO client (mc) binaries for every platform + source
+922|gh|seaweedfs/seaweedfs||storage|SeaweedFS (S3 gateway, filer, volume servers)
+922|gh|rustfs/rustfs||storage|RustFS S3-compatible store
+922|gh|versity/versitygw||storage|Versity S3 gateway (S3 over any POSIX filesystem)
+922|gh|rclone/rclone||storage|rclone (sync to/from any S3 + 70 backends)
+922|gh|peak/s5cmd||storage|s5cmd fast S3 client
+922|gh|restic/restic||storage|restic backups (S3 backend)
+922|gh|borgbackup/borg||storage|Borg backups
+# --- Databases ----------------------------------------------------------------------------
+920|gh|relatedb/relate||databases|Relate by Neo4j: embedded Rust graph DB (openCypher/GQL) for agents
+920|template|ghtag:neo4j/neo4j|https://dist.neo4j.org/neo4j-community-{V}-unix.tar.gz https://dist.neo4j.org/neo4j-community-{V}-windows.zip|databases|Neo4j Community server
+920|gh|milvus-io/milvus||databases|Milvus vector DB
+920|gh|qdrant/qdrant||databases|Qdrant vector DB
+920|gh|chroma-core/chroma||databases|Chroma vector DB
+920|gh|weaviate/weaviate||databases|Weaviate vector DB
+920|gh|lancedb/lancedb||databases|LanceDB
+920|gh|duckdb/duckdb||databases|DuckDB
+920|gh|kuzudb/kuzu||databases|Kuzu embedded graph DB
+920|gh|memgraph/memgraph||databases|Memgraph graph DB
+920|gh|FalkorDB/FalkorDB||databases|FalkorDB graph DB
+920|gh|ClickHouse/ClickHouse|(linux-amd64|linux-arm64|amd64\.tgz|arm64\.tgz|amd64\.deb|arm64\.deb|macos)|databases|ClickHouse
+920|gh|valkey-io/valkey||databases|Valkey (Redis fork)
+920|gh|redis/redis||databases|Redis source
+920|gh|surrealdb/surrealdb||databases|SurrealDB
+920|gh|etcd-io/etcd||databases|etcd
+920|gh|rqlite/rqlite||databases|rqlite (distributed SQLite)
+920|gh|tursodatabase/turso||databases|Turso (SQLite rewrite in Rust)
+920|gh|FerretDB/FerretDB||databases|FerretDB (MongoDB API on Postgres)
+920|gh|meilisearch/meilisearch||databases|Meilisearch
+920|gh|typesense/typesense||databases|Typesense
+920|gh|questdb/questdb||databases|QuestDB time series
+920|gh|timescale/timescaledb||databases|TimescaleDB
+920|gh|pgvector/pgvector||databases|pgvector
+920|gh|apache/age||databases|Apache AGE (graph on Postgres)
+920|gh|tigerbeetle/tigerbeetle||databases|TigerBeetle
+920|gh|dgraph-io/dgraph||databases|Dgraph
+920|gh|apache/couchdb||databases|CouchDB source
+920|gh|redpanda-data/redpanda||databases|Redpanda (Kafka API)
+920|template|gh:opensearch-project/OpenSearch|https://artifacts.opensearch.org/releases/bundle/opensearch/{V}/opensearch-{V}-linux-x64.tar.gz https://artifacts.opensearch.org/releases/bundle/opensearch/{V}/opensearch-{V}-linux-arm64.tar.gz https://artifacts.opensearch.org/releases/bundle/opensearch/{V}/opensearch-{V}-windows-x64.zip|databases|OpenSearch
+920|gh|sqlitebrowser/sqlitebrowser||databases|DB Browser for SQLite
+920|gh|dbeaver/dbeaver||databases|DBeaver universal DB client
+# --- Everyday dev tools -------------------------------------------------------------------
+910|gh|cli/cli||dev-tools|GitHub CLI
+910|gh|BurntSushi/ripgrep||dev-tools|ripgrep
+910|gh|sharkdp/fd||dev-tools|fd
+910|gh|sharkdp/bat||dev-tools|bat
+910|gh|sharkdp/hyperfine||dev-tools|hyperfine
+910|gh|junegunn/fzf||dev-tools|fzf
+910|gh|jqlang/jq||dev-tools|jq
+910|gh|mikefarah/yq||dev-tools|yq
+910|gh|jesseduffield/lazygit||dev-tools|lazygit
+910|gh|jesseduffield/lazydocker||dev-tools|lazydocker
+910|gh|dandavison/delta||dev-tools|delta diff viewer
+910|gh|ajeetdsouza/zoxide||dev-tools|zoxide
+910|gh|eza-community/eza||dev-tools|eza
+910|gh|starship/starship||dev-tools|starship prompt
+910|gh|zellij-org/zellij||dev-tools|zellij
+910|gh|neovim/neovim||dev-tools|Neovim
+910|gh|wezterm/wezterm||dev-tools|WezTerm
+910|gh|alacritty/alacritty||dev-tools|Alacritty
+910|gh|casey/just||dev-tools|just
+910|gh|gohugoio/hugo||dev-tools|Hugo
+910|gh|PowerShell/PowerShell||dev-tools|PowerShell (every OS)
+910|gh|microsoft/terminal||dev-tools|Windows Terminal
+910|gh|ip7z/7zip||dev-tools|7-Zip
+910|gh|aria2/aria2||dev-tools|aria2
+910|gh|keepassxreboot/keepassxc||dev-tools|KeePassXC
+910|gh|zed-industries/zed||dev-tools|Zed editor
+910|gh|notepad-plus-plus/notepad-plus-plus||dev-tools|Notepad++
+910|gh|ventoy/Ventoy||dev-tools|Ventoy multi-boot USB
+910|gh|raspberrypi/rpi-imager||dev-tools|Raspberry Pi Imager
+910|gh|balena-io/etcher||dev-tools|balenaEtcher
+# --- Bulk fill: big, replaceable-in-a-pinch items ------------------------------------------
+800|index|https://cdimage.kali.org/current/|^kali-linux-.*-(amd64|arm64)\.iso$|os-images|Kali Linux ISOs (installer, netinst, everything, live, purple) + SHA256SUMS
+790|pypi-top|1000||python|Wheelhouse: newest version of the 1000 most-downloaded PyPI projects, every wheel + sdist

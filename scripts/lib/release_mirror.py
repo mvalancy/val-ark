@@ -5,39 +5,53 @@ containers/Kubernetes, S3 storage, popular CLI tools) for every platform it ship
 
 Commands (stdlib only):
   plan  [--tsv F] [--group G ...] [--only REF ...]
-        print TAB rows: url, dest (relative path), size (0 = unknown), digest
-        (algo:hex, or '' when upstream publishes none). No downloads.
+        print TAB rows: url, dest (relative path), size (0 = unknown), digest (algo:hex,
+        or '' when upstream publishes none), volatile (1 = the file name does not change
+        between upstream versions). No downloads.
   fetch --dest DIR [same filters]
-        download every planned file under DIR: resumable .part, size + digest checked
-        before the rename, files already complete are skipped (idempotent).
+        download every planned file under DIR, skipping files already complete.
 
 Catalog schema (pipe-delimited): rank|kind|ref|match|group|note (match may contain '|':
 everything between ref and the last two fields is the match)
   gh        ref owner/repo. Latest STABLE GitHub release: every asset whose name matches
-            the regex `match` (empty = all), plus the tag's source tarball. A project with
-            no releases falls back to its newest stable tag (source tarball only). Uses
+            the regex `match` (empty = all), plus the tag's source tarball. A match that
+            selects no asset is an error. A project with no releases falls back to its
+            newest plain version tag (v1.2 / 1.2.3; source tarball only). Uses
             $GITHUB_TOKEN when set (60 API calls/hour without it).
-  index     ref directory URL. Every href matching `match`; when the regex has a
-            (?P<v>...) group, only the highest version is kept. SHA256SUMS-style files
-            in the directory supply digests and are mirrored too.
-  gnu       ref GNU package name: the newest release tarball (+ .sig) from ftp.gnu.org.
-  go        ref ignored: the newest stable Go release from go.dev (every OS/arch, sha256).
-  python    ref comma list of minor versions: python.org installers + source for the
-            newest final patch of each (filter with `match`).
+  index     ref directory URL. Every href matching `match` (none = an error); when the
+            regex has a (?P<v>...) group, only the highest version is kept. SHA256SUMS-
+            style files in the directory supply digests and are mirrored too.
+  gnu       ref GNU package name: the newest release tarball (one compression: xz > gz >
+            bz2 > lz > zst) + .sig from ftp.gnu.org.
+  go        ref ignored ('-'): the newest stable Go release (every OS/arch, sha256).
+  python    ref comma list of minor versions: python.org source for the newest final
+            patch of each, plus Windows/macOS installers from the newest patch that still
+            ships them (security releases are source-only). Filter with `match`.
   pypi      ref project name: the newest version, every wheel + sdist (sha256 from PyPI).
   pypi-top  ref N: the N most-downloaded PyPI projects, as `pypi` (match = skip regex).
-  template  ref version source (a URL whose body is the version, gh:owner/repo for its
-            latest release tag, or =TEXT for a literal such as =latest); match = space-separated URL templates using {v} ({V} =
-            version without a leading v).
+            Projects that fail are reported (exit 1); the rest are still planned.
+  template  ref version source: a URL whose body is the version, gh:owner/repo for its
+            latest release tag, or =TEXT for a literal such as =latest (volatile rows);
+            match = space-separated URL templates using {v} ({V} = without a leading v).
   snap      ref snap name; match = channel (default latest/stable). Every architecture's
-            .snap (sha3-384), for `snap ack`-free installs use `snap install --dangerous`.
-Dest layout: <group>/<ref-path>/<version>/<file>.
+            .snap (sha3-384); install offline with `snap install --dangerous`.
+Dest layout: <group>/<project path>/<version>/<file> (gh, gnu, go, python, pypi, snap,
+template); index rows use <group>/<host>/<dir path>/<file>.
 
-Exit codes: 0 complete · 1 an entry failed to resolve (others still planned/fetched)
-· 2 a download failed (size/digest mismatch or network) · 3 nothing resolved · 64 usage.
-The most severe wins (64 > 1 > 2 > 3 > 0).
+fetch: a .part resumes with Range (a 206 must start at the .part's size, else restart; a
+server that ignores Range restarts the file); the length is checked against the planned size
+or the server's Content-Length / Content-Range total, then the digest, before the rename. A
+cut-short body keeps the .part and is retried (4 attempts per file, as for metadata
+requests). A complete .part (killed before the rename, or a 416) is verified and kept.
+Volatile rows are re-checked with HEAD (Content-Length / ETag / Last-Modified, kept in a
+<file>.source.json sidecar) and re-downloaded when upstream changed. Nothing is written
+outside --dest.
+
+Exit codes: 0 complete · 1 an entry failed to resolve, or nothing resolved (the other
+entries are still planned and fetched) · 2 a download failed · 64 usage (bad option, an
+unreadable --tsv, a bad catalog row, kind or regex). The most severe wins (64 > 1 > 2 > 0).
 """
-import argparse, concurrent.futures, hashlib, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
+import argparse, concurrent.futures, gzip, hashlib, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -56,31 +70,53 @@ KINDS = {"gh", "index", "gnu", "go", "python", "pypi", "pypi-top", "template", "
 PY_FILES = r"^(Python-[\d.]+\.tar\.xz|python-[\d.]+-(amd64|arm64)\.exe|python-[\d.]+-embed-(amd64|arm64)\.zip|python-[\d.]+-macos11\.pkg)$"
 SUMS = re.compile(r"^(SHA256SUMS|sha256sums?(\.txt)?|SHA256SUMS\.txt)$", re.I)
 SAFE = re.compile(r"[^A-Za-z0-9._+@=-]")
+STABLE_TAG = re.compile(r"[vV]?\d+(\.\d+)+")  # tag-only fallback: plain version tags only
 
 
 class Usage(Exception):
     pass
 
 
+class Partial(Exception):
+    """A resolver that planned SOME rows but not all (e.g. pypi-top with missing projects)."""
+    def __init__(self, rows, msg):
+        super().__init__(msg)
+        self.rows = rows
+
+
+TRIES = 4  # attempts per request (3 retries): DNS/connection blips are common on a saturated link
+BACKOFF = float(os.environ.get("VALARK_RETRY_SLEEP", "1"))  # seconds scale; the test sets 0
+
+
+def transient(e):
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code >= 500 or e.code == 429
+    return isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError))
+
+
 def get(url, accept=None, token=False):
-    headers = {"User-Agent": UA}
+    # identity: some CDNs send Brotli even to a client that asked for nothing, and an
+    # undecoded body would parse as an EMPTY listing (silently mirroring nothing).
+    headers = {"User-Agent": UA, "Accept-Encoding": "identity"}
     if accept:
         headers["Accept"] = accept
     if token and os.environ.get("GITHUB_TOKEN"):
         headers["Authorization"] = "Bearer " + os.environ["GITHUB_TOKEN"]
     if url.startswith(SNAP_API):
         headers["Snap-Device-Series"] = "16"
-    for attempt in range(4):  # DNS/connection blips are common on a saturated link
+    for attempt in range(TRIES):
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as r:
-                return r.read()
-        except urllib.error.HTTPError as e:
-            if e.code < 500 and e.code != 429 or attempt == 3:
+                body, enc = r.read(), (r.headers.get("Content-Encoding") or "identity").lower()
+            if enc == "gzip":
+                body = gzip.decompress(body)
+            elif enc not in ("identity", ""):
+                raise LookupError(f"{url}: undecodable Content-Encoding {enc}")
+            return body
+        except Exception as e:
+            if not transient(e) or attempt == TRIES - 1:
                 raise
-        except (urllib.error.URLError, TimeoutError, ConnectionError):
-            if attempt == 3:
-                raise
-        time.sleep(2 * 3 ** attempt)
+        time.sleep(BACKOFF * 2 * 3 ** attempt)
 
 
 def getjson(url, **kw):
@@ -116,8 +152,10 @@ def parse_sums(text):
     return sums
 
 
-def row(url, group, *path, size=0, digest=""):
-    return (url, "/".join([safe(group)] + [safe(p) for p in path]), int(size or 0), digest or "")
+def row(url, group, *path, size=0, digest="", volatile=False):
+    """(url, dest, size, digest, volatile). volatile = the dest name does not change when
+    upstream publishes a new file (moving "latest" URLs, checksum lists, "current/" dirs)."""
+    return (url, "/".join([safe(group)] + [safe(p) for p in path]), int(size or 0), digest or "", int(bool(volatile)))
 
 
 # --- resolvers: each returns a list of rows -------------------------------------------
@@ -127,12 +165,15 @@ def r_gh(ref, match, group):
     except urllib.error.HTTPError as e:
         if e.code != 404:
             raise
-        # Tag-only projects (no GitHub releases): the newest tag's source tarball.
-        tags = getjson(f"{GH_API}/repos/{ref}/tags?per_page=100", token=True)
-        stable = [t["name"] for t in tags if not re.search(r"(alpha|beta|rc|dev|pre|nightly)", t["name"], re.I)]
+        # Tag-only projects (no GitHub releases): the newest VERSION tag's source tarball.
+        # matching-refs lists every tag in one call (the tags API pages by name, 100 at a time,
+        # so a project's newest tags are often not on page 1).
+        refs = getjson(f"{GH_API}/repos/{ref}/git/matching-refs/tags", token=True)
+        names = [r["ref"].removeprefix("refs/tags/") for r in refs]
+        stable = [t for t in names if STABLE_TAG.fullmatch(t)]
         if not stable:
-            raise LookupError(f"gh {ref}: no releases or stable tags")
-        rel = {"tag_name": max(stable, key=lambda t: vkey(re.sub(r"^[^0-9]*", "", t))), "assets": []}
+            raise LookupError(f"gh {ref}: no releases and no plain version tags")
+        rel = {"tag_name": max(stable, key=lambda t: vkey(t.lstrip("vV"))), "assets": [], "tag_only": True}
     tag = rel["tag_name"]
     owner, repo = ref.split("/", 1)
     rows = [row(f"{GH_WEB}/{ref}/archive/refs/tags/{urllib.parse.quote(tag)}.tar.gz", group, owner, repo, tag, f"{repo}-{tag}-source.tar.gz")]
@@ -142,6 +183,10 @@ def r_gh(ref, match, group):
             continue
         d = a.get("digest") or ""
         rows.append(row(a["browser_download_url"], group, owner, repo, tag, a["name"], size=a.get("size", 0), digest=d if d.startswith("sha256:") else ""))
+    if rx and len(rows) == 1 and not rel.get("tag_only"):
+        # The filter was written for assets this release no longer names: say so, don't
+        # quietly mirror only the source tarball.
+        raise LookupError(f"gh {ref} {tag}: match {match!r} selects none of {len(rel.get('assets', []))} assets")
     return rows
 
 
@@ -163,17 +208,25 @@ def r_index(ref, match, group):
                 sumfiles.append((n, u))
             except OSError:
                 pass
+    if not hits:
+        raise LookupError(f"index {base}: no file matches {match!r} ({len(links)} links listed)")
     host = urllib.parse.urlparse(base)
     where = [host.netloc] + [p for p in host.path.split("/") if p]
-    rows = [row(u, group, *where, n) for n, u in sumfiles]
-    rows += [row(u, group, *where, n, digest=sums.get(n, "")) for n, u, _ in dict.fromkeys(hits)]
+    # Checksum files keep their name across releases, and so do matches without a (?P<v>)
+    # version group (a "current/" dir): both are VOLATILE (re-checked on every fetch).
+    versioned = "v" in rx.groupindex
+    rows = [row(u, group, *where, n, volatile=True) for n, u in sumfiles]
+    rows += [row(u, group, *where, n, digest=sums.get(n, ""), volatile=not versioned) for n, u, _ in dict.fromkeys(hits)]
     return rows
+
+
+GNU_EXT = ["xz", "gz", "bz2", "lz", "zst"]  # preference order: one compression is enough
 
 
 def r_gnu(ref, match, group):
     base = f"{GNU}/{ref}/"
     links = hrefs(base)
-    rx = re.compile(rf"^{re.escape(ref)}-(\d+(?:\.\d+)+)(?:\.tar\.(xz|gz|bz2))?$")
+    rx = re.compile(rf"^{re.escape(ref)}-(\d+(?:\.\d+)+)(?:\.tar\.({'|'.join(GNU_EXT)}))?$")
     vers = {}
     for n, u, d in links:
         m = rx.match(n)
@@ -183,23 +236,34 @@ def r_gnu(ref, match, group):
         raise LookupError(f"gnu {ref}: no releases listed")
     v = max(vers, key=vkey)
     files = []
-    for n, u, d in vers[v]:
+    for n, u, d in vers[v]:  # gcc-style: one dir per release; else flat tarballs
         files += [(x, y) for x, y, dd in hrefs(u) if not dd] if d else [(n, u)]
-    for n, u, d in links:  # flat layout: the tarball's .sig sits beside it
-        if n.startswith(f"{ref}-{v}.tar.") and n.endswith(".sig"):
-            files.append((n, u))
-    want = re.compile(match) if match else re.compile(rf"^{re.escape(ref)}-{re.escape(v)}\.tar\.(xz|gz)(\.sig)?$|\.sum$|sha512")
-    picked = [(n, u) for n, u in dict.fromkeys(files) if want.search(n)]
-    if any(n.endswith(".tar.xz") for n, _ in picked):  # one compression is enough
-        picked = [(n, u) for n, u in picked if ".tar.gz" not in n]
+    files += [(n, u) for n, u, d in links if not d and n.startswith(f"{ref}-{v}.tar.") and n.endswith(".sig")]
+    files = list(dict.fromkeys(files))
+    if match:
+        picked = [(n, u) for n, u in files if re.search(match, n)]
+    else:
+        names = {n for n, _ in files}
+        ext = next((e for e in GNU_EXT if f"{ref}-{v}.tar.{e}" in names), None)
+        if not ext:
+            raise LookupError(f"gnu {ref} {v}: no {ref}-{v}.tar.* tarball")
+        tar = f"{ref}-{v}.tar.{ext}"
+        picked = [(n, u) for n, u in files if n in (tar, tar + ".sig") or n.endswith(".sum") or "sha512" in n]
+    if not picked:
+        raise LookupError(f"gnu {ref} {v}: match {match!r} selects nothing")
     return [row(u, group, "gnu", ref, v, n) for n, u in picked]
 
 
 def r_go(ref, match, group):
-    rel = next(r for r in getjson(GO_JSON) if r.get("stable"))
+    rel = next((r for r in getjson(GO_JSON) if r.get("stable")), None)
+    if not rel:
+        raise LookupError("go: no stable release listed")
     rx = re.compile(match) if match else None
-    return [row(f"https://dl.google.com/go/{f['filename']}", group, "go", rel["version"], f["filename"], size=f.get("size", 0), digest="sha256:" + f["sha256"] if f.get("sha256") else "")
+    rows = [row(f"https://dl.google.com/go/{f['filename']}", group, "go", rel["version"], f["filename"], size=f.get("size", 0), digest="sha256:" + f["sha256"] if f.get("sha256") else "")
             for f in rel["files"] if f.get("kind") in ("archive", "installer", "source") and (not rx or rx.search(f["filename"]))]
+    if not rows:
+        raise LookupError(f"go {rel['version']}: no files selected")
+    return rows
 
 
 def r_python(ref, match, group):
@@ -226,6 +290,8 @@ def r_python(ref, match, group):
                 break
         if not source:
             raise LookupError(f"python {minor}: no final release found")
+    if not rows:
+        raise LookupError(f"python {ref}: match selects no files")
     return rows
 
 
@@ -233,8 +299,11 @@ def pypi_rows(name, group, skip=None):
     info = getjson(f"{PYPI}/{urllib.parse.quote(name)}/json")
     v = info["info"]["version"]
     norm = re.sub(r"[-_.]+", "-", info["info"]["name"]).lower()
-    return [row(f["url"], group, "pypi", norm, v, f["filename"], size=f.get("size", 0), digest="sha256:" + f["digests"]["sha256"])
+    rows = [row(f["url"], group, "pypi", norm, v, f["filename"], size=f.get("size", 0), digest="sha256:" + f["digests"]["sha256"])
             for f in info.get("urls", []) if not f.get("yanked") and not (skip and skip.search(f["filename"]))]
+    if not rows:
+        raise LookupError(f"pypi {name} {v}: no downloadable files")
+    return rows
 
 
 def r_pypi(ref, match, group):
@@ -251,8 +320,8 @@ def r_pypi_top(ref, match, group):
                 rows += fut.result()
             except Exception as e:  # one vanished project must not drop the other N-1
                 errs.append(f"{name}: {e}")
-    if errs:
-        print(f"WARN pypi-top: {len(errs)} projects unresolved: " + "; ".join(errs[:5]), file=sys.stderr)
+    if errs:  # keep what resolved, but the run is not complete (exit 1)
+        raise Partial(rows, f"{len(errs)} of {len(top)} projects unresolved: " + "; ".join(errs[:5]))
     return rows
 
 
@@ -269,7 +338,12 @@ def r_template(ref, match, group):
     for t in match.split():
         url = t.replace("{v}", v).replace("{V}", v.lstrip("v"))
         p = urllib.parse.urlparse(url)
-        rows.append(row(url, group, p.netloc, v, *[x for x in p.path.split("/") if x][-3:]))
+        # The last 3 path parts keep per-platform files apart (linux-amd64/minio vs
+        # linux-arm64/minio); parts equal to the version are already in the path.
+        tail = [x for x in p.path.split("/") if x and x not in (v, v.lstrip("v"))][-3:]
+        rows.append(row(url, group, p.netloc, v, *tail, volatile=ref.startswith("=")))
+    if not rows:
+        raise Usage(f"template {ref}: no URL templates in match")
     return rows
 
 
@@ -329,14 +403,19 @@ def plan(entries):
         futs = [ex.submit(one, e) for e in entries]
         for fut, e in zip(futs, entries):
             try:
-                for r in fut.result()[1]:
-                    if r[1] not in seen:
-                        seen.add(r[1])
-                        rows.append(r)
+                got = fut.result()[1]
             except Usage:
                 raise
+            except Partial as p:
+                got = p.rows
+                failures.append(f"{e['kind']} {e['ref']}: {p}")
             except Exception as ex_:
+                got = []
                 failures.append(f"{e['kind']} {e['ref']}: {ex_}")
+            for r in got:
+                if r[1] not in seen:
+                    seen.add(r[1])
+                    rows.append(r)
     return rows, failures
 
 
@@ -354,27 +433,110 @@ def check(path, size, digest):
     return None
 
 
-def fetch_one(url, dest, size, digest):
-    if dest.exists() and not check(dest, size, digest):
-        return "skip"
-    dest.parent.mkdir(parents=True, exist_ok=True)
+class Retry(OSError):
+    """A download that stopped short or must restart: retried (resuming when possible)."""
+
+
+CRANGE = re.compile(r"bytes (\d+)-(\d+)/(\d+|\*)")
+
+
+def stamp(headers):
+    """What identifies the remote file's current version, for volatile rows."""
+    return {k: headers.get(k) for k in ("Content-Length", "ETag", "Last-Modified") if headers.get(k)}
+
+
+def sidecar(dest):
+    return dest.with_name(dest.name + ".source.json")
+
+
+def finish(part, dest, size, digest, headers, volatile):
+    bad = check(part, size, digest)
+    if bad:
+        part.unlink(missing_ok=True)
+        raise OSError(f"{dest.name}: {bad}")
+    os.replace(part, dest)
+    if volatile:
+        info = stamp(headers)
+        if "Content-Range" in headers:  # a resumed body's length is not the file's
+            info["Content-Length"] = str(dest.stat().st_size)
+        sidecar(dest).write_text(json.dumps(info))
+
+
+def download(url, dest, size, digest, volatile):
     part = dest.with_name(dest.name + ".part")
+    # A volatile file with no digest cannot be resumed safely: the bytes on disk may belong
+    # to an older upstream version. Everything else resumes (the digest/size catches a mix).
+    if part.exists() and volatile and not digest:
+        part.unlink()
     have = part.stat().st_size if part.exists() else 0
     if size and have > size:
         part.unlink()
         have = 0
-    req = urllib.request.Request(url, headers={"User-Agent": UA, **({"Range": f"bytes={have}-"} if have else {})})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        mode = "ab" if have and r.status == 206 else "wb"  # a server that ignores Range restarts the file
+    if size and have == size:  # killed after the last byte, before the rename
+        return finish(part, dest, size, digest, {}, False)
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Encoding": "identity", **({"Range": f"bytes={have}-"} if have else {})})
+    try:
+        r = urllib.request.urlopen(req, timeout=120)
+    except urllib.error.HTTPError as e:
+        if e.code == 416 and have:
+            m = re.search(r"\*/(\d+)", e.headers.get("Content-Range") or "")
+            if m and int(m[1]) == have:  # the .part already holds the whole file
+                return finish(part, dest, size or have, digest, e.headers, volatile)
+            part.unlink()
+            raise Retry(f"{dest.name}: 416 for a {have}-byte .part; restarting")
+        raise
+    with r:
+        total = None
+        if have and r.status == 206:
+            m = CRANGE.match(r.headers.get("Content-Range") or "")
+            if not m or int(m[1]) != have:  # must continue exactly where the .part ends
+                part.unlink()
+                raise Retry(f"{dest.name}: 206 at the wrong offset; restarting")
+            total, mode = (int(m[3]) if m[3] != "*" else None), "ab"
+        else:  # 200: a server that ignores Range sends the whole file again
+            mode, have = "wb", 0
+            total = int(r.headers["Content-Length"]) if (r.headers.get("Content-Length") or "").isdigit() else None
+        expected = size or total
         with part.open(mode) as f:
             for chunk in iter(lambda: r.read(8 << 20), b""):
                 f.write(chunk)
-    bad = check(part, size, digest)
-    if bad:
-        part.unlink()
-        raise OSError(f"{dest.name}: {bad}")
-    os.replace(part, dest)
-    return "ok"
+        got = part.stat().st_size
+        if expected and got < expected:  # connection dropped: keep the .part and resume
+            raise Retry(f"{dest.name}: {got} of {expected} bytes")
+        if expected and got > expected:
+            part.unlink()
+            raise OSError(f"{dest.name}: {got} bytes, more than the expected {expected}")
+        finish(part, dest, expected, digest, r.headers, volatile)
+
+
+def current(url, dest, size, digest, volatile):
+    """Is the file at dest complete and still upstream's current version?"""
+    if not dest.exists() or check(dest, size, digest):
+        return False
+    if not volatile or digest:  # a versioned name, or a digest from this run's listing
+        return True
+    try:
+        old = json.loads(sidecar(dest).read_text())
+    except (OSError, ValueError):
+        return False
+    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": UA, "Accept-Encoding": "identity"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        now = stamp(r.headers)
+    return bool(now) and now == old
+
+
+def fetch_one(url, dest, size, digest, volatile=False):
+    if current(url, dest, size, digest, volatile):
+        return "skip"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    for attempt in range(TRIES):
+        try:
+            download(url, dest, size, digest, volatile)
+            return "ok"
+        except Exception as e:
+            if not (isinstance(e, Retry) or transient(e)) or attempt == TRIES - 1:
+                raise
+        time.sleep(BACKOFF * (2 * 3 ** attempt if attempt else 1))
 
 
 def main(argv=None):
@@ -400,7 +562,7 @@ def main(argv=None):
         print(f"ERROR resolve {f}", file=sys.stderr)
     rc = 1 if failures else 0
     if not rows:
-        return rc or 3
+        return 1
     if a.cmd == "plan":
         for r in rows:
             print("\t".join(map(str, r)))
@@ -408,14 +570,14 @@ def main(argv=None):
         return rc
     base = Path(a.dest).resolve()
     bad = 0
-    for url, dest, size, digest in rows:
+    for url, dest, size, digest, volatile in rows:
         target = (base / dest).resolve()
         if base not in target.parents:  # dest is built from upstream names: never escape --dest
             print(f"ERROR refusing path outside --dest: {dest}", file=sys.stderr)
             bad += 1
             continue
         try:
-            print(f"{fetch_one(url, target, size, digest)}\t{dest}")
+            print(f"{fetch_one(url, target, size, digest, volatile)}\t{dest}")
         except Exception as e:
             print(f"ERROR fetch {dest}: {e}", file=sys.stderr)
             bad += 1

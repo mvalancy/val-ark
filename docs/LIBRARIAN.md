@@ -85,23 +85,45 @@ for every platform the project ships. Rows rank small, irreplaceable tools above
 (Kali ISOs, the PyPI wheelhouse).
 
 ```bash
-python3 scripts/lib/release_mirror.py plan                       # url, dest, size, digest rows; no downloads
+python3 scripts/lib/release_mirror.py plan                       # url, dest, size, digest, volatile rows; no downloads
 python3 scripts/lib/release_mirror.py plan --group security      # one group (or --only <ref>, repeatable)
 GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/val-ark/dev-stack"
 ```
 
-- `fetch` resumes `.part` files with Range, checks size and the upstream digest (sha256, or
-  sha3-384 for snaps) before the rename, skips files already complete, and never writes outside
-  `--dest`. Files land at `<group>/<project>/<version>/<file>`, so a new release sits beside the
-  old one instead of replacing it.
-- About 130 GB without the wheelhouse (late 2026). The top-1000 wheelhouse is several hundred GB
-  more, because it keeps every platform's wheels (CUDA builds included).
-- Set `GITHUB_TOKEN`: there are roughly 250 GitHub API calls per plan, and the anonymous limit
-  is 60 an hour.
-- Tag-only projects (no GitHub releases) get the newest stable tag's source tarball.
-- Exit codes: `0` complete, `1` an entry failed to resolve (the rest are still planned and
-  fetched), `2` a download failed, `3` nothing resolved, `64` usage (bad catalog row, kind or
-  regex). The most severe wins.
+- **Resume and verify.** `fetch` resumes `.part` files with Range. Before renaming a file into
+  place it checks the length, then the upstream digest: sha256, or sha3-384 for snaps. The
+  length comes from the planned size, or the server's `Content-Length` / `Content-Range` total
+  when the size isn't known up front (source tarballs, templates).
+- **Interrupted downloads.** A cut-short body keeps its `.part` and is resumed. A `.part` that
+  is already complete is verified and kept. That covers a run killed before the rename, and a
+  server answering 416.
+- **What gets skipped.** Files already complete are skipped. Nothing is written outside `--dest`.
+- **Layout.** Versioned rows land at `<group>/<project>/<version>/<file>`, so a new release sits
+  beside the old one. Index rows land at `<group>/<host>/<dir path>/<file>`.
+- **Volatile rows.** These are files whose name stays the same across upstream versions:
+  `=latest` templates such as MinIO and the Metasploit installers, `SHA256SUMS`, and `current/`
+  directories. Each fetch re-checks them with a HEAD request against a `<file>.source.json`
+  sidecar, and downloads them again when upstream changed.
+- **Size.** About 130 GB without the wheelhouse (late 2026). The top-1000 wheelhouse adds
+  several hundred GB, because it keeps every platform's wheels, CUDA builds included.
+- **GitHub token.** Set `GITHUB_TOKEN`. A plan makes roughly 250 GitHub API calls, and the
+  anonymous limit is 60 an hour.
+- **Tag-only projects.** Projects with no GitHub releases get the source tarball of their newest
+  plain version tag (`v1.2` / `1.2.3`). The tags come from `git/matching-refs/tags`, because the
+  paged tags API often misses the newest ones.
+- **Silent gaps are errors.** These all exit 1 rather than silently mirroring nothing:
+  - an index with no matching file;
+  - a `gh` regex that selects no asset;
+  - a Brotli-encoded listing (stdlib can't decode it, so pick a mirror that serves plain HTML);
+  - a template version source that returns something other than a version.
+- **Exit codes:**
+  - `0` complete;
+  - `1` an entry failed to resolve, or nothing resolved (the rest are still planned and fetched);
+  - `2` a download failed;
+  - `64` usage (a bad catalog row, kind or regex).
+
+  The most severe wins. Every metadata request and download gets 4 attempts on DNS and
+  connection errors, 5xx and 429.
 - Offline-install hints: Python wheels install with `pip install --no-index --find-links <dir>`;
   MicroK8s with `snap install --dangerous core20_*.snap` then `snap install --dangerous --classic
   microk8s_*.snap`; Docker static binaries by unpacking `docker-*.tgz` into `/usr/local/bin`.

@@ -97,8 +97,8 @@
 947|gh|google/bindiff||reverse-engineering|BinDiff
 # --- Security / forensics / network analysis ---------------------------------------------
 940|index|https://nmap.org/dist/|^nmap-(?P<v>\d+\.\d+)(-setup\.exe|\.tar\.bz2|\.dmg|-1\.x86_64\.rpm)$|security|Nmap + Zenmap + Ncat (Windows/macOS/source)
-940|index|https://2.na.dl.wireshark.org/src/|^wireshark-(?P<v>\d+\.\d+\.\d+)\.tar\.xz$|security|Wireshark source
-940|index|https://2.na.dl.wireshark.org/win64/|^Wireshark-(?P<v>\d+\.\d+\.\d+)-x64\.(exe|msi)$|security|Wireshark Windows
+940|index|https://www.wireshark.org/download/src/|^wireshark-(?P<v>\d+\.\d+\.\d+)\.tar\.xz$|security|Wireshark source
+940|index|https://www.wireshark.org/download/win64/|^Wireshark-(?P<v>\d+\.\d+\.\d+)-x64\.(exe|msi)$|security|Wireshark Windows
 940|gh|zaproxy/zaproxy||security|OWASP ZAP web scanner
 940|gh|sqlmapproject/sqlmap||security|sqlmap
 940|gh|hashcat/hashcat||security|hashcat

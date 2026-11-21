@@ -30,9 +30,10 @@ jobs:
       # broken doc link or a leaked host/secret fails in seconds — before the
       # multi-minute Playwright browser install. Re-run inside run-all.sh too,
       # so the HTML report still records them; the duplication is ~free. (#130)
-      - name: Fast guards — doc-link integrity + secret/host-leak scan
+      - name: Fast guards — doc-link integrity + doc-art + secret/host-leak scan
         run: |
           bash tests/test-doc-links.sh
+          bash tests/test-doc-art.sh
           bash tests/test-secrets.sh
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7

@@ -58,6 +58,7 @@ them into one hostable HTML report.
   [`gotchas.md#grep-operative-not-comment-96`](../docs/knowledge/gotchas.md#grep-operative-not-comment-96).
 - **multipass is snap-confined** (VM matrix): stage transfers under a non-hidden repo path like
   `tests/results/`, never `/tmp` or a dotfile dir.
+- **`test-doc-art.sh` failing on "stale" = regenerate, don't hand-edit.** Run `python3 scripts/docs/popup_art.py` and commit the SVGs it writes.
 - **`test-secrets.sh` failing = fix the leak, not the test.** It flags LAN IPs, private-TLD/bare URL
   hosts, and tracked secret files (public repo — Prime Directive 1). If it's a genuine non-secret
   (a doc example, a protocol constant, a test fixture), add ONE reviewed line to

@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/popup/encryption-dark.svg">
+  <img src="img/popup/encryption-light.svg" width="100%" alt="Pop-up book scene: Encrypted on the LAN. Its own tiny certificate authority: HTTPS for every device, no internet.">
+</picture>
+
 # Val Ark — Encryption & TLS
 
 ↑ [Docs](README.md) · [Repo root](../README.md)

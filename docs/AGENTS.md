@@ -24,6 +24,20 @@ Each file is either a **reference** (describes what the code *is* — keep it ma
 
 The hub that indexes these is [README.md](README.md) (owned elsewhere — link it, don't restructure it). Sub-areas: [design/](design/README.md) (the scope-first product design) and [knowledge/](knowledge/README.md) (gotchas/decisions/workflow).
 
+## Pop-up art (the chapter scenes)
+
+Each major guide opens with an animated pop-up-book scene, with a light and a dark version under [`img/popup/`](img/popup/). They are **generated**, so never hand-edit an SVG there:
+
+- Scenes, captions and the docs each scene belongs to live in `SCENES` in [`scripts/docs/popup_art.py`](../scripts/docs/popup_art.py) (stdlib only, deterministic). Run `python3 scripts/docs/popup_art.py` to rewrite them; `--list` shows where each scene is used.
+- Embed a scene as a `<picture>` with a `prefers-color-scheme: dark` `<source>` (copy an existing one). The `alt` text is the scene's title and caption.
+- A caption is a claim about the doc. Keep it true, like any other line in a guide.
+- [`tests/test-doc-art.sh`](../tests/test-doc-art.sh) fails if:
+  - the SVGs are stale;
+  - an SVG has a script, an external reference, or no `<title>`/`<desc>`;
+  - an SVG skips `prefers-reduced-motion`, or goes over 40 KB;
+  - a scene isn't used as a light/dark pair.
+- The resting state is the fully opened scene, so reduced motion (and any renderer that won't animate) shows the finished picture.
+
 ## Canonical source — edit the owner, link everywhere else
 
 One fact, one home. Change it in the owning doc; from any other doc, link — never restate.

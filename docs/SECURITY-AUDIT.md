@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/popup/security-dark.svg">
+  <img src="img/popup/security-light.svg" width="100%" alt="Pop-up book scene: The security audit. Every surface inspected, every finding tracked to a fix.">
+</picture>
+
 # Val Ark Security Audit
 
 ↑ [Docs](README.md) · [Repo root](../README.md)

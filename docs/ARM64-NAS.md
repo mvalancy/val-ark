@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/popup/nas-dark.svg">
+  <img src="img/popup/nas-light.svg" width="100%" alt="Pop-up book scene: The Ark on an arm64 NAS. Off-the-shelf ARM64 boxes such as the RK3588: setup notes, gotchas, fixes.">
+</picture>
+
 # Val Ark on ARM64 NAS appliances (chips such as the Rockchip RK3588)
 
 ↑ [Docs](README.md) · [Repo root](../README.md)

@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/design-dark.svg">
+  <img src="../img/popup/design-light.svg" width="100%" alt="Pop-up book scene: Designing an appliance. Commissioning, access, storage, self-heal and recovery: scope first.">
+</picture>
+
 # Val Ark — Consumer Appliance Design
 
 > **The goal:** Val Ark should feel like setting up a router or opening a fitness app —

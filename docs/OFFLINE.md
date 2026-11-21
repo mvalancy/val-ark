@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/popup/offline-dark.svg">
+  <img src="img/popup/offline-light.svg" width="100%" alt="Pop-up book scene: Off the grid, together. Pull everything once, then share it across the LAN with no internet.">
+</picture>
+
 # Val Ark - Offline & P2P Guide
 
 [Back to Docs](README.md) | [Back to Project Root](../README.md)

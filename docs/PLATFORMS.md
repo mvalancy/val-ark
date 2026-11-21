@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/popup/platforms-dark.svg">
+  <img src="img/popup/platforms-light.svg" width="100%" alt="Pop-up book scene: Every kind of machine. One mirror serves x86_64, arm64, Jetson, macOS, Windows and OpenWRT.">
+</picture>
+
 # Val Ark - Platform Notes
 
 ↑ [Docs](README.md) · [Repo root](../README.md)

@@ -29,6 +29,7 @@ disk and keep itself healthy 24/7. Start here to understand how a box boots, fil
 | `mirror-self.sh` | Self-replication: package the codebase (git bundle + tarball + VERSION) under `<data>/sources/val-ark/`, served at `/sources/` + `/bootstrap.sh`. |
 | `release.sh` | Tag a release from the repo-root `VERSION` file (unprefixed `0.x`; `--push`). |
 | `audit-tools.sh`, `monitor.sh`, `status.sh`, `retry-failed.sh`, `screenshots.sh`, `optimize-images.py`, `uninstall.sh` | Operational helpers (report/watch/retry/capture/cleanup). |
+| `docs/popup_art.py` | Generates the pop-up-book SVG chapter art under `docs/img/popup/` (see [docs/AGENTS.md](../docs/AGENTS.md#pop-up-art-the-chapter-scenes)). |
 
 ### Subsystems (own AGENTS.md)
 

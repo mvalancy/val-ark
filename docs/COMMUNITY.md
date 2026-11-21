@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/popup/community-dark.svg">
+  <img src="img/popup/community-light.svg" width="100%" alt="Pop-up book scene: The village square. Chat, mail, message boards, pastes and shared files: no internet needed.">
+</picture>
+
 # Val Ark - Community & Comms Layer
 
 ↑ [Docs](README.md) · [Repo root](../README.md)

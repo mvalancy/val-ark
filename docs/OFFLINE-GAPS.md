@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/popup/offline-gaps-dark.svg">
+  <img src="img/popup/offline-gaps-light.svg" width="100%" alt="Pop-up book scene: Mapping the gaps. What still needs the internet, and the plan to close each gap.">
+</picture>
+
 # Val Ark — Internet-Off Gap Analysis
 
 *A decision report: if the internet went off today, what would this mirror be

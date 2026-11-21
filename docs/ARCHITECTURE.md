@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/popup/architecture-dark.svg">
+  <img src="img/popup/architecture-light.svg" width="100%" alt="Pop-up book scene: How the Ark is built. One config, two entry points, a librarian and a zero-dependency web server.">
+</picture>
+
 # Val Ark - Architecture
 
 ↑ [Docs](README.md) · [Repo root](../README.md)

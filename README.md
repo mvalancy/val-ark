@@ -38,6 +38,11 @@ NFS-shareable, offline-capable — scales to a disk of any size.
 
 ## Architecture
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/architecture-dark.svg">
+  <img src="docs/img/popup/architecture-light.svg" width="100%" alt="Pop-up book scene: How the Ark is built. One config, two entry points, a librarian and a zero-dependency web server.">
+</picture>
+
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
   'primaryColor': '#1a2230',
@@ -97,6 +102,11 @@ graph TB
 ```
 
 ## Self-Filling Mirror (Librarian)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/librarian-dark.svg">
+  <img src="docs/img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Diversity first, then small and valuable, then fill, then trade up.">
+</picture>
 
 Val Ark fills a disk of **any size** by itself and keeps it healthy. The
 **Librarian** pulls from **live** catalogs — the Kiwix OPDS ZIM library (no stale
@@ -182,6 +192,11 @@ also exposes manual tiers:
 
 ## Community & Comms
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/community-dark.svg">
+  <img src="docs/img/popup/community-light.svg" width="100%" alt="Pop-up book scene: The village square. Chat, mail, message boards, pastes and shared files: no internet needed.">
+</picture>
+
 Val Ark is also an **offline community hub** — a place to message a friend, mail the
 group, post to a board, and share files, all on the LAN with no internet. Each service
 runs on the box and is framed inside the web UI (same origin, one port, with a
@@ -197,6 +212,11 @@ LAN-only, auth-required, no federation. Enable per service via `VALARK_SERVICES`
 architecture and security model.
 
 ## Platforms
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/platforms-dark.svg">
+  <img src="docs/img/popup/platforms-light.svg" width="100%" alt="Pop-up book scene: Every kind of machine. One mirror serves x86_64, arm64, Jetson, macOS, Windows and OpenWRT.">
+</picture>
 
 | Platform | Arch | Tools dir | Notes |
 |----------|------|-----------|-------|
@@ -241,6 +261,11 @@ curl -fsSL http://<ark-host>:3000/bootstrap.sh | bash   # clones + sets up from 
 The Getting Started page shows this one-liner pre-filled with the host's address.
 
 ## Offline & P2P
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/offline-dark.svg">
+  <img src="docs/img/popup/offline-light.svg" width="100%" alt="Pop-up book scene: Off the grid, together. Pull everything once, then share it across the LAN with no internet.">
+</picture>
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -356,6 +381,11 @@ grouped, with a graph and a "start here" triage. Begin there. The four knowledge
 Governance: [CLAUDE.md](CLAUDE.md) · [AGENTS.md](AGENTS.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md)
 
 ## Testing
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/tests-dark.svg">
+  <img src="docs/img/popup/tests-light.svg" width="100%" alt="Pop-up book scene: Proving it works. Validators, browser tests and fresh-VM installs, in one offline report.">
+</picture>
 
 One runner covers every layer and renders a **self-contained, offline HTML report**
 (`tests/results/report.html`) — bash validators, a Playwright suite (300+ tests),

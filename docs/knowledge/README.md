@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/knowledge-dark.svg">
+  <img src="../img/popup/knowledge-light.svg" width="100%" alt="Pop-up book scene: What we have learned. Decisions, gotchas, workflow and governance, kept in git.">
+</picture>
+
 # Val Ark — Knowledge Base (agents bake learnings here)
 
 This directory is the **git‑tracked, shared brain** for anyone (human or AI agent) working

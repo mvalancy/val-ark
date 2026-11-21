@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/popup/models-dark.svg">
+  <img src="img/popup/models-light.svg" width="100%" alt="Pop-up book scene: A menagerie of models. Flagship LLM, speech, vision and image models, plus small diversity picks.">
+</picture>
+
 # AI Model Inventory
 
 ↑ [Docs](README.md) · [Repo root](../README.md)

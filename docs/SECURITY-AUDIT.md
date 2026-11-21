@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/popup/security-dark.svg">
-  <img src="img/popup/security-light.svg" width="100%" alt="Pop-up book scene: The security audit. Every surface inspected, every finding tracked to a fix.">
+  <img src="img/popup/security-light.svg" width="100%" alt="Pop-up book scene: The security audit. A dated audit: what was swept, what was found, what is still open.">
 </picture>
 
 # Val Ark Security Audit

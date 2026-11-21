@@ -108,7 +108,7 @@ SCENES = {
         sub='One config, two entry points, a librarian and a zero-dependency web server.', backdrop='city',
         cards=[('key', '.env', None), ('terminal', 'start.sh', None), ('gear', 'loop.sh', None),
                ('disk', 'Librarian', None), ('server', 'server.js', None), ('globe', 'Web UI', None)],
-        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side'), (4, 5, 'side')],
+        links=[(0, 1, 'side'), (0, 2, 'arc'), (1, 3, 'arc'), (2, 3, 'side'), (2, 4, 'arc'), (4, 5, 'side')],
         used=['docs/ARCHITECTURE.md', 'README.md']),
     'librarian': dict(chapter='Chapter 2', title='The Librarian fills the shelves',
         sub='Diversity first, then small and valuable, then fill, then trade up.', backdrop='shelf',
@@ -119,12 +119,12 @@ SCENES = {
     'tools': dict(chapter='Chapter 3', title='A toolbox for every job',
         sub='Dev tools, AI runtimes, creative suites and media, mirrored for each platform.', backdrop='hills',
         cards=[('terminal', 'Dev tools', None), ('brain', 'AI inference', None), ('cube', 'Creative', None),
-               ('play', 'Media', None), ('gear', 'Infrastructure', None), ('wrench', 'Build kits', None)],
+               ('play', 'Media', None), ('gear', 'Infrastructure', None), ('cloud', 'AI platforms', None)],
         links=[], used=['docs/TOOLS.md']),
     'models': dict(chapter='Chapter 4', title='A menagerie of models',
         sub='Flagship LLM, speech, vision and image models, plus small diversity picks.', backdrop='hills',
         cards=[('brain', 'Language', None), ('eye', 'Vision', None), ('mic', 'Speech', None),
-               ('play', 'Image + video', None), ('cube', 'Embeddings', None)],
+               ('play', 'Image gen', None), ('cube', 'Embeddings', None)],
         links=[(0, 1, 'arc'), (1, 2, 'arc'), (2, 3, 'arc'), (3, 4, 'arc')],
         used=['docs/MODEL_INVENTORY.md']),
     'platforms': dict(chapter='Chapter 5', title='Every kind of machine',
@@ -151,7 +151,7 @@ SCENES = {
         links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side')],
         used=['docs/OFFLINE-GAPS.md']),
     'nas': dict(chapter='Appendix', title='The Ark on an arm64 NAS',
-        sub='Off-the-shelf ARM64 boxes such as the RK3588: setup notes, gotchas, fixes.', backdrop='city',
+        sub='Boxes built on chips such as the Rockchip RK3588: setup notes and fixes.', backdrop='city',
         cards=[('server', 'NAS box', None), ('chip', 'RK3588', None), ('brain', 'NPU', None), ('wifi', 'LAN', None)],
         links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side')],
         used=['docs/ARM64-NAS.md']),
@@ -162,7 +162,7 @@ SCENES = {
         links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side')],
         used=['docs/ENCRYPTION.md']),
     'security': dict(chapter='Safekeeping', title='The security audit',
-        sub='Every surface inspected, every finding tracked to a fix.', backdrop='vault',
+        sub='A dated audit: what was swept, what was found, what is still open.', backdrop='vault',
         cards=[('magnifier', 'Inspect', None), ('shield', 'Harden', None), ('lock', 'Contain', None),
                ('check', 'Prove', None)],
         links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side')],
@@ -200,7 +200,7 @@ def backdrop(kind, t, rnd):
     """Two paper layers behind the cut-outs; they pop first for depth."""
     layers = []
     if kind in ('hills', 'village', 'waves'):
-        for li, (col, amp, base) in enumerate(((t['hill1'], 46, BASE - 64), (t['hill2'], 30, BASE - 30))):
+        for col, amp, base in ((t['hill1'], 46, BASE - 64), (t['hill2'], 30, BASE - 30)):
             pts = [f'M110 {BASE}']
             x = 110
             while x < 1090:
@@ -218,7 +218,7 @@ def backdrop(kind, t, rnd):
                             f'stroke="{t["hill2"]}" stroke-width="4" stroke-linecap="round"/>' for y in (BASE - 8,))
             layers[1] += waves
     elif kind == 'city':
-        for li, (col, hmin, hmax) in enumerate(((t['hill1'], 70, 130), (t['hill2'], 30, 70))):
+        for col, hmin, hmax in ((t['hill1'], 70, 130), (t['hill2'], 30, 70)):
             x, s = 110, ''
             while x < 1090:
                 w = rnd.randint(40, 90)
@@ -265,7 +265,7 @@ def card(i, x, w, icon, label, badge, t, delay):
                f'animation-delay:{-i*0.9:.1f}s">{"".join(body)}</g></g>')
     return ''.join(out), (x, top, w, h)
 
-def link(a, b, kind, idx, delay):
+def link(a, b, kind, delay):
     ax, at, aw, ah = a
     bx, bt, bw, bh = b
     if kind == 'side':
@@ -291,11 +291,11 @@ def render(sid, spec, theme):
     css = f"""
 .s{{fill:none;stroke:var(--a);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}}
 .t{{stroke-width:2}}.w{{stroke-width:6}}.f{{fill:var(--a)}}
-.lb{{font:600 15px system-ui,-apple-system,'Segoe UI',sans-serif;fill:{t['ink']};text-anchor:middle}}
+.lb{{font:600 16px system-ui,-apple-system,'Segoe UI',sans-serif;fill:{t['ink']};text-anchor:middle}}
 .bd{{font:700 13px system-ui,sans-serif;fill:#fff;text-anchor:middle}}
 .ch{{font:700 12px system-ui,sans-serif;letter-spacing:.22em;fill:{t['tab']};text-transform:uppercase}}
 .tt{{font:italic 600 30px Georgia,'Times New Roman',serif;fill:{t['ink']}}}
-.st{{font:15px system-ui,sans-serif;fill:{t['muted']}}}
+.st{{font:16px system-ui,sans-serif;fill:{t['muted']}}}
 .pop,.lay{{transform-box:fill-box;transform-origin:50% 100%;animation:pop {CYCLE}s cubic-bezier(.3,1.4,.5,1) infinite backwards}}
 .sw{{transform-box:fill-box;transform-origin:50% 100%;animation:sway 4s ease-in-out infinite alternate}}
 .sh{{transform-box:fill-box;transform-origin:50% 50%;animation:shade {CYCLE}s ease-out infinite backwards}}
@@ -341,17 +341,17 @@ def render(sid, spec, theme):
         boxes.append(box)
     ld = 0.7 + len(spec['cards']) * 0.32 + 0.3
     for k, (a, b, kind) in enumerate(spec['links']):
-        p.append(link(boxes[a], boxes[b], kind, k, ld + k * 0.12))
+        p.append(link(boxes[a], boxes[b], kind, ld + k * 0.12))
     # sparkles
     for k in range(7):
         sx, sy = rnd.randint(90, 1110), rnd.randint(100, 150)
         sc = rnd.uniform(0.35, 0.6)
         p.append(f'<g transform="translate({sx} {sy}) scale({sc:.2f})"><g class="tw" style="animation-delay:{rnd.uniform(0, 2.8):.2f}s;--a:{t["star"]}">'
                  f'{ICONS["spark"]}</g></g>')
-    # the pull-tab, sticking out of the right page
-    p.append(f'<g class="tab"><rect x="1100" y="{BASE+6}" width="70" height="24" rx="6" fill="{t["tab"]}"/>'
-             f'<text x="1135" y="{BASE+22}" font-family="system-ui,sans-serif" font-size="11" font-weight="700" '
-             f'letter-spacing=".18em" text-anchor="middle" fill="{t["tabink"]}">PULL</text></g>')
+    # the pull-tab, sticking out of the right page (decorative: an arrow, not a word that reads as a button)
+    p.append(f'<g class="tab"><rect x="1100" y="{BASE+6}" width="58" height="24" rx="6" fill="{t["tab"]}"/>'
+             f'<path d="M1138 {BASE+12}l-9 6 9 6M1148 {BASE+12}l-9 6 9 6" fill="none" stroke="{t["tabink"]}" stroke-width="2.4" '
+             f'stroke-linecap="round" stroke-linejoin="round"/></g>')
     p.append('</svg>\n')
     return ''.join(p)
 
@@ -365,7 +365,7 @@ def main(argv):
             print(f"{sid}\t{', '.join(spec['used'])}")
         return 0
     if '--check' in argv:
-        bad = [n for n, body in files.items() if not (OUT / n).is_file() or (OUT / n).read_text() != body]
+        bad = [n for n, body in files.items() if not (OUT / n).is_file() or (OUT / n).read_bytes() != body.encode()]
         extra = sorted(p.name for p in OUT.glob('*.svg') if p.name not in files) if OUT.is_dir() else []
         for n in bad:
             print(f'stale or missing: docs/img/popup/{n}')
@@ -378,7 +378,7 @@ def main(argv):
         return 0
     OUT.mkdir(parents=True, exist_ok=True)
     for n, body in files.items():
-        (OUT / n).write_text(body)
+        (OUT / n).write_bytes(body.encode())  # LF on every OS, so --check is exact
     print(f'wrote {len(files)} SVGs to docs/img/popup/')
     return 0
 

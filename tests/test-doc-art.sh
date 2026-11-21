@@ -8,8 +8,8 @@
 #   2. every SVG is well-formed XML with <title>, <desc> and role="img";
 #   3. none carries a <script>, an external href/url() or an event handler;
 #   4. each honours prefers-reduced-motion and stays under the size budget;
-#   5. every scene is referenced by a doc as a light/dark <picture> pair, and
-#      every popup/ reference in a tracked .md points at a real file.
+#   5. every scene is embedded as a <picture> (dark <source> + light <img> with
+#      alt text, same scene) somewhere, and every popup/ reference resolves.
 # Fully offline; needs only python3 (CI has it).
 ###############################################################################
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -62,24 +62,36 @@ print(f'checked {len(files)} SVGs' + ('' if bad else ' — all ok'))
 sys.exit(1 if bad else 0)
 PY
 
-echo "== every scene is used, and every reference resolves"
+echo "== every scene is used as a light/dark <picture> pair, and every reference resolves"
 python3 - <<'PY' || fail=1
 import pathlib, re, subprocess, sys, os
 scenes = {p.name.rsplit('-', 1)[0] for p in pathlib.Path('docs/img/popup').glob('*.svg')}
-used, bad = set(), 0
-mds = subprocess.run(['git', 'ls-files', '*.md'], capture_output=True, text=True).stdout.split()
+try:
+    out = subprocess.run(['git', 'ls-files', '*.md'], capture_output=True, text=True, check=True).stdout.split()
+except Exception:
+    out = []
+# Outside a git checkout (e.g. a release tarball) fall back to walking the tree.
+mds = out or [str(p) for p in pathlib.Path('.').rglob('*.md') if '.git' not in p.parts and 'node_modules' not in p.parts]
+paired, bad = set(), 0
+PIC = re.compile(r'<picture>(.*?)</picture>', re.S)
 for md in mds:
     text = pathlib.Path(md).read_text(errors='replace')
-    for m in re.finditer(r'(?:src|srcset)="([^"]*popup/([a-z0-9-]+)-(light|dark)\.svg)"', text):
+    for m in re.finditer(r'(?:src|srcset)="([^"]*popup/[a-z0-9-]+-(?:light|dark)\.svg)"', text):
         path = os.path.normpath(os.path.join(os.path.dirname(md), m.group(1)))
         if not os.path.isfile(path):
             print(f'FAIL: {md}: {m.group(1)} does not exist'); bad += 1
-        used.add((m.group(2), m.group(3), md))
-for s in sorted(scenes):
-    themes = {t for (sc, t, _) in used if sc == s}
-    if themes != {'light', 'dark'}:
-        print(f'FAIL: scene {s} is not used as a light+dark <picture> pair in any doc'); bad += 1
-print(f'{len(scenes)} scenes, {len(used)} references' + ('' if bad else ' — all ok'))
+    for block in PIC.findall(text):
+        dark = re.search(r'<source media="\(prefers-color-scheme: dark\)" srcset="[^"]*popup/([a-z0-9-]+)-dark\.svg"', block)
+        light = re.search(r'<img src="[^"]*popup/([a-z0-9-]+)-light\.svg"[^>]*\balt="([^"]+)"', block)
+        if not (dark or light):
+            continue
+        if not (dark and light and dark.group(1) == light.group(1)):
+            print(f'FAIL: {md}: a popup <picture> needs a dark <source> and a light <img alt="..."> of the same scene'); bad += 1
+            continue
+        paired.add(dark.group(1))
+for s in sorted(scenes - paired):
+    print(f'FAIL: scene {s} is not used as a light+dark <picture> pair in any doc'); bad += 1
+print(f'{len(scenes)} scenes, {len(paired)} used as pairs across {len(mds)} docs' + ('' if bad else ' — all ok'))
 sys.exit(1 if bad else 0)
 PY
 

@@ -6,7 +6,7 @@
 # (tests/results/report.html) you can host locally with no internet:
 #
 #   * Bash validators  (tests/test-*.sh: deps, models, tls, tools, urls,
-#                        doc-links + secrets — offline doc-integrity/leak guards)
+#                        doc-links + doc-art + secrets — offline doc-integrity/leak guards)
 #   * Playwright        (server-api, web-ui, install-icons, ui-exercise)
 #   * Community services e2e   (when an Ark is reachable — VALARK_URL)
 #   * Fresh-VM setup tests     (opt-in: VALARK_RUN_VM=1 — Ubuntu 22/24/26)
@@ -47,7 +47,7 @@ echo "=================================================================="
 
 # --- 1. Bash validators -------------------------------------------------------
 echo -e "\n${BOLD}Bash validators${NC}"
-results_init "bash-validators" "Bash validators (deps / models / tls / tools / urls / doc-links / secrets)"
+results_init "bash-validators" "Bash validators (deps / models / tls / tools / urls / doc-links / doc-art / secrets)"
 for test_file in "${TEST_DIR}"/test-*.sh; do
     [ -f "$test_file" ] || continue
     name="$(basename "$test_file" .sh | sed 's/test-//')"

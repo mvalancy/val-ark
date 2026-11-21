@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/popup/tools-dark.svg">
+  <img src="img/popup/tools-light.svg" width="100%" alt="Pop-up book scene: A toolbox for every job. Dev tools, AI runtimes, creative suites and media, mirrored for each platform.">
+</picture>
+
 # Val Ark - Tools Catalog (47 Tools)
 
 [Back to Docs](README.md) | [Back to Project Root](../README.md)

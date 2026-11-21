@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/popup/librarian-dark.svg">
+  <img src="img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Diversity first, then small and valuable, then fill, then trade up.">
+</picture>
+
 # Librarian — scalable disk-fill, curation & self-healing
 
 ↑ [Docs](README.md) · [Repo root](../README.md)

@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../docs/img/popup/tests-dark.svg">
+  <img src="../docs/img/popup/tests-light.svg" width="100%" alt="Pop-up book scene: Proving it works. Validators, browser tests and fresh-VM installs, in one offline report.">
+</picture>
+
 # Val Ark — Test Library
 
 One command runs every suite and produces a single **self-contained, offline HTML

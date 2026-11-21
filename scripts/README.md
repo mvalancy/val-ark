@@ -72,6 +72,7 @@ mount one shared mirror — see [Platforms](../docs/PLATFORMS.md).
 | `release.sh` | Tag a release from the `VERSION` file (`./release.sh [--push]`; unprefixed tags, e.g. `0.1.10`) |
 | `screenshots.sh` | Capture web/terminal screenshots for docs |
 | `optimize-images.py` | Compress/resize web-ui screenshots and logos |
+| `docs/popup_art.py` | Generate the animated pop-up-book chapter art in `docs/img/popup/` (`--check` for CI) |
 | `uninstall.sh` | Remove Val Ark config (leaves models and tools intact) |
 
 Shared library under `lib/` — sourced/required building blocks, not entry points

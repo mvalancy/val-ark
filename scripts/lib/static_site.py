@@ -43,7 +43,7 @@ directories, and every directory that is not a section (state/, private/, the re
 Writes are temp + rename (no chmod: network shares refuse it) and unchanged files are not
 rewritten. Exit 0 ok, 1 root missing or output unwritable, 64 usage.
 """
-import argparse, fnmatch, hashlib, heapq, html, json, lzma, os, re, shutil, struct, subprocess, sys, time, urllib.parse
+import argparse, fnmatch, hashlib, heapq, html, json, lzma, os, re, shutil, struct, subprocess, sys, threading, time, urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -156,7 +156,8 @@ class JSLit:
             elif t.startswith('//', self.p):
                 self.p = t.find('\n', self.p) + 1 or len(t)
             elif t.startswith('/*', self.p):
-                self.p = t.find('*/', self.p) + 2
+                end = t.find('*/', self.p + 2)
+                self.p = len(t) if end < 0 else end + 2
             else:
                 break
 
@@ -316,10 +317,68 @@ class Curated:
 
 
 # --------------------------------------------------------------------------- ZIM metadata
+ZIM_BLOB_MAX = 2_000_000          # a metadata blob (an illustration is a few KB)
+ZIM_DECODED_MAX = 4_000_000       # decoded bytes kept from one compressed cluster
+ZIM_COMPRESSED_MAX = 8_388_608    # compressed bytes read from one cluster
+
+
+def decode_cluster(rd, pos, comp):
+    """The first ZIM_DECODED_MAX bytes of a compressed cluster (4 = xz via lzma, 5 = zstd via the
+    zstd CLI when present, since the stdlib has no zstd before 3.14); None when unsupported."""
+    if comp == 4:
+        dec, data, read = lzma.LZMADecompressor(), b'', 0
+        while len(data) < ZIM_DECODED_MAX and read < ZIM_COMPRESSED_MAX and not dec.eof:
+            chunk = rd(pos + read, 65536)
+            if not chunk:
+                break
+            read += len(chunk)
+            data += dec.decompress(chunk, max_length=ZIM_DECODED_MAX - len(data))
+            while not dec.eof and not dec.needs_input and len(data) < ZIM_DECODED_MAX:
+                data += dec.decompress(b'', max_length=ZIM_DECODED_MAX - len(data))
+        return data
+    if comp == 5 and shutil.which('zstd'):
+        p = subprocess.Popen(['zstd', '-dcq'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL)
+        stop = threading.Event()
+
+        def feed():
+            sent = 0
+            try:
+                while sent < ZIM_COMPRESSED_MAX and not stop.is_set():
+                    chunk = rd(pos + sent, 65536)
+                    if not chunk:
+                        break
+                    p.stdin.write(chunk)
+                    sent += len(chunk)
+            except (OSError, ValueError):
+                pass
+            finally:
+                try:
+                    p.stdin.close()
+                except OSError:
+                    pass
+        t = threading.Thread(target=feed, daemon=True)
+        t.start()
+        data = b''
+        try:
+            while len(data) < ZIM_DECODED_MAX:
+                chunk = p.stdout.read1(65536) if hasattr(p.stdout, 'read1') else p.stdout.read(65536)
+                if not chunk:
+                    break
+                data += chunk
+        finally:
+            stop.set()
+            p.kill()
+            p.wait()
+            t.join(5)
+        return data[:ZIM_DECODED_MAX]
+    return None
+
+
 def zim_meta(path, want=('Title', 'Description', 'Language', 'Creator', 'Illustration_48x48@1')):
     """Metadata entries of a ZIM file, read with a handful of small random reads: header, a binary
-    search of the URL pointer list for each M/<name>, then the blob from its cluster (uncompressed
-    or xz; zstd clusters are skipped, since the stdlib has no zstd before Python 3.14)."""
+    search of the URL pointer list for each M/<name>, then the blob from its cluster (uncompressed,
+    or decoded once per cluster with a size cap: see decode_cluster)."""
     out = {}
     try:
         f = open(path, 'rb')
@@ -347,6 +406,8 @@ def zim_meta(path, want=('Title', 'Description', 'Language', 'Creator', 'Illustr
                 url = b[16:].split(b'\0', 1)[0].decode('utf-8', 'replace')
                 return ns, url, (cl, blob)
 
+            decoded = {}            # cluster number -> decoded bytes (decode each cluster once)
+
             def blob(cl, n):
                 if cl >= clusters:
                     return None
@@ -354,50 +415,24 @@ def zim_meta(path, want=('Title', 'Description', 'Language', 'Creator', 'Illustr
                 info = rd(off, 1)[0]
                 comp, ext = info & 0x0F, bool(info & 0x10)
                 size = 8 if ext else 4
-                fmt = '<Q' if ext else '<I'
+                fmt = '<' + ('Q' if ext else 'I') * 2
                 if comp in (0, 1):
-                    first = struct.unpack(fmt, rd(off + 1, size))[0]
+                    first = struct.unpack(fmt[:2], rd(off + 1, size))[0]
                     if n + 1 >= first // size:
                         return None
-                    a, b = struct.unpack('<' + fmt[1] * 2, rd(off + 1 + size * n, size * 2))
-                    if b - a > 2_000_000:
+                    a, b = struct.unpack(fmt, rd(off + 1 + size * n, size * 2))
+                    if not 0 <= a <= b or b - a > ZIM_BLOB_MAX:
                         return None
                     return rd(off + 1 + a, b - a)
-                if comp == 5 and shutil.which('zstd'):
-                    # stdlib has no zstd before 3.14: the zstd CLI decodes a growing prefix
-                    want = 262144
-                    while want <= 8_388_608:
-                        raw = rd(off + 1, want)
-                        r = subprocess.run(['zstd', '-dcq'], input=raw, capture_output=True, timeout=30)
-                        data = r.stdout
-                        if len(data) >= size:
-                            first = struct.unpack(fmt, data[:size])[0]
-                            if len(data) >= first and len(data) >= size * (n + 2):
-                                a, b = struct.unpack('<' + fmt[1] * 2, data[size * n:size * n + size * 2])
-                                if len(data) >= b:
-                                    return data[a:b]
-                        if len(raw) < want:
-                            break
-                        want *= 4
+                if cl not in decoded:
+                    decoded[cl] = decode_cluster(rd, off + 1, comp)
+                data = decoded[cl]
+                if data is None or len(data) < size * (n + 2):
                     return None
-                if comp == 4:
-                    dec = lzma.LZMADecompressor()
-                    data, pos = b'', off + 1
-                    while len(data) < 4_000_000:
-                        chunk = rd(pos, 65536)
-                        if not chunk:
-                            break
-                        pos += len(chunk)
-                        data += dec.decompress(chunk)
-                        if len(data) >= size:
-                            first = struct.unpack(fmt, data[:size])[0]
-                            if len(data) >= first:
-                                a, b = struct.unpack('<' + fmt[1] * 2, data[size * n:size * n + size * 2])
-                                if len(data) >= b:
-                                    return data[a:b]
-                        if dec.eof:
-                            break
-                return None
+                a, b = struct.unpack(fmt, data[size * n:size * n + size * 2])
+                if not 0 <= a <= b <= len(data) or b - a > ZIM_BLOB_MAX:
+                    return None
+                return data[a:b]
 
             for name in want:
                 lo, hi = 0, entries - 1
@@ -469,6 +504,28 @@ def zim_group(z):
     if z['proj'].endswith(('stackexchange.com', 'stackoverflow.com', 'superuser.com', 'serverfault.com', 'askubuntu.com')):
         return 'stack_exchange'
     return 'other' if '.' in z['proj'] else z['proj']
+
+
+ZIM_ICON = re.compile(r'thumbs/z-[0-9a-f]{16}\.png')
+
+
+def clean_zim_cache(raw):
+    """zim-meta.json as loaded -> only well-formed entries: {'<file>|<size>': {title, description,
+    creator: str (<= 400 chars), icon: 'thumbs/z-<hex16>.png'}}; anything else is dropped."""
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    for k, v in raw.items():
+        if not isinstance(k, str) or '|' not in k or not isinstance(v, dict):
+            continue
+        e = {}
+        for f in ('title', 'description', 'creator'):
+            if isinstance(v.get(f), str):
+                e[f] = v[f][:400]
+        if isinstance(v.get('icon'), str) and ZIM_ICON.fullmatch(v['icon']):
+            e['icon'] = v['icon']
+        out[k] = e
+    return out
 
 
 def kiwix_counts(root):
@@ -549,6 +606,21 @@ def read_small(path, limit=65536):
         return None
 
 
+def image_kind(data, allow_svg=False):
+    """'.png' / '.jpg' / '.gif' / '.webp' (/ '.svg') from the bytes themselves, else None."""
+    if data[:8] == b'\x89PNG\r\n\x1a\n':
+        return '.png'
+    if data[:3] == b'\xff\xd8\xff':
+        return '.jpg'
+    if data[:6] in (b'GIF87a', b'GIF89a'):
+        return '.gif'
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return '.webp'
+    if allow_svg and b'<svg' in data[:2048]:
+        return '.svg'
+    return None
+
+
 # --------------------------------------------------------------------------- generated badges
 PALETTE = ['#b5562f', '#2f6f6a', '#5b4fb5', '#a0407a', '#3d7a2f', '#9a6a12', '#2f5f9a', '#7a3d2f']
 GLYPHS = {'text-generation': 'Aa', 'image-text-to-text': '👁', 'text-to-image': '🖼', 'image-to-image': '🖼',
@@ -606,7 +678,7 @@ class Entry:
         self.top = []           # min-heap of (size, path inside the section)
         self.readme = self.license = None
         self.names = set()      # small set of file names inside (README image lookup)
-        self.platforms = {}     # tools: platform -> bytes
+        self.platforms = {}     # tools: platform -> {real top-level name: (bytes, is_dir)}
 
 
 class Section:
@@ -648,7 +720,10 @@ class Section:
         e.bytes += size; e.files += 1
         e.mtime = max(e.mtime, mtime)
         if plat:
-            e.platforms[plat] = e.platforms.get(plat, 0) + size
+            top = rel.split('/')[1]
+            names = e.platforms.setdefault(plat, {})
+            b, isdir = names.get(top, (0, False))
+            names[top] = (b + size, isdir or rel.count('/') >= 2)
         if e.is_dir:
             if inner in README:
                 e.readme = inner
@@ -722,10 +797,10 @@ def read_listing(path, sections, root, max_files, pending):
 
 # --------------------------------------------------------------------------- page chrome
 CSS = """
-:root{--bg:#f6f0e4;--paper:#fffaf0;--ink:#2b2622;--muted:#6f655b;--line:#e3d7c3;--accent:#b5562f;
+:root{--bg:#f6f0e4;--paper:#fffaf0;--ink:#2b2622;--muted:#6f655b;--line:#e3d7c3;--accent:#b5562f;--fill:#a8481f;--fill2:#2f6f6a;
 --accent2:#2f6f6a;--chip:#efe4cf;--shadow:0 1px 0 #e9dcc6,0 8px 24px -12px rgba(80,50,20,.35);color-scheme:light}
 @media (prefers-color-scheme:dark){:root{--bg:#1c1a17;--paper:#262320;--ink:#efe7da;--muted:#a89d8f;
---line:#3a352f;--accent:#e58a5c;--accent2:#6cc0b8;--chip:#332e28;--shadow:0 1px 0 #2f2b26,0 10px 28px -14px #000;color-scheme:dark}}
+--line:#3a352f;--accent:#e58a5c;--fill:#a8481f;--fill2:#2a625e;--accent2:#6cc0b8;--chip:#332e28;--shadow:0 1px 0 #2f2b26,0 10px 28px -14px #000;color-scheme:dark}}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 a{color:var(--accent2)}a:hover{color:var(--accent)}code{font-size:.92em;background:var(--chip);padding:1px 5px;border-radius:6px}
@@ -733,7 +808,7 @@ a{color:var(--accent2)}a:hover{color:var(--accent)}code{font-size:.92em;backgrou
 header.top{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:baseline;padding:18px 0 8px}
 header.top .brand{font:700 20px/1.2 Georgia,"Iowan Old Style",serif;text-decoration:none;color:var(--ink)}
 nav.sections{display:flex;flex-wrap:wrap;gap:6px}nav.sections a{padding:3px 10px;border-radius:99px;background:var(--chip);
-text-decoration:none;color:var(--ink);font-size:14px}nav.sections a[aria-current]{background:var(--accent);color:#fff}
+text-decoration:none;color:var(--ink);font-size:14px}nav.sections a[aria-current]{background:var(--fill);color:#fff}
 .hero{background:var(--paper);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden;margin:10px 0 22px}
 .hero img{display:block;width:100%;height:auto}.hero .txt{padding:14px 22px 20px}
 h1{font:700 clamp(26px,4vw,38px)/1.15 Georgia,"Iowan Old Style",serif;margin:4px 0 6px}
@@ -758,7 +833,7 @@ box-shadow:var(--shadow);text-decoration:none;color:var(--ink);transition:transf
 .item .sub{font-size:12px;color:var(--muted);margin:1px 0 4px;word-break:break-word}
 .item p{margin:0;font-size:14px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .chips{margin-top:6px}.chip{display:inline-block;font-size:12px;padding:1px 8px;border-radius:99px;background:var(--chip);margin:2px 4px 0 0;color:var(--ink)}
-.chip.q{background:var(--accent);color:#fff}.chip.ok{background:var(--accent2);color:#fff}
+.chip.q{background:var(--fill);color:#fff}.chip.ok{background:var(--fill2);color:#fff}
 .group{grid-column:1/-1;font:700 15px Georgia,serif;color:var(--muted);margin:10px 0 -4px;text-transform:none}
 .more{margin:14px 0;padding:10px 14px;border:1px dashed var(--line);border-radius:12px}
 footer{margin-top:36px;font-size:13px;color:var(--muted)}
@@ -811,7 +886,7 @@ class Builder:
         self.zim_cache_path = os.path.join(self.browse, 'zim-meta.json')
         try:
             with open(self.zim_cache_path, encoding='utf-8') as f:
-                self.zim_cache = json.load(f)
+                self.zim_cache = clean_zim_cache(json.load(f))
         except (OSError, ValueError):
             self.zim_cache = {}
         self.zim_seen = {}
@@ -824,21 +899,28 @@ class Builder:
             self.thumbs_have.add(name)
         return 'thumbs/' + name
 
-    def thumb_file(self, src, max_bytes=1_048_576):
-        ext = os.path.splitext(src)[1].lower()
-        if ext not in IMG_EXT:
+    def thumb_file(self, src, max_bytes=1_048_576, within=None, allow_svg=True):
+        """Copy one picture into browse/thumbs/. `within`: the file must really live under that
+        directory (realpath, so a symlink in a mirrored repo cannot pull in an arbitrary file).
+        The bytes must look like PNG / JPEG / GIF / WebP (SVG only when allow_svg: our own web UI
+        logos, never an upstream repo's SVG, which could carry script)."""
+        if os.path.splitext(src)[1].lower() not in IMG_EXT:
             return None
-        name = sha(src, 16) + ext
-        if name in self.thumbs_have:
-            self.thumbs_used.add(name)
-            return 'thumbs/' + name
         try:
+            if within is not None:
+                real, base = os.path.realpath(src), os.path.realpath(within)
+                if not real.startswith(base.rstrip(os.sep) + os.sep):
+                    return None
             if os.path.getsize(src) > max_bytes:
                 return None
             with open(src, 'rb') as f:
-                return self.thumb_bytes(name, f.read())
+                data = f.read(max_bytes + 1)
         except OSError:
             return None
+        ext = image_kind(data, allow_svg)
+        if not ext:
+            return None
+        return self.thumb_bytes(sha(src, 16) + ext, data)
 
     def badge(self, label, key, sub=''):
         color = PALETTE[int(sha(key, 4), 16) % len(PALETTE)]
@@ -892,14 +974,14 @@ class Builder:
             elif re.match(r'^[a-z]+:', u) or u.startswith('/'):
                 continue
             u = os.path.normpath(urllib.parse.unquote(u)).replace(os.sep, '/')
-            if u.startswith('..') or not u.lower().endswith(IMG_EXT):
+            if u.startswith('..') or not u.lower().endswith(IMG_EXT) or u.lower().endswith('.svg'):
                 continue
             # with a listing, only use images we know are present (no blind stat over a share)
             rel_in_section = f'{e.key}/{u}'
             known = any(n == u for n in e.names) if e.names else False
             if not known and self.a.listing and s.name not in self.a.walk:
                 continue
-            t = self.thumb_file(os.path.join(s.path, rel_in_section))
+            t = self.thumb_file(os.path.join(s.path, rel_in_section), within=abs_dir, allow_svg=False)
             if t:
                 return t
         return None
@@ -934,7 +1016,7 @@ class Builder:
                     info['extra'] += '<h3>Usage tips</h3><ul>' + ''.join(f'<li>{esc(t)}</li>' for t in tips[:8]) + '</ul>'
                 logo = family.get('logo')
                 if logo:
-                    info['icon'] = self.thumb_file(os.path.join(self.a.web_ui, logo))
+                    info['icon'] = self.thumb_file(os.path.join(self.a.web_ui, logo), within=self.a.web_ui)
             else:
                 info['sub'] = parts[0]
 
@@ -968,11 +1050,11 @@ class Builder:
                 info['facts'].append(('Website', plain_url(meta['website'])))
             logo = t.get('logo')
             if logo:
-                info['icon'] = self.thumb_file(os.path.join(self.a.web_ui, logo))
+                info['icon'] = self.thumb_file(os.path.join(self.a.web_ui, logo), within=self.a.web_ui)
             if not info['icon'] and t.get('icon'):
                 info['icon'] = self.badge_color(t['icon'], t.get('iconBg'))
             for shot in (det.get('screenshots') or t.get('screenshots') or [])[:4]:
-                p = self.thumb_file(os.path.join(self.a.web_ui, shot), max_bytes=2_500_000)
+                p = self.thumb_file(os.path.join(self.a.web_ui, shot), max_bytes=2_500_000, within=self.a.web_ui)
                 if p:
                     info['shots'].append(p)
         info['group'] = ''
@@ -1065,8 +1147,11 @@ class Builder:
     def zim_info(self, path, fn, size):
         key = f'{fn}|{size}'
         if key in self.zim_cache:
-            self.zim_seen[key] = self.zim_cache[key]
-            return self.zim_cache[key]
+            info = dict(self.zim_cache[key])
+            if info.get('icon') and info['icon'].split('/', 1)[1] not in self.thumbs_have:
+                info.pop('icon')        # the picture was deleted: show the badge, re-read next time
+            self.zim_seen[key] = info
+            return info
         if self.zim_left <= 0:
             return {}
         self.zim_left -= 1
@@ -1092,17 +1177,24 @@ class Builder:
         return os.path.relpath(target, from_dir)
 
     @staticmethod
-    def entry_path(s, e):
-        """The entry's own folder / file (a tool: its biggest platform folder)."""
+    def plat_main(names):
+        """A platform's main item for a tool: its folder if it has one, else its biggest file."""
+        name, (_, isdir) = max(names.items(), key=lambda kv: (kv[1][1], kv[1][0]))
+        return name, isdir
+
+    def entry_path(self, s, e):
+        """(path, is_dir) of the entry's own folder / file; a tool: the real folder or archive in
+        its biggest platform folder (tools/<platform>/blender.tar.zst, not a made-up tools/x/blender)."""
         if e.platforms:
-            plat = max(e.platforms.items(), key=lambda kv: kv[1])[0]
-            return os.path.join(s.path, plat, e.key)
-        return os.path.join(s.path, e.key)
+            plat = max(e.platforms, key=lambda p: sum(b for b, _ in e.platforms[p].values()))
+            name, isdir = self.plat_main(e.platforms[plat])
+            return os.path.join(s.path, plat, name), isdir
+        return os.path.join(s.path, e.key), e.is_dir
 
     def detail_page(self, s, e, info, shown, item_name, stamp):
         d = self.items_dir
-        abs_t = self.entry_path(s, e)
-        tgt = href(self.rel(abs_t, d) + ('/' if e.is_dir else ''))
+        abs_t, t_dir = self.entry_path(s, e)
+        tgt = href(self.rel(abs_t, d) + ('/' if t_dir else ''))
         long = info['long'] or info['desc']
         paras = ''.join(f'<p>{esc(p)}</p>' for p in long.split('\n\n') if p.strip()) or \
             '<p class="muted">No description was published with this item.</p>'
@@ -1112,20 +1204,24 @@ class Builder:
         if e.pending_files:
             facts.append(('Still queued', queued_text(e.pending_files, e.pending_bytes)))
         facts += info['facts']
-        facts.append(('Location', f'{os.path.relpath(s.path, self.root)}/{e.key}'.lstrip('./')))
+        facts.append(('Location', os.path.relpath(abs_t, self.root).replace(os.sep, '/')))
         facts_html = '<dl class="facts">' + ''.join(f'<dt>{esc(k)}</dt><dd>{esc(v)}</dd>' for k, v in facts) + '</dl>'
         links = []
         if e.files:
-            links.append(f'<a href="{tgt}">{"Open the folder" if e.is_dir else "Open the file"}</a>')
+            links.append(f'<a href="{tgt}">{"Open the folder" if t_dir else "Open the file"}</a>')
         if e.readme and not e.platforms:
             links.append(f'<a href="{href(self.rel(os.path.join(abs_t, e.readme), d))}">Read the full README</a>')
         if e.license and not e.platforms:
             links.append(f'<a href="{href(self.rel(os.path.join(abs_t, e.license), d))}">Licence file</a>')
         plat = ''
         if e.platforms:
-            plat = '<p class="plat">' + ''.join(
-                f'<a href="{href(self.rel(os.path.join(s.path, p, e.key), d))}/">{esc(PLATFORMS.get(p, p))}</a>'
-                f'<span class="muted">{human(b)}</span> ' for p, b in sorted(e.platforms.items())) + '</p>'
+            parts = []
+            for p_, names in sorted(e.platforms.items()):
+                for name, (b, isdir) in sorted(names.items()):
+                    label = PLATFORMS.get(p_, p_) + ('' if len(names) == 1 else f' · {name}')
+                    parts.append(f'<a href="{href(self.rel(os.path.join(s.path, p_, name), d))}{"/" if isdir else ""}">'
+                                 f'{esc(label)}</a><span class="muted">{human(b)}</span> ')
+            plat = '<h3>Downloads by platform</h3><p class="plat">' + ''.join(parts) + '</p>'
         shots = ''
         if info['shots']:
             shots = '<h3>Screenshots</h3><div class="shots">' + ''.join(
@@ -1147,8 +1243,8 @@ class Builder:
                 + (f'<div class="panel">{info["extra"]}</div>' if info['extra'] else '')
                 + (f'<div class="panel">{shots}</div>' if shots else '')
                 + (f'<div class="panel">{files}</div>' if files else '')
-                + f'<p><a href="../{s.name}.html">← All {esc(s.title.lower())}</a></p>'
-                f'<footer>Static snapshot generated {esc(stamp)}.</footer>')
+                + f'<p><a href="../{s.name}.html">← All {esc(s.title)}</a></p>'
+                '<footer>Part of the static catalog; the generation time is on the front page.</footer>')
         self.items_used.add(item_name)
         write_atomic(os.path.join(d, item_name), page(f'{info["title"]} · {s.title}', body, self.nav('../../', s.name, shown)),
                      known=self.items_have)
@@ -1210,7 +1306,8 @@ class Builder:
                     self.detail_page(s, e, info, shown, item_name, stamp)
                     link = f'item/{item_name}'
                 else:
-                    link = self.rel(self.entry_path(s, e), self.browse) + ('/' if e.is_dir else '')
+                    t_path, t_dir = self.entry_path(s, e)
+                    link = self.rel(t_path, self.browse) + ('/' if t_dir else '')
                 chips = []
                 if e.files:
                     chips.append(f'<span class="chip">{human(e.bytes)}</span>')
@@ -1245,10 +1342,11 @@ class Builder:
                     f'<h1>{esc(s.title)}</h1><p class="muted">{esc(s.blurb)}</p>'
                     f'<p><b>{len(entries):,}</b> entries · <b>{human(sb)}</b> in {sf:,} files{queued} · '
                     f'<a href="{href(folder)}">open the folder</a></p></div></section>{trunc}'
-                    f'<div class="tools"><input id="q" type="search" placeholder="Search {esc(s.title.lower())}…" '
+                    f'<div class="tools"><input id="q" type="search" placeholder="Search {esc(s.title)}…" '
                     f'aria-label="Search" hidden>{gsel}</div>'
                     f'<div class="grid">{"".join(cards)}</div>{more}'
-                    f'<footer>Static snapshot generated {esc(stamp)}. Click a card for details, files and links.</footer>'
+                    '<footer>Click a card for details, files and links. The generation time is on the '
+                    '<a href="../index.html">front page</a>.</footer>'
                     f'{FILTER_JS}')
             write_atomic(page_path, page(f'{s.title} · {a.title}', body, self.nav('../', s.name, shown)))
 
@@ -1309,6 +1407,17 @@ class Builder:
                 os.remove(os.path.join(self.thumbs_dir, name))
             except OSError:
                 pass
+        # temp files of an interrupted run (write_atomic: <name>.tmp-<pid>), older than an hour
+        ours = re.compile(r'^(index\.html|summary\.json|zim-meta\.json|[a-z-]+\.html)\.tmp-\d+$')
+        for d in (self.items_dir, self.thumbs_dir, self.browse, self.out):
+            for name in listdir(d):
+                if re.search(r'\.tmp-\d+$', name) and (d in (self.items_dir, self.thumbs_dir) or ours.match(name)):
+                    path = os.path.join(d, name)
+                    try:
+                        if time.time() - os.path.getmtime(path) > 3600:
+                            os.remove(path)
+                    except OSError:
+                        pass
         return len(scards), tot
 
 

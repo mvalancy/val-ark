@@ -230,7 +230,7 @@ ok = ok and c[\"excerpt\"].startswith(\"ChatTTS is a text-to-speech\")
 sys.exit(0 if ok else 1)"'
 mkdir -p "$T/lb/content/lastbook/maps" "$T/lb/content/lastbook/packs"; echo a > "$T/lb/content/lastbook/maps/m.pmtiles"; echo b > "$T/lb/content/lastbook/packs/p.zip"
 gen --root "$T/lb" >/dev/null 2>&1
-check "Lastbook is one card" '[ "$(grep -c "class=\"item\"" "$T/lb/browse/content.html")" = 1 ]'
+check "Lastbook is one card" '[ "$(grep -o "class=\"item\"" "$T/lb/browse/content.html" | wc -l)" = 1 ]'
 
 # datasets: depth by path prefix (open-data/<topic>/huggingface/<org>/<repo> is one entry)
 printf 'datasets/open-data/weather/huggingface/org1/ds1/data/a.parquet\t10\t\ndatasets/open-data/weather/noaa/ghcnd/x.csv\t5\t\ndatasets/robotics/lerobot/set1/d/e.bin\t7\t\n' > "$T/ds.tsv"
@@ -244,6 +244,49 @@ check "datasets: robotics three levels" 'grep -q "<h4>set1</h4><div class=\"sub\
 mkdir -p "$A/sources/github/own"; echo b > "$A/sources/github/own/repo.bundle"
 gen --root "$A" --out "$T/src" >/dev/null 2>&1
 check "git bundles listed one per repo" 'grep -q "<h4>repo</h4><div class=\"sub\">own</div>" "$T/src/browse/sources.html"'
+
+# review #261: real tool paths, image containment + magic bytes, malformed cache, JS reader, stamps, temp files
+R="$T/r"; mkdir -p "$R/tools/linux-x86_64" "$R/tools/sources/maddy-0.9.7-src" "$R/models/huggingface/o/m/assets"
+echo z > "$R/tools/linux-x86_64/blender.tar.zst"; echo n > "$R/tools/linux-x86_64/blender.tar.zst.README.txt"
+echo s > "$R/tools/sources/maddy-0.9.7-src/main.go"
+printf '\x89PNG\r\n\x1a\nOUTSIDE-SECRET' > "$T/secret.png"
+ln -s "$T/secret.png" "$R/models/huggingface/o/m/assets/evil.png"
+echo 'not an image' > "$R/models/huggingface/o/m/assets/fake.png"
+echo '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' > "$R/models/huggingface/o/m/assets/x.svg"
+printf -- '---\nlicense: mit\n---\n![a](assets/evil.png)\n![b](assets/fake.png)\n![c](assets/x.svg)\n\nA model whose card points at a symlinked picture outside its repo, a fake PNG and an SVG.\n' > "$R/models/huggingface/o/m/README.md"
+gen --root "$R" >/dev/null 2>&1
+check "tools: archive + versioned -src dir fold into their tools" '[ "$(grep -o "class=\"item\"" "$R/browse/tools.html" | wc -l)" = 2 ]'
+check "tools: links go to the real archive / folder" 'grep -rq "href=\"../../tools/linux-x86_64/blender.tar.zst\"" "$R/browse/item" && grep -rq "href=\"../../tools/sources/maddy-0.9.7-src/\"" "$R/browse/item"'
+linkcheck "$R" > "$T/links3.out" 2>&1
+check "tools: every platform / card link resolves" 'grep -qx ok "$T/links3.out" || { cat "$T/links3.out" >&2; false; }'
+gen --root "$R" --out "$T/rnd" --max-details 0 >/dev/null 2>&1
+linkcheck "$T/rnd" > "$T/links4.out" 2>&1
+check "tools: card links resolve without detail pages" 'grep -qx ok "$T/links4.out" || { cat "$T/links4.out" >&2; false; }'
+check "images: a symlink out of the repo is never copied" '! for f in "$R"/browse/thumbs/*; do cmp -s "$f" "$T/secret.png" && echo leaked; done | grep -q leaked'
+check "images: non-image bytes and README SVGs are refused (badge instead)" '! ls "$R/browse/thumbs"/*.svg 2>/dev/null | xargs -r grep -l "<script>" | grep -q . && grep -q "thumbs/b-" "$R/browse/models.html"'
+printf '{"a.zim|1": "not a dict", "b.zim|2": {"title": "Ok", "icon": "../../../etc/passwd"}, "c": 5}\n' > "$R/browse/zim-meta.json"
+gen --root "$R" > "$T/mal.out" 2>&1; rc=$?
+check "malformed zim-meta.json: no crash, bad entries dropped" '[ "$rc" -eq 0 ] && ! grep -q "passwd" "$R/browse/zim-meta.json"'
+printf '[1, 2]\n' > "$R/browse/zim-meta.json"; gen --root "$R" >/dev/null 2>&1; rc=$?
+check "zim-meta.json that is not an object: no crash" '[ "$rc" -eq 0 ]'
+check "clean_zim_cache keeps only well-formed entries" 'python3 -I -c "
+import importlib.util,sys
+s=importlib.util.spec_from_file_location(\"ss\",\"$PY\");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+c=m.clean_zim_cache({\"a|1\":{\"title\":\"T\",\"icon\":\"thumbs/z-0123456789abcdef.png\"},\"b|2\":{\"icon\":\"x/../y\"},\"c|3\":[],7:{}})
+sys.exit(0 if c=={\"a|1\":{\"title\":\"T\",\"icon\":\"thumbs/z-0123456789abcdef.png\"},\"b|2\":{}} else 1)"'
+mkdir -p "$T/badui"; printf 'const TOOLS = [ { id: \x27x\x27 /* never closed\n' > "$T/badui/index.html"
+check "JS reader: an unterminated comment does not hang" 'timeout 10 python3 -I -c "
+import importlib.util,sys
+s=importlib.util.spec_from_file_location(\"ss\",\"$PY\");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+m.Curated(\"$T/badui\",\"$T/none\")"'
+m1=$(stat -c %Y.%i "$R/browse/models.html"); d1=$(stat -c %Y.%i "$(ls "$R"/browse/item/models-*.html | head -1)"); sleep 1
+python3 -I "$PY" --web-ui "$W" --now 1800000000 --root "$R" >/dev/null 2>&1
+check "a new generation time rewrites only the front page" '[ "$(stat -c %Y.%i "$R/browse/models.html")" = "$m1" ] && [ "$(stat -c %Y.%i "$(ls "$R"/browse/item/models-*.html | head -1)")" = "$d1" ] && grep -q "2027-01-15" "$R/index.html"'
+: > "$R/browse/item/models-x.html.tmp-4242"; touch -d "2 hours ago" "$R/browse/item/models-x.html.tmp-4242"
+: > "$R/browse/item/fresh.html.tmp-4243"; : > "$R/keep.tmp-4244"
+gen --root "$R" >/dev/null 2>&1
+check "old temp files of an interrupted run are removed, fresh / foreign ones kept" '[ ! -e "$R/browse/item/models-x.html.tmp-4242" ] && [ -e "$R/browse/item/fresh.html.tmp-4243" ] && [ -e "$R/keep.tmp-4244" ]'
+check "titles keep their case (search placeholder, back link)" 'grep -q "Search AI models…" "$R/browse/models.html" && grep -rq "All AI models" "$R/browse/item"'
 
 # exit codes
 python3 -I "$PY" --root "$T/nope" >/dev/null 2>&1; rc=$?

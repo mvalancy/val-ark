@@ -269,8 +269,8 @@ Every card has a picture and a description, from the best source available:
 | Section | Picture | Description |
 |---------|---------|-------------|
 | Tools & apps (one card per tool, all platforms) | the web UI's logo; screenshots on the detail page | the web UI's `TOOLS` / `TOOL_META`: description, overview, features, CLI, maker, licence |
-| Library (ZIM) | the ZIM's own 48x48 illustration | the ZIM's own title + description (read from its header and directory with a few small reads; uncompressed, xz and, with the `zstd` CLI, zstd clusters), the web UI's `CONTENT_LIBRARY` overview, article counts from a cached Kiwix catalog |
-| AI models, datasets | the first image the model / dataset card shows from its own repo | the card's first paragraphs, licence and pipeline tag; curated `MODEL_FAMILIES` text for the classic `llm/` folders |
+| Library (ZIM) | the ZIM's own 48x48 illustration | the ZIM's own title + description (read from its header and directory with a few small reads; uncompressed, xz and, with the `zstd` CLI, zstd clusters, each decoded once and capped at 4 MB), the web UI's `CONTENT_LIBRARY` overview, article counts from a cached Kiwix catalog |
+| AI models, datasets | the first image the model / dataset card shows from its own repo (a real PNG / JPEG / GIF / WebP file inside the repo: symlinks out of it and upstream SVGs are refused) | the card's first paragraphs, licence and pipeline tag; curated `MODEL_FAMILIES` text for the classic `llm/` folders |
 | Installers, developer stack, sources | generated badge | `data/installers.tsv`, `data/dev-stack.tsv`, `data/source-repos.tsv` notes |
 
 Anything without a picture gets a generated badge (initials or a modality glyph). Pictures are copied
@@ -281,8 +281,19 @@ Only section directories are scanned (`state/`, `private/` and the repo's own co
 `--max-rows` (3000 cards per section), `--max-files` (60 files per detail page), `--max-details`
 (8000 detail pages), `--meta-limit` (4000 README reads, 64 KiB each), `--zim-limit` (400 ZIMs
 opened per run; results are cached in `browse/zim-meta.json`, so later runs fill in the rest) and
-`--walk-limit` (the page then says its totals are partial). Pages are written temp + rename,
-unchanged files are not rewritten, and stale detail pages and thumbnails are removed.
+`--walk-limit` (the page then says its totals are partial). Pages are written temp + rename and
+unchanged files are not rewritten: only `index.html` and `summary.json` carry the generation time, so
+a refresh with nothing new touches two files. Stale detail pages, thumbnails and an interrupted run's
+temp files are removed.
+
+**What to share.** The pages sit in `<VALARK_HOME>` (`<DATA_ROOT>/val-ark`), but models live in
+`<DATA_ROOT>/models`, next to it, and the model links climb out to `../models`. Share (or open) the
+whole `<DATA_ROOT>` so those links resolve; a share of `val-ark/` alone shows the model cards but
+their file links break. A single-disk dev box keeps everything in the repo, so nothing climbs out.
+
+**Cost.** `librarian.sh site` walks the section folders (`os.scandir` + one `stat` per file) on every
+refresh. That is quick on a local disk; on a very large tree on a slow disk raise
+`VALARK_STATIC_SITE_HOURS`, or run `static_site.py` yourself with a `--listing`.
 
 A mirror that keeps its own index can skip the walk entirely: `--listing FILE` takes
 `path<TAB>size[<TAB>mtime]` rows (relative to `--root`) for what is present, `--pending FILE` the same

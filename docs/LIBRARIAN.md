@@ -95,9 +95,10 @@ schema. `librarian.sh scout` does it now.
   always come early.** ASR, TTS, voice activity, audio enhancement/classification/generation,
   and object detection (YOLO-class), segmentation, depth, image classification, zero-shot,
   keypoints, image features and OCR. **Any age** (the classics count), real repo size ≤ 6 GB,
-  at least 15 likes, drawn from each task's all-time most-downloaded, most-liked and trending
-  lists, up to 150 per run. Valued 560–700 — inside the curated band, ahead of the other
-  scouted rows. No `safetensors` requirement (many are ONNX / PyTorch / NeMo).
+  at least 15 likes, drawn from each task's all-time most-downloaded and most-liked lists, up
+  to 150 per run. Valued about 600–700, ahead of the other scouted rows. No `safetensors`
+  requirement (many are ONNX / PyTorch / NeMo), and `-base` is kept (here it is a size:
+  `whisper-base`, `vit-base`).
 - **small** (default): any modality, created in the last 180 days, **real repo size ≤ 10 GB**
   (summed from the repo's file list, not guessed), at least 40 likes (10 for a repo owned by
   a well-known lab), up to 200 per run. These are the cheap wins: OCR, embeddings, small
@@ -112,13 +113,15 @@ Both skip gated and private repos (no accepted licence), quantised / converted r
 sweeps only consider repos that publish `safetensors` metadata (their size pre-filter needs
 it); the speech-vision sweep sizes every candidate from its file list instead.
 
-How they rank: speech-vision rows get 560–700, small rows 300–550, frontier 200–400, against
-480–900 for
-the curated rows, and reuse the curated category words (`small-llm`, `tiny-vlm`, `embed`,
-`speech-asr`, …; anything else is `scouted`). They never take a diversity slot and are not
-shielded from eviction as a category's only item, so on a small disk the curated set is
-planned first; in the small-valuable phase a scouted repo can still beat a curated one on
-value **per byte** when it is much smaller. A scout that cannot reach every listing never
+How they rank: speech-vision rows get about 600–700, small rows 300–550, frontier 200–400,
+against 480–900 for the curated rows, and reuse the curated category words (`small-llm`,
+`tiny-vlm`, `embed`, `speech-asr`, `detection`, …; captioners are `captioning`, anything else
+`scouted`). They never take a diversity slot and are not shielded from eviction as a
+category's only item, and the small-valuable phase plans every curated row before any
+scouted one, so on a small disk the curated set comes first; after that, speech and vision
+picks come before the other scouted rows. In the final fill phase rows go by value, so a
+speech-vision pick can come before a lower-valued curated item that was too big for the
+small-valuable phase. A scout that cannot reach every listing never
 replaces a good cache (the ZIM catalog's completeness rule); a failed attempt waits
 `VALARK_SCOUT_RETRY` (1 day) before the next, and the scout's stderr is kept next to the
 cache as `models-scouted.tsv.err`. `VALARK_SCOUT=0` turns it off and ignores the cache.

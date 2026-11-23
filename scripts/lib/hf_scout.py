@@ -18,8 +18,11 @@ Sweeps (default: small,speech-vision):
             vision (detection incl. YOLO, segmentation, depth, classification, zero-shot,
             keypoints, image features, OCR) models: small but important, so ANY age, no
             safetensors requirement, real size <= --sv-max-gb, likes >= --sv-likes, from each
-            tag's all-time most-downloaded, most-liked and trending lists. Valued 560-700, in
-            the curated band (user priority: speech + vision come before other scouted rows).
+            tag's all-time most-downloaded and most-liked lists. Valued ~600-700 (560 + likes,
+            log scale), above every other scouted row. The planner still plans curated rows
+            first in its small-valuable phase, so a scouted row never displaces a curated one
+            there. QUANT's `-base` / `-exp` / EAGLE rules are not applied (in speech/vision
+            `-base` is a model size: whisper-base, vit-base); quantised re-uploads still are.
   small     any modality; created within --days; real size <= --max-gb;
             likes >= --min-likes, or >= --lab-likes for a repo owned by a well-known lab.
   frontier  (opt-in) open-weight releases with >= --frontier-params billion parameters
@@ -60,6 +63,11 @@ LABS = ['moonshotai', 'deepseek-ai', 'Qwen', 'zai-org', 'mistralai', 'google', '
         'nvidia', 'MiniMaxAI', 'tencent', 'baidu', 'stepfun-ai', 'inclusionAI', 'XiaomiMiMo', 'allenai',
         'microsoft', 'ibm-granite', 'CohereLabs', 'ai21labs', 'LiquidAI', 'HuggingFaceTB', 'apple',
         'openbmb', 'stabilityai', 'black-forest-labs']
+# Quantised / converted re-uploads: skipped by every sweep.
+QUANT_CORE = re.compile(r'(?i)gguf|awq|gptq|mlx|bnb|nvfp4|mxfp4|fp4|int4|int8|exl2|-fp8$|4bit|8bit|'
+                        r'abliterat|obliterat|uncensored')
+# Full list for the LLM-shaped sweeps; in speech/vision `-base` is a model SIZE (whisper-base,
+# vit-base), so speech-vision only applies QUANT_CORE.
 QUANT = re.compile(r'(?i)gguf|awq|gptq|mlx|bnb|nvfp4|mxfp4|fp4|int4|int8|exl2|eagle3|-eagle|-fp8$|4bit|8bit|'
                    r'abliterat|obliterat|uncensored|dolphin|venice|-bf16$|-base$|dspark|-mopd|-exp$|-interleave')
 DTYPE_BYTES = {'F64': 8, 'I64': 8, 'F32': 4, 'I32': 4, 'U32': 4, 'BF16': 2, 'F16': 2, 'I16': 2,
@@ -71,8 +79,9 @@ EXPAND = ['gated', 'private', 'likes', 'downloads', 'createdAt', 'pipeline_tag',
 # frontier pick, goes to the one `scouted` bucket.
 CATEGORY = {'text-generation': 'small-llm', 'image-text-to-text': 'tiny-vlm', 'feature-extraction': 'embed',
             'sentence-similarity': 'embed', 'text-ranking': 'reranker',
-            'automatic-speech-recognition': 'speech-asr', 'text-to-speech': 'tts', 'image-to-text': 'ocr-doc',
+            'automatic-speech-recognition': 'speech-asr', 'text-to-speech': 'tts',
             'time-series-forecasting': 'time-series', 'depth-estimation': 'depth',
+            'image-to-text': 'captioning',
             'object-detection': 'detection', 'image-segmentation': 'segmentation',
             'mask-generation': 'segmentation', 'text-to-audio': 'audio-gen',
             'audio-classification': 'audio-clf', 'voice-activity-detection': 'speech-vad',
@@ -83,6 +92,7 @@ SV_TAGS = ['automatic-speech-recognition', 'text-to-speech', 'voice-activity-det
            'zero-shot-image-classification', 'keypoint-detection', 'image-feature-extraction',
            'image-to-text', 'video-classification']
 SWEEPS = {'small', 'speech-vision', 'frontier'}
+PACE = float(os.environ.get('VALARK_SCOUT_PACE', 0.2))   # seconds between repo lookups
 # Repo ids go into a path (scouted/<id>) and a '|' row: only plain Hugging Face ids pass.
 REPO_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$')
 API = os.environ.get('VALARK_HF_API', 'https://huggingface.co').rstrip('/')
@@ -185,7 +195,7 @@ def plan(a):
             pool[m['id']] = m
     if 'speech-vision' in sweeps:
         for tag in SV_TAGS:
-            for sort in ('downloads', 'likes', 'trendingScore'):
+            for sort in ('downloads', 'likes'):   # any age: trending adds little
                 for m in listing(f'{tag} {sort}', pipeline_tag=tag, sort=sort, limit=60):
                     pool[m['id']] = m
     picks = []
@@ -193,7 +203,10 @@ def plan(a):
         repo = m.get('id') or ''
         if not REPO_ID.match(repo) or '..' in repo:
             continue
-        if m.get('gated') or m.get('private') or QUANT.search(repo) or repo.lower() in skip:
+        if m.get('gated') or m.get('private') or QUANT_CORE.search(repo) or repo.lower() in skip:
+            continue
+        sv = 'speech-vision' in sweeps and m.get('pipeline_tag') in SV_TAGS
+        if not sv and QUANT.search(repo):
             continue
         when = created(m)
         if not when:
@@ -202,8 +215,10 @@ def plan(a):
         org = repo.split('/')[0]
         params, est = params_and_bytes(m)
         fresh = when >= now - timedelta(days=a.days)
-        if 'speech-vision' in sweeps and m.get('pipeline_tag') in SV_TAGS and likes >= a.sv_likes:
+        if sv and likes >= a.sv_likes:
             picks.append(('speech-vision', likes, m))
+        elif QUANT.search(repo):
+            continue
         elif 'small' in sweeps and fresh and 0 < est <= a.max_gb * 1e9 and \
                 likes >= (a.lab_likes if org in LABS else a.min_likes):
             picks.append(('small', likes, m))
@@ -218,6 +233,7 @@ def plan(a):
         if count[sweep] >= cap[sweep]:
             continue
         repo = m['id']
+        time.sleep(PACE)   # be gentle: up to ~350 lookups per run
         try:
             size = repo_bytes(repo)
         except Exception as e:

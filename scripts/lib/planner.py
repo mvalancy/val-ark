@@ -246,8 +246,11 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
     p2 = [c for c in pool if c["id"] not in planned_ids and c["bytes"] <= small_max]
     # Scouted rows have their own per-category count, so dense scouted repos cannot use up
     # a curated category's cap and push the curated items there to phase 3.
+    # Curated rows go first, scouted ones (hf_scout.py) in a second pass over what is left:
+    # a tiny, high-value scouted speech/vision repo has ~30x the value per byte of a 2 GB
+    # curated model and would otherwise crowd the curated set out of a small disk.
     scout_count = {}
-    for c in sorted(p2, key=lambda x: (-density(x), x["bytes"])):
+    for c in sorted(p2, key=lambda x: (is_scouted(x), -density(x), x["bytes"])):
         counts = scout_count if is_scouted(c) else cat_count
         if counts.get(c["category"], 0) >= cap_for(c["category"]):
             continue

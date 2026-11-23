@@ -91,8 +91,11 @@ catalog_refresh_scout() {
     [ "${VALARK_SCOUT:-1}" = "0" ] && return 0
     mkdir -p "$CATALOG_DIR" 2>/dev/null || true
     local now; now=$(date +%s)
+    local want; want=$(printf '%s' "${VALARK_SCOUT_SWEEPS:-small,speech-vision}" | tr ',' '\n' | sed 's/ //g' | grep . | LC_ALL=C sort -u | paste -sd, -)
     if [ "$1" != "--force" ]; then
-        [ -f "$SCOUT_CACHE" ] && [ "$(_scout_age "$SCOUT_CACHE" "$now")" -lt "$SCOUT_TTL" ] && return 0
+        # A cache written for other sweeps (e.g. before a default changed) is stale now.
+        [ -f "$SCOUT_CACHE" ] && [ "$(_scout_age "$SCOUT_CACHE" "$now")" -lt "$SCOUT_TTL" ] &&
+            head -1 "$SCOUT_CACHE" | grep -q " sweeps=${want} " && return 0
         [ "$(_scout_age "${SCOUT_CACHE}.attempt" "$now")" -lt "$SCOUT_RETRY" ] && return 0
     fi
     local tmp="${SCOUT_CACHE}.tmp.$$" rc=0

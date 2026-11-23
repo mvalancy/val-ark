@@ -62,18 +62,40 @@ ensure_state() {
 # `request` would evict other content to make room for a model already on disk).
 # The marker is written only when every listed dir was reachable and stamped, so a data
 # disk or NFS share that is not mounted yet is retried on the next command.
+# A dir that exists but cannot take the stamp (read-only) is warned about, not retried.
 stamp_legacy_repos() {
     local mark="${STATE_DIR}/.hf-repo-stamps-v1"
     [ -f "$mark" ] && return 0
     [ -f "$MANIFEST" ] || { : > "$mark" 2>/dev/null; return 0; }
+    move_moondream_gguf
     local missed
     missed=$(awk -F'\t' '$7=="hf-repo" {print $4}' "$MANIFEST" | while IFS= read -r d; do
         [ -n "$d" ] || continue
         [ -f "$d/.valark-complete" ] && continue
-        [ -d "$d" ] && echo "migrated $(date -u +%FT%TZ)" > "$d/.valark-complete" 2>/dev/null || echo x
+        [ -d "$d" ] || { echo x; continue; }
+        echo "migrated $(date -u +%FT%TZ)" > "$d/.valark-complete" 2>/dev/null ||
+            warn "cannot stamp $d (read-only?); it will be re-pulled when writable" >&2
     done)
     [ -z "$missed" ] && : > "$mark" 2>/dev/null
     return 0
+}
+
+# #259: the curated moondream2 GGUF row shared vlm/moondream2 with download-models.sh's
+# vikhyatk/moondream2 checkout (whole-repo eviction would have deleted both). Its dest is
+# now vlm/moondream2-gguf: move only the GGUF files the Librarian pulled, re-point the
+# manifest row, and leave the rest of the old dir (download-models.sh owns it).
+move_moondream_gguf() {
+    local row old new f
+    row=$(awk -F'\t' '$1=="model:moondream2-gguf" && $4 ~ /\/vlm\/moondream2$/' "$MANIFEST" 2>/dev/null | head -1)
+    [ -n "$row" ] || return 0
+    old=$(printf '%s' "$row" | cut -f4); new="${old}-gguf"
+    [ -d "$old" ] || return 0
+    mkdir -p "$new" 2>/dev/null || return 0
+    for f in "$old"/*.gguf; do [ -f "$f" ] && mv -n -- "$f" "$new/" 2>/dev/null; done
+    ls "$new"/*.gguf >/dev/null 2>&1 || return 0
+    echo "migrated $(date -u +%FT%TZ)" > "$new/.valark-complete" 2>/dev/null
+    awk -F'\t' -v OFS='\t' -v n="$new" '$1=="model:moondream2-gguf" {$4=n} {print}' "$MANIFEST" > "${MANIFEST}.tmp.$$" &&
+        mv -f "${MANIFEST}.tmp.$$" "$MANIFEST"
 }
 
 # --- manifest --------------------------------------------------------------

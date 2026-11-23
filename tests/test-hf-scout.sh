@@ -213,18 +213,35 @@ check "...once (marker written)" 'echo "$MG" | grep -q MARKED'
 
 check "an unreachable listed dir keeps the migration pending" 'T="$T" ROOT="$ROOT" bash -c "export VAL_ARK_DATA=$T/mg2 VAL_ARK_CONFIG=$T/none.env; mkdir -p \$VAL_ARK_DATA; . $ROOT/scripts/librarian.sh; mkdir -p \$STATE_DIR; printf \"model:x\tmodels\tmodel:e\t/nonexistent/x\t1\t1\thf-repo\t1\n\" > \$MANIFEST; rm -f \$STATE_DIR/.hf-repo-stamps-v1; ensure_state; [ ! -f \$STATE_DIR/.hf-repo-stamps-v1 ]" 2>/dev/null'
 
+MD=$(T="$T" ROOT="$ROOT" bash <<'EOS' 2>/dev/null
+export VAL_ARK_DATA="$T/md-data" VAL_ARK_CONFIG="$T/none.env"; mkdir -p "$VAL_ARK_DATA"
+. "$ROOT/scripts/librarian.sh"
+mkdir -p "$STATE_DIR" "$MODELS_DIR/vlm/moondream2"
+echo g > "$MODELS_DIR/vlm/moondream2/m.gguf"; echo s > "$MODELS_DIR/vlm/moondream2/model.safetensors"
+printf 'model:moondream2-gguf\tmodels\tmodel:tiny-vlm\t%s\t2\t630\thf-repo\t1\n' "$MODELS_DIR/vlm/moondream2" > "$MANIFEST"
+rm -f "$STATE_DIR/.hf-repo-stamps-v1"; ensure_state
+[ -f "$MODELS_DIR/vlm/moondream2-gguf/m.gguf" ] && [ -f "$MODELS_DIR/vlm/moondream2-gguf/.valark-complete" ] && echo MOVED
+[ -f "$MODELS_DIR/vlm/moondream2/model.safetensors" ] && echo OTHER-KEPT
+grep -q "vlm/moondream2-gguf	" "$MANIFEST" && echo REPOINTED
+EOS
+)
+check "old shared moondream2 dir: GGUF moved, row re-pointed, other files kept" 'echo "$MD" | grep -q MOVED && echo "$MD" | grep -q OTHER-KEPT && echo "$MD" | grep -q REPOINTED'
+
 # --- whole-repo dests never collide (eviction rm -rf's the dest) ------------------------------
 COLL=$(python3 -I - "$ROOT/data/models-extra.tsv" "$ROOT/scripts/download-models.sh" <<'PYEOF'
 import re, sys
 rows = [l.rstrip('\n').split('|') for l in open(sys.argv[1]) if l.strip() and not l.lstrip().startswith('#')]
-repo = [r[8].strip('/') for r in rows if len(r) > 8 and r[5] == 'repo']
-alld = [r[8].strip('/') for r in rows if len(r) > 8]
+dests = [(r[8].strip('/'), r[5]) for r in rows if len(r) > 8]
 src = open(sys.argv[2]).read()
 var = dict(re.findall(r'(\w+_DIR)="\$\{MODEL_ROOT\}/([^"]+)"', src))
 dm = {var[v] + '/' + n for v, n in re.findall(r'"\$\{(\w+_DIR)\}/([^"/$]+)', src) if v in var}
 nest = lambda a, b: a == b or a.startswith(b + '/') or b.startswith(a + '/')
-bad = [(a, b) for a in repo for b in alld if b is not a and nest(a, b) and alld.count(b) >= 1 and (a != b or alld.count(a) > 1)]
-bad += [(a, b) for a in repo for b in sorted(dm) if nest(a, b)]
+bad = []
+for i, (a, fmt) in enumerate(dests):
+    if fmt != 'repo':
+        continue
+    bad += [(a, b) for j, (b, _) in enumerate(dests) if j != i and nest(a, b)]   # other rows
+    bad += [(a, b) for b in sorted(dm) if nest(a, b)]                           # download-models.sh
 print('\n'.join(f'{a} ~ {b}' for a, b in bad))
 print('DM', len(dm))
 PYEOF

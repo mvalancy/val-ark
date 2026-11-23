@@ -210,6 +210,9 @@ broadens modality coverage with small, high-value files the
 
 | Modality | Examples |
 |----------|----------|
+| Setup assistants | Qwen2.5 1.5B / 3B / 7B Instruct, Llama-3.2-3B Instruct (GGUF; ask the box for shell + setup help) |
+| Small LLMs | Qwen2.5 0.5B / 1.5B, SmolLM2-1.7B, Gemma-2-2B, Phi-3.5-mini (GGUF) |
+| Code | Qwen2.5-Coder 1.5B / 7B (GGUF) |
 | Embeddings / rerankers | bge, nomic, mxbai, gte, jina, e5 (RAG backbone) |
 | Tiny VLMs / OCR | SmolVLM, moondream2, granite-docling, Florence-2 |
 | Speech | silero-vad, whisper-base ONNX, Kokoro-q8 |

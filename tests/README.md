@@ -22,8 +22,8 @@ contract — add a suite by emitting a matching JSON file.
 
 | Suite | What it checks | Where |
 |-------|----------------|-------|
-| **Bash validators** | host deps, model inventory, TLS/local-CA, tool scripts, upstream mirror URLs, **internal doc-link integrity**, **secret/host-leak scan** | `tests/test-*.sh` |
-| **Playwright** | web UI, server API + SSE, install icons, dynamic UI exercise (250+ parametrized) | `tests/screenshots/specs/*.spec.ts` |
+| **Bash validators** | host deps, model inventory, TLS/local-CA, tool scripts, upstream mirror URLs, grid-down essentials, the standalone mirrors (release / APT server stack / git bundles / Lastbook, all against local fixtures), pop-up doc art, port hygiene, **internal doc-link integrity**, **secret/host-leak scan** | `tests/test-*.sh` |
+| **Playwright** | web UI, server API + SSE, install icons, dynamic UI exercise, health, metrics, notifications, packages, nav, mirror-job UI, responsive library, attribute-escaping sweep (12 specs; hundreds of tests, parametrized over the catalog) | `tests/screenshots/specs/*.spec.ts` |
 | **Community services e2e** | chat/mail/forum/paste status + `/app/<id>/` proxy frames, against a live Ark | `tests/services/run.sh` |
 | **Fresh-VM setup** | real setup + web-UI/API smoke on clean Ubuntu 22.04 / 24.04 / 26.04 | `tests/vm/{run,provision}.sh` |
 
@@ -73,6 +73,11 @@ tests/
   run-all.sh              # orchestrator -> runs suites + renders the report
   test-*.sh               # bash validators
   lib/results.sh          # shared: results_init / results_case / results_run / results_finish
+  lib/ports.sh            # free_port / stop_pids / trap_signals for local fixture servers
+  lib/md_link_check.py    # internal doc-link + anchor checker (test-doc-links.sh)
+  lib/secret_scan.py      # secret / host-leak scan (+ secrets-allowlist.txt) (test-secrets.sh)
+  lib/port_hygiene.py     # hard-coded port checks (test-port-hygiene.sh)
+  fixtures/lastbook/      # offline Lastbook manifests for test-lastbook.sh
   services/run.sh         # community-services e2e (target = VALARK_URL)
   vm/run.sh, provision.sh # fresh-Ubuntu setup matrix (multipass); provisioner runs inside the VM
   report/generate.mjs     # results/*.json -> self-contained report.html

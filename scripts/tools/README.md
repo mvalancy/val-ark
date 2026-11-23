@@ -110,7 +110,7 @@ GPU-accelerated tools (`llama-cpp`, `whisper-cpp`, `sd-cpp`, `bitnet`) ship preb
 | `whisper-cpp.sh` | whisper.cpp | windows-x64; linux-arm64, linux-x86_64, macos-arm64 (source) |
 | `yt-dlp.sh` | yt-dlp | linux-x86_64, linux-arm64, macos-arm64, windows-x64 |
 
-50 tool scripts in total.
+50+ tool scripts in total.
 
 ## Shared Helpers (`_common.sh`)
 

@@ -419,7 +419,7 @@ def zim_meta(path, want=('Title', 'Description', 'Language', 'Creator', 'Illustr
     return out
 
 
-ZIM = re.compile(r'^(?P<proj>[a-z0-9.-]+?)_(?P<lang>[a-z]{2,3}(?:-[a-z]+)?)_(?P<rest>.+?)(?:_(?P<date>\d{4}-\d{2}))?\.zim$', re.I)
+ZIM = re.compile(r'^(?P<proj>[a-z0-9.-]+?)_(?P<lang>[a-z]{2,3}(?:-[a-z]+)?)_(?P<rest>.+?)(?:_(?P<date>\d{4}-\d{2})[a-z]?)?\.zim$', re.I)
 FLAVOURS = {'maxi': 'full, with images', 'nopic': 'text only', 'mini': 'introductions only'}
 
 
@@ -1021,7 +1021,10 @@ class Builder:
             if e.key.split('/')[0] == 'lastbook':
                 c = next((c for c in self.cur.content if c.get('id') == 'lastbook'), None)
                 if c:
+                    info['title'] = c.get('name') or info['title']
+                    info['sub'] = ''
                     info['desc'] = c.get('desc') or ''
+                    info['long'] = (c.get('details') or {}).get('overview') or ''
                     info['icon'] = self.badge_color(c.get('icon') or 'L', c.get('iconBg'))
             return
         z = zim_parts(fn) or {}

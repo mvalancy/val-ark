@@ -21,7 +21,8 @@ Sweeps (default: small,speech-vision):
             tag's all-time most-downloaded and most-liked lists. Valued ~600-700 (560 + likes,
             log scale), above every other scouted row. The planner keeps scouted rows out of
             its small-valuable phase; they compete by value in the fill phase (after curated
-            rows valued above them, before those valued below) and are evicted first. QUANT's `-base` / `-exp` / EAGLE rules are not applied (in speech/vision
+            rows valued above them, before those valued below) and are evicted first.
+            QUANT's `-base` / `-exp` / EAGLE rules are not applied (in speech/vision
             `-base` is a model size: whisper-base, vit-base); quantised re-uploads still are.
   small     any modality; created within --days; real size <= --max-gb;
             likes >= --min-likes, or >= --lab-likes for a repo owned by a well-known lab.

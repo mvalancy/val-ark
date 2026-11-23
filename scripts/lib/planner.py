@@ -244,8 +244,6 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
 
     # Phase 2: small valuable - value/byte desc, size-capped, per-category capped.
     p2 = [c for c in pool if c["id"] not in planned_ids and c["bytes"] <= small_max]
-    # Scouted rows have their own per-category count, so dense scouted repos cannot use up
-    # a curated category's cap and push the curated items there to phase 3.
     # Scouted rows (hf_scout.py) skip this phase: a tiny, high-value scouted speech/vision
     # repo has ~30x the value per byte of a 2 GB curated model, so it would crowd curated
     # items out here (and, by spending the budget, starve the curated items over small_max

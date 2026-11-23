@@ -121,8 +121,11 @@ category's only item, and they skip the small-valuable phase (their tiny size wo
 outright). They are planned in the final fill phase by intrinsic value: after every curated
 item valued above them (the setup-assistant LLMs, for example), before curated items valued
 below them, with speech and vision picks ahead of the other scouted rows. Under disk
-pressure scouted rows are evicted before any curated item. A scout that cannot reach every listing never
-replaces a good cache (the ZIM catalog's completeness rule); a failed attempt waits
+pressure scouted rows are evicted before any curated item. A curated model too big for the
+small-valuable phase and valued below a speech-vision pick (`qwen25-coder-7b`, 670) can wait
+behind it on a small disk; raise its value in `data/models-extra.tsv` if it must come first.
+
+A scout that cannot reach every listing never replaces a good cache (the ZIM catalog's completeness rule); a failed attempt waits
 `VALARK_SCOUT_RETRY` (1 day) before the next, and the scout's stderr is kept next to the
 cache as `models-scouted.tsv.err`. `VALARK_SCOUT=0` turns it off and ignores the cache.
 Rows are fetched with `hf download --include '*'` like any `repo` row; a whole-repo pull

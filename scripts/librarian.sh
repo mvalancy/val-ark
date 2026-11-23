@@ -50,7 +50,24 @@ warn() { log "${YELLOW}WARN${NC} $*"; }
 err()  { log "${RED}ERR${NC} $*"; }
 human(){ valark_human "${1:-0}"; }
 
-ensure_state() { mkdir -p "$STATE_DIR" "$LOG_DIR" "$TMPDIR_VA" "$ZIM_DIR" "$INSTALLERS_DIR" "$MODELS_DIR" 2>/dev/null || true; }
+ensure_state() {
+    mkdir -p "$STATE_DIR" "$LOG_DIR" "$TMPDIR_VA" "$ZIM_DIR" "$INSTALLERS_DIR" "$MODELS_DIR" 2>/dev/null || true
+    stamp_legacy_repos
+}
+
+# One-time migration (#259): an hf-repo counts as present only with <dest>/.valark-complete,
+# written after `hf download` exits 0. Repos pulled before the stamp existed are in the
+# manifest (manifest_add only ever ran after a successful pull), so stamp those once;
+# otherwise an OFFLINE box would see them all as missing (re-planned, double-counted, and
+# `request` would evict other content to make room for a model already on disk).
+stamp_legacy_repos() {
+    local mark="${STATE_DIR}/.hf-repo-stamps-v1"
+    [ -f "$mark" ] && return 0
+    [ -f "$MANIFEST" ] && awk -F'\t' '$7=="hf-repo" {print $4}' "$MANIFEST" | while IFS= read -r d; do
+        [ -n "$d" ] && [ -d "$d" ] && [ ! -f "$d/.valark-complete" ] && echo "migrated $(date -u +%FT%TZ)" > "$d/.valark-complete" 2>/dev/null
+    done
+    : > "$mark" 2>/dev/null || true
+}
 
 # --- manifest --------------------------------------------------------------
 # id  bucket  category  dest  bytes  value  source  epoch
@@ -210,7 +227,8 @@ download_one() {
             [ -n "$hf" ] || { warn "hf CLI missing; skip $id"; return 1; }
             mkdir -p "$dest" 2>/dev/null
             if "$hf" download "$url" --local-dir "$dest" --include "$extra" >>"$LL_LOG" 2>&1; then
-                date -u +%FT%TZ > "$dest/.valark-complete" 2>/dev/null || true
+                date -u +%FT%TZ > "$dest/.valark-complete" 2>/dev/null || {
+                    warn "cannot write $dest/.valark-complete; not recording $id"; return 1; }
                 local sz; sz=$(du -sb "$dest" 2>/dev/null | cut -f1); manifest_add "$id" "$bucket" "$cat" "$dest" "${sz:-0}" "$value" "$source" && return 0
             fi
             return 1 ;;

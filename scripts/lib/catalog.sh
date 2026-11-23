@@ -84,14 +84,16 @@ catalog_refresh_zim() {
 # VALARK_SCOUT=0 turns it off (the cache is then ignored too); VALARK_SCOUT_SWEEPS picks
 # the sweeps (default small; small,frontier adds big open-weight releases).
 SCOUT_RETRY="${VALARK_SCOUT_RETRY:-86400}"
+_scout_age() {   # _scout_age FILE NOW -> seconds since FILE's mtime (huge when missing)
+    [ -f "$1" ] && echo $(( $2 - $(stat -c %Y "$1" 2>/dev/null || echo 0) )) || echo 99999999
+}
 catalog_refresh_scout() {
     [ "${VALARK_SCOUT:-1}" = "0" ] && return 0
     mkdir -p "$CATALOG_DIR" 2>/dev/null || true
     local now; now=$(date +%s)
-    _scout_age() { [ -f "$1" ] && echo $(( now - $(stat -c %Y "$1" 2>/dev/null || echo 0) )) || echo 99999999; }
     if [ "$1" != "--force" ]; then
-        [ -f "$SCOUT_CACHE" ] && [ "$(_scout_age "$SCOUT_CACHE")" -lt "$SCOUT_TTL" ] && return 0
-        [ "$(_scout_age "${SCOUT_CACHE}.attempt")" -lt "$SCOUT_RETRY" ] && return 0
+        [ -f "$SCOUT_CACHE" ] && [ "$(_scout_age "$SCOUT_CACHE" "$now")" -lt "$SCOUT_TTL" ] && return 0
+        [ "$(_scout_age "${SCOUT_CACHE}.attempt" "$now")" -lt "$SCOUT_RETRY" ] && return 0
     fi
     local tmp="${SCOUT_CACHE}.tmp.$$" rc=0
     python3 "$SCOUT_PY" plan --sweep "${VALARK_SCOUT_SWEEPS:-small}" \

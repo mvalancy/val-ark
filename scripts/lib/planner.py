@@ -244,10 +244,16 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
 
     # Phase 2: small valuable - value/byte desc, size-capped, per-category capped.
     p2 = [c for c in pool if c["id"] not in planned_ids and c["bytes"] <= small_max]
+    # Scouted rows have their own per-category count, so dense scouted repos cannot use up
+    # a curated category's cap and push the curated items there to phase 3.
+    scout_count = {}
     for c in sorted(p2, key=lambda x: (-density(x), x["bytes"])):
-        if cat_count.get(c["category"], 0) >= cap_for(c["category"]):
+        counts = scout_count if is_scouted(c) else cat_count
+        if counts.get(c["category"], 0) >= cap_for(c["category"]):
             continue
-        take(c, 2)
+        if take(c, 2) and is_scouted(c):
+            cat_count[c["category"]] -= 1   # take() counted it; keep it out of the curated tally
+            scout_count[c["category"]] = scout_count.get(c["category"], 0) + 1
 
     # Phase 3: fill remaining - intrinsic value desc (flagships), then small.
     p3 = [c for c in pool if c["id"] not in planned_ids]

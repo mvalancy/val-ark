@@ -70,7 +70,7 @@ CATEGORY = {'text-generation': 'small-llm', 'image-text-to-text': 'tiny-vlm', 'f
             'mask-generation': 'segmentation', 'text-to-audio': 'audio-gen',
             'audio-classification': 'audio-clf', 'voice-activity-detection': 'speech-vad'}
 # Repo ids go into a path (scouted/<id>) and a '|' row: only plain Hugging Face ids pass.
-REPO_ID = re.compile(r'^[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*$')
+REPO_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$')
 API = os.environ.get('VALARK_HF_API', 'https://huggingface.co').rstrip('/')
 SEND_TOKEN = urllib.parse.urlparse(API).hostname == 'huggingface.co'   # never leak it to another host
 ERRORS = []

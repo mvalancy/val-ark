@@ -73,6 +73,7 @@ MODELS = [
 ]
 REAL = {'indie/hidden-big': 30 * G, 'Qwen/Big-Frontier-300B': 600 * G}
 class H(http.server.BaseHTTPRequestHandler):
+    limited = False
     def log_message(self, *a): pass
     def send(self, code, body):
         b = json.dumps(body).encode(); self.send_response(code)
@@ -83,6 +84,9 @@ class H(http.server.BaseHTTPRequestHandler):
         if u.path == '/ping': return self.send(200, {})
         if u.path == '/api/models':
             if 'safetensors' not in q.get('expand', []): return self.send(400, {'error': 'expand'})
+            if q.get('author') == ['google'] and not H.limited:      # one 429, then fine
+                H.limited = True; self.send_response(429); self.send_header('Retry-After', '0')
+                self.send_header('Content-Length', '0'); self.end_headers(); return
             if open(flag).read().strip() == 'fail' and q.get('sort') == ['likes7d']:
                 return self.send(404, {'error': 'gone'})
             if 'author' in q: return self.send(200, [x for x in MODELS if x['id'].split('/')[0] == q['author'][0]])
@@ -106,7 +110,7 @@ run() { python3 -I "$PY" "$@"; }
 
 # --- small sweep ------------------------------------------------------------------------
 run plan --skip-tsv "$ROOT/data/models-extra.tsv" > "$T/small.out" 2>"$T/small.err"; rc=$?
-check "small sweep exits 0" '[ $rc -eq 0 ]'
+check "small sweep exits 0 (a 429 with Retry-After is retried)" '[ $rc -eq 0 ] && grep -q "lab-few-likes" "$T/small.out"'
 check "header line" 'head -1 "$T/small.out" | grep -q "^# hf_scout plan .*small=4 frontier=0"'
 rows() { grep -v '^#' "$1" | cut -d'|' -f4 | tr '\n' ' '; }
 check "picks exactly the good small repos, by likes" '[ "$(rows "$T/small.out")" = "indie/good-small indie/second-small indie/odd-tag google/lab-few-likes " ]'
@@ -188,6 +192,24 @@ LS=$(VAL_ARK_DATA="$T/lib-data2" VAL_ARK_CONFIG="$T/none.env" VALARK_SCOUT=1 bas
 check "librarian.sh scout on failure: exit 1, count 0 (one number)" '[ $rc -eq 1 ] && echo "$LS" | grep -q "(0 repos)"'
 echo ok > "$T/flag"
 check "maintain refreshes the scout" 'grep -q "catalog_refresh_scout >/dev/null" "$ROOT/scripts/librarian.sh"'
+
+# --- stamp migration: repos pulled before .valark-complete existed ------------------------
+MG=$(T="$T" ROOT="$ROOT" bash <<'EOS' 2>/dev/null
+export VAL_ARK_DATA="$T/mg-data" VAL_ARK_CONFIG="$T/none.env"; mkdir -p "$VAL_ARK_DATA"
+. "$ROOT/scripts/librarian.sh"
+mkdir -p "$STATE_DIR" "$MODELS_DIR/old/repo" "$MODELS_DIR/stray"; echo x > "$MODELS_DIR/old/repo/f"; echo x > "$MODELS_DIR/stray/f"
+printf 'model:old\tmodels\tmodel:embed\t%s\t2\t500\thf-repo\t1\n' "$MODELS_DIR/old/repo" > "$MANIFEST"
+rm -f "$STATE_DIR/.hf-repo-stamps-v1"; ensure_state
+[ -f "$MODELS_DIR/old/repo/.valark-complete" ] && echo STAMPED
+[ ! -f "$MODELS_DIR/stray/.valark-complete" ] && echo STRAY-UNSTAMPED
+candidate_present id b hf-repo v 0 x u "$MODELS_DIR/old/repo" && echo PRESENT
+[ -f "$STATE_DIR/.hf-repo-stamps-v1" ] && echo MARKED
+EOS
+)
+check "migration stamps manifest-listed hf-repo dirs" 'echo "$MG" | grep -q STAMPED'
+check "...but not unrecorded dirs" 'echo "$MG" | grep -q STRAY-UNSTAMPED'
+check "...so they count as present offline" 'echo "$MG" | grep -q PRESENT'
+check "...once (marker written)" 'echo "$MG" | grep -q MARKED'
 
 # --- planner interaction ------------------------------------------------------------------------
 P="$ROOT/scripts/lib/planner.py"; M="$T/pm"; mkdir -p "$M/cur" "$M/sc"

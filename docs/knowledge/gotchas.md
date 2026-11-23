@@ -106,8 +106,11 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   `.cache/huggingface/download/*.incomplete` behind; the old present check (any file in `dest`)
   treated that as complete forever (never resumed, never in the manifest). Now `librarian.sh`
   writes `<dest>/.valark-complete` after `hf download` exits 0 and both present checks
-  (`librarian.sh`, `planner.py`) require it. One-time cost: repos pulled before the stamp
-  existed are re-run once (`hf download` skips files it already has, then stamps). Eviction goes
+  (`librarian.sh`, `planner.py`) require it; if the stamp cannot be written the pull is not
+  recorded. Repos pulled before the stamp existed are in the manifest (it is only written after a
+  successful pull), so `ensure_state` stamps those once (`stamp_legacy_repos`, marker
+  `state/.hf-repo-stamps-v1`) — without it an OFFLINE box saw them all as missing, re-planned
+  them and `request` evicted other content to make room. Eviction goes
   through `evict_path`, which `rm -rf`s a directory only when it resolves strictly inside
   `MODELS_DIR` / `CONTENT_DIR` / `INSTALLERS_DIR`.
 - **Scouted model rows must not open new categories** (#259). The planner's diversity phase takes

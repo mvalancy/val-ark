@@ -860,7 +860,7 @@ const TOOLS = [
         desc: 'Universal media player and streaming server - CLI transcoding, streaming, and format conversion',
         size: '~50 MB',
         screenshots: ['screenshots/vlc-1.png', 'screenshots/vlc-2.jpg'],
-        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        platforms: { jetson: 'package', ubuntu: 'package', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/videolan/vlc',
             releases: 'https://www.videolan.org/vlc/',
@@ -1549,7 +1549,7 @@ const TOOLS = [
         desc: 'Resource monitor with CPU, memory, disks, network, and process stats - GPU monitoring support',
         size: '~2 MB',
         screenshots: ['screenshots/btop-1.png', 'screenshots/btop-2.png'],
-        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'build', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/aristocratos/btop',
             releases: 'https://github.com/aristocratos/btop/releases',
@@ -1589,7 +1589,7 @@ const TOOLS = [
         id: 'tmux', name: 'tmux', category: 'dev-tools', icon: 'T', iconBg: '#1b8c2d', logo: 'logos/tmux.svg', downloadTarget: 'tmux',
         desc: 'Terminal multiplexer - persistent sessions for long-running AI inference and training',
         size: '~2 MB',
-        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'n/a' },
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'build', windows: 'n/a' },
         downloads: {
             source: 'https://github.com/tmux/tmux',
             releases: 'https://github.com/tmux/tmux/releases',
@@ -1917,7 +1917,7 @@ const TOOLS = [
         desc: 'Professional audio editor and recorder - multi-track editing, effects, noise reduction, and format conversion',
         screenshots: ['screenshots/audacity-1.png'],
         size: '~60 MB',
-        platforms: { jetson: 'package', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
+        platforms: { jetson: 'prebuilt', ubuntu: 'prebuilt', mac: 'prebuilt', windows: 'prebuilt' },
         downloads: {
             source: 'https://github.com/audacity/audacity',
             releases: 'https://www.audacityteam.org/download/',

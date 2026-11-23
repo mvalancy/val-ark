@@ -101,6 +101,20 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Downloads / mirroring
 
+- **`github_asset_url` patterns are BASIC grep regexes** (`grep -i "$pattern"`): `(a|b)` matches
+  the literal text "(a|b)". Write alternation as `\(a\|b\)`. Audacity 4.x renamed its assets
+  (`-x86_64` / `-aarch64` / `.msi`), and the old `x64…AppImage` / `64bit.*exe` patterns silently
+  found nothing.
+- **A flat offline repo has no deb-src index**, so `apt-get build-dep <pkg>` by NAME fails there
+  ("You must put some 'deb-src' URIs"). Install build deps from the source package's file:
+  `apt-get build-dep ./<pkg>_*.dsc` (the `desktop-src` set ships the .dsc under `source/<pkg>/`).
+  And in `apt_offline.fetch`, names like `source/<pkg>/<file>` contain a `/`: build the `.part`
+  path from the target's basename (`target.with_name(target.name + ".part")`), never from the
+  row name (`with_name` rejects a name with a separator).
+- **Tailscale's stable channel keeps only the newest build**: a pinned
+  `tailscale_<ver>_<arch>.tgz` 404s after the next release. Read the version from
+  `https://pkgs.tailscale.com/stable/?mode=json` (`TarballsVersion`) each run.
+
 - **A whole-repo (`hf-repo`) pull is a DIRECTORY, so "any file present" is not "done" and
   `rm -f` does not evict it** (#259). A cut-off `hf download` leaves `config.json` and
   `.cache/huggingface/download/*.incomplete` behind; the old present check (any file in `dest`)

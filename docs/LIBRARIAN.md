@@ -236,6 +236,33 @@ template row):**
 
 Tests: `tests/test-release-mirror.sh` (offline fixture for every kind).
 
+### Offline .deb sets: desktop apps and building from source
+
+`desktop-apps` holds Inkscape, GIMP, Krita, Blender, Kdenlive, KiCad (+ symbols/footprints),
+OpenSCAD, PrusaSlicer, Audacity, VLC, mpv, FFmpeg, LibreOffice, Calibre, darktable, Shotcut,
+OBS, tmux, btop and htop for Ubuntu on both arches (~1.2 GB each for noble): the offline path
+where upstream ships no Linux arm64 build. `desktop-src` adds, for the apps with no arm64
+build, Ubuntu's source package and every build dependency (~2.7 GB each), so a box with no
+internet can rebuild them:
+
+```bash
+python3 scripts/lib/apt_offline.py build --suite noble --arch arm64 --set desktop-apps --set desktop-src --dest <dir>
+# on the target: deb [trusted=yes] file:<dir> ./  then (the flat repo has no deb-src index,
+# so build deps come from the .dsc FILE, not the package name)
+cd <dir>/source/inkscape && D=$(ls -v inkscape_*.dsc | tail -1)   # the newest .dsc
+sudo apt-get build-dep ./$D
+rm -rf build-inkscape && dpkg-source -x $D build-inkscape && cd build-inkscape
+dpkg-buildpackage -us -uc -b
+```
+
+These build the Ubuntu suite's version of each app (noble: e.g. KiCad 7, Blender 4.0,
+Audacity 3.4). A newer upstream release, whose source the tool script mirrors separately,
+may need newer or extra libraries.
+
+Set entries `build-dep:SRC` / `source:SRC` drive this (see `data/AGENTS.md`); the tool
+scripts' `INSTALL.txt` for those platforms name the same sets, the mirrored upstream release
+tarball and the git bundle ([TOOLS.md](TOOLS.md#no-upstream-build-for-a-platform-offline-install--source)).
+
 ### Offline .deb sets: exit codes and a real-box check
 
 `apt_offline.py` exits with one of these codes:

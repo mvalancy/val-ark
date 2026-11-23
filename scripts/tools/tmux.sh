@@ -58,19 +58,23 @@ BUILDEOF
 
     # macos-arm64
     dest="${TOOLS_DIR}/macos-arm64/tmux"
-    write_install_hint "$dest" "tmux (macOS)" "Install tmux on macOS:
+    local src_path="" libevent_path="" lev="2.1.12-stable"
+    src_path=$(mirror_source_tarball tmux "$ver" "$source_url") || src_path=""
+    # tmux's one non-system dependency on macOS (ncurses ships with macOS): mirror it too.
+    libevent_path=$(mirror_source_tarball libevent "$lev" \
+        "https://github.com/libevent/libevent/releases/download/release-${lev}/libevent-${lev}.tar.gz") || libevent_path=""
+    write_install_hint "$dest" "tmux (macOS)" "tmux - macos-arm64
+==================
 
-brew install tmux
+Upstream ships no macOS binary. Build it offline (Xcode command line tools only):
+  1. libevent: ${libevent_path:-tools/sources/libevent-${lev}-src/libevent-${lev}.tar.gz}
+       tar xzf libevent-${lev}.tar.gz && cd libevent-${lev}
+       ./configure --prefix=\$HOME/.local --disable-openssl && make && make install
+  2. tmux: ${src_path:-tools/sources/tmux-${ver}-src/tmux-${ver}.tar.gz}
+       tar xzf tmux-${ver}.tar.gz && cd tmux-${ver}
+       PKG_CONFIG_PATH=\$HOME/.local/lib/pkgconfig ./configure --prefix=\$HOME/.local && make && make install
 
-Or build from source:
-  brew install libevent ncurses
-  curl -LO https://github.com/tmux/tmux/releases/download/${tag}/tmux-${ver}.tar.gz
-  tar xzf tmux-${ver}.tar.gz
-  cd tmux-${ver}
-  ./configure
-  make
-  sudo make install
-"
+Online: brew install tmux"
 }
 
 # Run if called directly

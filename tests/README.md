@@ -22,7 +22,7 @@ contract — add a suite by emitting a matching JSON file.
 
 | Suite | What it checks | Where |
 |-------|----------------|-------|
-| **Bash validators** | host deps, model inventory, TLS/local-CA, tool scripts, upstream mirror URLs, grid-down essentials, the standalone mirrors (release / APT server stack / git bundles / Lastbook, all against local fixtures), pop-up doc art, port hygiene, **internal doc-link integrity**, **secret/host-leak scan** | `tests/test-*.sh` |
+| **Bash validators** | host deps, model inventory, TLS/local-CA, tool scripts, upstream mirror URLs, grid-down essentials, source fallbacks for platforms with no upstream build (test-source-fallbacks), the standalone mirrors (release / APT server stack / git bundles / Lastbook, all against local fixtures), pop-up doc art, port hygiene, **internal doc-link integrity**, **secret/host-leak scan** | `tests/test-*.sh` |
 | **Playwright** | web UI, server API + SSE, install icons, dynamic UI exercise, health, metrics, notifications, packages, nav, mirror-job UI, responsive library, attribute-escaping sweep (12 specs; hundreds of tests, parametrized over the catalog) | `tests/screenshots/specs/*.spec.ts` |
 | **Community services e2e** | chat/mail/forum/paste status + `/app/<id>/` proxy frames, against a live Ark | `tests/services/run.sh` |
 | **Fresh-VM setup** | real setup + web-UI/API smoke on clean Ubuntu 22.04 / 24.04 / 26.04 | `tests/vm/{run,provision}.sh` |

@@ -26,18 +26,13 @@ download_kdenlive() {
     # linux-arm64: no official AppImage
     dest="${TOOLS_DIR}/linux-arm64/kdenlive"
     ensure_dir "$dest"
-    write_install_hint "$dest" "kdenlive (linux-arm64)" "Kdenlive - linux-arm64
-=====================
-
-No official ARM64 AppImage is available. Install via package manager:
-
-  sudo apt install kdenlive
-
-Or via Flatpak:
-  flatpak install flathub org.kde.kdenlive
-
-For more info: https://kdenlive.org/en/download/
-"
+    local src_path=""
+    src_path=$(mirror_source_tarball kdenlive "$ver" \
+        "https://download.kde.org/stable/release-service/${ver}/src/kdenlive-${ver}.tar.xz") || src_path=""
+    build_from_source_hint kdenlive "Kdenlive" linux-arm64 kdenlive kdenlive "$src_path" KDE/kdenlive \
+"  tar xf kdenlive-${ver}.tar.xz && cd kdenlive-${ver}
+  cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel
+  sudo cmake --install build      (https://invent.kde.org/multimedia/kdenlive/-/blob/master/dev-docs/build.md)"
 
     # macos-arm64: DMG
     dest="${TOOLS_DIR}/macos-arm64/kdenlive"

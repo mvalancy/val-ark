@@ -26,12 +26,12 @@ download_kicad() {
   cmake -B build -DCMAKE_BUILD_TYPE=Release -DKICAD_USE_EGL=ON && cmake --build build --parallel
   sudo cmake --install build      (https://dev-docs.kicad.org/en/build/linux/)"
     build_from_source_hint kicad "KiCad" linux-arm64 "kicad kicad-symbols kicad-footprints" kicad "$src_path" KiCad/kicad-source-mirror \
-"$kicad_steps"
+"$kicad_steps" archive
 
     # linux-x86_64
     dest="${TOOLS_DIR}/linux-x86_64/kicad"
     build_from_source_hint kicad "KiCad" linux-x86_64 "kicad kicad-symbols kicad-footprints" kicad "$src_path" KiCad/kicad-source-mirror \
-"$kicad_steps"
+"$kicad_steps" archive
 
     # macos-arm64 - since 10.0, macOS ships a single universal (arm64+x86_64) dmg
     dest="${TOOLS_DIR}/macos-arm64/kicad"

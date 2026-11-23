@@ -247,10 +247,15 @@ internet can rebuild them:
 
 ```bash
 python3 scripts/lib/apt_offline.py build --suite noble --arch arm64 --set desktop-apps --set desktop-src --dest <dir>
-# on the target: deb [trusted=yes] file:<dir> ./  then
-sudo apt-get build-dep inkscape
-cd <dir>/source/inkscape && dpkg-source -x *.dsc && cd inkscape-*/ && dpkg-buildpackage -us -uc -b
+# on the target: deb [trusted=yes] file:<dir> ./  then (the flat repo has no deb-src index,
+# so build deps come from the .dsc FILE, not the package name)
+cd <dir>/source/inkscape && sudo apt-get build-dep ./inkscape_*.dsc
+dpkg-source -x inkscape_*.dsc && cd inkscape-*/ && dpkg-buildpackage -us -uc -b
 ```
+
+These build the Ubuntu suite's version of each app (noble: e.g. KiCad 7, Blender 4.0,
+Audacity 3.4). A newer upstream release, whose source the tool script mirrors separately,
+may need newer or extra libraries.
 
 Set entries `build-dep:SRC` / `source:SRC` drive this (see `data/AGENTS.md`); the tool
 scripts' `INSTALL.txt` for those platforms name the same sets, the mirrored upstream release

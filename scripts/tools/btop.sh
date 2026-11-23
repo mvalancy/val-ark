@@ -54,9 +54,9 @@ download_btop() {
     write_install_hint "$dest" "btop (macOS)" "btop - macos-arm64
 ==================
 
-Upstream ships no macOS binary. Build it offline from the mirrored release source
-(btop has no third-party library dependencies; it needs only Xcode's command line
-tools, a C++20 compiler):
+Upstream ships no macOS binary. Build it offline from the mirrored source (GitHub's tag
+archive; btop has no git submodules and no third-party library dependencies, it needs only
+Xcode's command line tools with a C++20 compiler):
   ${src_path:-tools/sources/btop-${tag#v}-src/${tag}.tar.gz}   (full history: aristocratos/btop git bundle)
   tar xzf ${tag}.tar.gz && cd btop-${tag#v} && gmake   (or: make) && sudo make install
 

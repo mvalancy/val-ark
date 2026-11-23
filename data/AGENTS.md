@@ -35,7 +35,8 @@ value|set|packages|note
 
 `packages` are binary package names, plus `build-dep:SRC` (the Build-Depends of the Ubuntu
 source package SRC) and `source:SRC` (that source package, stored under `source/SRC/`). A set
-using either makes `apt_offline.py` also read deb-src lists. Keep each `build-dep:X` paired
+using either makes `apt_offline.py` also read deb-src lists. On the target the flat repo has
+no deb-src index: install build deps with `apt-get build-dep ./SRC_*.dsc` (from the .dsc file). Keep each `build-dep:X` paired
 with `source:X` (tests/test-server-stack.sh checks it).
 
 `dev-stack.tsv`:

@@ -18,8 +18,11 @@ Set entries are binary package names, plus two prefixes for building from source
   build-dep:SRC  every package `apt-get build-dep SRC` needs (the Build-Depends of the
                  Ubuntu source package SRC, with their dependencies), into the flat repo
   source:SRC     the Ubuntu source package itself (.dsc + orig/debian tarballs), stored
-                 under <dest>/source/SRC/ (unpack with `dpkg-source -x *.dsc`, build with
-                 `dpkg-buildpackage -us -uc -b` after `apt-get build-dep` from the repo)
+                 under <dest>/source/SRC/. On the target, with only the flat repo as a source
+                 (it has no deb-src index, so `apt-get build-dep SRC` by NAME fails), install
+                 the build deps from the .dsc file:  sudo apt-get build-dep ./SRC_*.dsc
+                 then `dpkg-source -x SRC_*.dsc` and `dpkg-buildpackage -us -uc -b`.
+                 These are Ubuntu's (suite's) versions; a newer upstream release may need more.
 A set that uses either prefix makes the APT root also read deb-src lists.
 Missing packages (not in that suite/arch) are reported on stderr and skipped.
 Exit codes (when several apply, the MOST SEVERE wins, in this order):
@@ -248,7 +251,7 @@ def fetch(rows, dest):
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists() and target.stat().st_size == size and (not sha or sha256(target) == sha):
             continue
-        part = target.with_name(name + ".part")
+        part = target.with_name(target.name + ".part")
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "val-ark-apt-offline"})
             with urllib.request.urlopen(req, timeout=120) as r, open(part, "wb") as f:

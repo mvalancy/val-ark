@@ -262,5 +262,35 @@ for t in srcset:
     assert kind in ("build-dep", "source") and f"build-dep:{name}" in srcset and f"source:{name}" in srcset, t
 PY
 
+# 11. A source row (name "source/<pkg>/<file>") is really FETCHED into <dest>/source/<pkg>/ from
+#     a local HTTP server (the .part name must be built from the basename), with size + SHA256
+#     checked; a bad SHA is a counted failure (exit 2 through main), never a traceback.
+. "$ROOT/tests/lib/ports.sh"
+SP="$(free_port)"; mkdir -p "$T/srcwww"; printf 'Format: 3.0 (quilt)\nSource: demo\n' > "$T/srcwww/demo_1-1.dsc"
+(cd "$T/srcwww" && exec python3 -m http.server "$SP" --bind 127.0.0.1) >/dev/null 2>&1 & SRC_PID=$!
+for _ in $(seq 50); do curl -s "http://127.0.0.1:$SP/" >/dev/null 2>&1 && break; sleep 0.1; done
+python3 - "$ROOT/scripts/lib" "$T/fetchdest" "http://127.0.0.1:$SP/demo_1-1.dsc" "$T/srcwww/demo_1-1.dsc" <<'PY' && pass || fail "a source/<pkg>/<file> row is fetched for real"
+import sys, io, contextlib, hashlib, os; sys.path.insert(0, sys.argv[1]); import apt_offline as ao
+dest, url, local = sys.argv[2], sys.argv[3], sys.argv[4]
+data = open(local, "rb").read(); sha = hashlib.sha256(data).hexdigest()
+assert ao.fetch([(url, "source/demo/demo_1-1.dsc", len(data), sha)], dest) == 0
+got = os.path.join(dest, "source/demo/demo_1-1.dsc")
+assert open(got, "rb").read() == data and not os.path.exists(got + ".part")
+# idempotent: present + verified -> nothing fetched again, still 0
+assert ao.fetch([(url, "source/demo/demo_1-1.dsc", len(data), sha)], dest) == 0
+# a bad SHA256 through the real CLI path (stubbed resolve) -> exit 2, a clean message, no traceback
+ao.AptRoot.update = lambda self: None
+ao.AptRoot.has_lists = lambda self: True
+ao.AptRoot.resolve = lambda self, pkgs: ([(url, "source/demo/demo_1-2.dsc", len(data), "0" * 64)], [])
+tsv = dest + ".tsv"; open(tsv, "w").write("1|s|source:demo|n\n")
+err = io.StringIO()
+with contextlib.redirect_stderr(err):
+    rc = ao.main(["fetch", "--tsv", tsv, "--suite", "noble", "--arch", "amd64", "--dest", dest])
+assert rc == 2, (rc, err.getvalue())
+assert "FAILED source/demo/demo_1-2.dsc" in err.getvalue() and "Traceback" not in err.getvalue(), err.getvalue()
+assert not os.path.exists(os.path.join(dest, "source/demo/demo_1-2.dsc.part"))
+PY
+kill "$SRC_PID" 2>/dev/null; wait "$SRC_PID" 2>/dev/null
+
 echo "server-stack: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

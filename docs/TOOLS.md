@@ -248,12 +248,16 @@ for btop and tmux. Their tool scripts (`build_from_source_hint` in
 1. **The `desktop-apps` .deb set** (`data/apt-sets.tsv`, ~1.2 GB per arch): Ubuntu's
    package with every dependency, as a flat repo for `apt-get install` with no internet.
 2. **The `desktop-src` set** (~2.7 GB per arch): Ubuntu's source package (`source/<pkg>/`)
-   plus every build dependency, so `apt-get build-dep` + `dpkg-buildpackage` work offline.
-3. **The upstream release source tarball**, mirrored by the script to
-   `tools/sources/<tool>-<version>-src/` (`mirror_source_tarball`; release tarballs carry
-   the submodules / vendored code a bare clone lacks), with the upstream build commands.
-   Libraries a source build needs beyond the distro are mirrored too (libevent for tmux on
-   macOS).
+   plus every build dependency, so `apt-get build-dep ./<pkg>_*.dsc` + `dpkg-buildpackage`
+   work offline (the flat repo has no deb-src index, so build-dep by package NAME fails).
+   These are the Ubuntu suite's versions, which can be older than upstream's.
+3. **The upstream source tarball**, mirrored by the script to
+   `tools/sources/<tool>-<version>-src/` (`mirror_source_tarball`; older versions are pruned),
+   with the upstream build commands. A maintainer-made release tarball usually bundles its
+   submodules / vendored code; a forge's auto-generated tag archive (KiCad's GitLab archive,
+   Bambu Studio and btop on GitHub) does not, and the hint says which one it is. A newer
+   upstream release may need newer libraries than the `desktop-src` build deps. Libraries a
+   source build needs beyond the OS are mirrored too (libevent for tmux on macOS).
 4. **The full-history git bundle** of the upstream repo (`data/source-repos.tsv`).
 
 Bambu Studio's own build script downloads third-party sources while it builds, so its

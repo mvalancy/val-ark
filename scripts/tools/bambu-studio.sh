@@ -65,7 +65,7 @@ download_bambu_studio() {
   ./BuildLinux.sh -u && ./BuildLinux.sh -dsi   (https://github.com/bambulab/BambuStudio/blob/master/BuildLinux.sh)
   NOTE: its deps/ step downloads third-party sources (wxWidgets, OpenCV, ...) from the internet:
   run it once on a connected box and copy deps/build back, or slice with the mirrored x86_64
-  AppImage (tools/linux-x86_64/bambu-studio/) or OrcaSlicer, which ships official linux-arm64 builds"
+  AppImage (tools/linux-x86_64/bambu-studio/) or OrcaSlicer, which ships official linux-arm64 builds" archive
 
     # macos-arm64: universal dmg
     _bambu_fetch macos-arm64 "$(_bambu_url "$tag" "mac.*\.dmg" "$BAMBU_PINNED_MAC")" "BambuStudio.dmg" "$tag" || failed=1

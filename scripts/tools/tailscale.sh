@@ -11,7 +11,11 @@ tailscale_latest_version() {
     local v
     v=$(curl -fsSL --max-time 20 "${PKGS}/?mode=json" 2>/dev/null \
         | grep -oE '"TarballsVersion": *"[0-9][0-9.]*"' | grep -oE '[0-9][0-9.]*' | head -1)
-    echo "${v:-$PINNED_VERSION}"
+    if [ -z "$v" ]; then
+        log_warn "tailscale: could not read the current version from ${PKGS}/?mode=json; using pinned ${PINNED_VERSION} (the stable channel may no longer serve it)" >&2
+        v="$PINNED_VERSION"
+    fi
+    echo "$v"
 }
 
 download_tailscale() {

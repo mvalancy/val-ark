@@ -11,10 +11,6 @@ download_audacity() {
     local repo="audacity/audacity"
     local tag
     tag=$(github_latest_tag "$repo" "Audacity-${PINNED_VERSION}")
-    # Upstream source (with its vendored libraries) for any platform without a binary.
-    local src_path=""
-    src_path=$(mirror_source_tarball audacity "${tag#Audacity-}" \
-        "$(github_asset_url "$repo" "$tag" "audacity-sources.*tar")") || src_path=""
 
     local ver="${tag#Audacity-}" url dest
 
@@ -45,6 +41,11 @@ download_audacity() {
         elif [ "$plat" = linux-x86_64 ]; then
             log_error "Could not find the Audacity ${plat} AppImage"
         else
+            # No binary for this platform: mirror upstream's release source (fetched only
+            # here, so a run where every platform has a binary downloads no source).
+            local src_path=""
+            src_path=$(mirror_source_tarball audacity "${tag#Audacity-}" \
+                "$(github_asset_url "$repo" "$tag" "audacity-sources.*tar")") || src_path=""
             build_from_source_hint audacity "Audacity" "$plat" audacity audacity "$src_path" audacity/audacity \
 "  cmake -B build -DCMAKE_BUILD_TYPE=Release -Daudacity_conan_enabled=Off
   cmake --build build --parallel

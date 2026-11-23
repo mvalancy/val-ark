@@ -51,17 +51,33 @@ grep -q "RC=0 E=0 P=tools/sources/app-3.0-src/app-3.0.tar.xz" <<<"$OUT" && ! gre
 OUT=$(run 'mirror_source_tarball app 4.0 "" >/dev/null; echo "RC=$?"' 2>&1)
 grep -q "RC=1" <<<"$OUT" && grep -q "no source URL" <<<"$OUT" && pass || fail "an empty URL list must be an error (got: $OUT)"
 
+# 3d. a new version's source prunes older <tool>-<ver>-src dirs, never another tool's
+mkdir -p "$TOOLS/sources/app-0.9-src" "$TOOLS/sources/app-extra-1-src" "$TOOLS/sources/app-0.8-src"
+echo "v5" > "$T/www/rel/app-5.0.tar.xz"
+run 'mirror_source_tarball app 5.0 "'"$B"'/rel/app-5.0.tar.xz" >/dev/null' 2>/dev/null
+[ -d "$TOOLS/sources/app-5.0-src" ] && [ ! -d "$TOOLS/sources/app-0.9-src" ] && [ ! -d "$TOOLS/sources/app-1.0-src" ] \
+    && [ -d "$TOOLS/sources/app-extra-1-src" ] && pass || fail "older source versions pruned, other tools kept ($(ls "$TOOLS/sources" | tr '\n' ' '))"
+
 # 4. the hint text
 run 'build_from_source_hint demo "Demo App" linux-arm64 demo-pkg demo tools/sources/demo-1.0-src/demo-1.0.tar.xz owner/demo "  make && make install"' >/dev/null 2>&1
 H="$T/data/val-ark/tools/linux-arm64/demo/INSTALL.txt"; [ -f "$H" ] || H="$(find "$T/data" -path '*linux-arm64/demo/INSTALL.txt' | head -1)"
-for want in "Demo App - linux-arm64" "--set desktop-apps" "--arch arm64" "apt-get install demo-pkg" "'desktop-src'" \
-            "source/demo/" "apt-get build-dep demo" "dpkg-buildpackage" "tools/sources/demo-1.0-src/demo-1.0.tar.xz" \
-            "owner/demo.bundle" "make && make install" "submodules"; do
+for want in "Demo App - linux-arm64" "--set desktop-apps --set desktop-src --dest" "--arch arm64" "apt-get install demo-pkg" \
+            "'desktop-src'" "source/demo/" "apt-get build-dep ./demo_*.dsc" "dpkg-source -x demo_*.dsc" "dpkg-buildpackage" \
+            "tools/sources/demo-1.0-src/demo-1.0.tar.xz" "owner/demo.bundle" "make && make install" "release tarball" \
+            "Ubuntu noble's version" "may need newer" "1. Install" "2. Rebuild" "3. Upstream source" "4. Full-history"; do
     grep -qF -- "$want" "$H" 2>/dev/null && pass || fail "hint must mention: $want"
 done
+# build-dep by package NAME fails against a flat repo (no deb-src index): never suggested
+! grep -qE "build-dep [a-z]" "$H" && pass || fail "hint must not suggest 'apt-get build-dep <name>'"
+! grep -q "software/linux" "$H" && pass || fail "hint must not name a private mirror layout"
 run 'build_from_source_hint demo2 "Demo" linux-x86_64 "" "" "" "" ""' >/dev/null 2>&1
 H2="$(find "$T/data" -path '*linux-x86_64/demo2/INSTALL.txt' | head -1)"
 ! grep -q "desktop-apps\|desktop-src\|bundle" "$H2" && grep -q "Online fallback" "$H2" && pass || fail "empty fields leave their sections out"
+# no .deb sets (Bambu-like): the source section is number 1 and never mentions desktop-src / build-dep
+run 'build_from_source_hint demo3 "Demo3" linux-arm64 "" "" tools/sources/demo3-2-src/v2.tar.gz o/demo3 "  make" archive' >/dev/null 2>&1
+H3="$(find "$T/data" -path '*linux-arm64/demo3/INSTALL.txt' | head -1)"
+grep -q "^1. Upstream source, tag archive" "$H3" && grep -q "NOT include git submodules" "$H3" && grep -q "^2. Full-history" "$H3" \
+    && ! grep -q "desktop-src\|build-dep" "$H3" && pass || fail "a hint without .deb sets numbers from 1 and has no build-dep line ($(head -12 "$H3" | tr '\n' '|'))"
 
 # 5. the scripts use it where upstream ships no build
 for f in inkscape blender kdenlive kicad vlc bambu-studio; do
@@ -70,6 +86,11 @@ for f in inkscape blender kdenlive kicad vlc bambu-studio; do
 done
 grep -q 'sudo apt install inkscape' "$ROOT/scripts/tools/inkscape.sh" && fail "inkscape.sh still has the online-only hint" || pass
 for f in btop tmux audacity; do grep -q "mirror_source_tarball" "$ROOT/scripts/tools/$f.sh" && pass || fail "$f.sh must mirror its source"; done
+# audacity fetches its source only for a platform without a binary (inside the no-binary branch)
+awk '/build_from_source_hint audacity/{exit} /mirror_source_tarball audacity/{m=NR} /if \[ -n "\$url" \]; then/{u=NR} END{exit !(m>u && u>0)}' "$ROOT/scripts/tools/audacity.sh" \
+    && pass || fail "audacity.sh must mirror source only in the no-binary branch"
+grep -q 'kicad_steps" archive' "$ROOT/scripts/tools/kicad.sh" && grep -q 'builds" archive' "$ROOT/scripts/tools/bambu-studio.sh" \
+    && pass || fail "forge tag archives (KiCad GitLab, Bambu GitHub) must be marked 'archive'"
 grep -q 'libevent' "$ROOT/scripts/tools/tmux.sh" && pass || fail "tmux.sh must mirror libevent (its one non-system library on macOS)"
 
 # 6. the bundles named in hints exist in the source catalog

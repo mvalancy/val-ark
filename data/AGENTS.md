@@ -1,6 +1,8 @@
 # data/ — the catalog TSVs
 
-Pipe-delimited (`|`) catalogs the librarian reads to decide what to mirror. Edit here to add
+Pipe-delimited (`|`) catalogs that decide what to mirror: the librarian's fill reads `installers.tsv`,
+`models-extra.tsv` and `essentials.tsv`; the standalone mirror CLIs (run by hand, outside the fill)
+read `dev-stack.tsv`, `apt-sets.tsv` and `source-repos.tsv`. Edit here to add
 freely-redistributable install media or a small high-value model; the header comment inside each
 file is the canonical schema.
 
@@ -37,6 +39,18 @@ value|set|packages|note
 rank|kind|ref|match|group|note
 ```
 
+`essentials.tsv`:
+
+```
+rank|kind|match|focus|note
+```
+
+`source-repos.tsv`:
+
+```
+value|repo|group
+```
+
 `models-extra.tsv`:
 
 ```
@@ -57,8 +71,9 @@ value|id|category|repo|file|format|gated|bytes|dest|note
 
 ## Consumers (change a column position → breakage)
 
-- `scripts/lib/catalog.sh` — parses both files.
-- `scripts/planner.py` — ranks rows by derived value-per-byte.
+- `scripts/lib/catalog.sh` — parses `models-extra.tsv` + `installers.tsv` into candidates.
+- `scripts/lib/planner.py` — ranks candidates by derived value-per-byte; reads `essentials.tsv` (phase 0,
+  via `planner.py --essentials`, which `librarian.sh plan|fill` always passes), matching `kind`+`match` against candidate ids.
 - `scripts/lib/git_bundle_mirror.py` — reads `source-repos.tsv`. Use canonical `owner/repo` names (GitHub redirects renamed repos, but duplicates then slip in); `tests/test-git-bundle-mirror.sh` rejects case-insensitive duplicates.
 - `scripts/loop.sh` — link-checks the `url` field on the self-heal cycle.
 - `scripts/lib/apt_offline.py` — reads `apt-sets.tsv` (`sets` / `resolve` / `fetch` / `index` / `build`).

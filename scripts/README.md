@@ -19,9 +19,17 @@ flowchart TD
     loop --> srv
 
     lib --> cat[lib/catalog.sh]
-    lib --> plan[lib/planner.py<br/>diversity-first plan]
+    lib --> plan[lib/planner.py<br/>essentials-first plan]
+    plan --> ess[data/essentials.tsv<br/>phase 0]
     cat --> kiwix[lib/kiwix_catalog.py<br/>live OPDS]
     cat --> tsv[data/installers.tsv<br/>data/models-extra.tsv]
+
+    loop -->|2e| self[mirror-self.sh<br/>LAN self-replication]
+    loop -->|7c| sweep[lib/mod-sweep.sh<br/>moderation sweep]
+
+    manual([run by hand]) --> rel[lib/release_mirror.py] --> devtsv[data/dev-stack.tsv]
+    manual --> apt[lib/apt_offline.py] --> apttsv[data/apt-sets.tsv]
+    manual --> gb[lib/git_bundle_mirror.py] --> srctsv[data/source-repos.tsv]
 
     lib -->|aria2 / curl| zim[content/zim ZIMs]
     lib --> models[models/]
@@ -55,7 +63,7 @@ mount one shared mirror — see [Platforms](../docs/PLATFORMS.md).
 | Script | Purpose |
 |--------|---------|
 | `setup.sh` | First-run dependency checks and directory creation |
-| `update.sh` | Pull latest changes and re-run setup if needed |
+| `update.sh` | Update the Ollama installers, tool logos/assets, and check for new tool releases |
 | `librarian.sh` | Scalable, diversity-first disk-fill + curation engine (see below) |
 | `loop.sh` | 24/7 self-healing + verification cycle; installs a cron driver |
 | `verify.sh` | Functional checks: tools run, kiwix serves, LLM infers, fleet reachable |
@@ -90,11 +98,20 @@ Shared library under `lib/` — sourced/required building blocks, not entry poin
 | `lib/auth.js` | Admin identity: one scrypt passcode + HMAC sessions; shared by `server.js` and the `valark` CLI |
 | `lib/commission.js` | First-boot claim/commissioning + config store (profile/use-mode/recovery/moderation); shared by `server.js` and `valark` |
 | `lib/tls.sh` | Offline local certificate authority (CA + server leaf) for LAN HTTPS with no internet |
+| `lib/jobs.js` | Download/mirror job manager behind `/api/status/downloads` + SSE: real-byte progress, honest terminal states, restart recovery |
+| `lib/tool-scan.js` | Mirrored-tool directory scan + per-platform mirror verification (sees through wrapper dirs) |
+| `lib/release_mirror.py` | Standalone: the current release of every `data/dev-stack.tsv` project, every platform (`plan` / `fetch`) |
+| `lib/hf_scout.py` | Weekly Hugging Face model scout: new open models (≤ 10 GB by default) as `models-extra.tsv` rows, cached by `catalog.sh` and run by `librarian.sh scout` / `maintain` |
+| `lib/apt_offline.py` | Standalone: dependency-complete offline APT sets from `data/apt-sets.tsv`, indexed as a flat repo |
+| `lib/git_bundle_mirror.py` | Standalone: full-history git bundles of `data/source-repos.tsv` (`plan` / `mirror` / `verify`) |
+| `lib/lastbook_mirror.py` | The current Lastbook release, budget-sized (used by `tools/lastbook.sh`) |
+| `lib/references_mirror.py` | Private content-addressed archive of cad-agent's reference library (used by `tools/cad-agent-references.sh`) |
+| `lib/oci_pull.py` | One platform of a container image as a `docker load` tar, no Docker needed (used by `tools/cad-agent.sh`) |
 
 ## Librarian (`librarian.sh`)
 
 Fills a disk of **any size** from live catalogs in priority order:
-`diversity → small-valuable → fill-remaining → evict-for-better`. Downloads prefer
+`grid-down essentials → diversity → small-valuable → fill-remaining → evict-for-better`. Downloads prefer
 **aria2** multi-connection (~3× faster on per-connection-throttled mirrors) with a
 curl fallback; both resume, retry, verify size, atomic-rename, and never abort on a
 single failure. A single `flock` prevents concurrent fills from racing.
@@ -107,6 +124,11 @@ single failure. A single `flock` prevents concurrent fills from racing.
 ./librarian.sh evict --need BYTES  # free space (lowest value/byte, protect diversity)
 ./librarian.sh maintain            # refresh + verify + bounded top-up + health report
 ./librarian.sh refresh             # refresh the live Kiwix catalog cache
+./librarian.sh scout               # scout Hugging Face for new models now (weekly otherwise)
+./librarian.sh catalog [content|model|installer|all]  # not-yet-downloaded items (browse feed)
+./librarian.sh request <content|model|tool> <id>  # pin + fetch ONE item now
+./librarian.sh pin <kind> <id> / unpin <id>       # keep an item; pins are never evicted
+./librarian.sh pins [--refill]     # list pins / re-fetch any that went missing
 ```
 
 `fill`/`maintain` accept `--max-bytes B`, `--max-items N`, `--time SECONDS`, and
@@ -116,8 +138,12 @@ single failure. A single `flock` prevents concurrent fills from racing.
 
 One cycle is safe to run repeatedly and concurrently with a standalone fill. In order:
 ensure the data disk is writable → repair the symlink layout → ensure the web server
-(and Kiwix) is up → refresh the live catalog (heals content links) → link-check + repair
-→ integrity verify → bounded top-up fill → functional verification → health report.
+(and Kiwix) is up → keep the standard-port redirect (`VALARK_WEB_PUBLIC_PORT`) → keep
+enabled community services up → self-mirror Val Ark's source (LAN bootstrap) → refresh
+the live catalog (heals content links) → link-check + repair → integrity verify →
+re-fill pinned requests → bounded top-up fill → weekly tool refresh → functional
+verification → UI smoke → moderation sweep of uploads → report + coordination →
+self-heal snapshot (`state/selfheal.json`).
 
 ```bash
 ./loop.sh once             # one maintenance cycle (cron / manual)
@@ -140,7 +166,7 @@ inference on a model served over NFS.
 
 ## Tool Scripts (`scripts/tools/`)
 
-There are **50** self-contained tool download scripts (e.g. `llama-cpp.sh`, `piper.sh`,
+There are **50+** self-contained tool download scripts (e.g. `llama-cpp.sh`, `piper.sh`,
 `ffmpeg.sh`) plus the shared `_common.sh`. Each sources `_common.sh` for shared helpers
 (logging, retrying downloads, platform detection, GitHub release lookup) and defines a
 `download_<tool>()` function. `download-tools.sh` discovers them automatically:

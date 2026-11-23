@@ -42,7 +42,7 @@
 # --- Tiny VLMs (need text gguf + mmproj; grab all gguf) ---
 640|smolvlm-instruct-gguf|tiny-vlm|ggml-org/SmolVLM-Instruct-GGUF|*.gguf|repo|no|2362232012|vlm/smolvlm|2B VLM, runs in llama.cpp w/ mmproj
 635|smolvlm2-22b-gguf|tiny-vlm|ggml-org/SmolVLM2-2.2B-Instruct-GGUF|*.gguf|repo|no|1717986918|vlm/smolvlm2|Video+image small VLM
-630|moondream2-gguf|tiny-vlm|ggml-org/moondream2-20250414-GGUF|*.gguf|repo|no|1932735283|vlm/moondream2|Tiny VLM, GGUF for llama.cpp
+630|moondream2-gguf|tiny-vlm|ggml-org/moondream2-20250414-GGUF|*.gguf|repo|no|1932735283|vlm/moondream2-gguf|Tiny VLM, GGUF for llama.cpp
 # --- OCR / document understanding ---
 650|granite-docling-258m-gguf|ocr-doc|ggml-org/granite-docling-258M-GGUF|*.gguf|repo|no|356515840|ocr/granite-docling-258m|Tiny doc-to-markdown/layout VLM
 600|florence-2-base-ft-onnx|ocr-doc|onnx-community/Florence-2-base-ft|onnx/*.onnx|repo|no|262144000|ocr/florence-2-base-onnx|ONNX caption/detect/OCR/grounding VLM

@@ -210,12 +210,23 @@ broadens modality coverage with small, high-value files the
 
 | Modality | Examples |
 |----------|----------|
+| Setup assistants | Qwen2.5 1.5B / 3B / 7B Instruct, Llama-3.2-3B Instruct (GGUF; ask the box for shell + setup help) |
+| Small LLMs | Qwen2.5 0.5B / 1.5B, SmolLM2-1.7B, Gemma-2-2B, Phi-3.5-mini (GGUF) |
+| Code | Qwen2.5-Coder 1.5B / 7B (GGUF) |
 | Embeddings / rerankers | bge, nomic, mxbai, gte, jina, e5 (RAG backbone) |
 | Tiny VLMs / OCR | SmolVLM, moondream2, granite-docling, Florence-2 |
 | Speech | silero-vad, whisper-base ONNX, Kokoro-q8 |
 | Vision | YOLO11n, depth-anything-v2, MobileSAM, CLIP, SigLIP |
 | Time-series / audio | chronos-t5, moirai, CLAP, musicgen-small |
 | Safety | Llama-Guard-3-8B |
+
+**New models arrive on their own.** Each week the Librarian's
+[model scout](LIBRARIAN.md#model-scout-hf_scoutpy) (`scripts/lib/hf_scout.py`) adds open
+**speech and vision** models (ASR, TTS, YOLO-class detection, segmentation, depth, OCR, …;
+any age, up to 6 GB) at high priority, plus new models of any modality up to 10 GB that are
+getting attention on Hugging Face (optionally also big frontier releases). Speech and vision
+picks rank with the curated rows; the rest are planned after them on a small disk and fill
+around them on a big one.
 
 ---
 

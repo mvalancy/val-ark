@@ -4,13 +4,17 @@
 #
 # One cycle (run by `/loop`, cron, or systemd) does, in order:
 #   1. ensure the data disk is writable (self-heal NTFS/ro reverts)
-#   2. repair the repo<->disk symlink layout
+#   2. repair the repo<->disk symlink layout (2b-2d web server, public port, community
+#      services, 2e self-mirror of Val Ark's own source)
 #   3. refresh the live catalog  -> ZIM/content links self-heal (no stale dates)
 #   4. link check + repair        -> tool/installer URLs, web-ui assets, symlinks
-#   5. integrity verify           -> requeue corrupt/short downloads
+#   5. integrity verify           -> requeue corrupt/short downloads (5b re-fill pinned requests)
 #   6. top-up fill (bounded)      -> keep filling per the curation priority model
+#      (6b weekly refresh of mirrored tools)
 #   7. functional verification    -> tools run, kiwix serves, fleet reachable
-#   8. health report + coordination drop
+#      (7b UI smoke, 7c content-moderation sweep)
+#   8. health report + coordination drop (8b self-heal snapshot)
+#   The step list in docs/LIBRARIAN.md "The 24/7 loop" is the full, current reference.
 #
 # Every FULL cycle is serialised on loop.lock (fd 8): the installed cron `once`
 # ticks, the admin one-click repair (server.js spawns `loop.sh once`), and a

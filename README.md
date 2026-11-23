@@ -153,7 +153,7 @@ cp .env.example .env            # set VAL_ARK_DATA=/your/disk (git-ignored)
 ./scripts/loop.sh install 30    # flock-guarded 24/7 self-healing cron (every 30 min)
 ```
 
-Commands: `status | plan | fill | verify | evict | maintain | refresh | catalog |
+Commands: `status | plan | fill | verify | evict | maintain | refresh | scout | catalog |
 request <content|model|tool> <id> | pin | unpin | pins [--refill]`.
 See **[docs/LIBRARIAN.md](docs/LIBRARIAN.md)** for the full design.
 
@@ -373,7 +373,7 @@ val-ark/
 │   ├── server.js             # Zero-dep web UI server + JSON API + SSE
 │   ├── valark                # Admin & recovery CLI (passcode, Use Mode, recovery)
 │   ├── librarian.sh          # Self-fill engine: status|plan|fill|verify|evict|maintain|
-│   │                         #   refresh|catalog|request|pin|unpin|pins
+│   │                         #   refresh|scout|catalog|request|pin|unpin|pins
 │   ├── loop.sh               # 24/7 self-healing + verification loop (cron)
 │   ├── verify.sh             # Functional "does it actually run?" checks (local + fleet)
 │   ├── mirror-self.sh        # Mirror Val Ark's own source for LAN self-replication

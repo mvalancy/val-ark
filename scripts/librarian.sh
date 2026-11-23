@@ -12,9 +12,11 @@
 #   status                 disk + coverage summary
 #   plan   [--budget B]    dry-run: print the ordered plan
 #   fill   [opts]          execute the plan, bounded (see opts)
-#   maintain               refresh catalog + verify + top-up + report (loop core)
+#   maintain               refresh catalog (+ weekly model scout) + verify + top-up + report (loop core)
 #   verify                 integrity-check managed files (size); requeue bad
 #   evict  --need BYTES    free space (lowest value/byte, protect diversity+pins)
+#   refresh                force a live Kiwix catalog refresh
+#   scout                  force a Hugging Face model scout (lib/hf_scout.py) now
 #   catalog [kind]         list not-yet-downloaded items (content|model|installer)
 #   request KIND ID        pin + fetch ONE item now (auto-evicts to fit the cap)
 #   pin/unpin/pins         manage durable user requests (pins [--refill])
@@ -48,7 +50,55 @@ warn() { log "${YELLOW}WARN${NC} $*"; }
 err()  { log "${RED}ERR${NC} $*"; }
 human(){ valark_human "${1:-0}"; }
 
-ensure_state() { mkdir -p "$STATE_DIR" "$LOG_DIR" "$TMPDIR_VA" "$ZIM_DIR" "$INSTALLERS_DIR" "$MODELS_DIR" 2>/dev/null || true; }
+ensure_state() {
+    mkdir -p "$STATE_DIR" "$LOG_DIR" "$TMPDIR_VA" "$ZIM_DIR" "$INSTALLERS_DIR" "$MODELS_DIR" 2>/dev/null || true
+    stamp_legacy_repos
+}
+
+# One-time migration (#259): an hf-repo counts as present only with <dest>/.valark-complete,
+# written after `hf download` exits 0. Repos pulled before the stamp existed are in the
+# manifest (manifest_add only ever ran after a successful pull), so stamp those once;
+# otherwise an OFFLINE box would see them all as missing (re-planned, double-counted, and
+# `request` would evict other content to make room for a model already on disk).
+# The marker is written only when every listed dir was reachable and stamped, so a data
+# disk or NFS share that is not mounted yet is retried on the next command.
+# A dir that exists but cannot take the stamp (read-only) is warned about, not retried.
+stamp_legacy_repos() {
+    local mark="${STATE_DIR}/.hf-repo-stamps-v1"
+    [ -f "$mark" ] && return 0
+    [ -f "$MANIFEST" ] || { : > "$mark" 2>/dev/null; return 0; }
+    move_moondream_gguf
+    local missed
+    missed=$(awk -F'\t' '$7=="hf-repo" {print $4}' "$MANIFEST" | while IFS= read -r d; do
+        [ -n "$d" ] || continue
+        [ -f "$d/.valark-complete" ] && continue
+        [ -d "$d" ] || { echo x; continue; }
+        echo "migrated $(date -u +%FT%TZ)" > "$d/.valark-complete" 2>/dev/null ||
+            warn "cannot stamp $d (read-only?); it will be re-pulled when writable" >&2
+    done)
+    [ -z "$missed" ] && : > "$mark" 2>/dev/null
+    return 0
+}
+
+# #259: the curated moondream2 GGUF row shared vlm/moondream2 with download-models.sh's
+# vikhyatk/moondream2 checkout (whole-repo eviction would have deleted both). Its dest is
+# now vlm/moondream2-gguf: move only the GGUF files the Librarian pulled, re-point the
+# manifest row, and leave the rest of the old dir (download-models.sh owns it).
+move_moondream_gguf() {
+    local row old new f
+    row=$(awk -F'\t' '$1=="model:moondream2-gguf" && $4 ~ /\/vlm\/moondream2$/' "$MANIFEST" 2>/dev/null | head -1)
+    [ -n "$row" ] || return 0
+    old=$(printf '%s' "$row" | cut -f4); new="${old}-gguf"
+    [ -d "$old" ] || return 0
+    mkdir -p "$new" 2>/dev/null || return 0
+    for f in "$old"/*.gguf; do [ -f "$f" ] && mv -n -- "$f" "$new/" 2>/dev/null; done
+    # Nothing to move (deleted by hand / never finished): drop the row rather than leave
+    # it pointing at the shared dir, where a whole-repo eviction would rm -rf it.
+    ls "$new"/*.gguf >/dev/null 2>&1 || { manifest_drop "model:moondream2-gguf"; return 0; }
+    echo "migrated $(date -u +%FT%TZ)" > "$new/.valark-complete" 2>/dev/null
+    awk -F'\t' -v OFS='\t' -v n="$new" '$1=="model:moondream2-gguf" {$4=n} {print}' "$MANIFEST" > "${MANIFEST}.tmp.$$" &&
+        mv -f "${MANIFEST}.tmp.$$" "$MANIFEST"
+}
 
 # --- manifest --------------------------------------------------------------
 # id  bucket  category  dest  bytes  value  source  epoch
@@ -98,8 +148,8 @@ candidate_present() {
             fn="${dest}/$(basename "$url")"; [ -f "$fn" ] || return 1
             sz=$(stat -c%s "$fn" 2>/dev/null || echo 0)
             if [ "$bytes" -gt 0 ]; then [ "$sz" -ge $(( bytes * 90 / 100 )) ]; else [ "$sz" -gt 0 ]; fi ;;
-        hf-repo)
-            [ -d "$dest" ] && [ -n "$(find "$dest" -type f 2>/dev/null | head -1)" ] ;;
+        hf-repo)   # only a finished pull (stamp written after `hf download` exits 0)
+            [ -f "$dest/.valark-complete" ] ;;
         *) return 1 ;;
     esac
 }
@@ -208,6 +258,8 @@ download_one() {
             [ -n "$hf" ] || { warn "hf CLI missing; skip $id"; return 1; }
             mkdir -p "$dest" 2>/dev/null
             if "$hf" download "$url" --local-dir "$dest" --include "$extra" >>"$LL_LOG" 2>&1; then
+                date -u +%FT%TZ > "$dest/.valark-complete" 2>/dev/null || {
+                    warn "cannot write $dest/.valark-complete; not recording $id"; return 1; }
                 local sz; sz=$(du -sb "$dest" 2>/dev/null | cut -f1); manifest_add "$id" "$bucket" "$cat" "$dest" "${sz:-0}" "$value" "$source" && return 0
             fi
             return 1 ;;
@@ -368,8 +420,24 @@ cmd_evict() {
     gen_candidates | python3 "$PLANNER" --budget 1 --evict-need "$need" --manifest "$MANIFEST" --pins "$PINS" | \
     while IFS=$'\t' read -r id cat dest bytes value; do
         warn "evict $id ($cat, $(human "$bytes"), value $value) -> $dest"
-        rm -f "$dest" 2>/dev/null && manifest_drop "$id"
+        evict_path "$dest" && manifest_drop "$id"
     done
+}
+
+# Delete one managed download: a file, or a whole-repo (hf-repo) directory. A directory is
+# removed only when it resolves strictly inside the managed roots (never a root itself).
+evict_path() {
+    local p="$1" real root
+    [ -n "$p" ] || return 1
+    if [ -d "$p" ] && [ ! -L "$p" ]; then
+        real=$(realpath -e -- "$p" 2>/dev/null) || return 1
+        for root in "$MODELS_DIR" "$CONTENT_DIR" "$INSTALLERS_DIR"; do
+            root=$(realpath -e -- "$root" 2>/dev/null) || continue
+            case "$real" in "$root"/?*) rm -rf -- "$real" 2>/dev/null; return $? ;; esac
+        done
+        warn "evict: refusing to delete $p (outside the managed roots)"; return 1
+    fi
+    rm -f -- "$p" 2>/dev/null
 }
 
 # --- catalog: list every not-yet-downloaded candidate (the web browse feed) --
@@ -543,6 +611,7 @@ cmd_maintain() {
     ensure_state
     log "maintain: begin"
     catalog_refresh_zim --force >/dev/null 2>&1 && ok "catalog refreshed" || warn "catalog refresh failed (using cache)"
+    catalog_refresh_scout >/dev/null 2>&1 || warn "model scout incomplete (keeping the previous scouted list)"
     cmd_verify >/dev/null
     # Top-up fill bounded by time so the loop stays responsive.
     local added; added=$(cmd_fill --time "${MAINTAIN_FILL_SECONDS:-1800}" 2>>"$LL_LOG" | tail -1)
@@ -567,7 +636,7 @@ EOF
 [ "${BASH_SOURCE[0]}" != "$0" ] && return 0
 
 # DISPATCH: command -> cmd_<name> (grep `cmd_status` etc. to jump to a handler).
-# status/plan/fill/verify/evict/maintain -> cmd_*; refresh -> catalog_refresh_zim;
+# status/plan/fill/verify/evict/maintain -> cmd_*; refresh -> catalog_refresh_zim; scout -> catalog_refresh_scout;
 # catalog/request/pin/unpin/pins -> cmd_*. See the Commands block at the top of file.
 case "${1:-status}" in
     status)   cmd_status ;;
@@ -577,10 +646,15 @@ case "${1:-status}" in
     evict)    shift; cmd_evict "$@" ;;
     maintain) cmd_maintain ;;
     refresh)  catalog_refresh_zim --force && ok "catalog cached: $ZIM_CACHE ($(wc -l < "$ZIM_CACHE") entries)" ;;
+    scout)    catalog_refresh_scout --force; rc=$?
+              [ "${VALARK_SCOUT:-1}" = "0" ] && { warn "VALARK_SCOUT=0: scout disabled"; exit 0; }
+              n=$(grep -vc '^#' "$SCOUT_CACHE" 2>/dev/null); n=${n:-0}
+              [ "$rc" -eq 0 ] && ok "scouted models cached: $SCOUT_CACHE ($n repos)" || warn "scout incomplete (see ${SCOUT_CACHE}.err); cache: $SCOUT_CACHE ($n repos)"
+              exit "$rc" ;;
     catalog)  shift; cmd_catalog "${1:-all}" ;;
     request)  shift; cmd_request "$1" "$2" ;;
     pin)      shift; cmd_pin "$1" "$2" ;;
     unpin)    shift; cmd_unpin "$1" ;;
     pins)     shift; [ "$1" = "--refill" ] && cmd_pins_refill || cmd_pins ;;
-    *) echo "usage: librarian.sh {status|plan|fill|verify|evict|maintain|refresh|catalog|request|pin|unpin|pins}"; exit 1 ;;
+    *) echo "usage: librarian.sh {status|plan|fill|verify|evict|maintain|refresh|scout|catalog|request|pin|unpin|pins}"; exit 1 ;;
 esac

@@ -101,6 +101,7 @@ Shared library under `lib/` — sourced/required building blocks, not entry poin
 | `lib/jobs.js` | Download/mirror job manager behind `/api/status/downloads` + SSE: real-byte progress, honest terminal states, restart recovery |
 | `lib/tool-scan.js` | Mirrored-tool directory scan + per-platform mirror verification (sees through wrapper dirs) |
 | `lib/release_mirror.py` | Standalone: the current release of every `data/dev-stack.tsv` project, every platform (`plan` / `fetch`) |
+| `lib/hf_scout.py` | Weekly Hugging Face model scout: new open models (≤ 10 GB by default) as `models-extra.tsv` rows, cached by `catalog.sh` and run by `librarian.sh scout` / `maintain` |
 | `lib/apt_offline.py` | Standalone: dependency-complete offline APT sets from `data/apt-sets.tsv`, indexed as a flat repo |
 | `lib/git_bundle_mirror.py` | Standalone: full-history git bundles of `data/source-repos.tsv` (`plan` / `mirror` / `verify`) |
 | `lib/lastbook_mirror.py` | The current Lastbook release, budget-sized (used by `tools/lastbook.sh`) |
@@ -123,6 +124,7 @@ single failure. A single `flock` prevents concurrent fills from racing.
 ./librarian.sh evict --need BYTES  # free space (lowest value/byte, protect diversity)
 ./librarian.sh maintain            # refresh + verify + bounded top-up + health report
 ./librarian.sh refresh             # refresh the live Kiwix catalog cache
+./librarian.sh scout               # scout Hugging Face for new models now (weekly otherwise)
 ./librarian.sh catalog [content|model|installer|all]  # not-yet-downloaded items (browse feed)
 ./librarian.sh request <content|model|tool> <id>  # pin + fetch ONE item now
 ./librarian.sh pin <kind> <id> / unpin <id>       # keep an item; pins are never evicted

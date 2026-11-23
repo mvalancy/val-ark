@@ -101,6 +101,31 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Downloads / mirroring
 
+- **A whole-repo (`hf-repo`) pull is a DIRECTORY, so "any file present" is not "done" and
+  `rm -f` does not evict it** (#259). A cut-off `hf download` leaves `config.json` and
+  `.cache/huggingface/download/*.incomplete` behind; the old present check (any file in `dest`)
+  treated that as complete forever (never resumed, never in the manifest). Now `librarian.sh`
+  writes `<dest>/.valark-complete` after `hf download` exits 0 and both present checks
+  (`librarian.sh`, `planner.py`) require it; if the stamp cannot be written the pull is not
+  recorded. Repos pulled before the stamp existed are in the manifest (it is only written after a
+  successful pull), so `ensure_state` stamps those once (`stamp_legacy_repos`, marker
+  `state/.hf-repo-stamps-v1`) — without it an OFFLINE box saw them all as missing, re-planned
+  them and `request` evicted other content to make room. The marker is written only once every
+  listed dir was reachable, so an unmounted disk is retried. **Behaviour change:** a repo dir filled
+  OUTSIDE the Librarian (copied by hand, synced from another box, `download-models.sh`) no longer
+  counts as present until the Librarian pulls it itself (online: a quick re-check; offline: it is
+  re-planned). To adopt such a dir, write the stamp yourself: `date > <dest>/.valark-complete`.
+  Curated `repo` dests must never equal or nest in another row's dest or a `download-models.sh`
+  directory (eviction `rm -rf`s the whole dest): `vlm/moondream2` was shared and is now
+  `vlm/moondream2-gguf`; `tests/test-hf-scout.sh` checks this. Eviction goes
+  through `evict_path`, which `rm -rf`s a directory only when it resolves strictly inside
+  `MODELS_DIR` / `CONTENT_DIR` / `INSTALLERS_DIR`.
+- **Scouted model rows must not open new categories** (#259). The planner's diversity phase takes
+  the smallest item of every uncovered category first, and eviction shields a category's sole
+  item; a scouted repo with its own raw pipeline tag (`text-classification`, …) would get both.
+  `hf_scout.py` maps tags onto the curated category words (or `scouted`), and the planner skips
+  `model:scout-*` ids in phase 1 and in the sole-representative shield.
+
 - **`apt-get --print-uris` is a trap for offline .deb sets** (`scripts/lib/apt_offline.py`): (1) it
   prints only an **MD5** digest, so take SHA256 from the signed `*_Packages` lists; (2) its local
   file name carries the **epoch** URL-encoded (`zlib1g_1%3a1.3…deb`) while the pool/`Packages`

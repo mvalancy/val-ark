@@ -75,12 +75,48 @@ flavours (maxi/nopic/mini) collapse to the most complete one.
 |--------|------|-------|
 | Kiwix ZIM library | live OPDS via `scripts/lib/kiwix_catalog.py` | **Always current** — ZIM dates never go stale. ~1700+ entries across 9 languages by default (`VALARK_ZIM_LANGS`). |
 | Models (diversity) | `data/models-extra.tsv` | Small high-value models across 18 categories (setup-assistant chat LLMs, small LLMs, code, embeddings, rerankers, tiny VLMs, OCR, depth, segmentation, detection, audio, time-series, safety). |
+| Models (scouted, weekly) | `<state>/catalog/models-scouted.tsv` | **New open models, found automatically** by `scripts/lib/hf_scout.py` — see [Model scout](#model-scout-hf_scoutpy). Planned after the curated rows on a small disk. |
 | OS / router / netboot / server source | `data/installers.tsv` | Distro ISOs (Alpine/Debian/Ubuntu/…), OpenWRT firmware, netboot.xyz, Jetson BSP — for PXE / mesh commissioning — plus `server-source`: upstream LAMP + LAN-infrastructure releases (httpd/APR, PHP, MariaDB, PostgreSQL, nginx, OpenSSL/OpenSSH, BIND, Kea, dnsmasq, Unbound, Samba, Dovecot, WordPress, Nextcloud, Gitea, …). |
 
 The grid-down list in `data/essentials.tsv` is not a source of its own: it names ZIMs, models and
 installers from the catalogs above, and the planner takes the matches first (phase 0).
 
 The big LLM/STT/TTS/VLM/image catalog is still managed by `download-models.sh`.
+
+### Model scout (`hf_scout.py`)
+
+The curated catalog only changes when someone edits it, so good new open models would
+never reach a box on their own. Once a week (`librarian.sh maintain`, TTL
+`VALARK_SCOUT_TTL`, default 7 days) the Librarian asks the Hugging Face API what is new
+and writes the picks to `<state>/catalog/models-scouted.tsv`, in the `models-extra.tsv`
+schema. `librarian.sh scout` does it now.
+
+- **small** (default): any modality, created in the last 180 days, **real repo size ≤ 10 GB**
+  (summed from the repo's file list, not guessed), at least 40 likes (10 for a repo owned by
+  a well-known lab), up to 200 per run. These are the cheap wins: OCR, embeddings, small
+  LLMs and VLMs, speech, time-series.
+- **frontier** (opt-in, `VALARK_SCOUT_SWEEPS=small,frontier`): open-weight releases with
+  ≥ 20B parameters from the last 18 months, from a lab or heavily liked. No size cap; the
+  planner's value-per-byte order fills them last, so they only land on a big disk.
+
+Both skip gated and private repos (no accepted licence), quantised / converted re-uploads
+(the originals are kept), speculative-decoding heads, abliterated / uncensored fine-tunes,
+`-base` checkpoints and any repo the curated catalog already names. Only repos that publish
+`safetensors` metadata are considered (the size pre-filter needs it), so ONNX-, GGUF- or
+`.bin`-only repos are left to the curated catalog.
+
+How they rank: scouted rows get values of 300–550 (frontier 200–400), against 480–900 for
+the curated rows, and reuse the curated category words (`small-llm`, `tiny-vlm`, `embed`,
+`speech-asr`, …; anything else is `scouted`). They never take a diversity slot and are not
+shielded from eviction as a category's only item, so on a small disk the curated set is
+planned first; in the small-valuable phase a scouted repo can still beat a curated one on
+value **per byte** when it is much smaller. A scout that cannot reach every listing never
+replaces a good cache (the ZIM catalog's completeness rule); a failed attempt waits
+`VALARK_SCOUT_RETRY` (1 day) before the next, and the scout's stderr is kept next to the
+cache as `models-scouted.tsv.err`. `VALARK_SCOUT=0` turns it off and ignores the cache.
+Rows are fetched with `hf download --include '*'` like any `repo` row; a whole-repo pull
+counts as present only once it finished (`.valark-complete` stamp). Tests:
+`tests/test-hf-scout.sh`.
 
 ### Standalone mirrors (run by hand, not part of `fill` / the loop)
 
@@ -250,7 +286,8 @@ scripts/librarian.sh fill --time 1800 --max-bytes 53687091200   # bounded chunk 
 scripts/librarian.sh verify        # integrity-check managed files; requeue bad
 scripts/librarian.sh evict --need 107374182400   # free space (raw bytes), lowest value/byte first
 scripts/librarian.sh refresh       # re-pull the live ZIM catalog
-scripts/librarian.sh maintain      # refresh + verify + bounded top-up + report (loop core)
+scripts/librarian.sh scout         # scout Hugging Face for new models now (weekly otherwise)
+scripts/librarian.sh maintain      # refresh (+ weekly scout) + verify + bounded top-up + report (loop core)
 scripts/librarian.sh catalog model # not-yet-downloaded items (content|model|installer|all; web browse feed)
 scripts/librarian.sh request model <id>   # pin + fetch ONE item now (content|model|tool), evicting unpinned items to fit
 scripts/librarian.sh pin content <id>     # keep an item: pins are never evicted

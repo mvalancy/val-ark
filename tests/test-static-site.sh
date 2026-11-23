@@ -149,6 +149,9 @@ check "VALARK_STATIC_SITE=0 is a no-op" '[ "$rc" -eq 0 ] && [ ! -e "$T/data2/val
 # a top-level-only section (sources: one folder per project) has no "(top level)" header row
 mkdir -p "$A/sources/proj"; echo s > "$A/sources/proj/p.tar.gz"
 python3 -I "$PY" --root "$A" --out "$T/src" --now 1700000000 >/dev/null 2>&1
+mkdir -p "$A/sources/github/own"; echo b > "$A/sources/github/own/repo.bundle"
+python3 -I "$PY" --root "$A" --out "$T/src2" --now 1700000000 >/dev/null 2>&1
+check "git bundles listed one per repo" 'grep -q ">own/repo.bundle</a>" "$T/src2/browse/sources.html"'
 check "no group header when every entry is top level" '! grep -q "(top level)" "$T/src/browse/sources.html" && grep -q ">proj</a>" "$T/src/browse/sources.html"'
 
 # maintain throttles the refresh (VALARK_STATIC_SITE_HOURS) and runs it when stale. Sourced

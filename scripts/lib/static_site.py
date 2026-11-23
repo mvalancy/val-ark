@@ -63,7 +63,7 @@ SECTIONS = [
      'Training and reference datasets: robotics, agriculture, weather, climate, earth observation.',
      'nas', {'open-data': 4, '*': 3}),
     ('sources', 'sources', 'Source code', 'Source archives and git bundles of the projects in the archive.',
-     'community', {'*': 1}),
+     'community', {'github': 3, '*': 1}),
 ]
 SKIP = re.compile(r'(^\.)|(\.part$)|(\.tmp(-\d+)?$)|(\.oversize-\d+$)')
 README = ('README.md', 'readme.md', 'README.txt', 'README')

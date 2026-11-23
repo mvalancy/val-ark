@@ -217,6 +217,11 @@ broadens modality coverage with small, high-value files the
 | Time-series / audio | chronos-t5, moirai, CLAP, musicgen-small |
 | Safety | Llama-Guard-3-8B |
 
+**New models arrive on their own.** Each week the Librarian's
+[model scout](LIBRARIAN.md#model-scout-hf_scoutpy) (`scripts/lib/hf_scout.py`) adds new
+open models of any modality up to 10 GB that are getting attention on Hugging Face
+(optionally also big frontier releases), ranked below the curated rows above.
+
 ---
 
 ## Usage with llama.cpp

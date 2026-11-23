@@ -5,6 +5,7 @@
 # Produces a unified stream of download CANDIDATES from three sources:
 #   1. Kiwix OPDS  (live, always-current -> no stale dates ever)   -> ZIM content
 #   2. data/models-extra.tsv  (curated small high-value models)
+#      + <state>/catalog/models-scouted.tsv (weekly Hugging Face scout, hf_scout.py)
 #   3. data/installers.tsv    (OS / router / netboot images)
 #
 # Normalized candidate schema (TAB-delimited), consumed by librarian.sh:
@@ -32,6 +33,9 @@ ZIM_CACHE_TTL="${ZIM_CACHE_TTL:-86400}"          # refetch OPDS at most once/day
 ZIM_LANGS="${VALARK_ZIM_LANGS:-eng spa fra deu rus ara hin zho por}"
 DATA_DIR="${PROJECT_ROOT}/data"
 KIWIX_PY="${PROJECT_ROOT}/scripts/lib/kiwix_catalog.py"
+SCOUT_PY="${PROJECT_ROOT}/scripts/lib/hf_scout.py"
+SCOUT_CACHE="${CATALOG_DIR}/models-scouted.tsv"
+SCOUT_TTL="${VALARK_SCOUT_TTL:-604800}"           # re-scout Hugging Face at most weekly
 
 # --- ZIM: refresh the live catalog cache (falls back to stale cache) ----------
 catalog_refresh_zim() {
@@ -67,6 +71,32 @@ catalog_refresh_zim() {
     rm -f "$tmp" 2>/dev/null
     # Keep whatever cache we already have; signal staleness if none.
     [ -s "$ZIM_CACHE" ] && return 0 || return 1
+}
+
+# --- Models: weekly Hugging Face scout cache (hf_scout.py) -------------------
+# Writes <state>/catalog/models-scouted.tsv (models-extra.tsv schema). Same rule as the
+# ZIM cache: only a COMPLETE scout (exit 0, a header line) replaces the cache, so a
+# flaky link never trades a good list for a partial one; with no cache yet, a partial
+# scout is accepted (better than nothing; the next refresh heals it). VALARK_SCOUT=0
+# turns it off (the cache is then ignored too); VALARK_SCOUT_SWEEPS picks the sweeps
+# (default small; small,frontier adds big open-weight releases).
+catalog_refresh_scout() {
+    [ "${VALARK_SCOUT:-1}" = "0" ] && return 0
+    mkdir -p "$CATALOG_DIR" 2>/dev/null || true
+    local age=99999999
+    [ -f "$SCOUT_CACHE" ] && age=$(( $(date +%s) - $(stat -c %Y "$SCOUT_CACHE" 2>/dev/null || echo 0) ))
+    if [ "$1" != "--force" ] && [ -f "$SCOUT_CACHE" ] && [ "$age" -lt "$SCOUT_TTL" ]; then
+        return 0
+    fi
+    local tmp="${SCOUT_CACHE}.tmp.$$" rc=0
+    python3 "$SCOUT_PY" plan --sweep "${VALARK_SCOUT_SWEEPS:-small}" \
+        --skip-tsv "${DATA_DIR}/models-extra.tsv" > "$tmp" 2>/dev/null || rc=$?
+    if grep -q '^# hf_scout plan' "$tmp" 2>/dev/null && { [ "$rc" -eq 0 ] || [ ! -f "$SCOUT_CACHE" ]; }; then
+        mv -f "$tmp" "$SCOUT_CACHE"
+        return "$rc"
+    fi
+    rm -f "$tmp" 2>/dev/null
+    return 1
 }
 
 # --- Owner PROFILE → per-bucket priority multiplier (Phase 5) ------------------
@@ -141,10 +171,15 @@ catalog_zim_candidates() {
 
 # --- Models-extra: emit normalized candidates --------------------------------
 catalog_model_candidates() {
-    local f="${DATA_DIR}/models-extra.tsv"
-    [ -f "$f" ] || return 0
+    local f="${DATA_DIR}/models-extra.tsv" s="$SCOUT_CACHE"
+    [ -f "$f" ] || f=/dev/null
+    [ "${VALARK_SCOUT:-1}" != "0" ] && [ -f "$s" ] || s=/dev/null
+    # Curated rows first; a scouted row whose repo the curated catalog already names is
+    # dropped (hf_scout skips them too, but the cache may predate a catalog edit).
     awk -F'|' -v models="$MODELS_DIR" -v pw="$(_valark_profile_weight models)" '
     /^[[:space:]]*#/ {next} /^[[:space:]]*$/ {next}
+    FILENAME==ARGV[1] {seen[tolower($4)]=1}
+    FILENAME==ARGV[2] && (tolower($4) in seen) {next}
     {
         value=($1+0) * (pw+0 > 0 ? pw : 1); id=$2; cat=$3; repo=$4; file=$5; fmt=$6; gated=$7; rawb=$8; dest=$9;
         if (gated=="yes") next;                       # skip gated; recorded as hints elsewhere
@@ -155,7 +190,7 @@ catalog_model_candidates() {
             url="https://huggingface.co/" repo "/resolve/main/" file;
             printf "model:%s\tmodels\tmodel:%s\t%d\t%s\thf-file\t%s\t%s\t%s\n", id, cat, value, rawb, url, full, repo;
         }
-    }' "$f"
+    }' "$f" "$s"
 }
 
 # --- Installers: emit normalized candidates ----------------------------------

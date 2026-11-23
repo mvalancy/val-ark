@@ -12,9 +12,11 @@
 #   status                 disk + coverage summary
 #   plan   [--budget B]    dry-run: print the ordered plan
 #   fill   [opts]          execute the plan, bounded (see opts)
-#   maintain               refresh catalog + verify + top-up + report (loop core)
+#   maintain               refresh catalog (+ weekly model scout) + verify + top-up + report (loop core)
 #   verify                 integrity-check managed files (size); requeue bad
 #   evict  --need BYTES    free space (lowest value/byte, protect diversity+pins)
+#   refresh                force a live Kiwix catalog refresh
+#   scout                  force a Hugging Face model scout (lib/hf_scout.py) now
 #   catalog [kind]         list not-yet-downloaded items (content|model|installer)
 #   request KIND ID        pin + fetch ONE item now (auto-evicts to fit the cap)
 #   pin/unpin/pins         manage durable user requests (pins [--refill])
@@ -543,6 +545,7 @@ cmd_maintain() {
     ensure_state
     log "maintain: begin"
     catalog_refresh_zim --force >/dev/null 2>&1 && ok "catalog refreshed" || warn "catalog refresh failed (using cache)"
+    catalog_refresh_scout >/dev/null 2>&1 || warn "model scout incomplete (keeping the previous scouted list)"
     cmd_verify >/dev/null
     # Top-up fill bounded by time so the loop stays responsive.
     local added; added=$(cmd_fill --time "${MAINTAIN_FILL_SECONDS:-1800}" 2>>"$LL_LOG" | tail -1)
@@ -567,7 +570,7 @@ EOF
 [ "${BASH_SOURCE[0]}" != "$0" ] && return 0
 
 # DISPATCH: command -> cmd_<name> (grep `cmd_status` etc. to jump to a handler).
-# status/plan/fill/verify/evict/maintain -> cmd_*; refresh -> catalog_refresh_zim;
+# status/plan/fill/verify/evict/maintain -> cmd_*; refresh -> catalog_refresh_zim; scout -> catalog_refresh_scout;
 # catalog/request/pin/unpin/pins -> cmd_*. See the Commands block at the top of file.
 case "${1:-status}" in
     status)   cmd_status ;;
@@ -577,10 +580,15 @@ case "${1:-status}" in
     evict)    shift; cmd_evict "$@" ;;
     maintain) cmd_maintain ;;
     refresh)  catalog_refresh_zim --force && ok "catalog cached: $ZIM_CACHE ($(wc -l < "$ZIM_CACHE") entries)" ;;
+    scout)    catalog_refresh_scout --force; rc=$?
+              [ "${VALARK_SCOUT:-1}" = "0" ] && { warn "VALARK_SCOUT=0: scout disabled"; exit 0; }
+              n=$(grep -vc '^#' "$SCOUT_CACHE" 2>/dev/null || echo 0)
+              [ "$rc" -eq 0 ] && ok "scouted models cached: $SCOUT_CACHE ($n repos)" || warn "scout incomplete; cache: $SCOUT_CACHE ($n repos)"
+              exit "$rc" ;;
     catalog)  shift; cmd_catalog "${1:-all}" ;;
     request)  shift; cmd_request "$1" "$2" ;;
     pin)      shift; cmd_pin "$1" "$2" ;;
     unpin)    shift; cmd_unpin "$1" ;;
     pins)     shift; [ "$1" = "--refill" ] && cmd_pins_refill || cmd_pins ;;
-    *) echo "usage: librarian.sh {status|plan|fill|verify|evict|maintain|refresh|catalog|request|pin|unpin|pins}"; exit 1 ;;
+    *) echo "usage: librarian.sh {status|plan|fill|verify|evict|maintain|refresh|scout|catalog|request|pin|unpin|pins}"; exit 1 ;;
 esac

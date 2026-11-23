@@ -75,11 +75,36 @@ flavours (maxi/nopic/mini) collapse to the most complete one.
 |--------|------|-------|
 | Kiwix ZIM library | live OPDS via `scripts/lib/kiwix_catalog.py` | **Always current** — ZIM dates never go stale. ~1700+ entries across 9 languages by default (`VALARK_ZIM_LANGS`). |
 | Models (diversity) | `data/models-extra.tsv` | Small high-value models across 17 modalities (embeddings, rerankers, tiny VLMs, OCR, depth, segmentation, detection, audio, time-series). |
+| Models (scouted, weekly) | `<state>/catalog/models-scouted.tsv` | **New open models, found automatically** by `scripts/lib/hf_scout.py` — see [Model scout](#model-scout-hf_scoutpy). Ranked below the curated rows. |
 | OS / router / netboot / server source | `data/installers.tsv` | Distro ISOs (Alpine/Debian/Ubuntu/…), OpenWRT firmware, netboot.xyz, Jetson BSP — for PXE / mesh commissioning — plus `server-source`: upstream LAMP + LAN-infrastructure releases (httpd/APR, PHP, MariaDB, PostgreSQL, nginx, OpenSSL/OpenSSH, BIND, Kea, dnsmasq, Unbound, Samba, Dovecot, WordPress, Nextcloud, Gitea, …). |
 | Developer + security stack | `data/dev-stack.tsv` | The kit to build, run and secure software offline: every supported Python (python.org installers + relocatable builds + a top-1000 PyPI wheelhouse), compilers (LLVM, GCC/GNU sources, MinGW, Go, Rust, JDK, CMake…), decompilers/RE (Ghidra, radare2/rizin/Cutter, x64dbg, jadx, ILSpy, Frida…), security tools (Nmap, Wireshark, ZAP, Metasploit, nuclei, Trivy, Zeek, Suricata, Kali ISOs…), containers + Kubernetes (Docker static, Podman, kubeadm/kubectl, MicroK8s snaps, k3s, Helm…), cloud/IaC, S3-compatible storage (MinIO source, SeaweedFS, RustFS, versitygw, rclone) and databases (Neo4j + Relate, Milvus, Qdrant, DuckDB, ClickHouse, Valkey, OpenSearch…). Current release of each, resolved live by `scripts/lib/release_mirror.py` (see below). |
 | Offline .deb sets | `data/apt-sets.tsv` | Server + developer/security package sets resolved with all dependencies per Ubuntu suite+arch by `scripts/lib/apt_offline.py build --suite noble --arch arm64 --set lamp --dest <dir>` → a flat local APT repo for a LAN with no internet. |
 
 The big LLM/STT/TTS/VLM/image catalog is still managed by `download-models.sh`.
+
+### Model scout (`hf_scout.py`)
+
+The curated catalog only changes when someone edits it, so good new open models would
+never reach a box on their own. Once a week (`librarian.sh maintain`, TTL
+`VALARK_SCOUT_TTL`, default 7 days) the Librarian asks the Hugging Face API what is new
+and writes the picks to `<state>/catalog/models-scouted.tsv`, in the `models-extra.tsv`
+schema. `librarian.sh scout` does it now.
+
+- **small** (default): any modality, created in the last 180 days, **real repo size ≤ 10 GB**
+  (summed from the repo's file list, not guessed), at least 40 likes (10 for a repo owned by
+  a well-known lab), up to 200 per run. These are the cheap wins: OCR, embeddings, small
+  LLMs and VLMs, speech, time-series.
+- **frontier** (opt-in, `VALARK_SCOUT_SWEEPS=small,frontier`): open-weight releases with
+  ≥ 20B parameters from the last 18 months, from a lab or heavily liked. No size cap; the
+  planner's value-per-byte order fills them last, so they only land on a big disk.
+
+Both skip gated and private repos (no accepted licence), quantised / converted /
+abliterated re-uploads (the originals are kept) and any repo the curated catalog already
+names. Scouted rows have values of 200–550, below the curated 600+ band, so the curated
+picks always come first. A scout that cannot reach every listing never replaces a good
+cache (the same completeness rule as the ZIM catalog); `VALARK_SCOUT=0` turns it off and
+ignores the cache. Rows are fetched with `hf download --include '*'` like any `repo` row.
+Tests: `tests/test-hf-scout.sh`.
 
 ### Developer + security stack (`release_mirror.py`)
 
@@ -238,7 +263,8 @@ scripts/librarian.sh fill --time 1800 --max-bytes 53687091200   # bounded chunk 
 scripts/librarian.sh verify        # integrity-check managed files; requeue bad
 scripts/librarian.sh evict --need 107374182400   # free space (raw bytes), lowest value/byte first
 scripts/librarian.sh refresh       # re-pull the live ZIM catalog
-scripts/librarian.sh maintain      # refresh + verify + bounded top-up + report (loop core)
+scripts/librarian.sh scout         # scout Hugging Face for new models now (weekly otherwise)
+scripts/librarian.sh maintain      # refresh (+ weekly scout) + verify + bounded top-up + report (loop core)
 ```
 
 Downloads prefer **aria2** (8 connections, ~3x faster on per-connection-throttled

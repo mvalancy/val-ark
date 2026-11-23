@@ -410,7 +410,7 @@ PYEOF
 )
 check "every card has a description" '[ -z "$nodesc" ] || { echo "no description: $nodesc" >&2; false; }'
 check "tool found by its download target (piper -> Piper TTS)" 'grep -q "Fast local neural text to speech" "$D/browse/tools.html"'
-check "tool without a web-UI card: scripts/tools header" 'grep -q "Mirror Foo, the frobnicator. Foo turns widgets into gadgets offline." "$D/browse/tools.html"'
+check "tool without a web-UI card: scripts/tools header" 'grep -q "<p>Foo, the frobnicator. Foo turns widgets into gadgets offline.</p>" "$D/browse/tools.html"'
 check "unknown tool: generated sentence" 'grep -q "zzz: portable builds for Linux x86_64" "$D/browse/tools.html"'
 check "pypi package: Summary from the wheel METADATA" 'grep -q "Demo package that does demos" "$D/browse/dev-stack.html"'
 check "version folder named by its project" 'grep -q "<h4>python</h4>" "$D/browse/dev-stack.html" && ! grep -q "<h4>3.12.1</h4>" "$D/browse/dev-stack.html"'
@@ -421,11 +421,62 @@ check "ZIM without a template: generated" 'grep -q "in French, text only: an off
 check "caller hint used as the description" 'grep -q "NOAA daily weather station records" "$D/browse/datasets.html"'
 check "hint with .. ignored" '! grep -rq "escape attempt" "$D/browse"'
 check "dataset: generated with topic and org" 'grep -q "A crops dataset: fields from acme" "$D/browse/datasets.html"'
-check "model without a card: task from its name" 'grep -q "A object detection model — yolo-tiny from acme" "$D/browse/models.html" && grep -q "ONNX Runtime" "$D/browse/models.html"'
+check "model without a card: task from its name" 'grep -q "An object detection model — yolo-tiny from acme" "$D/browse/models.html" && grep -q "ONNX Runtime" "$D/browse/models.html"'
 check "software release: generated" 'grep -q "Upstream release assets of acme/widget" "$D/browse/software.html"'
 check "source archive: generated" 'grep -q "Source archive of blender" "$D/browse/sources.html"'
 check "summary.json counts generated descriptions" 'python3 -I -c "import json,sys;d=json.load(open(sys.argv[1]));c={s[\"name\"]:s[\"descriptions\"] for s in d[\"sections\"]};sys.exit(0 if c[\"datasets\"][\"hint\"]==1 and c[\"tools\"][\"generated\"]>=1 else 1)" "$D/browse/summary.json"'
 check "the run reports hint + generated counts" 'echo "$dout" | grep -q "descriptions from hints 1 / generated"'
+
+# review fixes (#271): corrupt wheel, script headers, task words, a/an, run hints, tool hints, long hint
+#     lines, wheel cache, scoped tool names
+D2="$T/d2"; mkdir -p "$T/tsh2" "$D2/dev-stack/python/pypi/broken" "$D2/models/huggingface/acme/dinov2-vits14" \
+    "$D2/models/huggingface/acme/vae-decoder" "$D2/models/huggingface/acme/dolphin-x" "$D2/models/huggingface/acme/ocr-small" \
+    "$D2/models/huggingface/acme/yolo11n" "$D2/tools/linux-x86_64/audio" "$D2/tools/linux-x86_64/bar" \
+    "$D2/tools/linux-x86_64/hinted" "$D2/datasets/misc/node" "$D2/dev-stack/python/pypi/demo"
+python3 -I -c 'import sys, zipfile, zlib
+with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED) as z:
+    z.writestr("broken-1.0.dist-info/METADATA", "Summary: should not crash\n" * 50)
+b = bytearray(open(sys.argv[1], "rb").read()); i = b.find(b"PK\x03\x04") + 30 + len("broken-1.0.dist-info/METADATA")
+b[i:i + 20] = b"\xff" * 20; open(sys.argv[1], "wb").write(bytes(b))' "$D2/dev-stack/python/pypi/broken/broken-1.0-py3-none-any.whl"
+python3 -I -c 'import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    z.writestr("demo-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: demo\nSummary: Cached summary text\n")' \
+    "$D2/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"
+printf '#!/bin/bash\n# Val Ark - Download Audio\nsource x\n' > "$T/tsh2/audio.sh"
+printf '#!/bin/bash\n# Val Ark - Mirror Bar, the offline thing (https://bar.example, MIT;\n# source https://github.com/x/bar): docs and maps.\n#\n# linux + windows: rolling builds -- current by design.\n' > "$T/tsh2/bar.sh"
+for m in dinov2-vits14 vae-decoder dolphin-x ocr-small; do echo x > "$D2/models/huggingface/acme/$m/weights.bin"; done
+echo x > "$D2/models/huggingface/acme/yolo11n/yolo11n.pt"
+echo x > "$D2/tools/linux-x86_64/audio/audio"; echo x > "$D2/tools/linux-x86_64/bar/bar"; echo x > "$D2/tools/linux-x86_64/hinted/hinted"
+echo x > "$D2/datasets/misc/node/data.csv"
+{ printf 'tools/linux-x86_64/hinted/hinted\t{"description": "A hinted tool description"}\n'
+  python3 -I -c 'print("x" * 200000)'
+  printf 'datasets/misc/node/data.csv\t{"description": "after the long line"}\n'; } > "$T/hints2.tsv"
+d2() { python3 -I "$PY" --root "$D2" --web-ui "$W" --tools-dir "$T/tsh2" --hints "$T/hints2.tsv" --now 1700000000 "$@"; }
+out2=$(d2 2>&1); rc=$?
+check "a corrupt wheel METADATA does not crash the build" '[ "$rc" -eq 0 ] || { echo "$out2" >&2; false; }'
+check "...the fixture really is corrupt (zlib error on read)" '! python3 -I -c "import sys,zipfile;zipfile.ZipFile(sys.argv[1]).read(\"broken-1.0.dist-info/METADATA\")" "$D2/dev-stack/python/pypi/broken/broken-1.0-py3-none-any.whl" 2>/dev/null'
+check "...and still gets a description" 'grep -A3 "<h4>broken</h4>" "$D2/browse/dev-stack.html" | grep -q "<p>"'
+check "a 'Download X' header is not used as the description" '! grep -q "<p>Download Audio\|<p>Audio\.</p>" "$D2/browse/tools.html" && grep -q "audio: portable builds" "$D2/browse/tools.html"'
+check "header: verb dropped, URLs removed, build notes skipped" 'grep -q "Bar, the offline thing: docs and maps\." "$D2/browse/tools.html" && ! grep -q "rolling builds\|https://" "$D2/browse/tools.html"'
+check "task words are whole tokens (vits14, decoder, dolphin)" '! grep -q "text to speech model — dinov2\|code language model — vae\|language model — dolphin" "$D2/browse/models.html"'
+check "a / an" 'grep -q "An OCR / document model — ocr-small" "$D2/browse/models.html" && grep -q "An object detection model — yolo11n" "$D2/browse/models.html"'
+check "no transformers hint without safetensors / config.json" 'grep -o "<h4>yolo11n</h4>[^<]*<div[^>]*>[^<]*</div><p>[^<]*</p>" "$D2/browse/models.html" | grep -q "acme (1 file, 2 B)\.</p>"'
+check "a hint reaches the tool card (tools/<platform>/<name>)" 'grep -q "A hinted tool description" "$D2/browse/tools.html"'
+check "an over-long hint line is skipped, later lines still read" 'grep -q "after the long line" "$D2/browse/datasets.html"'
+check "tool names do not leak into other sections (datasets/node)" '! grep -q "Node.js LTS runtime" "$D2/browse/datasets.html"'
+check "wheel Summary cached by file + size" 'grep -q "demo-1.0-py3-none-any.whl|" "$D2/browse/pypi-meta.json"'
+rm "$D2/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"; python3 -I -c 'import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    z.writestr("demo-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: demo\nSummary: Cached summary text\n")' \
+    "$D2/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"
+chmod 000 "$D2/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"
+d2 >/dev/null 2>&1
+check "...and reused without opening the wheel again" 'grep -q "Cached summary text" "$D2/browse/dev-stack.html"'
+chmod 644 "$D2/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"
+
+printf '#!/bin/bash\n# Val Ark - Mirror Baz, a mapping kit with offline tiles\n#\n# scripts/lib/baz_mirror.py reads the manifest and keeps the current release.\n' > "$T/tsh2/baz.sh"
+mkdir -p "$D2/tools/linux-x86_64/baz"; echo x > "$D2/tools/linux-x86_64/baz/baz"; d2 >/dev/null 2>&1
+check "header: implementation notes (script paths) skipped" 'grep -q "<p>Baz, a mapping kit with offline tiles.</p>" "$D2/browse/tools.html"'
 
 echo "static-site: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

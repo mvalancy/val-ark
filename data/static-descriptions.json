@@ -1,5 +1,5 @@
 {
-  "_comment": "Descriptions for the static browse pages (scripts/lib/static_site.py) where the web UI, the data/*.tsv catalogs, a model/dataset card or the ZIM's own metadata have none. zim: Kiwix project -> sentence ({topic} = the ZIM's topic words, {lang} = language name, {flavour} = ', full with images' / ', text only' / ', introductions only'). tools/names: folder name -> sentence. Anything not listed still gets a generated sentence.",
+  "_comment": "Descriptions for the static browse pages (scripts/lib/static_site.py) where the web UI, the data/*.tsv catalogs, a model/dataset card or the ZIM's own metadata have none. zim: Kiwix project -> sentence template ({topic} = the ZIM's topic words, {lang} = language name, {flavour} = ', full with images' / ', text only' / ', introductions only', {topic_in} / {topic_on} / {topic_paren} = ' on X' / ' about X' / ' — X', {site} = a Stack Exchange site's name). tools: folder name -> sentence, used only in the Tools & apps and Software releases sections. Anything not listed still gets a generated sentence.",
   "zim": {
     "wikipedia": "Wikipedia{topic_in} in {lang}{flavour}: the free encyclopedia, readable offline in Kiwix.",
     "wiktionary": "Wiktionary in {lang}{flavour}: the free dictionary with definitions, pronunciations, etymologies and translations.",
@@ -38,7 +38,7 @@
     "wikem": "WikEM ({lang}): the emergency-medicine reference used by clinicians.",
     "fas-military-medicine": "Military medicine field manuals ({lang}): emergency and trauma care references."
   },
-  "names": {
+  "tools": {
     "maddy": "maddy: a single-binary mail server (SMTP + IMAP) used by Val Ark's offline LAN mail service.",
     "alps": "alps: a lightweight webmail client in front of the maddy mail server for Val Ark's LAN mail.",
     "node": "Node.js LTS runtime, portable: lets Val Ark run its community services (forum, chat) with its own Node, offline.",

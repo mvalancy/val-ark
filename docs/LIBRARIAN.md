@@ -346,7 +346,7 @@ order: a caller's `--hints` file (`path<TAB>json` lines with `description` / `ti
 `collection` / `topic` / `platform` / `version` / `repo` / `publisher`; a NAS collector passes what it
 recorded at download time), the curated sentences in
 [`data/static-descriptions.json`](../data/static-descriptions.json) (Kiwix projects such as Wikipedia,
-TED, DevDocs, Gutenberg, and folder names such as `maddy` or `node`), and finally a sentence built from
+TED, DevDocs, Gutenberg, and tool folder names such as `maddy` or `node`), and finally a sentence built from
 what is known: task (from the model card or the folder name), organisation, format and how to run it,
 topic, version, platforms, file count and size. Folders named after a version (`3.12.1`, `latest`,
 `24.04`) are titled by their project. `summary.json` counts, per section, how many descriptions came

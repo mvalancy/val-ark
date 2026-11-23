@@ -92,15 +92,20 @@ LANG_NAMES = {'en': 'English', 'eng': 'English', 'es': 'Spanish', 'spa': 'Spanis
 # A path component that is a version / channel rather than a name (dev-stack + installer layouts).
 VERSIONISH = re.compile(r'(?i)^(v?\d[\w.+~-]*|r\d[\w.+-]*|current|latest(-[a-z]+)?|stable|lts|nightly|edge|main|master)$')
 # Model task words guessed from a folder name when no model card says (word -> task phrase).
-TASK_WORDS = [(r'whisper|asr|speech-?recogn|parakeet|canary|wav2vec|stt', 'speech-recognition'),
-              (r'tts|voice|speech|piper|kokoro|styletts|bark|vits', 'text-to-speech'),
-              (r'yolo|detr|detect|rtdetr|grounding', 'object-detection'), (r'\bsam\b|sam2|segment|seg\b', 'segmentation'),
-              (r'depth', 'depth-estimation'), (r'ocr|docling|layout', 'OCR / document'),
-              (r'embed|bge|e5-|gte|minilm|nomic', 'text-embedding'), (r'rerank', 'reranking'),
-              (r'clip|siglip', 'image-text embedding'), (r'diffusion|flux|sdxl|\bsd[-_]|wan-?2|ltx|hunyuan-?video|image-gen', 'image / video generation'),
-              (r'-vl\b|vl-|vision|llava|smolvlm|moondream|qwen.*vl|pixtral', 'vision-language'),
-              (r'policy|policies|robot|vla|openvla|pi0|gr00t|lerobot', 'robot policy'),
-              (r'music|audio', 'audio'), (r'coder|code', 'code language'), (r'gguf|instruct|chat|llama|qwen|mistral|gemma|phi|glm|kimi|deepseek', 'language')]
+# Tokens are matched whole (not inside another word: 'vits14', 'decoder', 'dolphin' must not hit).
+TASK_WORDS = [(r'whisper[a-z0-9]*|asr|parakeet[a-z0-9-]*|canary|wav2vec2?|stt|speech-?recognition', 'speech-recognition'),
+              (r'tts|text-?to-?speech|voice|piper|kokoro|styletts2?|bark|vits', 'text-to-speech'),
+              (r'yolo[a-z0-9]*|detr|rt-?detr[a-z0-9]*|grounding-?dino|detection|detector', 'object-detection'),
+              (r'sam2?|sam-[a-z0-9]+|segment[a-z]*|seg', 'segmentation'),
+              (r'depth[a-z0-9-]*', 'depth-estimation'), (r'ocr|docling|layout[a-z]*', 'OCR / document'),
+              (r'embed[a-z]*|embedding[a-z]*|bge|e5|gte|minilm|nomic-embed', 'text-embedding'), (r'rerank[a-z]*', 'reranking'),
+              (r'clip|siglip[a-z0-9]*', 'image-text embedding'),
+              (r'diffusion|flux[a-z0-9.]*|sdxl|sd|wan|ltx[a-z0-9.]*|hunyuan-?video|image-?gen', 'image / video generation'),
+              (r'vl|vlm|vision|llava|smolvlm[a-z0-9]*|moondream[a-z0-9]*|pixtral', 'vision-language'),
+              (r'policy|policies|robot[a-z]*|vla|openvla|pi0|gr00t|lerobot', 'robot policy'),
+              (r'music[a-z]*|audio[a-z]*', 'audio'), (r'coder|code', 'code language'),
+              (r'gguf|instruct|chat|llama[a-z0-9.]*|qwen[a-z0-9.]*|mistral[a-z0-9.]*|gemma[a-z0-9.]*|phi[a-z0-9.]*|glm[a-z0-9.]*|kimi[a-z0-9.]*|deepseek[a-z0-9.]*', 'language')]
+TASK_RES = [(re.compile(r'(?<![a-z0-9])(?:' + p + r')(?![a-z0-9])'), t) for p, t in TASK_WORDS]
 
 
 # --------------------------------------------------------------------------- small helpers
@@ -309,11 +314,11 @@ class Curated:
             for k in (tid, t.get('downloadTarget'), t.get('name')):
                 if isinstance(k, str) and k:
                     self.tool_alias.setdefault(tool_key(k), tid)
-        self.descriptions = {'zim': {}, 'names': {}}
+        self.descriptions = {'zim': {}, 'tools': {}}
         try:
             with open(os.path.join(data_dir, 'static-descriptions.json'), encoding='utf-8') as f:
                 raw = json.load(f)
-            for k in ('zim', 'names'):
+            for k in ('zim', 'tools'):
                 if isinstance(raw.get(k), dict):
                     self.descriptions[k] = {str(a).lower(): str(b) for a, b in raw[k].items() if isinstance(b, str)}
         except (OSError, ValueError, AttributeError):
@@ -357,33 +362,56 @@ class Curated:
 
 
 def tool_script_blurbs(tools_dir):
-    """name -> sentence from the header comment of scripts/tools/<name>.sh ('# Val Ark - <what>' + the
-    paragraph under it)."""
+    """name -> sentence from the header comment of scripts/tools/<name>.sh: the '# Val Ark - <what>'
+    paragraph (leading Download / Mirror verb dropped), plus the next paragraph when it is prose. A header
+    that only names the tool, build notes ('linux + windows: ...') and bullet lists are skipped, so the
+    web UI text or a generated sentence is used instead."""
     out = {}
     for fn in listdir(tools_dir) if tools_dir else ():
         if not fn.endswith('.sh') or fn.startswith('_'):
             continue
         text = read_small(os.path.join(tools_dir, fn), 4096) or ''
-        lines, head, para = text.splitlines()[1:40], '', []
-        for ln in lines:
+        paras, cur, started = [], [], False
+        for ln in text.splitlines()[1:40]:
             if not ln.startswith('#'):
                 break
             t = ln.lstrip('#').strip()
-            if not t or set(t) <= set('#=-'):
-                if para:
-                    break
+            if set(t) <= set('#=-'):
+                if cur:
+                    paras.append(cur); cur = []
                 continue
-            m = re.match(r'Val Ark\s*[-—:]\s*(.+)', t)
-            if m and not head:
-                head = m.group(1).strip()
-                continue
-            if head:
-                para.append(t)
-        blurb = ' '.join(para)
-        blurb = re.sub(r'\s+', ' ', re.sub(r'\(?https?://\S+\)?', '', blurb)).strip()
-        if head or blurb:
-            first = re.split(r'(?<=[.!?])\s', blurb, 1)[0] if blurb else ''
-            out[fn[:-3]] = (head.rstrip('.') + '. ' if head else '') + first if first else head
+            if not started:
+                m = re.match(r'Val Ark\s*[-—:]\s*(.+)', t)
+                if not m:
+                    continue
+                started, t = True, m.group(1)
+            cur.append(t)
+            if len(paras) >= 2:
+                break
+        if cur:
+            paras.append(cur)
+        def clean(lines):
+            p = ' '.join(lines)
+            p = re.sub(r'\([^)]*https?://[^)]*\)', '', p)
+            p = re.sub(r'https?://\S+', '', p)
+            p = re.sub(r'\s+([,.;:)])', r'\1', re.sub(r'\s+', ' ', p)).strip(' ;,')
+            return p
+        sentence = ''
+        if paras:
+            head = re.sub(r'(?i)^(download|mirror|mirrors|fetch|get)\s+(the\s+)?', '', clean(paras[0]))
+            if len(head.split()) > 3 or re.search(r'[,:(]', head):     # more than just the tool's name
+                sentence = head[0].upper() + head[1:]
+            for lines in paras[1:2]:
+                p = clean(lines)
+                first = re.split(r'(?<=[.!?])\s', p, 1)[0] if p else ''
+                prose = first and not any(x.lstrip().startswith(('-', '*', '•')) for x in lines) and \
+                    not first.endswith(':') and '--' not in first and \
+                    not re.match(r'(?i)(linux|macos|windows|arm64|x86|aarch64)\b', first) and \
+                    not re.search(r'\.(py|sh|json|txt|tsv)\b|scripts/|\bthis (script|file)\b', first)
+                if prose:
+                    sentence = (sentence.rstrip('.') + '. ' if sentence else '') + first
+        if sentence:
+            out[fn[:-3]] = sentence if sentence.endswith(('.', '!', '?')) else sentence + '.'
     return out
 
 
@@ -401,7 +429,7 @@ def wheel_summary(path):
                         return '' if v.upper() == 'UNKNOWN' else v
                     if not line.strip():
                         break
-    except (OSError, zipfile.BadZipFile, KeyError, ValueError, RuntimeError):
+    except Exception:   # best effort: a corrupt / odd wheel (zlib.error, EOFError, ...) has no Summary
         pass
     return ''
 
@@ -440,10 +468,14 @@ def zim_desc(z, templates):
 
 def model_task(*names):
     blob = ' '.join(n.lower() for n in names if n)
-    for pat, task in TASK_WORDS:
-        if re.search(pat, blob):
+    for rx, task in TASK_RES:
+        if rx.search(blob):
             return task
     return ''
+
+
+def article(phrase):
+    return 'an' if re.match(r'(?i)[aeio]|u(?!ni)|ocr|onnx|llm|sdxl', phrase or '') else 'a'
 
 
 # --------------------------------------------------------------------------- ZIM metadata
@@ -802,7 +834,7 @@ def tool_key(name):
 
 class Entry:
     __slots__ = ('key', 'is_dir', 'bytes', 'files', 'mtime', 'top', 'pending_bytes', 'pending_files',
-                 'readme', 'license', 'names', 'platforms')
+                 'readme', 'license', 'names', 'platforms', 'formats')
 
     def __init__(self, key, is_dir):
         self.key, self.is_dir = key, is_dir
@@ -812,6 +844,7 @@ class Entry:
         self.readme = self.license = None
         self.names = set()      # small set of file names inside (README image lookup)
         self.platforms = {}     # tools: platform -> {real top-level name: (bytes, is_dir)}
+        self.formats = set()    # model formats seen inside (.gguf / .onnx / .safetensors / config.json)
 
 
 class Section:
@@ -857,6 +890,12 @@ class Section:
             names = e.platforms.setdefault(plat, {})
             b, isdir = names.get(top, (0, False))
             names[top] = (b + size, isdir or rel.count('/') >= 2)
+        low = inner.lower()
+        for ext in ('.gguf', '.onnx', '.safetensors'):
+            if low.endswith(ext):
+                e.formats.add(ext)
+        if low == 'config.json' or low.endswith('/config.json'):
+            e.formats.add('config.json')
         if e.is_dir:
             if inner in README:
                 e.readme = inner
@@ -900,6 +939,7 @@ def walk(section, max_files, budget):
     return budget
 
 
+HINTS_MAX_LINES = 2_000_000
 HINT_KEYS = ('description', 'summary', 'title', 'item', 'collection', 'topic', 'platform', 'version', 'repo',
              'publisher', 'license')
 
@@ -916,7 +956,18 @@ def load_hints(path, root):
     except OSError:
         return out
     with fh:
-        for line in fh:
+        lines = 0
+        while lines < HINTS_MAX_LINES:
+            line = fh.readline(65536)
+            if not line:
+                break
+            lines += 1
+            if not line.endswith('\n') and len(line) >= 65536:     # over-long line: skip the rest of it
+                while True:
+                    more = fh.readline(65536)
+                    if not more or more.endswith('\n'):
+                        break
+                continue
             rel, _, js = line.rstrip('\n').partition('\t')
             rel = rel.strip('/')
             if not rel or '..' in rel.split('/'):
@@ -1078,6 +1129,15 @@ class Builder:
         except (OSError, ValueError):
             self.zim_cache = {}
         self.zim_seen = {}
+        self.wheel_cache_path = os.path.join(self.browse, 'pypi-meta.json')
+        try:
+            with open(self.wheel_cache_path, encoding='utf-8') as f:
+                raw = json.load(f)
+            self.wheel_cache = {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)} \
+                if isinstance(raw, dict) else {}
+        except (OSError, ValueError):
+            self.wheel_cache = {}
+        self.wheel_seen = {}
 
     # -- thumbnails ----------------------------------------------------------------------
     def thumb_bytes(self, name, data):
@@ -1156,7 +1216,12 @@ class Builder:
         info['desc'] = (info['desc'] or '').strip()
         if not info['desc']:
             rel = os.path.relpath(abs_dir, self.root).replace(os.sep, '/')
-            d = hint_desc(self.hints.get(rel), s.name)
+            h = self.hints.get(rel)
+            if not h and s.name == 'tools':          # tools live at tools/<platform>/<name>
+                sec = os.path.relpath(s.path, self.root).replace(os.sep, '/')
+                h = next((self.hints[k] for k in (f'{sec}/{p}/{n}' for p in sorted(e.platforms) for n in sorted(e.platforms[p]))
+                          if k in self.hints), None)
+            d = hint_desc(h, s.name)
             src = 'hint'
             if not d:
                 d, src = self.fallback(s, e, info, rcard, abs_dir), 'generated'
@@ -1198,17 +1263,21 @@ class Builder:
         title = info['title'] or parts[-1]
         size = f'{e.files:,} file{"s" if e.files != 1 else ""}, {human(e.bytes)}' if e.files else \
             f'queued: {e.pending_files:,} files, {human(e.pending_bytes)}'
-        named = self.cur.descriptions['names'].get(title.lower()) or self.cur.descriptions['names'].get(parts[-1].lower())
-        if named:
-            return named
+        if s.name in ('tools', 'software'):    # names like node / redis mean Val Ark's own tools only there
+            named = self.cur.descriptions['tools'].get(title.lower()) or self.cur.descriptions['tools'].get(parts[-1].lower())
+            if named:
+                return named
         if s.name == 'models':
             task = (rcard or {}).get('pipeline') or model_task(*parts)
             org = parts[-2] if len(parts) >= 2 and parts[0] in ('huggingface', 'scouted', 'github') else ''
-            fmt = ('GGUF: run it with llama.cpp' if any(n.lower().endswith('.gguf') for _, n in e.top) or 'gguf' in e.key.lower()
-                   else 'ONNX: run it with ONNX Runtime' if any(n.lower().endswith('.onnx') for _, n in e.top)
-                   else 'load it with transformers, vLLM or a similar runtime')
-            what = f'A {task.replace("-", " ")} model' if task else 'AI model files'
-            return f'{what} — {title}' + (f' from {org}' if org else '') + f' ({size}); {fmt}.'
+            fm = e.formats
+            fmt = ('GGUF: run it with llama.cpp' if '.gguf' in fm or 'gguf' in e.key.lower()
+                   else 'ONNX: run it with ONNX Runtime' if '.onnx' in fm
+                   else 'safetensors: load it with transformers, vLLM or a similar runtime' if fm & {'.safetensors', 'config.json'}
+                   else '')
+            t = task.replace('-', ' ')
+            what = f'{article(t).capitalize()} {t} model' if task else 'AI model files'
+            return f'{what} — {title}' + (f' from {org}' if org else '') + f' ({size})' + (f'; {fmt}.' if fmt else '.')
         if s.name == 'content':
             if parts[-1].lower().endswith('.zim'):
                 d = zim_desc(zim_parts(parts[-1]), self.cur.descriptions['zim'])
@@ -1224,8 +1293,7 @@ class Builder:
         if s.name == 'installers':
             cat = parts[0].replace('-', ' ')
             where = ' / '.join(p for p in parts[1:-1]) if len(parts) > 2 else ''
-            return (f'{cat.capitalize()} installer files' + (f' for {where}' if where else '') +
-                    f': {title} ({size}). Write images to USB or use them for network boot.')
+            return f'{cat.capitalize()} files' + (f' for {where}' if where else '') + f': {title} ({size}).'
         if s.name == 'dev-stack':
             grp = parts[0]
             proj = info['title']
@@ -1360,11 +1428,17 @@ class Builder:
         ref = '/'.join(parts[1:3]).lower()
         info['desc'] = (self.cur.devstack.get(ref) or self.cur.devstack.get(name.lower()) or
                         self.cur.devstack.get(parts[-1].lower()) or '')
-        if not info['desc'] and len(parts) > 1 and parts[1] == 'pypi' and self.reads > 0:
-            whl = next((p for _, p in sorted(e.top, reverse=True) if p.endswith('.whl')), None)
+        if not info['desc'] and len(parts) > 1 and parts[1] == 'pypi':
+            # cached by file + size (wheel names carry the version), so each wheel is opened once
+            whl = next(((sz, p) for sz, p in sorted(e.top, reverse=True) if p.endswith('.whl')), None)
             if whl:
-                self.reads -= 1
-                summ = wheel_summary(os.path.join(s.path, whl))
+                key = f'{whl[1]}|{whl[0]}'
+                summ = self.wheel_cache.get(key)
+                if summ is None and self.reads > 0:
+                    self.reads -= 1
+                    summ = wheel_summary(os.path.join(s.path, whl[1]))
+                if summ is not None:
+                    self.wheel_seen[key] = summ
                 if summ:
                     info['desc'] = f'{summ} (Python package from PyPI.)'
         if not info['desc']:
@@ -1698,6 +1772,8 @@ class Builder:
         # caches + stale cleanup (only files this tool owns)
         cache = dict(self.zim_seen)
         write_atomic(self.zim_cache_path, json.dumps(cache, indent=0, sort_keys=True) + '\n')
+        if self.wheel_seen or os.path.exists(self.wheel_cache_path):
+            write_atomic(self.wheel_cache_path, json.dumps(self.wheel_seen, indent=0, sort_keys=True) + '\n')
         for icon in (v.get('icon') for v in cache.values()):
             if icon:
                 self.thumbs_used.add(icon.split('/', 1)[1])
@@ -1714,7 +1790,7 @@ class Builder:
                 pass
         # temp files of an interrupted run (write_atomic: <name>.tmp-<pid>), older than an hour
         patterns = {self.items_dir: r'.+\.tmp-\d+', self.thumbs_dir: r'.+\.tmp-\d+',
-                    self.browse: r'(summary\.json|zim-meta\.json|[a-z-]+\.html)\.tmp-\d+',
+                    self.browse: r'(summary\.json|zim-meta\.json|pypi-meta\.json|[a-z-]+\.html)\.tmp-\d+',
                     self.out: r'index\.html\.tmp-\d+'}
         for d, pat in patterns.items():
             for name in listdir(d):

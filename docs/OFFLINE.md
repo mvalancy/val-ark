@@ -100,7 +100,9 @@ Full details: [LIBRARIAN.md](LIBRARIAN.md).
 ## What else works offline
 
 Beyond the tools, models and ZIM library, an Ark can rebuild and serve software with no
-internet at all:
+internet at all. The APT, developer-stack and source-archive mirrors are standalone CLIs
+you run (or schedule) yourself — the loop does not run them; self-replication and Lastbook
+are kept current by the loop and the weekly tool refresh.
 
 - **Self-replication** — the loop keeps a full-history git bundle + tarball of Val Ark's
   own source under `<data>/sources/val-ark/` (`scripts/mirror-self.sh`), and the web
@@ -110,11 +112,11 @@ internet at all:
   `data/apt-sets.tsv` with every dependency for any Ubuntu suite + architecture and
   indexes them as a flat repo (`deb [trusted=yes] file:<dir> ./`). See
   [LIBRARIAN.md](LIBRARIAN.md#offline-deb-sets-exit-codes-and-a-real-box-check).
-- **Developer + security stack** — `scripts/lib/release_mirror.py` keeps the current
+- **Developer + security stack** — `scripts/lib/release_mirror.py` fetches the current
   release of each `data/dev-stack.tsv` project for every platform, including Python
   installers and a PyPI wheelhouse (`pip install --no-index --find-links <dir>`). See
   [LIBRARIAN.md](LIBRARIAN.md#developer--security-stack-release_mirrorpy).
-- **Source archive** — `scripts/lib/git_bundle_mirror.py` keeps full-history git bundles
+- **Source archive** — `scripts/lib/git_bundle_mirror.py` builds full-history git bundles
   of the repos in `data/source-repos.tsv`; `git clone <repo>.bundle` works offline. See
   [TOOLS.md](TOOLS.md#content-mirrors).
 - **Lastbook** — the free offline survival library (packs, maps, address search, its

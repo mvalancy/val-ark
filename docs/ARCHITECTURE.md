@@ -157,8 +157,8 @@ flowchart TD
         D4["Disk full + better small item<br/>drop lowest value/byte<br/>never a sole category rep"]
     end
 
-    P0 --> DL
     P1 --> DL{Headroom<br/>above reserve?}
+    P0 --> DL
     P2 --> DL
     P3 --> DL
     DL -->|No| DONE([stop at reserve])
@@ -376,7 +376,7 @@ require a CUDA source build (no upstream binary) — see [PLATFORMS.md](PLATFORM
 
 | Path | Purpose |
 |------|---------|
-| `start.sh` | Interactive menu + CLI (setup, download, update, monitor, status, serve, cron, service, chat, transcribe, image, speak, test, screenshots, uninstall) |
+| `start.sh` | Interactive menu + CLI (setup, download, update, monitor, status, serve, cron, service, chat, transcribe, image, speak, test, screenshots, optimize-images, uninstall) |
 | `scripts/librarian.sh` | Disk-fill + curation engine (`status\|plan\|fill\|verify\|evict\|maintain\|refresh\|catalog\|request\|pin\|unpin\|pins`) |
 | `scripts/loop.sh` | 24/7 self-healing + verification cycle (`once\|run\|install\|uninstall`) |
 | `scripts/verify.sh` | Functional checks: tools run, kiwix serves, LLM infers, fleet reachable |
@@ -384,7 +384,7 @@ require a CUDA source build (no upstream binary) — see [PLATFORMS.md](PLATFORM
 | `scripts/lib/catalog.sh` | Build candidate catalog (models/installers + live ZIM) |
 | `scripts/lib/kiwix_catalog.py` | Fetch + parse the live Kiwix OPDS catalog |
 | `scripts/lib/planner.py` | Apply the priority model (essentials first) to produce the ordered plan |
-| `scripts/lib/{release,git_bundle,lastbook,references}_mirror.py`, `apt_offline.py`, `oci_pull.py` | Standalone mirror CLIs: dev + security stack, git bundles, Lastbook, cad-agent references, offline APT sets, container images (see [`scripts/lib/AGENTS.md`](../scripts/lib/AGENTS.md)) |
+| `scripts/lib/{release,git_bundle,lastbook,references}_mirror.py`, `apt_offline.py`, `oci_pull.py` | Mirror CLIs: dev + security stack, git bundles and offline APT sets (standalone, run by hand); Lastbook, cad-agent references and container images (driven by `scripts/tools/*.sh`) (see [`scripts/lib/AGENTS.md`](../scripts/lib/AGENTS.md)) |
 | `scripts/mirror-self.sh` | Package Val Ark's own source for LAN self-replication (`/bootstrap.sh`) |
 | `scripts/services/` | Community services (chat, mail, forum, paste, SeaweedFS) |
 | `scripts/download-tools.sh` | Mirror prebuilt tool binaries (per `scripts/tools/*.sh`) |

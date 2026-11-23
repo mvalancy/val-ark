@@ -73,7 +73,7 @@ value|id|category|repo|file|format|gated|bytes|dest|note
 
 - `scripts/lib/catalog.sh` — parses `models-extra.tsv` + `installers.tsv` into candidates.
 - `scripts/lib/planner.py` — ranks candidates by derived value-per-byte; reads `essentials.tsv` (phase 0,
-  via `librarian.sh plan|fill --essentials`), matching `kind`+`match` against candidate ids.
+  via `planner.py --essentials`, which `librarian.sh plan|fill` always passes), matching `kind`+`match` against candidate ids.
 - `scripts/lib/git_bundle_mirror.py` — reads `source-repos.tsv`. Use canonical `owner/repo` names (GitHub redirects renamed repos, but duplicates then slip in); `tests/test-git-bundle-mirror.sh` rejects case-insensitive duplicates.
 - `scripts/loop.sh` — link-checks the `url` field on the self-heal cycle.
 - `scripts/lib/apt_offline.py` — reads `apt-sets.tsv` (`sets` / `resolve` / `fetch` / `index` / `build`).

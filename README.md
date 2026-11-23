@@ -105,7 +105,7 @@ graph TB
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/librarian-dark.svg">
-  <img src="docs/img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Diversity first, then small and valuable, then fill, then trade up.">
+  <img src="docs/img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Essentials first, then diversity, small and valuable, fill, then trade up.">
 </picture>
 
 Val Ark fills a disk of **any size** by itself and keeps it healthy. The
@@ -177,7 +177,7 @@ Blender, FreeCAD, KiCad, Godot, GIMP, Inkscape, Kdenlive, Bambu Studio, cad-agen
 ### Media
 FFmpeg, VLC, Audacity, yt-dlp, Calibre
 
-### Community & Comms
+### Community Apps
 IRC Chat, Mail, Message Boards, Files & Pastebin (see [Community & Comms](#community--comms))
 
 ### Infrastructure
@@ -189,8 +189,9 @@ Helix, VSCodium, Miniforge, python-build-standalone, Claude Code, btop, tmux,
 Dev CLI Bundle (ripgrep, fd, bat, jq, fzf, lazygit)
 
 ### Offline Build & Server Kit
-Standalone mirror CLIs (run by hand, outside the fill) for rebuilding and serving
-software with no internet:
+Mirrors for rebuilding and serving software with no internet. The first three are
+standalone CLIs you run (or schedule) yourself, outside the fill and the loop; the last
+two ride the tool mirrors:
 - **Developer + security stack** — the current release of 200+ projects (toolchains,
   Python, compilers, decompilers, security tools, databases, containers/Kubernetes, S3
   storage) for every platform, from [`data/dev-stack.tsv`](data/dev-stack.tsv) via
@@ -202,9 +203,11 @@ software with no internet:
   [`data/source-repos.tsv`](data/source-repos.tsv) via `scripts/lib/git_bundle_mirror.py`
   ([details](docs/TOOLS.md#content-mirrors)).
 - **Container images** — one platform of an image as a `docker load` tar, no Docker
-  needed on the mirror host (`scripts/lib/oci_pull.py`).
+  needed on the mirror host (`scripts/lib/oci_pull.py`), pulled by `scripts/tools/cad-agent.sh`
+  as part of the default tool set and its weekly refresh.
 - **cad-agent references** — a private, content-addressed archive of cad-agent's
-  reference library (`scripts/lib/references_mirror.py`).
+  reference library (`scripts/lib/references_mirror.py`), via the opt-in
+  `scripts/tools/cad-agent-references.sh`.
 
 ### Content Library
 Offline ZIM files (Wikipedia and much more) served via Kiwix, selected live from
@@ -380,8 +383,8 @@ val-ark/
 │   │   ├── kiwix_catalog.py  #   live Kiwix OPDS catalog
 │   │   ├── planner.py        #   essentials-first, value/byte fill planner
 │   │   ├── *_mirror.py, apt_offline.py, oci_pull.py
-│   │   │                     #   standalone mirror CLIs (dev stack, APT, git bundles,
-│   │   │                     #   Lastbook, references, container images)
+│   │   │                     #   mirror CLIs: dev stack, APT, git bundles (run by hand);
+│   │   │                     #   Lastbook, references, container images (via tools/*.sh)
 │   │   ├── moderation.sh, mod-sweep.sh   # fail-closed on-device moderation
 │   │   ├── auth.js, commission.js        # admin identity + first-boot commissioning
 │   │   └── tls.sh            #   offline local CA for LAN HTTPS

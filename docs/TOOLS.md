@@ -7,7 +7,7 @@
 
 [Back to Docs](README.md) | [Back to Project Root](../README.md)
 
-These are the tool cards in the web UI (`TOOLS` in `web-ui/index.html`), grouped by its categories. Content mirrors (Lastbook, Wikipedia, git bundles) are listed under [Content mirrors](#content-mirrors).
+These are the tool cards in the web UI (`TOOLS` in `web-ui/index.html`), grouped by its categories. Content mirrors (Lastbook, cad-agent references, git bundles) are listed under [Content mirrors](#content-mirrors).
 
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'pie1': '#2563eb', 'pie2': '#7c3aed', 'pie3': '#e87d0d', 'pie4': '#16a34a', 'pie5': '#db2777', 'pie6': '#0891b2', 'pie7': '#6366f1'}}}%%

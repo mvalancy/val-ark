@@ -125,7 +125,7 @@ Each important folder carries local operating notes.
 | Folder | Docs |
 |--------|------|
 | `scripts/` | [scripts/AGENTS.md](../scripts/AGENTS.md) · [scripts/README.md](../scripts/README.md) — orchestration, curation, server layer. |
-| `scripts/lib/` | [scripts/lib/AGENTS.md](../scripts/lib/AGENTS.md) — data-root resolution + catalog/planner internals, the standalone mirror CLIs (release / APT / git-bundle / Lastbook / references / OCI), auth + commissioning, moderation, TLS. |
+| `scripts/lib/` | [scripts/lib/AGENTS.md](../scripts/lib/AGENTS.md) — data-root resolution + catalog/planner internals, the mirror CLIs (release / APT / git-bundle, run by hand; Lastbook / references / OCI, driven by `scripts/tools/*.sh`), auth + commissioning, moderation, TLS. |
 | `scripts/docs/` | `popup_art.py` — generator for the animated pop-up-book doc art (see [Pop-up art](#pop-up-art)). |
 | `scripts/services/` | [scripts/services/AGENTS.md](../scripts/services/AGENTS.md) — offline community service launchers (chat/mail/forum/paste/seaweedfs). |
 | `scripts/tools/` | [scripts/tools/AGENTS.md](../scripts/tools/AGENTS.md) · [scripts/tools/README.md](../scripts/tools/README.md) — per-tool mirror scripts + `_common.sh` helpers. |
@@ -160,8 +160,9 @@ Each important folder carries local operating notes.
   curates hundreds of catalog items — 50+ tool mirror scripts (`scripts/tools/*.sh`),
   models and the live Kiwix library. See [LIBRARIAN.md](LIBRARIAN.md).
 - **Offline build & survival kit** — `data/essentials.tsv` front-loads the grid-down
-  essentials; standalone mirror CLIs keep a developer + security stack, offline APT repos,
-  git bundles of upstream source, Lastbook and container images for a LAN with no internet.
+  essentials; standalone mirror CLIs (run by hand) build a developer + security stack,
+  offline APT repos and git bundles of upstream source, and the tool mirrors keep Lastbook
+  and container images current, for a LAN with no internet.
   See [OFFLINE.md](OFFLINE.md#what-else-works-offline).
 - **24/7 self-healing loop** — `scripts/loop.sh` + `scripts/verify.sh` repair
   symlinks, keep services up, self-mirror Val Ark's source, refresh the live Kiwix

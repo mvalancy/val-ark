@@ -50,7 +50,7 @@ graph TB
 
     subgraph Engine["Librarian Engine"]
         style Engine fill:#1a2230,stroke:#4da6ff
-        LIB["librarian.sh<br/>status|plan|fill|verify<br/>evict|maintain|refresh"]
+        LIB["librarian.sh<br/>status|plan|fill|verify<br/>evict|maintain|refresh<br/>catalog|request|pin|unpin|pins"]
         CAT["lib/catalog.sh<br/>lib/kiwix_catalog.py<br/>live OPDS catalog"]
         PLAN["lib/planner.py<br/>priority model"]
         VERIFY["verify.sh<br/>does it run?"]
@@ -126,8 +126,14 @@ reserve (`max(VALARK_RESERVE_PCT%, VALARK_RESERVE_MIN_GB)`) and, if set, the
 flowchart TD
     START([fill]) --> REFRESH["Refresh live catalogs<br/>Kiwix OPDS + models + installers"]
     REFRESH --> PLANNER["planner.py builds ordered plan<br/>budget = fillable bytes<br/>(reserve + optional VALARK_MAX_GB cap)"]
-    PLANNER --> P1
+    PLANNER --> P0
 
+    subgraph P0["0. Grid-down essentials"]
+        style P0 fill:#1a2230,stroke:#f87171
+        D0["data/essentials.tsv in rank order<br/>smallest variant that fits;<br/>a misfit is skipped, never blocks"]
+    end
+
+    P0 --> P1
     subgraph P1["1. Diversity first"]
         style P1 fill:#1a2230,stroke:#4ade80
         D1["Smallest item from every<br/>category before deepening any"]
@@ -152,6 +158,7 @@ flowchart TD
     end
 
     P1 --> DL{Headroom<br/>above reserve?}
+    P0 --> DL
     P2 --> DL
     P3 --> DL
     DL -->|No| DONE([stop at reserve])
@@ -167,10 +174,13 @@ flock-guarded cron so it survives reboots. The install adds **two** entries: an
 up) so the Ark resumes within ~90 s of a reboot, plus the periodic `*/N` tick that
 keeps it healthy. Each cycle restarts the web server + kiwix + the enabled
 community services (`VALARK_SERVICES`), keeps the optional standard-port redirect
-in place (`VALARK_WEB_PUBLIC_PORT`), refreshes the live catalog, link-checks,
-integrity-verifies, runs a bounded top-up fill (plus a weekly refresh of the tool
-mirror to the latest upstream versions, `VALARK_TOOL_REFRESH_DAYS`), and
-functionally verifies — so a reboot needs no manual steps. Each cycle is safe to
+in place (`VALARK_WEB_PUBLIC_PORT`), mirrors Val Ark's own source for LAN
+self-replication (`scripts/mirror-self.sh`), refreshes the live catalog, link-checks,
+integrity-verifies, re-fills pinned requests, runs a bounded top-up fill (plus a weekly
+refresh of the tool mirror to the latest upstream versions, `VALARK_TOOL_REFRESH_DAYS`),
+functionally verifies, smoke-tests the UI, sweeps plain-file uploads through the
+fail-closed moderation check, and writes a self-heal snapshot — so a reboot needs no
+manual steps. Each cycle is safe to
 run repeatedly and concurrently with a standalone fill (the fill flock prevents
 double-downloading) and never aborts on a single failure. TLS certs persist under
 `~/.config/val-ark/tls` and the server re-bootstraps them on first boot, so HTTPS
@@ -191,15 +201,19 @@ flowchart TD
     LAYOUT --> WEB["2b. Ensure web server + kiwix up"]
     WEB --> PUB["2c. Ensure standard-port access<br/>VALARK_WEB_PUBLIC_PORT redirect"]
     PUB --> SVCS["2d. Ensure enabled community<br/>services up (VALARK_SERVICES)"]
-    SVCS --> REFRESH["3. Refresh live catalog<br/>heals content links, no stale dates"]
+    SVCS --> SELF["2e. Self-mirror<br/>own source for LAN bootstrap"]
+    SELF --> REFRESH["3. Refresh live catalog<br/>heals content links, no stale dates"]
     REFRESH --> LINK["4. Link check + repair<br/>tool/installer URLs, web-ui assets"]
     LINK --> INTEG["5. Integrity verify<br/>requeue corrupt/short files"]
-    INTEG --> FILL["6. Bounded top-up fill<br/>librarian fill --time"]
+    INTEG --> PINS["5b. Re-fill pinned requests<br/>user picks win before generic fill"]
+    PINS --> FILL["6. Bounded top-up fill<br/>librarian fill --time"]
     FILL --> TOOLREF["6b. Weekly tool refresh<br/>mirrored apps to latest upstream"]
     TOOLREF --> FUNC["7. Functional verification<br/>verify.sh: tools run, kiwix serves,<br/>tiny LLM infers, fleet reachable"]
     FUNC --> UISMOKE["7b. UI smoke<br/>dynamic controls + back-to-ark nav"]
-    UISMOKE --> REPORT["8. Self-heal report + coordination<br/>state/selfheal.json + heal-events.jsonl"]
-    REPORT --> DONE([cycle complete])
+    UISMOKE --> MOD["7c. Moderation sweep<br/>quarantine flagged uploads"]
+    MOD --> REPORT["8. Report + coordination<br/>librarian maintain"]
+    REPORT --> SNAP["8b. Self-heal snapshot<br/>state/selfheal.json + heal-events.jsonl"]
+    SNAP --> DONE([cycle complete])
 ```
 
 ## Mesh Topology
@@ -291,7 +305,7 @@ sequenceDiagram
     filesystem-->>server.js: listing + metadata + kiwix status
     server.js-->>Browser: JSON response
 
-    Browser->>server.js: POST /api/download {target}
+    Browser->>server.js: POST /api/download/{tools|models|content}
     server.js->>download script: spawn child process
     loop Progress updates
         download script-->>server.js: stdout/stderr
@@ -362,24 +376,27 @@ require a CUDA source build (no upstream binary) — see [PLATFORMS.md](PLATFORM
 
 | Path | Purpose |
 |------|---------|
-| `start.sh` | Interactive menu + CLI (setup, download, update, serve, cron) |
-| `scripts/librarian.sh` | Disk-fill + curation engine (`status\|plan\|fill\|verify\|evict\|maintain\|refresh`) |
+| `start.sh` | Interactive menu + CLI (setup, download, update, monitor, status, serve, cron, service, chat, transcribe, image, speak, test, screenshots, optimize-images, uninstall) |
+| `scripts/librarian.sh` | Disk-fill + curation engine (`status\|plan\|fill\|verify\|evict\|maintain\|refresh\|catalog\|request\|pin\|unpin\|pins`) |
 | `scripts/loop.sh` | 24/7 self-healing + verification cycle (`once\|run\|install\|uninstall`) |
 | `scripts/verify.sh` | Functional checks: tools run, kiwix serves, LLM infers, fleet reachable |
 | `scripts/lib/valark-env.sh` | Resolve `DATA_ROOT` from `.env`, symlink repo dirs, disk math |
 | `scripts/lib/catalog.sh` | Build candidate catalog (models/installers + live ZIM) |
 | `scripts/lib/kiwix_catalog.py` | Fetch + parse the live Kiwix OPDS catalog |
-| `scripts/lib/planner.py` | Apply the priority model to produce the ordered plan |
+| `scripts/lib/planner.py` | Apply the priority model (essentials first) to produce the ordered plan |
+| `scripts/lib/{release,git_bundle,lastbook,references}_mirror.py`, `apt_offline.py`, `oci_pull.py` | Mirror CLIs: dev + security stack, git bundles and offline APT sets (standalone, run by hand); Lastbook, cad-agent references and container images (driven by `scripts/tools/*.sh`) (see [`scripts/lib/AGENTS.md`](../scripts/lib/AGENTS.md)) |
+| `scripts/mirror-self.sh` | Package Val Ark's own source for LAN self-replication (`/bootstrap.sh`) |
+| `scripts/services/` | Community services (chat, mail, forum, paste, SeaweedFS) |
 | `scripts/download-tools.sh` | Mirror prebuilt tool binaries (per `scripts/tools/*.sh`) |
 | `scripts/download-models.sh` | Tiered model downloads |
 | `scripts/server.js` | Zero-dep Node web UI + JSON API + SSE; auto-launches kiwix |
 | `scripts/setup.sh` / `status.sh` / `monitor.sh` | Deps, inventory, progress |
-| `data/installers.tsv`, `data/models-extra.tsv` | Catalog source rows |
+| `data/*.tsv` | Catalog source rows: essentials, installers, models-extra (librarian); dev-stack, apt-sets, source-repos (standalone mirrors). Schemas in [`data/AGENTS.md`](../data/AGENTS.md) |
 | `web-ui/` | Static dashboard (TOOLS array, logos, screenshots) |
 | `tests/` | Bash validators (`test-*.sh`) + Playwright suite under `tests/screenshots/` |
 | `.env.example` | Documented machine config (`VAL_ARK_DATA`, `VALARK_WEB_PORT`, `VALARK_FLEET`, reserve) |
 
-Val Ark currently mirrors **45** tools (`scripts/tools/*.sh`). The scripts never
+Val Ark currently mirrors **50+** tools (the web UI's tool cards; `scripts/tools/*.sh` also holds the content mirrors and the Node runtime). The scripts never
 install anything on the server itself — they mirror binaries and write install hints
 for the user. See [TOOLS.md](TOOLS.md) for the catalog and [LIBRARIAN.md](LIBRARIAN.md)
 for the fill engine.

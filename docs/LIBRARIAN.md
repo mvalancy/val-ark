@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/popup/librarian-dark.svg">
-  <img src="img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Diversity first, then small and valuable, then fill, then trade up.">
+  <img src="img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Essentials first, then diversity, small and valuable, fill, then trade up.">
 </picture>
 
 # Librarian — scalable disk-fill, curation & self-healing
@@ -53,7 +53,7 @@ The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
    [decisions](knowledge/decisions.md#mini-then-maxi)).
 1. **Diversity first** — one item (the *smallest*) from every category before
    deepening any single one. Guarantees breadth across ~40+ categories (22 ZIM
-   topics, 17 model modalities, and netboot / OS-install / router-firmware /
+   topics, 18 model categories, and netboot / OS-install / router-firmware /
    jetson-bsp installers).
 2. **Small valuable files** — then items by **value ÷ byte**, capped per category
    so a prolific category (devdocs, TED…) can't crowd out diversity.
@@ -74,12 +74,24 @@ flavours (maxi/nopic/mini) collapse to the most complete one.
 | Source | File | Notes |
 |--------|------|-------|
 | Kiwix ZIM library | live OPDS via `scripts/lib/kiwix_catalog.py` | **Always current** — ZIM dates never go stale. ~1700+ entries across 9 languages by default (`VALARK_ZIM_LANGS`). |
-| Models (diversity) | `data/models-extra.tsv` | Small high-value models across 17 modalities (embeddings, rerankers, tiny VLMs, OCR, depth, segmentation, detection, audio, time-series). |
+| Models (diversity) | `data/models-extra.tsv` | Small high-value models across 18 categories (setup-assistant chat LLMs, small LLMs, code, embeddings, rerankers, tiny VLMs, OCR, depth, segmentation, detection, audio, time-series, safety). |
 | OS / router / netboot / server source | `data/installers.tsv` | Distro ISOs (Alpine/Debian/Ubuntu/…), OpenWRT firmware, netboot.xyz, Jetson BSP — for PXE / mesh commissioning — plus `server-source`: upstream LAMP + LAN-infrastructure releases (httpd/APR, PHP, MariaDB, PostgreSQL, nginx, OpenSSL/OpenSSH, BIND, Kea, dnsmasq, Unbound, Samba, Dovecot, WordPress, Nextcloud, Gitea, …). |
-| Developer + security stack | `data/dev-stack.tsv` | The kit to build, run and secure software offline: every supported Python (python.org installers + relocatable builds + a top-1000 PyPI wheelhouse), compilers (LLVM, GCC/GNU sources, MinGW, Go, Rust, JDK, CMake…), decompilers/RE (Ghidra, radare2/rizin/Cutter, x64dbg, jadx, ILSpy, Frida…), security tools (Nmap, Wireshark, ZAP, Metasploit, nuclei, Trivy, Zeek, Suricata, Kali ISOs…), containers + Kubernetes (Docker static, Podman, kubeadm/kubectl, MicroK8s snaps, k3s, Helm…), cloud/IaC, S3-compatible storage (MinIO source, SeaweedFS, RustFS, versitygw, rclone) and databases (Neo4j + Relate, Milvus, Qdrant, DuckDB, ClickHouse, Valkey, OpenSearch…). Current release of each, resolved live by `scripts/lib/release_mirror.py` (see below). |
-| Offline .deb sets | `data/apt-sets.tsv` | Server + developer/security package sets resolved with all dependencies per Ubuntu suite+arch by `scripts/lib/apt_offline.py build --suite noble --arch arm64 --set lamp --dest <dir>` → a flat local APT repo for a LAN with no internet. |
+
+The grid-down list in `data/essentials.tsv` is not a source of its own: it names ZIMs, models and
+installers from the catalogs above, and the planner takes the matches first (phase 0).
 
 The big LLM/STT/TTS/VLM/image catalog is still managed by `download-models.sh`.
+
+### Standalone mirrors (run by hand, not part of `fill` / the loop)
+
+These catalogs are read by their own CLIs, which you run (or schedule) yourself; `librarian.sh
+fill` and `loop.sh` do not plan them.
+
+| Source | File | Notes |
+|--------|------|-------|
+| Developer + security stack | `data/dev-stack.tsv` | The kit to build, run and secure software offline: every supported Python (python.org installers + relocatable builds + a top-1000 PyPI wheelhouse), compilers (LLVM, GCC/GNU sources, MinGW, Go, Rust, JDK, CMake…), decompilers/RE (Ghidra, radare2/rizin/Cutter, x64dbg, jadx, ILSpy, Frida…), security tools (Nmap, Wireshark, ZAP, Metasploit, nuclei, Trivy, Zeek, Suricata, Kali ISOs…), containers + Kubernetes (Docker static, Podman, kubeadm/kubectl, MicroK8s snaps, k3s, Helm…), cloud/IaC, S3-compatible storage (MinIO source, SeaweedFS, RustFS, versitygw, rclone) and databases (Neo4j + Relate, Milvus, Qdrant, DuckDB, ClickHouse, Valkey, OpenSearch…). Current release of each, resolved live by `scripts/lib/release_mirror.py` (see below). |
+| Offline .deb sets | `data/apt-sets.tsv` | Server + developer/security package sets resolved with all dependencies per Ubuntu suite+arch by `scripts/lib/apt_offline.py build --suite noble --arch arm64 --set lamp --dest <dir>` → a flat local APT repo for a LAN with no internet. |
+| Upstream source repos | `data/source-repos.tsv` | Full-history git bundles of 200+ upstream repos via `scripts/lib/git_bundle_mirror.py plan\|mirror\|verify` (see [TOOLS.md](TOOLS.md#content-mirrors)). |
 
 ### Developer + security stack (`release_mirror.py`)
 
@@ -239,6 +251,11 @@ scripts/librarian.sh verify        # integrity-check managed files; requeue bad
 scripts/librarian.sh evict --need 107374182400   # free space (raw bytes), lowest value/byte first
 scripts/librarian.sh refresh       # re-pull the live ZIM catalog
 scripts/librarian.sh maintain      # refresh + verify + bounded top-up + report (loop core)
+scripts/librarian.sh catalog model # not-yet-downloaded items (content|model|installer|all; web browse feed)
+scripts/librarian.sh request model <id>   # pin + fetch ONE item now (content|model|tool), evicting unpinned items to fit
+scripts/librarian.sh pin content <id>     # keep an item: pins are never evicted
+scripts/librarian.sh unpin <id>    # files kept, but evictable again
+scripts/librarian.sh pins --refill # list pins (--refill re-fetches any that went missing)
 ```
 
 Downloads prefer **aria2** (8 connections, ~3x faster on per-connection-throttled
@@ -268,24 +285,30 @@ where it left off; abandoned partials are garbage-collected by `verify` after
    (LAN + VPN interfaces; loopback untouched),
 5. **keep enabled community services running** (`VALARK_SERVICES` in `.env` —
    chat, mail, forum, paste),
-6. **refresh the live catalog** → content links self-heal (no stale dates),
-7. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
+6. **self-mirror** — package Val Ark's own source under `<data>/sources/val-ark/`
+   (`scripts/mirror-self.sh`) so a neighbour can bootstrap a node over the LAN,
+7. **refresh the live catalog** → content links self-heal (no stale dates),
+8. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
    are transient, not dead), web-ui assets, symlinks → `state/linkcheck.txt`,
-8. **integrity verify** → requeue corrupt/short downloads,
-9. **top-up fill** (bounded; skipped if a fill already runs),
-10. **weekly tool refresh** — re-run the tool mirror so apps track their latest
+9. **integrity verify** → requeue corrupt/short downloads,
+10. **re-fill pinned requests** — user-requested items that went missing come back
+    before the generic fill,
+11. **top-up fill** (bounded; skipped if a fill already runs),
+12. **weekly tool refresh** — re-run the tool mirror so apps track their latest
     upstream versions (`VALARK_TOOL_REFRESH_DAYS`, default 7; a failed pass
     retries in a day),
-11. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
+13. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
     real ZIM, a tiny LLM infers, the web API answers, and each configured remote
-    mesh node (`VALARK_FLEET` in `.env`) is reachable and sees the shared content
-    (plus a Playwright UI smoke when installed),
-12. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
+    mesh node (`VALARK_FLEET` in `.env`) is reachable and sees the shared content,
+14. **UI smoke** — a Playwright pass over the dynamic controls (when installed),
+15. **moderation sweep** — screen plain-file community uploads on-device and
+    quarantine anything not cleanly allowed (`scripts/lib/mod-sweep.sh`, fail-closed),
+16. **report + coordination** — the librarian's `maintain` (writes
+    `state/health.json`: disk + per-category coverage) and a fleet coordination drop
+    (`state/coordination/`),
+17. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
     snapshot) and append any genuine repairs to `state/heal-events.jsonl` (the feed
-    behind the Health page), plus a fleet coordination drop (`state/coordination/`).
-    This is **distinct from `state/health.json`**, which the librarian's own
-    `maintain` command writes (disk + per-category coverage); the loop invokes
-    `maintain` as part of steps 6/8/9 above, so both files land each cycle.
+    behind the Health page). This is **distinct from `state/health.json`**.
 
 Install it as a durable, reboot-surviving job:
 

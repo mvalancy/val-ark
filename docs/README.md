@@ -120,19 +120,20 @@ Operating notes for editing this set: [design/AGENTS.md](design/AGENTS.md).
 
 ### Per-folder AGENTS.md + READMEs
 
-Each important folder carries local operating notes. (`AGENTS.md` files are created across
-this doc cleanup; the links resolve after integration.)
+Each important folder carries local operating notes.
 
 | Folder | Docs |
 |--------|------|
 | `scripts/` | [scripts/AGENTS.md](../scripts/AGENTS.md) · [scripts/README.md](../scripts/README.md) — orchestration, curation, server layer. |
-| `scripts/lib/` | [scripts/lib/AGENTS.md](../scripts/lib/AGENTS.md) — data-root resolution + catalog/planner internals. |
+| `scripts/lib/` | [scripts/lib/AGENTS.md](../scripts/lib/AGENTS.md) — data-root resolution + catalog/planner internals, the standalone mirror CLIs (release / APT / git-bundle / Lastbook / references / OCI), auth + commissioning, moderation, TLS. |
+| `scripts/docs/` | `popup_art.py` — generator for the animated pop-up-book doc art (see [Pop-up art](#pop-up-art)). |
 | `scripts/services/` | [scripts/services/AGENTS.md](../scripts/services/AGENTS.md) — offline community service launchers (chat/mail/forum/paste/seaweedfs). |
 | `scripts/tools/` | [scripts/tools/AGENTS.md](../scripts/tools/AGENTS.md) · [scripts/tools/README.md](../scripts/tools/README.md) — per-tool mirror scripts + `_common.sh` helpers. |
 | `tests/` | [tests/AGENTS.md](../tests/AGENTS.md) · [tests/README.md](../tests/README.md) — one runner → offline HTML report. |
+| `tests/lib/`, `tests/fixtures/` | Shared test helpers (results, ports, doc-link / secret / port-hygiene checkers) and offline fixtures (see [tests/README.md](../tests/README.md)). |
 | `tests/screenshots/` | [tests/screenshots/AGENTS.md](../tests/screenshots/AGENTS.md) — Playwright specs, parametrized over the catalog. |
 | `web-ui/` | [web-ui/AGENTS.md](../web-ui/AGENTS.md) · [web-ui/README.md](../web-ui/README.md) — zero-dep SPA (TOOLS array, TOOL_META, logos, screenshots). |
-| `data/` | [data/AGENTS.md](../data/AGENTS.md) — `installers.tsv` + `models-extra.tsv` catalog format. |
+| `data/` | [data/AGENTS.md](../data/AGENTS.md) — the six catalog TSVs (installers, models-extra, essentials, dev-stack, apt-sets, source-repos) and their schemas. |
 | `docs/` | [docs/AGENTS.md](AGENTS.md) — the reference guides (this folder). |
 | `docs/design/` | [docs/design/AGENTS.md](design/AGENTS.md) — the scope-first design set. |
 | `docs/knowledge/` | [docs/knowledge/AGENTS.md](knowledge/AGENTS.md) — the shared brain. |
@@ -154,13 +155,18 @@ this doc cleanup; the links resolve after integration.)
   repo's dirs are symlinked to it. Scales to any disk size. Logic in
   `scripts/lib/valark-env.sh`. See [LIBRARIAN.md](LIBRARIAN.md).
 - **Librarian engine** — `scripts/librarian.sh` fills a disk from live catalogs
-  in priority order (diversity → small-valuable → fill-remaining → evict-for-better),
-  using aria2 multi-connection downloads with curl fallback. It curates roughly **250
-  catalog items** across ~50 tool mirror scripts (`scripts/tools/*.sh`) plus models and
-  offline content. See [LIBRARIAN.md](LIBRARIAN.md).
+  in priority order (grid-down essentials → diversity → small-valuable → fill-remaining →
+  evict-for-better), using aria2 multi-connection downloads with curl fallback. It
+  curates hundreds of catalog items — 50+ tool mirror scripts (`scripts/tools/*.sh`),
+  models and the live Kiwix library. See [LIBRARIAN.md](LIBRARIAN.md).
+- **Offline build & survival kit** — `data/essentials.tsv` front-loads the grid-down
+  essentials; standalone mirror CLIs keep a developer + security stack, offline APT repos,
+  git bundles of upstream source, Lastbook and container images for a LAN with no internet.
+  See [OFFLINE.md](OFFLINE.md#what-else-works-offline).
 - **24/7 self-healing loop** — `scripts/loop.sh` + `scripts/verify.sh` repair
-  symlinks, refresh the live Kiwix catalog, link-check, integrity-verify, top-up
-  fill, and confirm apps actually run (including remote mesh nodes).
+  symlinks, keep services up, self-mirror Val Ark's source, refresh the live Kiwix
+  catalog, link-check, integrity-verify, re-fill pins, top-up fill, sweep uploads
+  through moderation, and confirm apps actually run (including remote mesh nodes).
 - **Mesh** — the data root is NFS-exportable so fleet nodes mount one shared
   mirror and run GPU inference over the network. See [OFFLINE.md](OFFLINE.md).
 - **Web server** — `scripts/server.js` (zero-dep Node) serves the UI, a JSON API,

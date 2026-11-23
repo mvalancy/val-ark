@@ -83,10 +83,12 @@ llama/whisper/sd require a CUDA source build — see [PLATFORMS.md](PLATFORMS.md
 ## 24/7 self-healing
 
 `scripts/loop.sh` keeps an offline mirror healthy without supervision: it ensures the
-disk is writable, repairs symlinks, keeps the web server up, refreshes the live
-catalog (content links self-heal — no stale dates), checks & repairs links, verifies
-integrity, tops up the fill, refreshes mirrored tools weekly (latest upstream
-versions), and runs functional verification. Install it as a flock-guarded cron job:
+disk is writable, repairs symlinks, keeps the web server and enabled community services
+up, mirrors its own source for LAN self-replication, refreshes the live catalog (content
+links self-heal — no stale dates), checks & repairs links, verifies integrity, re-fills
+pinned requests, tops up the fill, refreshes mirrored tools weekly (latest upstream
+versions), runs functional verification and a UI smoke, and sweeps uploads through the
+fail-closed moderation check (full step list: [LIBRARIAN.md](LIBRARIAN.md#the-247-loop)). Install it as a flock-guarded cron job:
 
 ```bash
 scripts/loop.sh install 30            # one cycle every 30 min (survives reboot)
@@ -94,6 +96,29 @@ scripts/loop.sh uninstall
 ```
 
 Full details: [LIBRARIAN.md](LIBRARIAN.md).
+
+## What else works offline
+
+Beyond the tools, models and ZIM library, an Ark can rebuild and serve software with no
+internet at all:
+
+- **Self-replication** — the loop keeps a full-history git bundle + tarball of Val Ark's
+  own source under `<data>/sources/val-ark/` (`scripts/mirror-self.sh`), and the web
+  server hands out a host-aware installer, so a neighbour stands up their own node from
+  the LAN: `curl -fsSL http://<ark-host>:3000/bootstrap.sh | bash`.
+- **Offline APT repos** — `scripts/lib/apt_offline.py` resolves the package sets in
+  `data/apt-sets.tsv` with every dependency for any Ubuntu suite + architecture and
+  indexes them as a flat repo (`deb [trusted=yes] file:<dir> ./`). See
+  [LIBRARIAN.md](LIBRARIAN.md#offline-deb-sets-exit-codes-and-a-real-box-check).
+- **Developer + security stack** — `scripts/lib/release_mirror.py` keeps the current
+  release of each `data/dev-stack.tsv` project for every platform, including Python
+  installers and a PyPI wheelhouse (`pip install --no-index --find-links <dir>`). See
+  [LIBRARIAN.md](LIBRARIAN.md#developer--security-stack-release_mirrorpy).
+- **Source archive** — `scripts/lib/git_bundle_mirror.py` keeps full-history git bundles
+  of the repos in `data/source-repos.tsv`; `git clone <repo>.bundle` works offline. See
+  [TOOLS.md](TOOLS.md#content-mirrors).
+- **Lastbook** — the free offline survival library (packs, maps, address search, its
+  model and installers), kept current by `scripts/tools/lastbook.sh`.
 
 ## Sharing between machines
 

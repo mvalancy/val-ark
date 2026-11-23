@@ -174,9 +174,10 @@ size-verified, atomic, single-`flock`.
 ```
 
 A 24/7 self-healing loop ([`scripts/loop.sh`](../scripts/loop.sh)) keeps a node healthy:
-it repairs the symlink layout, keeps the web server (and enabled services) up, refreshes
-the live catalog, link-checks and re-verifies integrity, tops up the fill, refreshes
-mirrored tools weekly, and runs functional verification
+it repairs the symlink layout, keeps the web server (and enabled services) up, mirrors its
+own source for LAN bootstrap, refreshes the live catalog, link-checks and re-verifies
+integrity, re-fills pinned requests, tops up the fill, refreshes mirrored tools weekly,
+sweeps uploads through the moderation check, and runs functional verification
 ([`scripts/verify.sh`](../scripts/verify.sh)) that the tools actually run, Kiwix serves
 a real ZIM, a tiny LLM responds, and the web API answers.
 

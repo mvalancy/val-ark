@@ -336,10 +336,21 @@ Every card has a picture and a description, from the best source available:
 
 | Section | Picture | Description |
 |---------|---------|-------------|
-| Tools & apps (one card per tool, all platforms) | the web UI's logo; screenshots on the detail page | the web UI's `TOOLS` / `TOOL_META`: description, overview, features, CLI, maker, licence |
+| Tools & apps (one card per tool, all platforms) | the web UI's logo; screenshots on the detail page | the web UI's `TOOLS` / `TOOL_META` (matched by id, download folder or name): description, overview, features, CLI, maker, licence; else the header comment of `scripts/tools/<name>.sh` |
 | Library (ZIM) | the ZIM's own 48x48 illustration | the ZIM's own title + description (read from its header and directory with a few small reads; uncompressed, xz and, with the `zstd` CLI, zstd clusters, each decoded once and capped at 4 MB), the web UI's `CONTENT_LIBRARY` overview, article counts from a cached Kiwix catalog |
 | AI models, datasets | the first image the model / dataset card shows from its own repo (a real PNG / JPEG / GIF / WebP file inside the repo: symlinks out of it and upstream SVGs are refused) | the card's first paragraphs, licence and pipeline tag; curated `MODEL_FAMILIES` text for the classic `llm/` folders |
-| Installers, developer stack, sources | generated badge | `data/installers.tsv`, `data/dev-stack.tsv`, `data/source-repos.tsv` notes |
+| Installers, developer stack, sources | generated badge | `data/installers.tsv`, `data/dev-stack.tsv`, `data/source-repos.tsv` notes; a PyPI package's `Summary` from its wheel's `METADATA`; the web UI text for a known tool |
+
+**Every card has a description.** When none of the sources above has one, the generator uses, in
+order: a caller's `--hints` file (`path<TAB>json` lines with `description` / `title` / `item` /
+`collection` / `topic` / `platform` / `version` / `repo` / `publisher`; a NAS collector passes what it
+recorded at download time), the curated sentences in
+[`data/static-descriptions.json`](../data/static-descriptions.json) (Kiwix projects such as Wikipedia,
+TED, DevDocs, Gutenberg, and folder names such as `maddy` or `node`), and finally a sentence built from
+what is known: task (from the model card or the folder name), organisation, format and how to run it,
+topic, version, platforms, file count and size. Folders named after a version (`3.12.1`, `latest`,
+`24.04`) are titled by their project. `summary.json` counts, per section, how many descriptions came
+from hints and how many were generated, and the run prints the totals.
 
 Anything without a picture gets a generated badge (initials or a modality glyph). Pictures are copied
 into `browse/thumbs/` (deduplicated, size-capped) so the catalog works without the repo next to it.

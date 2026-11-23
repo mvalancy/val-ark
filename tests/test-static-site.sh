@@ -68,6 +68,10 @@ cat > "$W/index.html" <<'EOF'
 <script>
 const TOOLS = [
     {
+        id: 'piper-tts', name: 'Piper TTS', category: 'ai-inference', icon: 'P', downloadTarget: 'piper',
+        desc: 'Fast local neural text to speech',
+    },
+    {
         id: 'btop', name: 'btop++', category: 'dev-tools', icon: 'B', iconBg: '#123456', logo: 'logos/btop.svg',
         desc: 'Resource monitor ' + 'with CPU and memory graphs', // trailing comment
         screenshots: ['screenshots/btop-1.png'],
@@ -345,7 +349,7 @@ check "VALARK_STATIC_SITE=0 is a no-op" '[ "$rc" -eq 0 ] && [ ! -e "$T/data2/val
 M2="$T/m"; mkdir -p "$M2/val-ark/state"
 run_maintain() {
     VAL_ARK_DATA="$M2" bash -c '. "$1/scripts/librarian.sh"
-        catalog_refresh_zim() { return 0; }; cmd_verify() { :; }; cmd_fill() { :; }
+        catalog_refresh_zim() { return 0; }; catalog_refresh_scout() { return 0; }; cmd_verify() { :; }; cmd_fill() { :; }
         cmd_site() { echo ran >> "$VALARK_HOME/site.calls"; }
         cmd_maintain >/dev/null 2>&1' _ "$ROOT"
 }
@@ -360,6 +364,68 @@ check "VALARK_STATIC_SITE_HOURS=0 refreshes every time" '[ "$(wc -l < "$M2/val-a
 
 # web UI opened from file:// points at the static catalog
 check "web UI file:// hint links ../index.html" 'grep -q "id=\"static-hint\"" "$ROOT/web-ui/index.html" && grep -q "location.protocol===.file:." "$ROOT/web-ui/index.html"'
+
+# --- every card carries a description (#270): web UI aliases, tool-script headers, wheel METADATA,
+#     version-named folders, ZIM name templates, caller hints, and a generated sentence otherwise
+D="$T/d"
+mkdir -p "$T/tsh" "$D/tools/linux-x86_64/foo" "$D/tools/linux-x86_64/piper" "$D/tools/linux-x86_64/zzz" \
+         "$D/dev-stack/python/pypi/demo" "$D/dev-stack/python/python/3.12.1" "$D/datasets/open-data/weather/noaa" \
+         "$D/datasets/open-data/crops/huggingface/acme/fields" "$D/installers/ubuntu/24.04" "$D/content/zim" \
+         "$D/models/huggingface/acme/yolo-tiny" "$D/sources/blender" "$D/software/releases/acme/widget/1.0"
+printf '#!/bin/bash\n# Val Ark - Mirror Foo, the frobnicator\n#\n# Foo turns widgets into gadgets offline. It also does more.\n' > "$T/tsh/foo.sh"
+echo x > "$D/tools/linux-x86_64/foo/foo"; echo x > "$D/tools/linux-x86_64/piper/piper"; echo x > "$D/tools/linux-x86_64/zzz/zzz"
+python3 -I -c 'import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    z.writestr("demo-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: demo\nSummary: Demo package that does demos\n\nlong text")' \
+    "$D/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"
+echo x > "$D/dev-stack/python/python/3.12.1/Python-3.12.1.tar.xz"
+echo x > "$D/content/zim/devdocs_en_react_2025-01.zim"
+echo x > "$D/content/zim/ted_mul_ai_2026-01.zim"
+echo x > "$D/content/zim/weirdsite.org_fr_all_nopic_2026-02.zim"
+echo x > "$D/datasets/open-data/weather/noaa/readme.txt"
+echo x > "$D/datasets/open-data/crops/huggingface/acme/fields/data.parquet"
+echo x > "$D/installers/ubuntu/24.04/ubuntu.iso"
+echo x > "$D/models/huggingface/acme/yolo-tiny/model.onnx"
+echo x > "$D/sources/blender/blender-4.0.tar.xz"
+echo x > "$D/software/releases/acme/widget/1.0/widget.zip"
+printf 'datasets/open-data/weather/noaa/readme.txt\t{"description": "NOAA daily weather station records", "collection": "Public open data"}\n' > "$T/hints.tsv"
+printf 'bad line without json\nx/../y\t{"description": "escape attempt here"}\n' >> "$T/hints.tsv"
+dout=$(python3 -I "$PY" --root "$D" --web-ui "$W" --tools-dir "$T/tsh" --hints "$T/hints.tsv" --now 1700000000 2>&1); rc=$?
+check "description build exits 0" '[ "$rc" -eq 0 ] || { echo "$dout" >&2; false; }'
+nodesc=$(python3 -I - "$D/browse" <<'PYEOF'
+import glob, re, sys
+bad = []
+for f in glob.glob(sys.argv[1] + '/*.html'):
+    s = open(f, encoding='utf-8').read()
+    for t, body in re.findall(r'<div class="tx"><h4>(.*?)</h4>(.*?)</a>', s, re.S):
+        if not re.search(r'<p>\s*\S', body):
+            bad.append(f.rsplit('/', 1)[-1] + ':' + t)
+for f in glob.glob(sys.argv[1] + '/item/*.html'):
+    s = open(f, encoding='utf-8').read()
+    m = re.search(r'</h1>(.*?)<h3|</h1>(.*?)</main>', s, re.S)
+    if m and not re.search(r'<p[^>]*>\s*[^<\s]', m.group(0)):
+        bad.append('item:' + f.rsplit('/', 1)[-1])
+print(' '.join(bad))
+PYEOF
+)
+check "every card has a description" '[ -z "$nodesc" ] || { echo "no description: $nodesc" >&2; false; }'
+check "tool found by its download target (piper -> Piper TTS)" 'grep -q "Fast local neural text to speech" "$D/browse/tools.html"'
+check "tool without a web-UI card: scripts/tools header" 'grep -q "Mirror Foo, the frobnicator. Foo turns widgets into gadgets offline." "$D/browse/tools.html"'
+check "unknown tool: generated sentence" 'grep -q "zzz: portable builds for Linux x86_64" "$D/browse/tools.html"'
+check "pypi package: Summary from the wheel METADATA" 'grep -q "Demo package that does demos" "$D/browse/dev-stack.html"'
+check "version folder named by its project" 'grep -q "<h4>python</h4>" "$D/browse/dev-stack.html" && ! grep -q "<h4>3.12.1</h4>" "$D/browse/dev-stack.html"'
+check "installer version folder titled with its parent" 'grep -q "<h4>ubuntu 24.04</h4>" "$D/browse/installers.html"'
+check "ZIM template: DevDocs" 'grep -q "DevDocs reference for react" "$D/browse/content.html"'
+check "ZIM template: TED" 'grep -q "TED talks about ai (several languages)" "$D/browse/content.html"'
+check "ZIM without a template: generated" 'grep -q "in French, text only: an offline archive" "$D/browse/content.html"'
+check "caller hint used as the description" 'grep -q "NOAA daily weather station records" "$D/browse/datasets.html"'
+check "hint with .. ignored" '! grep -rq "escape attempt" "$D/browse"'
+check "dataset: generated with topic and org" 'grep -q "A crops dataset: fields from acme" "$D/browse/datasets.html"'
+check "model without a card: task from its name" 'grep -q "A object detection model — yolo-tiny from acme" "$D/browse/models.html" && grep -q "ONNX Runtime" "$D/browse/models.html"'
+check "software release: generated" 'grep -q "Upstream release assets of acme/widget" "$D/browse/software.html"'
+check "source archive: generated" 'grep -q "Source archive of blender" "$D/browse/sources.html"'
+check "summary.json counts generated descriptions" 'python3 -I -c "import json,sys;d=json.load(open(sys.argv[1]));c={s[\"name\"]:s[\"descriptions\"] for s in d[\"sections\"]};sys.exit(0 if c[\"datasets\"][\"hint\"]==1 and c[\"tools\"][\"generated\"]>=1 else 1)" "$D/browse/summary.json"'
+check "the run reports hint + generated counts" 'echo "$dout" | grep -q "descriptions from hints 1 / generated"'
 
 echo "static-site: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

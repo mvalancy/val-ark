@@ -43,7 +43,7 @@ directories, and every directory that is not a section (state/, private/, the re
 Writes are temp + rename (no chmod: network shares refuse it) and unchanged files are not
 rewritten. Exit 0 ok, 1 root missing or output unwritable, 64 usage.
 """
-import argparse, fnmatch, hashlib, heapq, html, json, lzma, os, re, shutil, struct, subprocess, sys, threading, time, urllib.parse
+import argparse, fnmatch, hashlib, heapq, html, json, lzma, os, re, shutil, struct, subprocess, sys, threading, time, urllib.parse, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -81,6 +81,26 @@ LICENSE = re.compile(r'(?i)^(license|licence|copying|notice)(\.[a-z]+)?$')
 IMG_EXT = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg')
 PLATFORMS = {'linux-x86_64': 'Linux x86_64', 'linux-arm64': 'Linux arm64', 'macos-arm64': 'macOS',
              'windows-x64': 'Windows', 'sources': 'Source'}
+
+
+LANG_NAMES = {'en': 'English', 'eng': 'English', 'es': 'Spanish', 'spa': 'Spanish', 'fr': 'French', 'fra': 'French',
+              'de': 'German', 'deu': 'German', 'ru': 'Russian', 'rus': 'Russian', 'ar': 'Arabic', 'ara': 'Arabic',
+              'hi': 'Hindi', 'hin': 'Hindi', 'zh': 'Chinese', 'zho': 'Chinese', 'pt': 'Portuguese', 'por': 'Portuguese',
+              'it': 'Italian', 'ita': 'Italian', 'ja': 'Japanese', 'jpn': 'Japanese', 'ko': 'Korean', 'kor': 'Korean',
+              'nl': 'Dutch', 'pl': 'Polish', 'tr': 'Turkish', 'uk': 'Ukrainian', 'vi': 'Vietnamese', 'id': 'Indonesian',
+              'fa': 'Persian', 'he': 'Hebrew', 'bn': 'Bengali', 'sw': 'Swahili', 'mul': 'several languages'}
+# A path component that is a version / channel rather than a name (dev-stack + installer layouts).
+VERSIONISH = re.compile(r'(?i)^(v?\d[\w.+~-]*|r\d[\w.+-]*|current|latest(-[a-z]+)?|stable|lts|nightly|edge|main|master)$')
+# Model task words guessed from a folder name when no model card says (word -> task phrase).
+TASK_WORDS = [(r'whisper|asr|speech-?recogn|parakeet|canary|wav2vec|stt', 'speech-recognition'),
+              (r'tts|voice|speech|piper|kokoro|styletts|bark|vits', 'text-to-speech'),
+              (r'yolo|detr|detect|rtdetr|grounding', 'object-detection'), (r'\bsam\b|sam2|segment|seg\b', 'segmentation'),
+              (r'depth', 'depth-estimation'), (r'ocr|docling|layout', 'OCR / document'),
+              (r'embed|bge|e5-|gte|minilm|nomic', 'text-embedding'), (r'rerank', 'reranking'),
+              (r'clip|siglip', 'image-text embedding'), (r'diffusion|flux|sdxl|\bsd[-_]|wan-?2|ltx|hunyuan-?video|image-gen', 'image / video generation'),
+              (r'-vl\b|vl-|vision|llava|smolvlm|moondream|qwen.*vl|pixtral', 'vision-language'),
+              (r'policy|policies|robot|vla|openvla|pi0|gr00t|lerobot', 'robot policy'),
+              (r'music|audio', 'audio'), (r'coder|code', 'code language'), (r'gguf|instruct|chat|llama|qwen|mistral|gemma|phi|glm|kimi|deepseek', 'language')]
 
 
 # --------------------------------------------------------------------------- small helpers
@@ -263,7 +283,7 @@ def js_const(text, name):
 class Curated:
     """Descriptions and pictures the web UI and the data/ catalogs already carry."""
 
-    def __init__(self, web_ui, data_dir):
+    def __init__(self, web_ui, data_dir, tools_dir=None):
         self.web_ui = web_ui
         text = ''
         try:
@@ -283,6 +303,22 @@ class Curated:
                 if f:
                     self.model_files[f] = (fam, m)
                     self.model_files.setdefault(os.path.dirname(f), (fam, m))
+        # tools are found by id, by download target (the folder name) and by display name
+        self.tool_alias = {}
+        for tid, t in self.tools.items():
+            for k in (tid, t.get('downloadTarget'), t.get('name')):
+                if isinstance(k, str) and k:
+                    self.tool_alias.setdefault(tool_key(k), tid)
+        self.descriptions = {'zim': {}, 'names': {}}
+        try:
+            with open(os.path.join(data_dir, 'static-descriptions.json'), encoding='utf-8') as f:
+                raw = json.load(f)
+            for k in ('zim', 'names'):
+                if isinstance(raw.get(k), dict):
+                    self.descriptions[k] = {str(a).lower(): str(b) for a, b in raw[k].items() if isinstance(b, str)}
+        except (OSError, ValueError, AttributeError):
+            pass
+        self.tool_scripts = tool_script_blurbs(tools_dir) if tools_dir else {}
         self.installers, self.devstack, self.sources = {}, {}, {}
         for row in self._rows(os.path.join(data_dir, 'installers.tsv')):
             if len(row) >= 6:
@@ -305,6 +341,10 @@ class Curated:
         except OSError:
             return []
 
+    def tool_for(self, name):
+        tid = self.tool_alias.get(tool_key(name))
+        return self.tools.get(tid) if tid else None
+
     def content_for(self, filename):
         for c in self.content:
             pat = c.get('match')
@@ -314,6 +354,96 @@ class Curated:
             except re.error:
                 continue
         return None
+
+
+def tool_script_blurbs(tools_dir):
+    """name -> sentence from the header comment of scripts/tools/<name>.sh ('# Val Ark - <what>' + the
+    paragraph under it)."""
+    out = {}
+    for fn in listdir(tools_dir) if tools_dir else ():
+        if not fn.endswith('.sh') or fn.startswith('_'):
+            continue
+        text = read_small(os.path.join(tools_dir, fn), 4096) or ''
+        lines, head, para = text.splitlines()[1:40], '', []
+        for ln in lines:
+            if not ln.startswith('#'):
+                break
+            t = ln.lstrip('#').strip()
+            if not t or set(t) <= set('#=-'):
+                if para:
+                    break
+                continue
+            m = re.match(r'Val Ark\s*[-—:]\s*(.+)', t)
+            if m and not head:
+                head = m.group(1).strip()
+                continue
+            if head:
+                para.append(t)
+        blurb = ' '.join(para)
+        blurb = re.sub(r'\s+', ' ', re.sub(r'\(?https?://\S+\)?', '', blurb)).strip()
+        if head or blurb:
+            first = re.split(r'(?<=[.!?])\s', blurb, 1)[0] if blurb else ''
+            out[fn[:-3]] = (head.rstrip('.') + '. ' if head else '') + first if first else head
+    return out
+
+
+def wheel_summary(path):
+    """The Summary line of a wheel's METADATA (reads the zip directory + one small member)."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            name = next((n for n in z.namelist() if n.endswith('.dist-info/METADATA')), None)
+            if not name or z.getinfo(name).file_size > 2_000_000:
+                return ''
+            with z.open(name) as f:
+                for line in f.read(200_000).decode('utf-8', 'replace').splitlines():
+                    if line.lower().startswith('summary:'):
+                        v = line.split(':', 1)[1].strip()
+                        return '' if v.upper() == 'UNKNOWN' else v
+                    if not line.strip():
+                        break
+    except (OSError, zipfile.BadZipFile, KeyError, ValueError, RuntimeError):
+        pass
+    return ''
+
+
+def lang_name(code):
+    code = (code or '').lower()
+    return LANG_NAMES.get(code) or LANG_NAMES.get(code.split('-')[0]) or code or 'several languages'
+
+
+def zim_desc(z, templates):
+    """A sentence for a ZIM from its file name, when the archive's own Description is not known."""
+    if not z:
+        return ''
+    proj, topic = z['proj'].lower(), z['topic'] if z['topic'] not in ('', 'all') else ''
+    words = topic.replace('_', ' ').replace('-', ' ').strip()
+    key = proj
+    if proj.endswith(('stackexchange.com', 'stackoverflow.com', 'superuser.com', 'serverfault.com', 'askubuntu.com',
+                      'mathoverflow.net')):
+        key = 'stackexchange'
+    elif proj.startswith('zimgit-'):
+        key, words = 'zimgit', words or proj[len('zimgit-'):].replace('-', ' ')
+    tpl = templates.get(key) or templates.get(proj.split('.')[0])
+    fl = {'maxi': ', full with images', 'nopic': ', text only', 'mini': ', introductions only'}.get(z['flavour'], '')
+    vals = {'topic': words or 'everything', 'lang': lang_name(z['lang']), 'flavour': fl,
+            'topic_in': f' on {words}' if words else '', 'topic_on': f' about {words}' if words else '',
+            'topic_paren': f' — {words}' if words else '', 'site': zim_title(z).split(' — ')[0]}
+    if tpl:
+        try:
+            return tpl.format(**vals)
+        except (KeyError, IndexError, ValueError):
+            pass
+    base = zim_title(z).split(' — ')[0]
+    return (f'{base}{vals["topic_on"]} in {vals["lang"]}{fl}: an offline archive of the {base} website, '
+            'readable in Kiwix.')
+
+
+def model_task(*names):
+    blob = ' '.join(n.lower() for n in names if n)
+    for pat, task in TASK_WORDS:
+        if re.search(pat, blob):
+            return task
+    return ''
 
 
 # --------------------------------------------------------------------------- ZIM metadata
@@ -770,6 +900,59 @@ def walk(section, max_files, budget):
     return budget
 
 
+HINT_KEYS = ('description', 'summary', 'title', 'item', 'collection', 'topic', 'platform', 'version', 'repo',
+             'publisher', 'license')
+
+
+def load_hints(path, root):
+    """--hints: path<TAB>json lines (paths relative to root, a file or a folder) carrying what a caller
+    knows about the item (description, title, item, collection, topic, platform, version, repo, publisher,
+    licence). Indexed under every leading folder of the path, so an entry finds the first hint inside it."""
+    out = {}
+    if not path:
+        return out
+    try:
+        fh = open(path, encoding='utf-8', errors='replace')
+    except OSError:
+        return out
+    with fh:
+        for line in fh:
+            rel, _, js = line.rstrip('\n').partition('\t')
+            rel = rel.strip('/')
+            if not rel or '..' in rel.split('/'):
+                continue
+            try:
+                d = json.loads(js)
+            except ValueError:
+                continue
+            if not isinstance(d, dict):
+                continue
+            h = {k: str(d[k])[:600] for k in HINT_KEYS if isinstance(d.get(k), (str, int, float)) and str(d[k]).strip()}
+            if not h:
+                continue
+            parts = rel.split('/')
+            for i in range(1, min(len(parts), 8) + 1):
+                out.setdefault('/'.join(parts[:i]), h)
+    return out
+
+
+def hint_desc(h, section):
+    """A sentence from a caller's hint, or ''."""
+    if not h:
+        return ''
+    for k in ('description', 'summary'):
+        if h.get(k) and len(h[k]) >= 12:
+            return h[k]
+    if h.get('item') and h.get('platform'):
+        return f"{h['item']} for {h['platform']}" + (f" ({h['version']})" if h.get('version') else '') + \
+            (f" — {h['collection']}." if h.get('collection') else '.')
+    if h.get('title') and h.get('publisher'):
+        return f"{h['title']} — {h['publisher']}" + (f", {h['topic']}" if h.get('topic') else '') + '.'
+    if h.get('repo') and h.get('collection'):
+        return f"{h['collection']}: {h['repo']}" + (f" {h['version']}" if h.get('version') else '') + '.'
+    return ''
+
+
 def read_listing(path, sections, root, max_files, pending):
     """Feed a path<TAB>size[<TAB>mtime] listing (paths relative to root) into the sections."""
     prefixes = []
@@ -879,7 +1062,9 @@ class Builder:
         self.browse = os.path.join(out, 'browse')
         self.items_dir = os.path.join(self.browse, 'item')
         self.thumbs_dir = os.path.join(self.browse, 'thumbs')
-        self.cur = Curated(a.web_ui, a.data_dir)
+        self.cur = Curated(a.web_ui, a.data_dir, getattr(a, 'tools_dir', None))
+        self.hints = load_hints(getattr(a, 'hints', None), root)
+        self.desc_from = {}      # section -> {'hint': n, 'generated': n}
         self.kiwix = kiwix_counts(root)
         self.reads = a.meta_limit
         self.zim_left = a.zim_limit
@@ -968,6 +1153,16 @@ class Builder:
                 info['facts'].append(('Licence', rcard['license']))
             if not info['icon']:
                 info['icon'] = self.card_image(s, e, rcard, abs_dir)
+        info['desc'] = (info['desc'] or '').strip()
+        if not info['desc']:
+            rel = os.path.relpath(abs_dir, self.root).replace(os.sep, '/')
+            d = hint_desc(self.hints.get(rel), s.name)
+            src = 'hint'
+            if not d:
+                d, src = self.fallback(s, e, info, rcard, abs_dir), 'generated'
+            info['desc'] = d.strip() or f'{info["title"] or e.key} ({human(e.bytes)}).'
+            c = self.desc_from.setdefault(s.name, {'hint': 0, 'generated': 0})
+            c[src] += 1
         if not info['icon']:
             glyph = GLYPHS.get((rcard or {}).get('pipeline') or '', None)
             info['icon'] = self.badge(glyph or initials(info['title']), info['title'], (rcard or {}).get('pipeline') or '')
@@ -996,6 +1191,63 @@ class Builder:
             if t:
                 return t
         return None
+
+    def fallback(self, s, e, info, rcard, abs_dir):
+        """Always a readable sentence, from what is known about the entry."""
+        parts = e.key.split('/')
+        title = info['title'] or parts[-1]
+        size = f'{e.files:,} file{"s" if e.files != 1 else ""}, {human(e.bytes)}' if e.files else \
+            f'queued: {e.pending_files:,} files, {human(e.pending_bytes)}'
+        named = self.cur.descriptions['names'].get(title.lower()) or self.cur.descriptions['names'].get(parts[-1].lower())
+        if named:
+            return named
+        if s.name == 'models':
+            task = (rcard or {}).get('pipeline') or model_task(*parts)
+            org = parts[-2] if len(parts) >= 2 and parts[0] in ('huggingface', 'scouted', 'github') else ''
+            fmt = ('GGUF: run it with llama.cpp' if any(n.lower().endswith('.gguf') for _, n in e.top) or 'gguf' in e.key.lower()
+                   else 'ONNX: run it with ONNX Runtime' if any(n.lower().endswith('.onnx') for _, n in e.top)
+                   else 'load it with transformers, vLLM or a similar runtime')
+            what = f'A {task.replace("-", " ")} model' if task else 'AI model files'
+            return f'{what} — {title}' + (f' from {org}' if org else '') + f' ({size}); {fmt}.'
+        if s.name == 'content':
+            if parts[-1].lower().endswith('.zim'):
+                d = zim_desc(zim_parts(parts[-1]), self.cur.descriptions['zim'])
+                if d:
+                    return d
+                nice = re.sub(r'_\d{4}-\d{2}[a-z]?$', '', parts[-1][:-4]).replace('_', ' ').replace('-', ' ')
+                return f'{nice}: an offline archive ({size}) — open it in Kiwix (desktop, Android or kiwix-serve).'
+            return f'Offline reading material: {title.replace("-", " ").replace("_", " ")} ({size}).'
+        if s.name == 'tools':
+            plats = ', '.join(PLATFORMS.get(p, p) for p in sorted(e.platforms)) or 'the platforms mirrored here'
+            blurb = self.cur.tool_scripts.get(e.key) or self.cur.tool_scripts.get(parts[-1])
+            return blurb or f'{title}: portable builds for {plats} ({size}), ready to copy and run offline.'
+        if s.name == 'installers':
+            cat = parts[0].replace('-', ' ')
+            where = ' / '.join(p for p in parts[1:-1]) if len(parts) > 2 else ''
+            return (f'{cat.capitalize()} installer files' + (f' for {where}' if where else '') +
+                    f': {title} ({size}). Write images to USB or use them for network boot.')
+        if s.name == 'dev-stack':
+            grp = parts[0]
+            proj = info['title']
+            how = {'pypi': 'pip install --no-index --find-links <this folder>',
+                   'snap': 'snap install --dangerous <file>.snap'}.get(parts[1] if len(parts) > 1 else '', '')
+            return (f'{proj} — current release from the developer stack ({grp}), every platform it ships ({size}).' +
+                    (f' Install offline with {how}.' if how else ''))
+        if s.name == 'software':
+            if parts[0] == 'releases' and len(parts) >= 3:
+                return (f'Upstream release assets of {parts[1]}/{parts[2]}: the installers and archives for each '
+                        f'platform ({size}).')
+            return f'Software packages: {title} ({size}).'
+        if s.name == 'datasets':
+            topic = parts[1].replace('-', ' ') if parts[0] == 'open-data' and len(parts) > 1 else parts[0].replace('-', ' ')
+            org = parts[-2] if len(parts) >= 2 and parts[-2] not in ('huggingface', 'open-data', topic) else ''
+            nice = title.replace('_', ' ').replace('-', ' ')
+            return f'A {topic} dataset: {nice}' + (f' from {org}' if org else '') + f' ({size}).'
+        if s.name == 'sources':
+            if parts[0] == 'github' and len(parts) == 2:
+                return f'Source code from {parts[1]} on GitHub ({size}).'
+            return f'Source archive of {title} ({size}): build or study it offline.'
+        return f'{title} ({size}).'
 
     def d_generic(self, s, e, info, rcard, abs_dir):
         pass
@@ -1045,7 +1297,7 @@ class Builder:
         info['sub'] = ' / '.join(parts[:-1])
 
     def d_tools(self, s, e, info, rcard, abs_dir):
-        t = self.cur.tools.get(e.key)
+        t = self.cur.tools.get(e.key) or self.cur.tool_for(e.key)
         if t:
             info['title'] = t.get('name') or e.key
             info['sub'] = (t.get('category') or '').replace('-', ' ')
@@ -1088,20 +1340,46 @@ class Builder:
             info['desc'] = m['note'] or ''
             if m['arch']:
                 info['chips'].append(m['arch'])
+        if not m:
+            parts = e.key.split('/')
+            if VERSIONISH.match(parts[-1]) and len(parts) >= 2:
+                info['title'] = f'{parts[-2]} {parts[-1]}'
+                info['sub'] = ' / '.join(parts[:-2]) or parts[0]
         info['icon'] = self.badge(initials(info['sub'] if not m else m['cat']), info['sub'], info['sub'])
 
     def d_dev_stack(self, s, e, info, rcard, abs_dir):
         parts = e.key.split('/')
-        info['title'] = parts[-1]
-        info['sub'] = ' / '.join(parts[:-1])
+        name = parts[-1]
+        if VERSIONISH.match(name) and len(parts) >= 2:      # <group>/<project>/<version>: name it by project
+            name = parts[-2]
+            info['chips'].append(parts[-1])
+            info['sub'] = ' / '.join(parts[:-2])
+        else:
+            info['sub'] = ' / '.join(parts[:-1])
+        info['title'] = name
         ref = '/'.join(parts[1:3]).lower()
-        info['desc'] = self.cur.devstack.get(ref) or self.cur.devstack.get(parts[-1].lower()) or ''
+        info['desc'] = (self.cur.devstack.get(ref) or self.cur.devstack.get(name.lower()) or
+                        self.cur.devstack.get(parts[-1].lower()) or '')
+        if not info['desc'] and len(parts) > 1 and parts[1] == 'pypi' and self.reads > 0:
+            whl = next((p for _, p in sorted(e.top, reverse=True) if p.endswith('.whl')), None)
+            if whl:
+                self.reads -= 1
+                summ = wheel_summary(os.path.join(s.path, whl))
+                if summ:
+                    info['desc'] = f'{summ} (Python package from PyPI.)'
+        if not info['desc']:
+            t = self.cur.tool_for(name)
+            if t:
+                info['desc'] = t.get('desc') or ''
 
     def d_software(self, s, e, info, rcard, abs_dir):
         parts = e.key.split('/')
         if parts[0] == 'releases' and len(parts) >= 3:
             info['title'] = parts[2]; info['sub'] = parts[1]
             info['desc'] = self.cur.devstack.get(f'{parts[1]}/{parts[2]}'.lower(), '')
+            t = None if info['desc'] else (self.cur.tool_for(parts[2]) or self.cur.tool_for(parts[1]))
+            if t:
+                info['desc'] = t.get('desc') or ''
         elif parts[0] == 'linux' and len(parts) >= 2:
             info['title'] = parts[1]
             info['desc'] = 'Offline APT package set: point apt at this folder (deb [trusted=yes] file:<dir> ./).'
@@ -1112,8 +1390,15 @@ class Builder:
             repo = parts[2][:-len('.bundle')] if parts[2].endswith('.bundle') else parts[2]
             info['title'] = repo; info['sub'] = parts[1]
             grp = self.cur.sources.get(f'{parts[1]}/{repo}'.lower())
-            info['desc'] = ('Full-history git bundle' + (f' ({grp})' if grp else '') +
+            info['desc'] = (f'{parts[1]}/{repo} source code as a full-history git bundle' + (f' ({grp})' if grp else '') +
                             ': clone it offline with git clone <file>.bundle.') if parts[2].endswith('.bundle') else ''
+            t = self.cur.tool_for(repo)
+            if t and t.get('desc'):
+                info['desc'] = t['desc'] + (' ' + info['desc'] if info['desc'] else '')
+        elif parts[0] != 'github':
+            t = self.cur.tool_for(parts[0])
+            if t and t.get('desc'):
+                info['desc'] = t['desc']
 
     def d_content(self, s, e, info, rcard, abs_dir):
         fn = e.key.rsplit('/', 1)[-1]
@@ -1311,6 +1596,7 @@ class Builder:
             # what is on disk first, then what is still queued; cards then group by kind
             listed = sorted(entries, key=lambda e: not e.files)[:a.max_rows]
             described = [(e, self.describe(s, e)) for e in listed]
+            summary['sections'][-1]['descriptions'] = dict(self.desc_from.get(s.name, {'hint': 0, 'generated': 0}))
             described.sort(key=lambda t: (t[1]['group'].lower(), not t[0].files, t[1]['title'].lower()))
             cards, groups, last = [], [], None
             for e, info in described:
@@ -1461,6 +1747,8 @@ def main(argv=None):
     ap.add_argument('--data-dir', default=os.path.join(REPO, 'data'))
     ap.add_argument('--art-dir', default=os.path.join(REPO, 'docs', 'img', 'popup'))
     ap.add_argument('--now', type=float)
+    ap.add_argument('--hints', help='path<TAB>json descriptions a caller already knows (see load_hints)')
+    ap.add_argument('--tools-dir', default=os.path.join(REPO, 'scripts', 'tools'))
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:
@@ -1514,11 +1802,15 @@ def main(argv=None):
             print(f'static_site: pending: {e}', file=sys.stderr)
             return 1
     try:
-        n, tot = Builder(a, root, out, sections).build()
+        b = Builder(a, root, out, sections)
+        n, tot = b.build()
     except OSError as e:
         print(f'static_site: cannot write {out}: {e}', file=sys.stderr)
         return 1
-    print(f'static_site: {n} sections, {tot["files"]:,} files, {human(tot["bytes"])} -> {os.path.join(out, "index.html")}')
+    gen = sum(c['generated'] for c in b.desc_from.values())
+    hint = sum(c['hint'] for c in b.desc_from.values())
+    print(f'static_site: {n} sections, {tot["files"]:,} files, {human(tot["bytes"])}, descriptions from hints '
+          f'{hint:,} / generated {gen:,} -> {os.path.join(out, "index.html")}')
     return 0
 
 

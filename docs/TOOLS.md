@@ -79,7 +79,7 @@ Media playback, recording, download, conversion and e-book tools.
 |---|------|-------------|-----------|--------|---------|
 | 22 | **FFmpeg** | Audio/video processing, transcoding, streaming, and frame extraction | arm64, x86_64, mac, windows | Prebuilt binary | LGPL-2.1+ |
 | 23 | **VLC** | Universal media player with CLI transcoding and HTTP streaming (cvlc) | arm64, x86_64, mac, windows | Prebuilt binary | GPL-2.0+ |
-| 24 | **Audacity** | Multi-track audio editor with recording, effects, and noise reduction | x86_64, mac, windows | Prebuilt binary / package manager | GPL-3.0 |
+| 24 | **Audacity** | Multi-track audio editor with recording, effects, and noise reduction | arm64, x86_64, mac, windows | Prebuilt binary (AppImage x86_64 + aarch64, DMG, MSI) | GPL-3.0 |
 | 25 | **yt-dlp** | Video/audio downloader supporting 1000+ sites with format selection | arm64, x86_64, mac, windows | Prebuilt binary | Unlicense |
 | 26 | **Calibre** | E-book library manager, format converter, and content server | arm64, x86_64, mac, windows | Prebuilt binary | GPL-3.0 |
 
@@ -237,6 +237,27 @@ directory fsync. After a power cut you may get a new bundle with the old sidecar
 mismatch and gets rebuilt. You never get a torn pair that passes.
 
 ---
+
+## No upstream build for a platform? Offline install + source
+
+Some apps publish no build for a platform: Linux arm64 for **Inkscape, Blender, Kdenlive,
+KiCad, VLC and Bambu Studio**, Linux x86_64 for KiCad and VLC (distro packages only), macOS
+for btop and tmux. Their tool scripts (`build_from_source_hint` in
+`scripts/tools/_common.sh`) write an `INSTALL.txt` that names every offline way in:
+
+1. **The `desktop-apps` .deb set** (`data/apt-sets.tsv`, ~1.2 GB per arch): Ubuntu's
+   package with every dependency, as a flat repo for `apt-get install` with no internet.
+2. **The `desktop-src` set** (~2.7 GB per arch): Ubuntu's source package (`source/<pkg>/`)
+   plus every build dependency, so `apt-get build-dep` + `dpkg-buildpackage` work offline.
+3. **The upstream release source tarball**, mirrored by the script to
+   `tools/sources/<tool>-<version>-src/` (`mirror_source_tarball`; release tarballs carry
+   the submodules / vendored code a bare clone lacks), with the upstream build commands.
+   Libraries a source build needs beyond the distro are mirrored too (libevent for tmux on
+   macOS).
+4. **The full-history git bundle** of the upstream repo (`data/source-repos.tsv`).
+
+Bambu Studio's own build script downloads third-party sources while it builds, so its
+hint says so and points at the x86_64 AppImage or OrcaSlicer (which ships arm64 builds).
 
 ## Build From Source
 

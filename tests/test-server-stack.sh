@@ -11,6 +11,8 @@
 #  * apt_offline.py exit codes: usage errors exit 64 (never argparse's 2 =
 #    "a download failed"), and the most severe class wins (1 > 2 > 3 > 0).
 #  * bad --tsv / `--set all --set bogus` -> 64; no apt-get / unwritable --dest -> 1, no traceback.
+#  * build-dep:SRC / source:SRC tokens: deb-src lists only when needed, source files under
+#    source/<pkg>/ with SHA256 from *_Sources, fetch never escapes --dest, desktop sets complete.
 # No network: every check runs on repo files and fixtures.
 ###############################################################################
 PASS=0; FAIL=0
@@ -36,7 +38,7 @@ for n, line in enumerate(open(sys.argv[1]), 1):
     assert sid not in ids, f"line {n}: duplicate id {sid}"
     ids.add(sid)
     for p in pkgs.split():
-        assert re.fullmatch(r"[a-z0-9][a-z0-9+.-]+", p), f"line {n}: bad package {p!r}"
+        assert re.fullmatch(r"(build-dep:|source:)?[a-z0-9][a-z0-9+.-]+", p), f"line {n}: bad package {p!r}"
     assert pkgs.split() and note.strip(), f"line {n}: empty packages/note"
 EOF
 
@@ -210,6 +212,55 @@ PY
 ERR=$(VALARK_DEBUG=1 PATH="$T/empty-path" "$(command -v python3)" "$A" resolve --suite noble --arch amd64 --set lamp --cache "$T/nopath2" 2>&1); RC=$?
 [ "$RC" = 1 ] && grep -q Traceback <<<"$ERR" && grep -q "apt_offline:" <<<"$ERR" && pass \
     || fail "VALARK_DEBUG=1 must add the traceback to an environment failure (got $RC: $ERR)"
+
+# 10. Build-from-source tokens (#desktop-apps): build-dep:SRC / source:SRC.
+python3 - "$ROOT/scripts/lib" "$T/src-root" "$ROOT/data/apt-sets.tsv" <<'PY' && pass || fail "apt_offline build-dep/source tokens"
+import sys, io, contextlib, pathlib; sys.path.insert(0, sys.argv[1]); import apt_offline as ao
+plain, bdep, src = ao.split_tokens(["vlc", "build-dep:vlc", "source:vlc", "mpv"])
+assert (plain, bdep, src) == (["vlc", "mpv"], ["vlc"], ["vlc"]), (plain, bdep, src)
+sets = ao.load_sets(sys.argv[3])
+assert ao.needs_src(sets, ["desktop-src"]) and not ao.needs_src(sets, ["lamp", "desktop-apps"])
+# deb-src lines only when a selected set needs them
+r = ao.AptRoot("noble", "arm64", sys.argv[2], src=True); r.prepare()
+sl = (r.dir / "sources.list").read_text()
+assert sl.count("deb-src ") == 3 and sl.count("\ndeb [") + sl.startswith("deb [") == 3, sl
+r2 = ao.AptRoot("noble", "amd64", sys.argv[2]); r2.prepare()
+assert "deb-src" not in (r2.dir / "sources.list").read_text()
+# resolve: source files go to source/<pkg>/, build-deps join the flat repo, SHA256 from *_Sources
+lists = r.dir / "var/lib/apt/lists"; lists.mkdir(parents=True, exist_ok=True)
+(lists / "x_noble_main_source_Sources").write_text(
+    "Package: vlc\nChecksums-Sha256:\n " + "c" * 64 + " 10 vlc_3.0.orig.tar.xz\n " + "d" * 64 + " 5 vlc_3.0-1.dsc\n")
+(lists / "x_noble_main_binary-arm64_Packages").write_text(
+    "Package: libfoo-dev\nFilename: pool/main/f/foo/libfoo-dev_1_arm64.deb\nSHA256: " + "e" * 64 + "\n")
+r.available = lambda pkgs: (pkgs, [])
+calls = []
+def pu(self, *args):
+    calls.append(args)
+    if args[0] == "build-dep":
+        return [("http://x/pool/libfoo-dev_1_arm64.deb", "libfoo-dev_1_arm64.deb", 1, "")]
+    if args[0] == "source":
+        return [("http://x/pool/vlc_3.0.orig.tar.xz", "vlc_3.0.orig.tar.xz", 10, ""), ("http://x/pool/vlc_3.0-1.dsc", "vlc_3.0-1.dsc", 5, "")]
+    return [("http://x/pool/mpv_1_arm64.deb", "mpv_1_arm64.deb", 2, "")]
+ao.AptRoot._print_uris = pu
+rows, missing = r.resolve(["mpv", "build-dep:vlc", "source:vlc"])
+names = {n: sha for _, n, _, sha in rows}
+assert "source/vlc/vlc_3.0.orig.tar.xz" in names and names["source/vlc/vlc_3.0.orig.tar.xz"] == "c" * 64, names
+assert names["source/vlc/vlc_3.0-1.dsc"] == "d" * 64 and names["libfoo-dev_1_arm64.deb"] == "e" * 64, names
+assert ("install", "mpv") in calls and ("build-dep", "vlc") in calls and ("source", "vlc") in calls, calls
+# fetch never writes outside --dest
+err = io.StringIO()
+with contextlib.redirect_stderr(err):
+    assert ao.fetch([("http://x/evil", "../evil", 1, ""), ("http://x/abs", "/tmp/abs", 1, "")], sys.argv[2] + "/d") == 2
+assert "unsafe file name" in err.getvalue() and not pathlib.Path(sys.argv[2] + "/evil").exists()
+# the desktop sets: apps with no upstream linux-arm64 binary are installable AND rebuildable
+apps, srcset = sets["desktop-apps"]["packages"], sets["desktop-src"]["packages"]
+for app in ["inkscape", "blender", "kdenlive", "kicad", "vlc", "audacity"]:
+    assert app in apps, app
+    assert f"build-dep:{app}" in srcset and f"source:{app}" in srcset, app
+for t in srcset:
+    kind, name = t.split(":", 1)
+    assert kind in ("build-dep", "source") and f"build-dep:{name}" in srcset and f"source:{name}" in srcset, t
+PY
 
 echo "server-stack: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

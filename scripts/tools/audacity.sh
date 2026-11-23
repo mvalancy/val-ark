@@ -3,7 +3,7 @@
 source "$(dirname "$0")/_common.sh"
 
 TOOL_NAME="audacity"
-PINNED_VERSION="3.7.8"
+PINNED_VERSION="4.0.2"
 
 download_audacity() {
     log "Downloading ${TOOL_NAME}..."
@@ -11,48 +11,47 @@ download_audacity() {
     local repo="audacity/audacity"
     local tag
     tag=$(github_latest_tag "$repo" "Audacity-${PINNED_VERSION}")
+    # Upstream source (with its vendored libraries) for any platform without a binary.
+    local src_path=""
+    src_path=$(mirror_source_tarball audacity "${tag#Audacity-}" \
+        "$(github_asset_url "$repo" "$tag" "audacity-sources.*tar")") || src_path=""
 
-    # linux-x86_64: AppImage. Upstream ships one AppImage per Ubuntu base
-    # (e.g. -20.04 and -22.04); prefer the newest base deterministically
-    # instead of taking whichever the API lists first.
-    local dest="${TOOLS_DIR}/linux-x86_64/audacity"
-    ensure_dir "$dest"
-    local url=""
-    local base
-    for base in "26.04" "24.04" "22.04" "20.04"; do
-        url=$(github_asset_url "$repo" "$tag" "audacity.*linux.*x64.*${base}.*AppImage")
-        [ -n "$url" ] && break
-    done
-    [ -z "$url" ] && url=$(github_asset_url "$repo" "$tag" "audacity.*linux.*x64.*AppImage")
-    if [ -n "$url" ]; then
-        version_gate "$dest" "$tag"
-        if download_file "$url" "${dest}/Audacity.AppImage" "audacity linux-x86_64"; then
-            chmod +x "${dest}/Audacity.AppImage" 2>/dev/null
-            rm -f "${dest}/INSTALL.txt" 2>/dev/null
-            version_stamp "$dest" "$tag"
+    local ver="${tag#Audacity-}" url dest
+
+    # linux-x86_64 / linux-arm64: AppImages. 3.x shipped one per Ubuntu base (…-x64-22.04…,
+    # newest base preferred); 4.x ships audacity-linux-<v>-x86_64 / -aarch64.AppImage.
+    local plat pat base
+    for plat in linux-x86_64 linux-arm64; do
+        dest="${TOOLS_DIR}/${plat}/audacity"
+        ensure_dir "$dest"
+        url=""
+        if [ "$plat" = linux-x86_64 ]; then
+            for base in "26.04" "24.04" "22.04" "20.04"; do
+                url=$(github_asset_url "$repo" "$tag" "audacity.*linux.*\(x64\|x86_64\).*${base}.*AppImage")
+                [ -n "$url" ] && break
+            done
+            pat="audacity.*linux.*\(x64\|x86_64\).*AppImage"
+        else
+            pat="audacity.*linux.*\(aarch64\|arm64\).*AppImage"
         fi
-    else
-        log_error "Could not find Audacity x86_64 AppImage"
-    fi
-
-    # linux-arm64: no official ARM64 AppImage, provide install hint
-    dest="${TOOLS_DIR}/linux-arm64/audacity"
-    ensure_dir "$dest"
-    write_install_hint "$dest" "audacity (linux-arm64)" "Audacity - linux-arm64
-=====================
-
-No official ARM64 AppImage is available. Install via package manager:
-
-  sudo apt install audacity
-
-Or build from source:
-  git clone https://github.com/audacity/audacity.git
-  cd audacity
-  cmake -B build -DCMAKE_BUILD_TYPE=Release
+        [ -z "$url" ] && url=$(github_asset_url "$repo" "$tag" "$pat")
+        if [ -n "$url" ]; then
+            version_gate "$dest" "$tag"
+            if download_file "$url" "${dest}/Audacity.AppImage" "audacity ${plat}"; then
+                chmod +x "${dest}/Audacity.AppImage" 2>/dev/null
+                rm -f "${dest}/INSTALL.txt" 2>/dev/null
+                version_stamp "$dest" "$tag"
+            fi
+        elif [ "$plat" = linux-x86_64 ]; then
+            log_error "Could not find the Audacity ${plat} AppImage"
+        else
+            build_from_source_hint audacity "Audacity" "$plat" audacity audacity "$src_path" audacity/audacity \
+"  cmake -B build -DCMAKE_BUILD_TYPE=Release -Daudacity_conan_enabled=Off
   cmake --build build --parallel
-
-For more info: https://github.com/audacity/audacity/blob/master/BUILDING.md
-"
+  (https://github.com/audacity/audacity/blob/master/BUILDING.md; system libraries come from the
+   desktop-src build-deps, so Conan - which needs internet - stays off)"
+        fi
+    done
 
     # macos-arm64: DMG
     dest="${TOOLS_DIR}/macos-arm64/audacity"
@@ -65,33 +64,21 @@ For more info: https://github.com/audacity/audacity/blob/master/BUILDING.md
             version_stamp "$dest" "$tag"
         fi
     else
-        log_warn "Could not find Audacity macOS ARM64 DMG"
-        write_install_hint "$dest" "audacity (macos-arm64)" "Audacity - macOS ARM64
-=====================
-
-  brew install --cask audacity
-
-Or download from: https://www.audacityteam.org/download/
-"
+        log_error "Could not find the Audacity macOS arm64 DMG"
     fi
 
-    # windows-x64: installer
+    # windows-x64: 3.x shipped audacity-win-<v>-64bit.exe, 4.x ships audacity-win-<v>-x86_64.msi.
     dest="${TOOLS_DIR}/windows-x64/audacity"
     ensure_dir "$dest"
-    url=$(github_asset_url "$repo" "$tag" "audacity.*win.*64bit.*exe")
+    url=$(github_asset_url "$repo" "$tag" "audacity.*win.*\(x86_64\|64bit\).*\(msi\|exe\)")
     if [ -n "$url" ]; then
         version_gate "$dest" "$tag"
-        if download_file "$url" "${dest}/Audacity-Setup.exe" "audacity windows-x64"; then
-            rm -f "${dest}/INSTALL.txt" 2>/dev/null
+        if download_file "$url" "${dest}/$(basename "$url")" "audacity windows-x64"; then
+            rm -f "${dest}/INSTALL.txt" "${dest}/Audacity-Setup.exe" 2>/dev/null
             version_stamp "$dest" "$tag"
         fi
     else
-        log_warn "Could not find Audacity Windows installer"
-        write_install_hint "$dest" "audacity (windows-x64)" "Audacity - Windows x64
-=====================
-
-Download from: https://www.audacityteam.org/download/
-"
+        log_error "Could not find the Audacity windows-x64 installer"
     fi
 
     log_success "Audacity download complete"

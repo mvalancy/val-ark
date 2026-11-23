@@ -586,6 +586,94 @@ create_source_tarball() {
 }
 
 # Create an install instructions file for package-managed tools
+# --- Source fallbacks for platforms with no upstream binary --------------------
+# Mirror an upstream RELEASE source tarball to ${TOOLS_DIR}/sources/<tool>-<version>-src/.
+# Release tarballs usually include git submodules / vendored third-party code, which a bare
+# git clone lacks, so an offline box can build from them. URLs are tried in order (the first
+# one that answers is downloaded); every URL failing is an honest log_error.
+#   mirror_source_tarball TOOL VERSION URL [URL...]   -> echoes the file's archive path
+mirror_source_tarball() {
+    local tool="$1" ver="$2"; shift 2
+    local dest="${TOOLS_DIR}/sources/${tool}-${ver}-src" u name code
+    local urls=() last
+    for u in "$@"; do [ -n "$u" ] && urls+=("$u"); done
+    [ ${#urls[@]} -gt 0 ] || { log_error "${tool}: no source URL for ${ver}" >&2; return 1; }
+    last="${urls[${#urls[@]}-1]}"
+    for u in "${urls[@]}"; do
+        name="$(basename "${u%%\?*}")"
+        if [ -s "${dest}/${name}" ]; then echo "tools/sources/${tool}-${ver}-src/${name}"; return 0; fi
+        if [ "$u" != "$last" ]; then
+            # Earlier mirrors: a quiet attempt, so a mirror that is down or slow (but recovered
+            # by the next one) is not counted as a failure. A definite 4xx skips it at once.
+            code=$(_http_probe "$u")
+            case "$code" in 4??) log_info "${tool} source: ${u} answered ${code}; trying the next mirror" >&2; continue ;; esac
+            ensure_dir "$dest"
+            if curl -fsSL --retry 2 --connect-timeout 30 --max-time 7200 -o "${dest}/${name}.part" "$u" 2>/dev/null \
+                && [ -s "${dest}/${name}.part" ] && mv -f "${dest}/${name}.part" "${dest}/${name}"; then
+                log_success "Downloaded: ${tool} ${ver} source" >&2
+                echo "tools/sources/${tool}-${ver}-src/${name}"; return 0
+            fi
+            rm -f "${dest}/${name}.part" 2>/dev/null
+            log_info "${tool} source: ${u} failed; trying the next mirror" >&2
+            continue
+        fi
+        # The last mirror: download_file (retries, resume, size check) logs an honest error.
+        if download_file "$u" "${dest}/${name}" "${tool} ${ver} source" >&2; then
+            echo "tools/sources/${tool}-${ver}-src/${name}"; return 0
+        fi
+        return 1
+    done
+    log_error "${tool}: no mirror answered for the ${ver} source tarball ($*)" >&2
+    return 1
+}
+
+# The standard hint for a platform with no upstream binary: install from the offline .deb
+# set, or build from source with everything the build needs mirrored too.
+#   build_from_source_hint TOOL TITLE PLATFORM APT_PKG UBUNTU_SRC SRC_PATH BUNDLE BUILD_STEPS
+#     APT_PKG     package in the desktop-apps .deb set ('' = none)
+#     UBUNTU_SRC  source package in the desktop-src set ('' = none)
+#     SRC_PATH    archive path of the upstream release tarball ('' = not mirrored)
+#     BUNDLE      owner/repo of the full-history git bundle (data/source-repos.tsv; '' = none)
+#     BUILD_STEPS upstream build commands (shown verbatim)
+build_from_source_hint() {
+    local tool="$1" title="$2" plat="$3" apt="$4" usrc="$5" src="$6" bundle="$7" steps="$8"
+    local arch; case "$plat" in linux-arm64) arch=arm64 ;; *) arch=amd64 ;; esac
+    local text="${title} - ${plat}
+$(printf '%*s' "$(( ${#title} + ${#plat} + 3 ))" '' | tr ' ' '=')
+
+Upstream publishes no ${plat} build, so this mirror keeps the offline ways to get it:
+"
+    [ -n "$apt" ] && text+="
+1. Install from the offline .deb set 'desktop-apps' (data/apt-sets.tsv):
+     python3 scripts/lib/apt_offline.py build --suite noble --arch ${arch} --set desktop-apps --dest <dir>
+   (archive mirrors keep it per suite/arch, e.g. software/linux/ubuntu-noble-${arch}/)
+   then on the target box:
+     echo 'deb [trusted=yes] file:<dir> ./' | sudo tee /etc/apt/sources.list.d/val-ark.list
+     sudo apt-get update && sudo apt-get install ${apt}
+"
+    [ -n "$usrc" ] && text+="
+2. Rebuild Ubuntu's package with no internet: the 'desktop-src' set holds the source package
+   (<dir>/source/${usrc}/) and EVERY build dependency in the same flat repo:
+     sudo apt-get build-dep ${usrc}          # from the offline repo above
+     cd <dir>/source/${usrc} && dpkg-source -x *.dsc && cd ${usrc}-*/
+     dpkg-buildpackage -us -uc -b && sudo apt-get install ../*.deb
+"
+    [ -n "$src" ] && text+="
+3. Upstream release source (includes its submodules / vendored code): ${src}
+   Build dependencies: the 'desktop-src' set above (apt-get build-dep ${usrc:-$tool}).
+   Build:
+${steps}
+"
+    [ -n "$bundle" ] && text+="
+4. Full-history git: the source archive bundle ${bundle}.bundle (scripts/lib/git_bundle_mirror.py,
+   e.g. sources/github/${bundle}.bundle):  git clone ${bundle##*/}.bundle
+   A bare clone lacks submodules: prefer the release tarball above to build.
+"
+    text+="
+Online fallback: flatpak install flathub <app>, or the upstream download page."
+    write_install_hint "${TOOLS_DIR}/${plat}/${tool}" "${tool} (${plat})" "$text"
+}
+
 write_install_hint() {
     local dest_dir="$1"
     local tool_name="$2"

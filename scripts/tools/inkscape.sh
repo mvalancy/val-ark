@@ -18,15 +18,13 @@ download_inkscape() {
     # linux-arm64: No official AppImage, use install hint
     local dest="${TOOLS_DIR}/linux-arm64/inkscape"
     ensure_dir "$dest"
-    write_install_hint "$dest" "inkscape (linux-arm64)" "Inkscape - linux-arm64
-======================
-
-Install via package manager:
-  sudo apt install inkscape
-
-Or via Flatpak:
-  flatpak install flathub org.inkscape.Inkscape
-"
+    local src_path=""
+    src_path=$(mirror_source_tarball inkscape "$version" \
+        "https://media.inkscape.org/dl/resources/file/inkscape-${version}.tar.xz") || src_path=""
+    build_from_source_hint inkscape "Inkscape" linux-arm64 inkscape inkscape "$src_path" inkscape/inkscape \
+"  tar xf inkscape-${version}.tar.xz && cd inkscape-${version}
+  cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel
+  sudo cmake --install build      (https://inkscape.org/develop/getting-started/)"
 
     # linux-x86_64: AppImage from official releases
     dest="${TOOLS_DIR}/linux-x86_64/inkscape"

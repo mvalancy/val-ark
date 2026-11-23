@@ -1,4 +1,4 @@
-# Val Ark - offline APT package sets (LAMP / LAN-infrastructure servers)
+# Val Ark - offline APT package sets (LAN servers, developer kits, desktop apps + their build kits)
 # Each set is resolved SEPARATELY (with every dependency, against an empty
 # dpkg status) by scripts/lib/apt_offline.py for each Ubuntu suite+arch, so a
 # bare box with no internet can `apt install` them from the local flat repo the
@@ -9,7 +9,8 @@
 # Schema (pipe-delimited):  value|set|packages|note
 #   value     intrinsic importance 0-1000 (same meaning as installers.tsv)
 #   set       id (a-z0-9-), becomes <suite>-<arch>/<set>/ under the APT root
-#   packages  space-separated binary package names
+#   packages  space-separated binary package names; build-dep:SRC = the Build-Depends of the
+#             Ubuntu source package SRC, source:SRC = that source package (see apt_offline.py)
 #
 990|lamp|apache2 libapache2-mod-php php php-cli php-fpm php-mysql php-pgsql php-sqlite3 php-curl php-gd php-mbstring php-xml php-zip php-intl php-bcmath php-imagick php-redis php-apcu php-ldap composer mariadb-server mariadb-client certbot python3-certbot-apache|Classic Apache + PHP + MariaDB stack
 960|web-proxy|nginx lighttpd haproxy varnish squid apt-cacher-ng python3-certbot-nginx keepalived|Alternate web servers, reverse proxy / load balancing, LAN caching proxies
@@ -27,3 +28,5 @@
 840|security|nmap ncat wireshark tshark tcpdump john hashcat hydra medusa sqlmap nikto aircrack-ng masscan arp-scan hping3 netcat-openbsd socat dirb gobuster wfuzz ettercap-text-only dsniff lynis rkhunter chkrootkit clamav aide auditd fail2ban suricata yara sleuthkit autopsy foremost testdisk binwalk steghide libimage-exiftool-perl fcrackzip openvpn wireguard-tools tor proxychains4 macchanger|Common Linux security, network-analysis and forensics tools (the Ubuntu-packaged side of a Kali kit; aircrack-ng is amd64-only in noble, so arm64 resolves need --allow-missing)
 830|reverse-eng|radare2 binutils binutils-multiarch elfutils hexedit bvi xxd upx-ucl apktool gdb gdb-multiarch strace ltrace valgrind qemu-user qemu-system-x86 qemu-system-arm python3-capstone python3-pyelftools checksec nasm|Reverse engineering: disassemblers, hex editors, debuggers, emulators
 820|virt-cloud|qemu-system libvirt-daemon-system libvirt-clients virtinst virt-manager cloud-init cloud-image-utils ovmf ceph ceph-common radosgw cephadm python3-openstackclient ansible|Virtualization + private cloud: KVM/libvirt, cloud-init, Ceph (S3 via radosgw), OpenStack client, Ansible
+875|desktop-apps|inkscape gimp krita blender kdenlive kicad kicad-symbols kicad-footprints kicad-templates openscad prusa-slicer audacity vlc mpv ffmpeg libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-draw calibre darktable shotcut obs-studio tmux btop htop|Desktop creative / engineering / office apps for Ubuntu on BOTH arches: the offline install path where upstream ships no Linux arm64 build (Inkscape, Blender, Kdenlive, KiCad, VLC, Audacity)
+700|desktop-src|source:inkscape build-dep:inkscape source:blender build-dep:blender source:kdenlive build-dep:kdenlive source:kicad build-dep:kicad source:vlc build-dep:vlc source:audacity build-dep:audacity|Ubuntu source + every build dependency of the desktop apps with no upstream Linux arm64 binary, so a box with no internet can rebuild them (dpkg-source -x, dpkg-buildpackage)

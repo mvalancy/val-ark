@@ -19,41 +19,19 @@ download_kicad() {
     # Linux has no portable upstream binary (PPA / distro packages / flatpak).
     # linux-arm64
     local dest="${TOOLS_DIR}/linux-arm64/kicad"
-    write_install_hint "$dest" "kicad (linux-arm64)" "KiCad - Installation Instructions (linux-arm64)
-==================================================
-
-Ubuntu/Debian:
-  sudo add-apt-repository ppa:kicad/kicad-10.0-releases
-  sudo apt update
-  sudo apt install kicad
-
-Fedora:
-  sudo dnf install kicad
-
-Flatpak:
-  flatpak install flathub org.kicad.KiCad
-
-For more info: https://www.kicad.org/download/linux/
-"
+    local src_path=""
+    src_path=$(mirror_source_tarball kicad "$ver" \
+        "https://gitlab.com/kicad/code/kicad/-/archive/${ver}/kicad-${ver}.tar.gz") || src_path=""
+    local kicad_steps="  tar xf kicad-${ver}.tar.gz && cd kicad-${ver}
+  cmake -B build -DCMAKE_BUILD_TYPE=Release -DKICAD_USE_EGL=ON && cmake --build build --parallel
+  sudo cmake --install build      (https://dev-docs.kicad.org/en/build/linux/)"
+    build_from_source_hint kicad "KiCad" linux-arm64 "kicad kicad-symbols kicad-footprints" kicad "$src_path" KiCad/kicad-source-mirror \
+"$kicad_steps"
 
     # linux-x86_64
     dest="${TOOLS_DIR}/linux-x86_64/kicad"
-    write_install_hint "$dest" "kicad (linux-x86_64)" "KiCad - Installation Instructions (linux-x86_64)
-==================================================
-
-Ubuntu/Debian:
-  sudo add-apt-repository ppa:kicad/kicad-10.0-releases
-  sudo apt update
-  sudo apt install kicad
-
-Fedora:
-  sudo dnf install kicad
-
-Flatpak:
-  flatpak install flathub org.kicad.KiCad
-
-For more info: https://www.kicad.org/download/linux/
-"
+    build_from_source_hint kicad "KiCad" linux-x86_64 "kicad kicad-symbols kicad-footprints" kicad "$src_path" KiCad/kicad-source-mirror \
+"$kicad_steps"
 
     # macos-arm64 - since 10.0, macOS ships a single universal (arm64+x86_64) dmg
     dest="${TOOLS_DIR}/macos-arm64/kicad"

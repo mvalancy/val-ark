@@ -40,10 +40,14 @@
 850|openssl/openssl|core-utils
 850|openssh/openssh-portable|core-utils
 850|tmux/tmux|core-utils
+850|libevent/libevent|core-utils
+820|aristocratos/btop|core-utils
 850|neovim/neovim|core-utils
 850|vim/vim|core-utils
 850|FFmpeg/FFmpeg|media
 850|videolan/vlc|media
+850|KDE/kdenlive|media
+850|audacity/audacity|media
 850|obsproject/obs-studio|media
 850|GNOME/gimp|media
 850|inkscape/inkscape|media

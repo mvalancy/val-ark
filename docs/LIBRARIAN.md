@@ -126,7 +126,7 @@ small-valuable phase and valued below a speech-vision pick (`qwen25-coder-7b`, 6
 behind it on a small disk; raise its value in `data/models-extra.tsv` if it must come first.
 
 A scout that cannot reach every listing never replaces a good cache (the ZIM catalog's completeness rule); a failed attempt waits
-`VALARK_SCOUT_RETRY` (1 day) before the next, and the scout's stderr is kept next to the
+`VALARK_SCOUT_RETRY` (1 day) before the next, a run is capped at `VALARK_SCOUT_TIMEOUT` (30 min), and the scout's stderr is kept next to the
 cache as `models-scouted.tsv.err`. `VALARK_SCOUT=0` turns it off and ignores the cache.
 Rows are fetched with `hf download --include '*'` like any `repo` row; a whole-repo pull
 counts as present only once it finished (`.valark-complete` stamp). Tests:

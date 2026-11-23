@@ -49,6 +49,11 @@ head -c 5000 /dev/zero > "$A/models/huggingface/acme/tiny-7b/model.safetensors"
 : > "$A/models/huggingface/acme/tiny-7b/LICENSE"
 for i in 1 2 3 4 5 6; do head -c $((i * 10)) /dev/zero > "$A/models/huggingface/acme/tiny-7b/sub/f$i.bin"; done
 head -c 100 /dev/zero > "$A/models/huggingface/acme/tiny-7b/big.part"
+# model-scout layout: models/scouted/<org>/<repo>; one finished (stamped), one cut off
+mkdir -p "$A/models/scouted/Qwen/Qwen3-ASR" "$A/models/scouted/Qwen/Qwen3-TTS/.cache/huggingface/download"
+head -c 300 /dev/zero > "$A/models/scouted/Qwen/Qwen3-ASR/model.safetensors"; date > "$A/models/scouted/Qwen/Qwen3-ASR/.valark-complete"
+head -c 200 /dev/zero > "$A/models/scouted/Qwen/Qwen3-TTS/config.json"
+: > "$A/models/scouted/Qwen/Qwen3-TTS/.cache/huggingface/download/x.incomplete"
 head -c 100 /dev/zero > "$A/models/llm/qwen/q.gguf"
 echo x > "$A/content/zim/<img src=x onerror=alert(1)>.zim"
 echo x > "$A/content/zim/a\"b&c d.zim"
@@ -153,6 +158,10 @@ check ".part leftovers ignored" '! grep -rq "big.part" "$A/browse"'
 TI="$(item tiny-7b)"
 check "model card: excerpt on the card" 'grep -q "Tiny 7B is a small but capable language model trained for offline use." "$M"'
 check "model card: org as subtitle" 'grep -q "<h4>tiny-7b</h4><div class=\"sub\">acme</div>" "$M"'
+check "scouted repos get one card each (org/repo, not one per org)" 'grep -q "<h4>Qwen3-ASR</h4>" "$M" && grep -q "<h4>Qwen3-TTS</h4>" "$M" && ! grep -q "<h4>Qwen</h4>" "$M"'
+check "a cut-off scouted pull is labelled incomplete" '[ -n "$(item Qwen3-TTS)" ] && grep -q "incomplete download" "$(item Qwen3-TTS)"'
+check "a stamped scouted pull is not" '[ -n "$(item Qwen3-ASR)" ] && ! grep -q "incomplete download" "$(item Qwen3-ASR)"'
+check "the stamp and .cache never show as files" '! grep -rq "valark-complete\|x.incomplete" "$A/browse/item"'
 check "model card: longer text on the detail page" 'grep -q "runs on a laptop CPU" "$TI"'
 check "model card: licence + pipeline chips" 'grep -q "licence: apache-2.0" "$M" && grep -q ">text-generation<" "$M"'
 check "model card: badge / link URLs dropped" '! grep -rq "shields" "$A/browse" && ! grep -rq "example.com" "$A/browse"'
@@ -183,7 +192,7 @@ gen --root "$A" --zim-limit 0 >/dev/null 2>&1
 check "ZIM: cache used when no ZIM may be opened" 'grep -q "<h4>Testipedia</h4>" "$C"'
 check "generated badge for items without a picture" 'grep -q "thumbs/b-[0-9a-f]\{12\}\.svg" "$C"'
 NZ=$(ls "$A/content/zim" | grep -c '\.zim$')
-check "totals in summary.json" 'python3 -I -c "import json,sys;d=json.load(open(sys.argv[1]));s={x[\"name\"]:x for x in d[\"sections\"]};sys.exit(0 if s[\"models\"][\"files\"]==11 and s[\"content\"][\"files\"]==int(sys.argv[2]) and s[\"tools\"][\"entries\"]==1 else 1)" "$A/browse/summary.json" "$NZ"'
+check "totals in summary.json" 'python3 -I -c "import json,sys;d=json.load(open(sys.argv[1]));s={x[\"name\"]:x for x in d[\"sections\"]};sys.exit(0 if s[\"models\"][\"files\"]==13 and s[\"content\"][\"files\"]==int(sys.argv[2]) and s[\"tools\"][\"entries\"]==1 else 1)" "$A/browse/summary.json" "$NZ"'
 check "search box progressive (hidden until script runs)" 'grep -q "id=\"q\" type=\"search\"" "$M" && grep -q "aria-label=\"Search\" hidden" "$M"'
 check "the shipped web UI data tables parse" 'python3 -I -c "
 import importlib.util,sys
@@ -203,7 +212,7 @@ check "stale detail page + thumbnail removed" '[ ! -e "$BI" ] && [ ! -e "$A/brow
 
 # caps
 gen --root "$A" --out "$T/cap" --max-rows 1 --max-files 2 >/dev/null 2>&1
-check "--max-rows summarises the rest" 'grep -q "and 1 more entries" "$T/cap/browse/models.html"'
+check "--max-rows summarises the rest" 'grep -q "and 3 more entries" "$T/cap/browse/models.html"'
 check "--max-files caps the file list" 'grep -rq "more in the folder" "$T/cap/browse/item"'
 check "--out keeps links pointing at the root" 'grep -q "href=\"../../a/models/" "$T/cap/browse/models.html"'
 linkcheck "$T/cap" > "$T/links2.out" 2>&1

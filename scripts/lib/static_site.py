@@ -54,7 +54,7 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 SECTIONS = [
     ('models', 'models', 'AI models',
      'Language, speech, vision and image models. GGUF files run in llama.cpp; safetensors folders load '
-     'in transformers, vLLM or similar.', 'models', {'huggingface': 3, '*': 2}),
+     'in transformers, vLLM or similar.', 'models', {'huggingface': 3, 'scouted': 3, '*': 2}),
     ('content', 'content', 'Library',
      'Offline encyclopedias, manuals, Q&A sites and maps. ZIM files open in Kiwix (desktop, Android or '
      'kiwix-serve).', 'knowledge', {'lastbook': 1, '*': 2}),
@@ -1002,9 +1002,17 @@ class Builder:
 
     def d_models(self, s, e, info, rcard, abs_dir):
         parts = e.key.split('/')
-        if parts[0] == 'huggingface' and len(parts) >= 3:
+        # A whole-repo pull counts as finished only with the Librarian's stamp (scouted/ is
+        # always Librarian-managed); hf leaves *.incomplete blobs behind when cut off.
+        if abs_dir and os.path.isdir(abs_dir):
+            cut = os.path.isdir(os.path.join(abs_dir, '.cache', 'huggingface', 'download')) and any(
+                n.endswith('.incomplete') for _, _, fs in os.walk(os.path.join(abs_dir, '.cache')) for n in fs)
+            if cut or (parts[0] == 'scouted' and not os.path.isfile(os.path.join(abs_dir, '.valark-complete'))):
+                info['chips'].append('incomplete download')
+                info['facts'].append(('Status', 'Download not finished; the Librarian resumes it'))
+        if parts[0] in ('huggingface', 'scouted') and len(parts) >= 3:
             info['title'] = parts[-1]
-            info['sub'] = parts[-2]
+            info['sub'] = parts[-2] + (' · found by the model scout' if parts[0] == 'scouted' else '')
         else:
             fam = self.cur.model_files.get(e.key.split('/', 1)[-1]) or self.cur.model_files.get(e.key)
             if not fam:

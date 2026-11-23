@@ -99,7 +99,9 @@ catalog_refresh_scout() {
         [ "$(_scout_age "${SCOUT_CACHE}.attempt" "$now")" -lt "$SCOUT_RETRY" ] && return 0
     fi
     local tmp="${SCOUT_CACHE}.tmp.$$" rc=0
-    python3 "$SCOUT_PY" plan --sweep "${VALARK_SCOUT_SWEEPS:-small,speech-vision}" \
+    # Bounded: a link that silently drops traffic must not hold the loop lock for hours. A
+    # killed scout prints nothing (rows are printed at the end), so the cache is kept.
+    timeout "${VALARK_SCOUT_TIMEOUT:-1800}" python3 "$SCOUT_PY" plan --sweep "${VALARK_SCOUT_SWEEPS:-small,speech-vision}" \
         --skip-tsv "${DATA_DIR}/models-extra.tsv" > "$tmp" 2>"${SCOUT_CACHE}.err" || rc=$?
     if grep -q '^# hf_scout plan' "$tmp" 2>/dev/null && { [ "$rc" -eq 0 ] || [ ! -f "$SCOUT_CACHE" ]; }; then
         mv -f "$tmp" "$SCOUT_CACHE"

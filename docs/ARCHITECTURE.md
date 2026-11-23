@@ -50,7 +50,7 @@ graph TB
 
     subgraph Engine["Librarian Engine"]
         style Engine fill:#1a2230,stroke:#4da6ff
-        LIB["librarian.sh<br/>status|plan|fill|verify<br/>evict|maintain|refresh<br/>catalog|request|pin|unpin|pins"]
+        LIB["librarian.sh<br/>status|plan|fill|verify<br/>evict|maintain|refresh|scout<br/>catalog|request|pin|unpin|pins|site"]
         CAT["lib/catalog.sh<br/>lib/kiwix_catalog.py<br/>live OPDS catalog"]
         PLAN["lib/planner.py<br/>priority model"]
         VERIFY["verify.sh<br/>does it run?"]

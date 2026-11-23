@@ -60,13 +60,20 @@ ensure_state() {
 # manifest (manifest_add only ever ran after a successful pull), so stamp those once;
 # otherwise an OFFLINE box would see them all as missing (re-planned, double-counted, and
 # `request` would evict other content to make room for a model already on disk).
+# The marker is written only when every listed dir was reachable and stamped, so a data
+# disk or NFS share that is not mounted yet is retried on the next command.
 stamp_legacy_repos() {
     local mark="${STATE_DIR}/.hf-repo-stamps-v1"
     [ -f "$mark" ] && return 0
-    [ -f "$MANIFEST" ] && awk -F'\t' '$7=="hf-repo" {print $4}' "$MANIFEST" | while IFS= read -r d; do
-        [ -n "$d" ] && [ -d "$d" ] && [ ! -f "$d/.valark-complete" ] && echo "migrated $(date -u +%FT%TZ)" > "$d/.valark-complete" 2>/dev/null
-    done
-    : > "$mark" 2>/dev/null || true
+    [ -f "$MANIFEST" ] || { : > "$mark" 2>/dev/null; return 0; }
+    local missed
+    missed=$(awk -F'\t' '$7=="hf-repo" {print $4}' "$MANIFEST" | while IFS= read -r d; do
+        [ -n "$d" ] || continue
+        [ -f "$d/.valark-complete" ] && continue
+        [ -d "$d" ] && echo "migrated $(date -u +%FT%TZ)" > "$d/.valark-complete" 2>/dev/null || echo x
+    done)
+    [ -z "$missed" ] && : > "$mark" 2>/dev/null
+    return 0
 }
 
 # --- manifest --------------------------------------------------------------

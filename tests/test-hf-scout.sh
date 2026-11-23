@@ -211,6 +211,27 @@ check "...but not unrecorded dirs" 'echo "$MG" | grep -q STRAY-UNSTAMPED'
 check "...so they count as present offline" 'echo "$MG" | grep -q PRESENT'
 check "...once (marker written)" 'echo "$MG" | grep -q MARKED'
 
+check "an unreachable listed dir keeps the migration pending" 'T="$T" ROOT="$ROOT" bash -c "export VAL_ARK_DATA=$T/mg2 VAL_ARK_CONFIG=$T/none.env; mkdir -p \$VAL_ARK_DATA; . $ROOT/scripts/librarian.sh; mkdir -p \$STATE_DIR; printf \"model:x\tmodels\tmodel:e\t/nonexistent/x\t1\t1\thf-repo\t1\n\" > \$MANIFEST; rm -f \$STATE_DIR/.hf-repo-stamps-v1; ensure_state; [ ! -f \$STATE_DIR/.hf-repo-stamps-v1 ]" 2>/dev/null'
+
+# --- whole-repo dests never collide (eviction rm -rf's the dest) ------------------------------
+COLL=$(python3 -I - "$ROOT/data/models-extra.tsv" "$ROOT/scripts/download-models.sh" <<'PYEOF'
+import re, sys
+rows = [l.rstrip('\n').split('|') for l in open(sys.argv[1]) if l.strip() and not l.lstrip().startswith('#')]
+repo = [r[8].strip('/') for r in rows if len(r) > 8 and r[5] == 'repo']
+alld = [r[8].strip('/') for r in rows if len(r) > 8]
+src = open(sys.argv[2]).read()
+var = dict(re.findall(r'(\w+_DIR)="\$\{MODEL_ROOT\}/([^"]+)"', src))
+dm = {var[v] + '/' + n for v, n in re.findall(r'"\$\{(\w+_DIR)\}/([^"/$]+)', src) if v in var}
+nest = lambda a, b: a == b or a.startswith(b + '/') or b.startswith(a + '/')
+bad = [(a, b) for a in repo for b in alld if b is not a and nest(a, b) and alld.count(b) >= 1 and (a != b or alld.count(a) > 1)]
+bad += [(a, b) for a in repo for b in sorted(dm) if nest(a, b)]
+print('\n'.join(f'{a} ~ {b}' for a, b in bad))
+print('DM', len(dm))
+PYEOF
+)
+check "curated repo dests never equal/nest another dest or a download-models.sh dir" '[ "$(echo "$COLL" | grep -v "^DM" | grep -c .)" -eq 0 ] && [ "$(echo "$COLL" | sed -n "s/^DM //p")" -gt 20 ]'
+[ "$(echo "$COLL" | grep -v "^DM" | grep -c .)" -eq 0 ] || echo "$COLL" >&2
+
 # --- planner interaction ------------------------------------------------------------------------
 P="$ROOT/scripts/lib/planner.py"; M="$T/pm"; mkdir -p "$M/cur" "$M/sc"
 printf 'model:cur-big\tmodels\tmodel:newcat\t900\t5000000\thf-repo\tx/y\t%s/cur\t*\nmodel:scout-a--b\tmodels\tmodel:newcat\t500\t1000\thf-repo\ta/b\t%s/sc\t*\n' "$M" "$M" > "$M/c.tsv"

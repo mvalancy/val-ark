@@ -471,12 +471,21 @@ with zipfile.ZipFile(sys.argv[1], "w") as z:
     "$D2/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"
 chmod 000 "$D2/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"
 d2 >/dev/null 2>&1
-check "...and reused without opening the wheel again" 'grep -q "Cached summary text" "$D2/browse/dev-stack.html"'
+if [ "$(id -u)" -ne 0 ]; then   # root reads a mode-000 file, so this proves nothing there
+    check "...and reused without opening the wheel again" 'grep -q "Cached summary text" "$D2/browse/dev-stack.html"'
+fi
 chmod 644 "$D2/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"
 
 printf '#!/bin/bash\n# Val Ark - Mirror Baz, a mapping kit with offline tiles\n#\n# scripts/lib/baz_mirror.py reads the manifest and keeps the current release.\n' > "$T/tsh2/baz.sh"
 mkdir -p "$D2/tools/linux-x86_64/baz"; echo x > "$D2/tools/linux-x86_64/baz/baz"; d2 >/dev/null 2>&1
 check "header: implementation notes (script paths) skipped" 'grep -q "<p>Baz, a mapping kit with offline tiles.</p>" "$D2/browse/tools.html"'
+
+printf '#!/bin/bash\n# Val Ark - Download Qux\n# Distributed widget store (S3-compatible) for the fleet.\n' > "$T/tsh2/qux.sh"
+printf '#!/bin/bash\n# Val Ark - Mirror lower-kit and everything it needs offline.\n' > "$T/tsh2/lower-kit.sh"
+mkdir -p "$D2/tools/linux-x86_64/qux" "$D2/tools/linux-x86_64/lower-kit"
+echo x > "$D2/tools/linux-x86_64/qux/qux"; echo x > "$D2/tools/linux-x86_64/lower-kit/lower-kit"; d2 >/dev/null 2>&1
+check "header line keeps a full stop before the next sentence" 'grep -q "<p>Qux. Distributed widget store (S3-compatible) for the fleet.</p>" "$D2/browse/tools.html"'
+check "a lowercase project name keeps its casing" 'grep -q "<p>lower-kit and everything it needs offline.</p>" "$D2/browse/tools.html"'
 
 echo "static-site: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

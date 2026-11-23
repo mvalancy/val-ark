@@ -391,6 +391,12 @@ def tool_script_blurbs(tools_dir):
         if cur:
             paras.append(cur)
         def clean(lines):
+            # a header line without its own full stop followed by a new sentence ('Download X' then
+            # 'Distributed store ...') keeps the break as '. '
+            lines = list(lines)
+            if len(lines) > 1 and not lines[0].rstrip().endswith(('.', ',', ';', ':', '(', '-', '—')) and \
+                    lines[1][:1].isupper():
+                lines[0] = lines[0].rstrip() + '.'
             p = ' '.join(lines)
             p = re.sub(r'\([^)]*https?://[^)]*\)', '', p)
             p = re.sub(r'https?://\S+', '', p)
@@ -400,7 +406,7 @@ def tool_script_blurbs(tools_dir):
         if paras:
             head = re.sub(r'(?i)^(download|mirror|mirrors|fetch|get)\s+(the\s+)?', '', clean(paras[0]))
             if len(head.split()) > 3 or re.search(r'[,:(]', head):     # more than just the tool's name
-                sentence = head[0].upper() + head[1:]
+                sentence = head                                      # keep the project's own casing
             for lines in paras[1:2]:
                 p = clean(lines)
                 first = re.split(r'(?<=[.!?])\s', p, 1)[0] if p else ''

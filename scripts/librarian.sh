@@ -92,7 +92,9 @@ move_moondream_gguf() {
     [ -d "$old" ] || return 0
     mkdir -p "$new" 2>/dev/null || return 0
     for f in "$old"/*.gguf; do [ -f "$f" ] && mv -n -- "$f" "$new/" 2>/dev/null; done
-    ls "$new"/*.gguf >/dev/null 2>&1 || return 0
+    # Nothing to move (deleted by hand / never finished): drop the row rather than leave
+    # it pointing at the shared dir, where a whole-repo eviction would rm -rf it.
+    ls "$new"/*.gguf >/dev/null 2>&1 || { manifest_drop "model:moondream2-gguf"; return 0; }
     echo "migrated $(date -u +%FT%TZ)" > "$new/.valark-complete" 2>/dev/null
     awk -F'\t' -v OFS='\t' -v n="$new" '$1=="model:moondream2-gguf" {$4=n} {print}' "$MANIFEST" > "${MANIFEST}.tmp.$$" &&
         mv -f "${MANIFEST}.tmp.$$" "$MANIFEST"

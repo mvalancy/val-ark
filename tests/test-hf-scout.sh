@@ -223,9 +223,13 @@ rm -f "$STATE_DIR/.hf-repo-stamps-v1"; ensure_state
 [ -f "$MODELS_DIR/vlm/moondream2-gguf/m.gguf" ] && [ -f "$MODELS_DIR/vlm/moondream2-gguf/.valark-complete" ] && echo MOVED
 [ -f "$MODELS_DIR/vlm/moondream2/model.safetensors" ] && echo OTHER-KEPT
 grep -q "vlm/moondream2-gguf	" "$MANIFEST" && echo REPOINTED
+rm -f "$MODELS_DIR/vlm/moondream2-gguf/m.gguf" "$STATE_DIR/.hf-repo-stamps-v1"
+printf 'model:moondream2-gguf\tmodels\tmodel:tiny-vlm\t%s\t2\t630\thf-repo\t1\n' "$MODELS_DIR/vlm/moondream2" > "$MANIFEST"
+ensure_state; grep -q "moondream2-gguf" "$MANIFEST" || echo DROPPED
 EOS
 )
 check "old shared moondream2 dir: GGUF moved, row re-pointed, other files kept" 'echo "$MD" | grep -q MOVED && echo "$MD" | grep -q OTHER-KEPT && echo "$MD" | grep -q REPOINTED'
+check "...and with no GGUF to move, the row is dropped" 'echo "$MD" | grep -q DROPPED'
 
 # --- whole-repo dests never collide (eviction rm -rf's the dest) ------------------------------
 COLL=$(python3 -I - "$ROOT/data/models-extra.tsv" "$ROOT/scripts/download-models.sh" <<'PYEOF'

@@ -58,17 +58,22 @@ run 'mirror_source_tarball app 5.0 "'"$B"'/rel/app-5.0.tar.xz" >/dev/null' 2>/de
 [ -d "$TOOLS/sources/app-5.0-src" ] && [ ! -d "$TOOLS/sources/app-0.9-src" ] && [ ! -d "$TOOLS/sources/app-1.0-src" ] \
     && [ -d "$TOOLS/sources/app-extra-1-src" ] && pass || fail "older source versions pruned, other tools kept ($(ls "$TOOLS/sources" | tr '\n' ' '))"
 
+# 3e. a run that fell back to an OLDER version never deletes a newer mirrored source
+echo "v4" > "$T/www/rel/app-4.0.tar.xz"
+run 'mirror_source_tarball app 4.0 "'"$B"'/rel/app-4.0.tar.xz" >/dev/null' 2>/dev/null
+[ -d "$TOOLS/sources/app-5.0-src" ] && [ -d "$TOOLS/sources/app-4.0-src" ] && pass || fail "an older fallback must keep the newer source ($(ls "$TOOLS/sources" | tr '\n' ' '))"
+
 # 4. the hint text
 run 'build_from_source_hint demo "Demo App" linux-arm64 demo-pkg demo tools/sources/demo-1.0-src/demo-1.0.tar.xz owner/demo "  make && make install"' >/dev/null 2>&1
 H="$T/data/val-ark/tools/linux-arm64/demo/INSTALL.txt"; [ -f "$H" ] || H="$(find "$T/data" -path '*linux-arm64/demo/INSTALL.txt' | head -1)"
 for want in "Demo App - linux-arm64" "--set desktop-apps --set desktop-src --dest" "--arch arm64" "apt-get install demo-pkg" \
-            "'desktop-src'" "source/demo/" "apt-get build-dep ./demo_*.dsc" "dpkg-source -x demo_*.dsc" "dpkg-buildpackage" \
+            "'desktop-src'" "source/demo/" 'D=$(ls -v demo_*.dsc | tail -1)' 'apt-get build-dep ./$D' 'dpkg-source -x $D' "dpkg-buildpackage" \
             "tools/sources/demo-1.0-src/demo-1.0.tar.xz" "owner/demo.bundle" "make && make install" "release tarball" \
             "Ubuntu noble's version" "may need newer" "1. Install" "2. Rebuild" "3. Upstream source" "4. Full-history"; do
     grep -qF -- "$want" "$H" 2>/dev/null && pass || fail "hint must mention: $want"
 done
 # build-dep by package NAME fails against a flat repo (no deb-src index): never suggested
-! grep -qE "build-dep [a-z]" "$H" && pass || fail "hint must not suggest 'apt-get build-dep <name>'"
+! grep -qE "apt-get build-dep [a-z]" "$H" && pass || fail "hint must not suggest 'apt-get build-dep <name>'"
 ! grep -q "software/linux" "$H" && pass || fail "hint must not name a private mirror layout"
 run 'build_from_source_hint demo2 "Demo" linux-x86_64 "" "" "" "" ""' >/dev/null 2>&1
 H2="$(find "$T/data" -path '*linux-x86_64/demo2/INSTALL.txt' | head -1)"

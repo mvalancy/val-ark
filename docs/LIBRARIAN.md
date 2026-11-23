@@ -249,8 +249,9 @@ internet can rebuild them:
 python3 scripts/lib/apt_offline.py build --suite noble --arch arm64 --set desktop-apps --set desktop-src --dest <dir>
 # on the target: deb [trusted=yes] file:<dir> ./  then (the flat repo has no deb-src index,
 # so build deps come from the .dsc FILE, not the package name)
-cd <dir>/source/inkscape && sudo apt-get build-dep ./inkscape_*.dsc
-dpkg-source -x inkscape_*.dsc && cd inkscape-*/ && dpkg-buildpackage -us -uc -b
+cd <dir>/source/inkscape && D=$(ls -v inkscape_*.dsc | tail -1)   # the newest .dsc
+sudo apt-get build-dep ./$D
+dpkg-source -x $D && cd inkscape-*/ && dpkg-buildpackage -us -uc -b
 ```
 
 These build the Ubuntu suite's version of each app (noble: e.g. KiCad 7, Blender 4.0,

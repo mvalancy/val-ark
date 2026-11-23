@@ -264,7 +264,8 @@ PY
 
 # 11. A source row (name "source/<pkg>/<file>") is really FETCHED into <dest>/source/<pkg>/ from
 #     a local HTTP server (the .part name must be built from the basename), with size + SHA256
-#     checked; a bad SHA is a counted failure (exit 2 through main), never a traceback.
+#     checked; a bad SHA is a counted failure (exit 2 through main), never a traceback; stale
+#     source files of an older upload are pruned only once the new set is complete.
 . "$ROOT/tests/lib/ports.sh"
 SP="$(free_port)"; mkdir -p "$T/srcwww"; printf 'Format: 3.0 (quilt)\nSource: demo\n' > "$T/srcwww/demo_1-1.dsc"
 (cd "$T/srcwww" && exec python3 -m http.server "$SP" --bind 127.0.0.1) >/dev/null 2>&1 & SRC_PID=$!
@@ -278,6 +279,15 @@ got = os.path.join(dest, "source/demo/demo_1-1.dsc")
 assert open(got, "rb").read() == data and not os.path.exists(got + ".part")
 # idempotent: present + verified -> nothing fetched again, still 0
 assert ao.fetch([(url, "source/demo/demo_1-1.dsc", len(data), sha)], dest) == 0
+# prune_sources: an older .dsc/tarball left by a previous -updates upload is removed once
+# this run's files are all present; a package whose fetch is incomplete is left alone.
+d = os.path.join(dest, "source/demo")
+open(os.path.join(d, "demo_1-0.dsc"), "w").write("old"); open(os.path.join(d, "demo_1.orig.tar.xz"), "w").write("old")
+assert ao.prune_sources([(url, "source/demo/demo_1-1.dsc", len(data), sha), ("u", "x_1_amd64.deb", 1, "")], dest) == 2
+assert sorted(os.listdir(d)) == ["demo_1-1.dsc"], os.listdir(d)
+os.makedirs(os.path.join(dest, "source/other")); open(os.path.join(dest, "source/other/other_0.dsc"), "w").write("keep")
+assert ao.prune_sources([(url, "source/other/other_1.dsc", 1, "")], dest) == 0      # wanted file missing -> keep
+assert os.listdir(os.path.join(dest, "source/other")) == ["other_0.dsc"]
 # a bad SHA256 through the real CLI path (stubbed resolve) -> exit 2, a clean message, no traceback
 ao.AptRoot.update = lambda self: None
 ao.AptRoot.has_lists = lambda self: True

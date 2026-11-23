@@ -266,6 +266,27 @@ def fetch(rows, dest):
     return failed
 
 
+def prune_sources(rows, dest):
+    """Keep only this resolve's files under <dest>/source/<pkg>/: when an -updates upload
+    replaces a source package, the older .dsc/tarballs would otherwise linger, and a second
+    .dsc breaks `dpkg-source -x <pkg>_*.dsc`. A package dir is only pruned once every file
+    this run wants for it is present (a failed fetch never leaves it with nothing)."""
+    want = {}
+    for _, name, _, _ in rows:
+        parts = Path(name).parts
+        if len(parts) == 3 and parts[0] == "source":
+            want.setdefault(parts[1], set()).add(parts[2])
+    removed = 0
+    for pkg, names in want.items():
+        d = Path(dest) / "source" / pkg
+        if not d.is_dir() or not all((d / n).is_file() for n in names):
+            continue
+        for f in d.iterdir():
+            if f.is_file() and f.name not in names:
+                f.unlink(); removed += 1
+    return removed
+
+
 EX_OK, EX_RESOLVE, EX_FETCH, EX_INCOMPLETE, EX_USAGE = 0, 1, 2, 3, 64
 SEVERITY = (EX_USAGE, EX_RESOLVE, EX_FETCH, EX_INCOMPLETE, EX_OK)  # most severe first
 
@@ -369,6 +390,9 @@ def _main(argv=None):
             print(f"{url}\t{name}\t{size}\t{sha}")
         return status
     failed = fetch(rows, a.dest)
+    stale = prune_sources(rows, a.dest)
+    if stale:
+        print(f"removed {stale} superseded source file(s)", file=sys.stderr)
     if a.command == "build":
         status = worst(status, report_index(*write_index(root.stanzas(), a.dest)))
     return worst(status, EX_FETCH if failed else EX_OK)

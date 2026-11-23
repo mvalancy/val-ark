@@ -633,10 +633,13 @@ mirror_source_tarball() {
 # one is kept). Only dirs named exactly <tool>-<digit…>-src match, so "kicad" never touches
 # "kicad-libs-…".
 _prune_old_sources() {
-    local tool="$1" ver="$2" d
+    local tool="$1" ver="$2" d have
     for d in "${TOOLS_DIR}/sources/${tool}-"[0-9]*-src; do
         [ -d "$d" ] || continue
-        [ "$d" = "${TOOLS_DIR}/sources/${tool}-${ver}-src" ] && continue
+        have="${d##*/${tool}-}"; have="${have%-src}"
+        # Only OLDER versions go (version_gate's downgrade rule): if this run fell back to an
+        # older pin, a newer source mirrored earlier is kept.
+        _version_newer "$ver" "$have" || continue
         rm -rf -- "$d" && log_info "Removed superseded source: $(basename "$d")" >&2
     done
 }
@@ -677,8 +680,9 @@ ${n}. Install from the offline .deb sets (data/apt-sets.tsv; see docs/LIBRARIAN.
 ${n}. Rebuild Ubuntu's package with no internet: the 'desktop-src' set put the source package in
    <dir>/source/${usrc}/ and EVERY build dependency in the flat repo. The repo has no deb-src
    index, so install the build deps from the .dsc file (not by package name):
-     cd <dir>/source/${usrc} && sudo apt-get build-dep ./${usrc}_*.dsc
-     dpkg-source -x ${usrc}_*.dsc && cd ${usrc}-*/ && dpkg-buildpackage -us -uc -b
+     cd <dir>/source/${usrc} && D=\$(ls -v ${usrc}_*.dsc | tail -1)     # the newest .dsc
+     sudo apt-get build-dep ./\$D
+     dpkg-source -x \$D && cd ${usrc}-*/ && dpkg-buildpackage -us -uc -b
      sudo apt-get install ../*.deb
    This is Ubuntu noble's version of ${title}, which can be older than upstream's.
 "
@@ -691,7 +695,7 @@ ${n}. Rebuild Ubuntu's package with no internet: the 'desktop-src' set put the s
 ${n}. Upstream source, ${what}:
      ${src}
 "
-        [ -n "$usrc" ] && text+="   Build dependencies: the 'desktop-src' set (apt-get build-dep ./${usrc}_*.dsc above) covers
+        [ -n "$usrc" ] && text+="   Build dependencies: the 'desktop-src' set (the build-dep step above) covers
    Ubuntu's version; a newer upstream release may need newer or extra libraries.
 "
         text+="   Build:

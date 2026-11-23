@@ -301,7 +301,8 @@ scripts/librarian.sh verify        # integrity-check managed files; requeue bad
 scripts/librarian.sh evict --need 107374182400   # free space (raw bytes), lowest value/byte first
 scripts/librarian.sh refresh       # re-pull the live ZIM catalog
 scripts/librarian.sh scout         # scout Hugging Face for new models now (weekly otherwise)
-scripts/librarian.sh maintain      # refresh (+ weekly scout) + verify + bounded top-up + report (loop core)
+scripts/librarian.sh maintain      # refresh (+ weekly scout) + verify + bounded top-up + report + static pages (loop core)
+scripts/librarian.sh site          # rewrite the static browse pages (index.html + browse/)
 scripts/librarian.sh catalog model # not-yet-downloaded items (content|model|installer|all; web browse feed)
 scripts/librarian.sh request model <id>   # pin + fetch ONE item now (content|model|tool), evicting unpinned items to fit
 scripts/librarian.sh pin content <id>     # keep an item: pins are never evicted
@@ -321,6 +322,53 @@ it, because an aria2 `.part` is segmented and `curl -C -` would "complete" it wi
 holes. Failed attempts keep the partial + control file so the next cycle resumes
 where it left off; abandoned partials are garbage-collected by `verify` after
 `VALARK_PARTIAL_MAX_AGE_DAYS` (default 14).
+
+## Static browse pages (no server)
+
+`scripts/librarian.sh site` (and `maintain`, at most every `VALARK_STATIC_SITE_HOURS`, default 6)
+runs `scripts/lib/static_site.py`, which writes a **static catalog** of the archive at
+`<VALARK_HOME>`: `index.html`, one card-grid page per section (`browse/<section>.html`) and one
+detail page per item (`browse/item/*.html`). Plain HTML with inline CSS, **relative links only**,
+no external URLs and no JavaScript requirement (a search box and group filter appear when scripts
+run). Open `index.html` from a file explorer, an SMB share, a USB disk or any dumb file server.
+
+Every card has a picture and a description, from the best source available:
+
+| Section | Picture | Description |
+|---------|---------|-------------|
+| Tools & apps (one card per tool, all platforms) | the web UI's logo; screenshots on the detail page | the web UI's `TOOLS` / `TOOL_META`: description, overview, features, CLI, maker, licence |
+| Library (ZIM) | the ZIM's own 48x48 illustration | the ZIM's own title + description (read from its header and directory with a few small reads; uncompressed, xz and, with the `zstd` CLI, zstd clusters, each decoded once and capped at 4 MB), the web UI's `CONTENT_LIBRARY` overview, article counts from a cached Kiwix catalog |
+| AI models, datasets | the first image the model / dataset card shows from its own repo (a real PNG / JPEG / GIF / WebP file inside the repo: symlinks out of it and upstream SVGs are refused) | the card's first paragraphs, licence and pipeline tag; curated `MODEL_FAMILIES` text for the classic `llm/` folders |
+| Installers, developer stack, sources | generated badge | `data/installers.tsv`, `data/dev-stack.tsv`, `data/source-repos.tsv` notes |
+
+Anything without a picture gets a generated badge (initials or a modality glyph). Pictures are copied
+into `browse/thumbs/` (deduplicated, size-capped) so the catalog works without the repo next to it.
+
+Only section directories are scanned (`state/`, `private/` and the repo's own code never appear);
+`*.part`, `*.tmp`, `.source.json` sidecars and dot files are skipped. Big trees stay cheap:
+`--max-rows` (3000 cards per section), `--max-files` (60 files per detail page), `--max-details`
+(8000 detail pages), `--meta-limit` (4000 README reads, 64 KiB each), `--zim-limit` (400 ZIMs
+opened per run; results are cached in `browse/zim-meta.json`, so later runs fill in the rest) and
+`--walk-limit` (the page then says its totals are partial). Pages are written temp + rename and
+unchanged files are not rewritten: only `index.html` and `summary.json` carry the generation time, so
+a refresh with nothing new touches two files. Stale detail pages, thumbnails and an interrupted run's
+temp files are removed.
+
+**What to share.** The pages sit in `<VALARK_HOME>` (`<DATA_ROOT>/val-ark`), but models live in
+`<DATA_ROOT>/models`, next to it, and the model links climb out to `../models`. Share (or open) the
+whole `<DATA_ROOT>` so those links resolve; a share of `val-ark/` alone shows the model cards but
+their file links break. A single-disk dev box keeps everything in the repo, so nothing climbs out.
+
+**Cost.** `librarian.sh site` walks the section folders (`os.scandir` + one `stat` per file) on every
+refresh. That is quick on a local disk; on a very large tree on a slow disk raise
+`VALARK_STATIC_SITE_HOURS`, or run `static_site.py` yourself with a `--listing`.
+
+A mirror that keeps its own index can skip the walk entirely: `--listing FILE` takes
+`path<TAB>size[<TAB>mtime]` rows (relative to `--root`) for what is present, `--pending FILE` the same
+for what is still queued (shown as "queued" chips), and `--walk NAME` adds a section the listing does
+not cover. `VALARK_STATIC_SITE=0` turns the refresh off. Opening `web-ui/index.html` over `file://`
+shows a hint linking to the static catalog, since the dynamic UI needs its server. Tests:
+`tests/test-static-site.sh`.
 
 ## The 24/7 loop
 

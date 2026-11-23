@@ -13,6 +13,15 @@
 <a href="#main-content" class="skip-link" onclick="event.preventDefault();var m=document.getElementById('main-content')||document.querySelector('main,[role=main]');if(m){m.setAttribute('tabindex','-1');m.focus();m.scrollIntoView();}">Skip to main content</a>
 
 <div id="app-root"></div>
+<!-- Opened straight from a file explorer (file://, no server.js): nothing can be loaded, so point
+     at the static browse pages that librarian.sh site writes next to web-ui/ (#257). -->
+<div id="static-hint" hidden style="position:fixed;left:16px;right:16px;bottom:16px;z-index:9999;padding:14px 18px;border-radius:12px;background:#fffaf0;color:#2b2622;box-shadow:0 8px 28px rgba(0,0,0,.35);font:15px/1.45 system-ui,sans-serif">
+This page needs the Val Ark server, which is not running here. To explore the archive from a plain file
+share, open <b>index.html</b> in the archive's <b>val-ark</b> folder on the data disk (written by
+<code>librarian.sh site</code>). If this page sits inside that folder, it is
+<a href="../index.html" style="color:#a8481f;font-weight:600">one level up</a>.
+</div>
+<script>if(location.protocol==='file:'){document.getElementById('static-hint').hidden=false;}</script>
 <div class="copied-toast" id="copiedToast">Copied to clipboard!</div>
 <button class="scroll-top" id="scrollTopBtn" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Scroll to top" title="Back to top">&#x2191;</button>
 

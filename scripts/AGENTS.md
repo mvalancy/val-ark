@@ -12,7 +12,7 @@ disk and keep itself healthy 24/7. Start here to understand how a box boots, fil
 | File | Purpose |
 |------|---------|
 | `../start.sh` → `setup.sh` | Repo-root interactive menu; `setup.sh` does first-run dependency checks + directory/layout creation. |
-| `librarian.sh` | Disk-fill + curation engine. `status\|plan\|fill\|verify\|evict\|maintain\|refresh\|scout\|catalog\|request\|pin\|unpin\|pins`. Fills any-size disk from **live** catalogs: diversity → small-valuable → fill → evict. |
+| `librarian.sh` | Disk-fill + curation engine. `status\|plan\|fill\|verify\|evict\|maintain\|refresh\|scout\|catalog\|request\|pin\|unpin\|pins\|site`. Fills any-size disk from **live** catalogs: diversity → small-valuable → fill → evict. |
 | `loop.sh` | 24/7 self-heal cycle. `once` (one cycle) / `run [SECS]` / `install [MIN]` (flock-guarded cron + `@reboot`) / `uninstall`. |
 | `verify.sh` | Functional checks: tools run, kiwix serves a real ZIM, a tiny LLM infers, the web API answers, fleet nodes reachable over SSH. `[local\|fleet\|all]`. |
 | `server.js` | **Zero-dependency** Node server: web UI + JSON API + SSE + `/api/archive/` (Range/resumable) + reverse proxies. Auto-launches `kiwix-serve`. (Navigation map below.) |

@@ -377,7 +377,7 @@ require a CUDA source build (no upstream binary) — see [PLATFORMS.md](PLATFORM
 | Path | Purpose |
 |------|---------|
 | `start.sh` | Interactive menu + CLI (setup, download, update, monitor, status, serve, cron, service, chat, transcribe, image, speak, test, screenshots, optimize-images, uninstall) |
-| `scripts/librarian.sh` | Disk-fill + curation engine (`status\|plan\|fill\|verify\|evict\|maintain\|refresh\|scout\|catalog\|request\|pin\|unpin\|pins`) |
+| `scripts/librarian.sh` | Disk-fill + curation engine (`status\|plan\|fill\|verify\|evict\|maintain\|refresh\|scout\|catalog\|request\|pin\|unpin\|pins\|site`) |
 | `scripts/loop.sh` | 24/7 self-healing + verification cycle (`once\|run\|install\|uninstall`) |
 | `scripts/verify.sh` | Functional checks: tools run, kiwix serves, LLM infers, fleet reachable |
 | `scripts/lib/valark-env.sh` | Resolve `DATA_ROOT` from `.env`, symlink repo dirs, disk math |

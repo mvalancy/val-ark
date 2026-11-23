@@ -154,7 +154,7 @@ cp .env.example .env            # set VAL_ARK_DATA=/your/disk (git-ignored)
 ```
 
 Commands: `status | plan | fill | verify | evict | maintain | refresh | scout | catalog |
-request <content|model|tool> <id> | pin | unpin | pins [--refill]`.
+request <content|model|tool> <id> | pin | unpin | pins [--refill] | site`.
 See **[docs/LIBRARIAN.md](docs/LIBRARIAN.md)** for the full design.
 
 ## What's Included
@@ -358,6 +358,18 @@ exist in `content/zim/`, the server auto-launches kiwix-serve (loopback-only on
 internal port 8888) and proxies it same-origin at `/kiwix/` for offline Wikipedia
 browsing without internet access.
 
+### No server? Browse the static catalog
+
+A box or NAS that is only reachable as a **plain file share** (SMB, a USB disk, `python3 -m
+http.server`) can't run `server.js`. `./scripts/librarian.sh site` (also run by every `maintain`)
+writes a static catalog at the archive root (`index.html`, a card grid per section and a detail
+page per item): plain HTML with relative links that works over `file://`. Every model, ZIM, tool,
+installer, dataset and source gets a picture (logo, ZIM illustration, model-card image or a badge),
+a description (web UI text, ZIM metadata, model card), its size and licence, and links straight to
+the files. Opening
+`web-ui/index.html` without a server now points there too. See
+[docs/LIBRARIAN.md](docs/LIBRARIAN.md#static-browse-pages-no-server).
+
 ## Project Structure
 
 Data dirs (`tools/`, `models/`, `content/`, `sources/`, ...) are symlinked to the
@@ -373,7 +385,7 @@ val-ark/
 │   ├── server.js             # Zero-dep web UI server + JSON API + SSE
 │   ├── valark                # Admin & recovery CLI (passcode, Use Mode, recovery)
 │   ├── librarian.sh          # Self-fill engine: status|plan|fill|verify|evict|maintain|
-│   │                         #   refresh|scout|catalog|request|pin|unpin|pins
+│   │                         #   refresh|scout|catalog|request|pin|unpin|pins|site
 │   ├── loop.sh               # 24/7 self-healing + verification loop (cron)
 │   ├── verify.sh             # Functional "does it actually run?" checks (local + fleet)
 │   ├── mirror-self.sh        # Mirror Val Ark's own source for LAN self-replication

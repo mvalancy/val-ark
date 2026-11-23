@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/popup/librarian-dark.svg">
-  <img src="img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Diversity first, then small and valuable, then fill, then trade up.">
+  <img src="img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Essentials first, then diversity, small and valuable, fill, then trade up.">
 </picture>
 
 # Librarian — scalable disk-fill, curation & self-healing
@@ -53,7 +53,7 @@ The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
    [decisions](knowledge/decisions.md#mini-then-maxi)).
 1. **Diversity first** — one item (the *smallest*) from every category before
    deepening any single one. Guarantees breadth across ~40+ categories (22 ZIM
-   topics, 17 model modalities, and netboot / OS-install / router-firmware /
+   topics, 18 model categories, and netboot / OS-install / router-firmware /
    jetson-bsp installers).
 2. **Small valuable files** — then items by **value ÷ byte**, capped per category
    so a prolific category (devdocs, TED…) can't crowd out diversity.
@@ -74,12 +74,74 @@ flavours (maxi/nopic/mini) collapse to the most complete one.
 | Source | File | Notes |
 |--------|------|-------|
 | Kiwix ZIM library | live OPDS via `scripts/lib/kiwix_catalog.py` | **Always current** — ZIM dates never go stale. ~1700+ entries across 9 languages by default (`VALARK_ZIM_LANGS`). |
-| Models (diversity) | `data/models-extra.tsv` | Small high-value models across 17 modalities (embeddings, rerankers, tiny VLMs, OCR, depth, segmentation, detection, audio, time-series). |
+| Models (diversity) | `data/models-extra.tsv` | Small high-value models across 18 categories (setup-assistant chat LLMs, small LLMs, code, embeddings, rerankers, tiny VLMs, OCR, depth, segmentation, detection, audio, time-series, safety). |
+| Models (scouted, weekly) | `<state>/catalog/models-scouted.tsv` | **New open models, found automatically** by `scripts/lib/hf_scout.py` — see [Model scout](#model-scout-hf_scoutpy). Planned after the curated rows on a small disk. |
 | OS / router / netboot / server source | `data/installers.tsv` | Distro ISOs (Alpine/Debian/Ubuntu/…), OpenWRT firmware, netboot.xyz, Jetson BSP — for PXE / mesh commissioning — plus `server-source`: upstream LAMP + LAN-infrastructure releases (httpd/APR, PHP, MariaDB, PostgreSQL, nginx, OpenSSL/OpenSSH, BIND, Kea, dnsmasq, Unbound, Samba, Dovecot, WordPress, Nextcloud, Gitea, …). |
-| Developer + security stack | `data/dev-stack.tsv` | The kit to build, run and secure software offline: every supported Python (python.org installers + relocatable builds + a top-1000 PyPI wheelhouse), compilers (LLVM, GCC/GNU sources, MinGW, Go, Rust, JDK, CMake…), decompilers/RE (Ghidra, radare2/rizin/Cutter, x64dbg, jadx, ILSpy, Frida…), security tools (Nmap, Wireshark, ZAP, Metasploit, nuclei, Trivy, Zeek, Suricata, Kali ISOs…), containers + Kubernetes (Docker static, Podman, kubeadm/kubectl, MicroK8s snaps, k3s, Helm…), cloud/IaC, S3-compatible storage (MinIO source, SeaweedFS, RustFS, versitygw, rclone) and databases (Neo4j + Relate, Milvus, Qdrant, DuckDB, ClickHouse, Valkey, OpenSearch…). Current release of each, resolved live by `scripts/lib/release_mirror.py` (see below). |
-| Offline .deb sets | `data/apt-sets.tsv` | Server + developer/security package sets resolved with all dependencies per Ubuntu suite+arch by `scripts/lib/apt_offline.py build --suite noble --arch arm64 --set lamp --dest <dir>` → a flat local APT repo for a LAN with no internet. |
+
+The grid-down list in `data/essentials.tsv` is not a source of its own: it names ZIMs, models and
+installers from the catalogs above, and the planner takes the matches first (phase 0).
 
 The big LLM/STT/TTS/VLM/image catalog is still managed by `download-models.sh`.
+
+### Model scout (`hf_scout.py`)
+
+The curated catalog only changes when someone edits it, so good new open models would
+never reach a box on their own. Once a week (`librarian.sh maintain`, TTL
+`VALARK_SCOUT_TTL`, default 7 days) the Librarian asks the Hugging Face API what is new
+and writes the picks to `<state>/catalog/models-scouted.tsv`, in the `models-extra.tsv`
+schema. `librarian.sh scout` does it now.
+
+- **speech-vision** (default): **speech and vision models are small but important, so they
+  always come early.** ASR, TTS, voice activity, audio enhancement/classification/generation,
+  and object detection (YOLO-class), segmentation, depth, image classification, zero-shot,
+  keypoints, image features and OCR. **Any age** (the classics count), real repo size ≤ 6 GB,
+  at least 15 likes, drawn from each task's all-time most-downloaded and most-liked lists, up
+  to 150 per run. Valued about 600–700, ahead of the other scouted rows. No `safetensors`
+  requirement (many are ONNX / PyTorch / NeMo), and `-base` is kept (here it is a size:
+  `whisper-base`, `vit-base`).
+- **small** (default): any modality, created in the last 180 days, **real repo size ≤ 10 GB**
+  (summed from the repo's file list, not guessed), at least 40 likes (10 for a repo owned by
+  a well-known lab), up to 200 per run. These are the cheap wins: OCR, embeddings, small
+  LLMs and VLMs, speech, time-series.
+- **frontier** (opt-in, `VALARK_SCOUT_SWEEPS=small,speech-vision,frontier`): open-weight releases with
+  ≥ 20B parameters from the last 18 months, from a lab or heavily liked. No size cap; the
+  planner's value-per-byte order fills them last, so they only land on a big disk.
+
+Both skip gated and private repos (no accepted licence), quantised / converted re-uploads
+(the originals are kept), speculative-decoding heads, abliterated / uncensored fine-tunes,
+`-base` checkpoints and any repo the curated catalog already names. The small and frontier
+sweeps only consider repos that publish `safetensors` metadata (their size pre-filter needs
+it); the speech-vision sweep sizes every candidate from its file list instead.
+
+How they rank: speech-vision rows get about 600–700, small rows 300–550, frontier 200–400,
+against 480–900 for the curated rows, and reuse the curated category words (`small-llm`,
+`tiny-vlm`, `embed`, `speech-asr`, `detection`, …; captioners are `captioning`, anything else
+`scouted`). They never take a diversity slot and are not shielded from eviction as a
+category's only item, and they skip the small-valuable phase (their tiny size would win it
+outright). They are planned in the final fill phase by intrinsic value: after every curated
+item valued above them (the setup-assistant LLMs, for example), before curated items valued
+below them, with speech and vision picks ahead of the other scouted rows. Under disk
+pressure scouted rows are evicted before any curated item. A curated model too big for the
+small-valuable phase and valued below a speech-vision pick (`qwen25-coder-7b`, 670) can wait
+behind it on a small disk; raise its value in `data/models-extra.tsv` if it must come first.
+
+A scout that cannot reach every listing never replaces a good cache (the ZIM catalog's completeness rule); a failed attempt waits
+`VALARK_SCOUT_RETRY` (1 day) before the next, a run is capped at `VALARK_SCOUT_TIMEOUT` (30 min), and the scout's stderr is kept next to the
+cache as `models-scouted.tsv.err`. `VALARK_SCOUT=0` turns it off and ignores the cache.
+Rows are fetched with `hf download --include '*'` like any `repo` row; a whole-repo pull
+counts as present only once it finished (`.valark-complete` stamp). Tests:
+`tests/test-hf-scout.sh`.
+
+### Standalone mirrors (run by hand, not part of `fill` / the loop)
+
+These catalogs are read by their own CLIs, which you run (or schedule) yourself; `librarian.sh
+fill` and `loop.sh` do not plan them.
+
+| Source | File | Notes |
+|--------|------|-------|
+| Developer + security stack | `data/dev-stack.tsv` | The kit to build, run and secure software offline: every supported Python (python.org installers + relocatable builds + a top-1000 PyPI wheelhouse), compilers (LLVM, GCC/GNU sources, MinGW, Go, Rust, JDK, CMake…), decompilers/RE (Ghidra, radare2/rizin/Cutter, x64dbg, jadx, ILSpy, Frida…), security tools (Nmap, Wireshark, ZAP, Metasploit, nuclei, Trivy, Zeek, Suricata, Kali ISOs…), containers + Kubernetes (Docker static, Podman, kubeadm/kubectl, MicroK8s snaps, k3s, Helm…), cloud/IaC, S3-compatible storage (MinIO source, SeaweedFS, RustFS, versitygw, rclone) and databases (Neo4j + Relate, Milvus, Qdrant, DuckDB, ClickHouse, Valkey, OpenSearch…). Current release of each, resolved live by `scripts/lib/release_mirror.py` (see below). |
+| Offline .deb sets | `data/apt-sets.tsv` | Server + developer/security package sets resolved with all dependencies per Ubuntu suite+arch by `scripts/lib/apt_offline.py build --suite noble --arch arm64 --set lamp --dest <dir>` → a flat local APT repo for a LAN with no internet. |
+| Upstream source repos | `data/source-repos.tsv` | Full-history git bundles of 200+ upstream repos via `scripts/lib/git_bundle_mirror.py plan\|mirror\|verify` (see [TOOLS.md](TOOLS.md#content-mirrors)). |
 
 ### Developer + security stack (`release_mirror.py`)
 
@@ -238,7 +300,14 @@ scripts/librarian.sh fill --time 1800 --max-bytes 53687091200   # bounded chunk 
 scripts/librarian.sh verify        # integrity-check managed files; requeue bad
 scripts/librarian.sh evict --need 107374182400   # free space (raw bytes), lowest value/byte first
 scripts/librarian.sh refresh       # re-pull the live ZIM catalog
-scripts/librarian.sh maintain      # refresh + verify + bounded top-up + report (loop core)
+scripts/librarian.sh scout         # scout Hugging Face for new models now (weekly otherwise)
+scripts/librarian.sh maintain      # refresh (+ weekly scout) + verify + bounded top-up + report + static pages (loop core)
+scripts/librarian.sh site          # rewrite the static browse pages (index.html + browse/)
+scripts/librarian.sh catalog model # not-yet-downloaded items (content|model|installer|all; web browse feed)
+scripts/librarian.sh request model <id>   # pin + fetch ONE item now (content|model|tool), evicting unpinned items to fit
+scripts/librarian.sh pin content <id>     # keep an item: pins are never evicted
+scripts/librarian.sh unpin <id>    # files kept, but evictable again
+scripts/librarian.sh pins --refill # list pins (--refill re-fetches any that went missing)
 ```
 
 Downloads prefer **aria2** (8 connections, ~3x faster on per-connection-throttled
@@ -254,6 +323,53 @@ holes. Failed attempts keep the partial + control file so the next cycle resumes
 where it left off; abandoned partials are garbage-collected by `verify` after
 `VALARK_PARTIAL_MAX_AGE_DAYS` (default 14).
 
+## Static browse pages (no server)
+
+`scripts/librarian.sh site` (and `maintain`, at most every `VALARK_STATIC_SITE_HOURS`, default 6)
+runs `scripts/lib/static_site.py`, which writes a **static catalog** of the archive at
+`<VALARK_HOME>`: `index.html`, one card-grid page per section (`browse/<section>.html`) and one
+detail page per item (`browse/item/*.html`). Plain HTML with inline CSS, **relative links only**,
+no external URLs and no JavaScript requirement (a search box and group filter appear when scripts
+run). Open `index.html` from a file explorer, an SMB share, a USB disk or any dumb file server.
+
+Every card has a picture and a description, from the best source available:
+
+| Section | Picture | Description |
+|---------|---------|-------------|
+| Tools & apps (one card per tool, all platforms) | the web UI's logo; screenshots on the detail page | the web UI's `TOOLS` / `TOOL_META`: description, overview, features, CLI, maker, licence |
+| Library (ZIM) | the ZIM's own 48x48 illustration | the ZIM's own title + description (read from its header and directory with a few small reads; uncompressed, xz and, with the `zstd` CLI, zstd clusters, each decoded once and capped at 4 MB), the web UI's `CONTENT_LIBRARY` overview, article counts from a cached Kiwix catalog |
+| AI models, datasets | the first image the model / dataset card shows from its own repo (a real PNG / JPEG / GIF / WebP file inside the repo: symlinks out of it and upstream SVGs are refused) | the card's first paragraphs, licence and pipeline tag; curated `MODEL_FAMILIES` text for the classic `llm/` folders |
+| Installers, developer stack, sources | generated badge | `data/installers.tsv`, `data/dev-stack.tsv`, `data/source-repos.tsv` notes |
+
+Anything without a picture gets a generated badge (initials or a modality glyph). Pictures are copied
+into `browse/thumbs/` (deduplicated, size-capped) so the catalog works without the repo next to it.
+
+Only section directories are scanned (`state/`, `private/` and the repo's own code never appear);
+`*.part`, `*.tmp`, `.source.json` sidecars and dot files are skipped. Big trees stay cheap:
+`--max-rows` (3000 cards per section), `--max-files` (60 files per detail page), `--max-details`
+(8000 detail pages), `--meta-limit` (4000 README reads, 64 KiB each), `--zim-limit` (400 ZIMs
+opened per run; results are cached in `browse/zim-meta.json`, so later runs fill in the rest) and
+`--walk-limit` (the page then says its totals are partial). Pages are written temp + rename and
+unchanged files are not rewritten: only `index.html` and `summary.json` carry the generation time, so
+a refresh with nothing new touches two files. Stale detail pages, thumbnails and an interrupted run's
+temp files are removed.
+
+**What to share.** The pages sit in `<VALARK_HOME>` (`<DATA_ROOT>/val-ark`), but models live in
+`<DATA_ROOT>/models`, next to it, and the model links climb out to `../models`. Share (or open) the
+whole `<DATA_ROOT>` so those links resolve; a share of `val-ark/` alone shows the model cards but
+their file links break. A single-disk dev box keeps everything in the repo, so nothing climbs out.
+
+**Cost.** `librarian.sh site` walks the section folders (`os.scandir` + one `stat` per file) on every
+refresh. That is quick on a local disk; on a very large tree on a slow disk raise
+`VALARK_STATIC_SITE_HOURS`, or run `static_site.py` yourself with a `--listing`.
+
+A mirror that keeps its own index can skip the walk entirely: `--listing FILE` takes
+`path<TAB>size[<TAB>mtime]` rows (relative to `--root`) for what is present, `--pending FILE` the same
+for what is still queued (shown as "queued" chips), and `--walk NAME` adds a section the listing does
+not cover. `VALARK_STATIC_SITE=0` turns the refresh off. Opening `web-ui/index.html` over `file://`
+shows a hint linking to the static catalog, since the dynamic UI needs its server. Tests:
+`tests/test-static-site.sh`.
+
 ## The 24/7 loop
 
 `scripts/loop.sh once` runs one maintenance cycle:
@@ -268,24 +384,30 @@ where it left off; abandoned partials are garbage-collected by `verify` after
    (LAN + VPN interfaces; loopback untouched),
 5. **keep enabled community services running** (`VALARK_SERVICES` in `.env` —
    chat, mail, forum, paste),
-6. **refresh the live catalog** → content links self-heal (no stale dates),
-7. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
+6. **self-mirror** — package Val Ark's own source under `<data>/sources/val-ark/`
+   (`scripts/mirror-self.sh`) so a neighbour can bootstrap a node over the LAN,
+7. **refresh the live catalog** → content links self-heal (no stale dates),
+8. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
    are transient, not dead), web-ui assets, symlinks → `state/linkcheck.txt`,
-8. **integrity verify** → requeue corrupt/short downloads,
-9. **top-up fill** (bounded; skipped if a fill already runs),
-10. **weekly tool refresh** — re-run the tool mirror so apps track their latest
+9. **integrity verify** → requeue corrupt/short downloads,
+10. **re-fill pinned requests** — user-requested items that went missing come back
+    before the generic fill,
+11. **top-up fill** (bounded; skipped if a fill already runs),
+12. **weekly tool refresh** — re-run the tool mirror so apps track their latest
     upstream versions (`VALARK_TOOL_REFRESH_DAYS`, default 7; a failed pass
     retries in a day),
-11. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
+13. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
     real ZIM, a tiny LLM infers, the web API answers, and each configured remote
-    mesh node (`VALARK_FLEET` in `.env`) is reachable and sees the shared content
-    (plus a Playwright UI smoke when installed),
-12. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
+    mesh node (`VALARK_FLEET` in `.env`) is reachable and sees the shared content,
+14. **UI smoke** — a Playwright pass over the dynamic controls (when installed),
+15. **moderation sweep** — screen plain-file community uploads on-device and
+    quarantine anything not cleanly allowed (`scripts/lib/mod-sweep.sh`, fail-closed),
+16. **report + coordination** — the librarian's `maintain` (writes
+    `state/health.json`: disk + per-category coverage) and a fleet coordination drop
+    (`state/coordination/`),
+17. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
     snapshot) and append any genuine repairs to `state/heal-events.jsonl` (the feed
-    behind the Health page), plus a fleet coordination drop (`state/coordination/`).
-    This is **distinct from `state/health.json`**, which the librarian's own
-    `maintain` command writes (disk + per-category coverage); the loop invokes
-    `maintain` as part of steps 6/8/9 above, so both files land each cycle.
+    behind the Health page). This is **distinct from `state/health.json`**.
 
 Install it as a durable, reboot-surviving job:
 

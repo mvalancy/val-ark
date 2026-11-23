@@ -4,7 +4,9 @@ Val Ark is an offline, LAN/tailnet appliance — it is **not** meant to be expos
 internet. Security model, access controls, and the trust posture live in
 [`docs/design/access-identity.md`](docs/design/access-identity.md),
 [`docs/design/deployment.md`](docs/design/deployment.md), and
-[`docs/knowledge/governance.md`](docs/knowledge/governance.md).
+[`docs/knowledge/governance.md`](docs/knowledge/governance.md). The latest code audit and its open findings
+are in [`docs/SECURITY-AUDIT.md`](docs/SECURITY-AUDIT.md); LAN HTTPS (the offline local CA) is described in
+[`docs/ENCRYPTION.md`](docs/ENCRYPTION.md).
 
 ## Reporting a vulnerability
 

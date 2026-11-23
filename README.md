@@ -105,7 +105,7 @@ graph TB
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/librarian-dark.svg">
-  <img src="docs/img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Diversity first, then small and valuable, then fill, then trade up.">
+  <img src="docs/img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Essentials first, then diversity, small and valuable, fill, then trade up.">
 </picture>
 
 Val Ark fills a disk of **any size** by itself and keeps it healthy. The
@@ -124,7 +124,8 @@ planner scores candidates by value-per-byte, downloading in this curated order:
 }}}%%
 flowchart TD
     CAT["Live catalogs<br/>Kiwix OPDS + models + installers"] --> PLAN["planner.py<br/>score by value / byte"]
-    PLAN --> P1["1. Diversity<br/>one of each kind first"]
+    PLAN --> P0["0. Grid-down essentials<br/>smallest variant first"]
+    P0 --> P1["1. Diversity<br/>one of each kind first"]
     P1 --> P2["2. Small valuable<br/>cheap high-value files"]
     P2 --> P3["3. Fill remaining<br/>up to disk reserve"]
     P3 --> P4["4. Evict for better<br/>swap low-value for higher"]
@@ -133,10 +134,17 @@ flowchart TD
 
 Downloads use **aria2** multi-connection transfers (~3x faster, curl fallback) —
 resumable, retried, size-verified, atomic-renamed, guarded by a single `flock`.
-A **24/7 loop** (`loop.sh`) refreshes catalogs (so content links never go stale),
-checks and repairs links, verifies file integrity, tops up the fill, and runs
-**functional verification** (`verify.sh`) confirming tools, kiwix, a tiny LLM, and
-the web API actually run — locally and across SSH-reachable mesh nodes.
+Phase **0** front-loads the grid-down essentials in [`data/essentials.tsv`](data/essentials.tsv)
+(water, medicine, food, repair, radio, a tiny setup assistant — the smallest variant of
+each, plus extras for the owner's profile) before anything else is planned.
+
+A **24/7 loop** (`loop.sh`) repairs symlinks, keeps the web server and enabled community
+services up, refreshes catalogs (so content links never go stale), checks and repairs
+links, verifies file integrity, mirrors its own source for LAN self-replication, tops up
+the fill and re-fills pinned requests, refreshes mirrored tools weekly, runs
+**functional verification** (`verify.sh`) confirming tools, kiwix, a tiny LLM, and the
+web API actually run — locally and across SSH-reachable mesh nodes — and sweeps uploads
+through the on-device moderation check.
 
 ```bash
 cp .env.example .env            # set VAL_ARK_DATA=/your/disk (git-ignored)
@@ -145,35 +153,61 @@ cp .env.example .env            # set VAL_ARK_DATA=/your/disk (git-ignored)
 ./scripts/loop.sh install 30    # flock-guarded 24/7 self-healing cron (every 30 min)
 ```
 
-Commands: `status | plan | fill | verify | evict | maintain | refresh`.
+Commands: `status | plan | fill | verify | evict | maintain | refresh | scout | catalog |
+request <content|model|tool> <id> | pin | unpin | pins [--refill] | site`.
 See **[docs/LIBRARIAN.md](docs/LIBRARIAN.md)** for the full design.
 
 ## What's Included
 
 Val Ark mirrors **50+ apps and tools** across four platforms (`scripts/tools/*.sh`),
-plus a value-per-byte **AI model** set and offline **content** — roughly **250 catalog
-items** in all, every one browsable and one-click installable from the web UI. The
-headline tools, by category:
+plus a value-per-byte **AI model** set, offline **content** from the live Kiwix library,
+and an offline **build & server kit** — hundreds of catalog items in all, the apps and
+models browsable and one-click installable from the web UI. The headline tools, grouped
+as the web UI groups them:
 
 ### AI Inference
-llama.cpp, whisper.cpp, stable-diffusion.cpp, BitNet.cpp, Ollama, ONNX Runtime, Vosk, Piper TTS
+llama.cpp, whisper.cpp, stable-diffusion.cpp, BitNet.cpp, ONNX Runtime, Vosk, Piper TTS
 
 ### AI Platforms
-n8n, Milvus, ComfyUI, Open WebUI
+Ollama, n8n, Milvus, ComfyUI, Open WebUI
 
-### Creative
-Blender, FreeCAD, KiCad, Godot, GIMP, Inkscape, Kdenlive, Calibre
+### Creative & Engineering
+Blender, FreeCAD, KiCad, Godot, GIMP, Inkscape, Kdenlive, Bambu Studio, cad-agent
 
 ### Media
-FFmpeg, VLC, Audacity, yt-dlp
+FFmpeg, VLC, Audacity, yt-dlp, Calibre
+
+### Community Apps
+IRC Chat, Mail, Message Boards, Files & Pastebin (see [Community & Comms](#community--comms))
 
 ### Infrastructure
 SeaweedFS, Syncthing, Coolify, Kiwix, Tailscale, Mosquitto, MQTT Explorer,
-Redis, PostgreSQL, InfluxDB, Grafana, Telegraf, SQLite, btop, tmux
+Redis, PostgreSQL, InfluxDB, Grafana, Telegraf, SQLite
 
 ### Dev Tools
-Helix, VSCodium, Miniforge, python-build-standalone, Claude Code,
+Helix, VSCodium, Miniforge, python-build-standalone, Claude Code, btop, tmux,
 Dev CLI Bundle (ripgrep, fd, bat, jq, fzf, lazygit)
+
+### Offline Build & Server Kit
+Mirrors for rebuilding and serving software with no internet. The first three are
+standalone CLIs you run (or schedule) yourself, outside the fill and the loop; the last
+two ride the tool mirrors:
+- **Developer + security stack** — the current release of 200+ projects (toolchains,
+  Python, compilers, decompilers, security tools, databases, containers/Kubernetes, S3
+  storage) for every platform, from [`data/dev-stack.tsv`](data/dev-stack.tsv) via
+  `scripts/lib/release_mirror.py` ([details](docs/LIBRARIAN.md#developer--security-stack-release_mirrorpy)).
+- **Offline APT repos** — dependency-complete `.deb` sets for any Ubuntu suite and
+  architecture, from [`data/apt-sets.tsv`](data/apt-sets.tsv) via `scripts/lib/apt_offline.py`,
+  served as a flat repo (`deb [trusted=yes] file:<dir> ./`).
+- **Source archive** — full-history git bundles of 200+ upstream repos from
+  [`data/source-repos.tsv`](data/source-repos.tsv) via `scripts/lib/git_bundle_mirror.py`
+  ([details](docs/TOOLS.md#content-mirrors)).
+- **Container images** — one platform of an image as a `docker load` tar, no Docker
+  needed on the mirror host (`scripts/lib/oci_pull.py`), pulled by `scripts/tools/cad-agent.sh`
+  as part of the default tool set and its weekly refresh.
+- **cad-agent references** — a private, content-addressed archive of cad-agent's
+  reference library (`scripts/lib/references_mirror.py`), via the opt-in
+  `scripts/tools/cad-agent-references.sh`.
 
 ### Content Library
 Offline ZIM files (Wikipedia and much more) served via Kiwix, selected live from
@@ -324,6 +358,18 @@ exist in `content/zim/`, the server auto-launches kiwix-serve (loopback-only on
 internal port 8888) and proxies it same-origin at `/kiwix/` for offline Wikipedia
 browsing without internet access.
 
+### No server? Browse the static catalog
+
+A box or NAS that is only reachable as a **plain file share** (SMB, a USB disk, `python3 -m
+http.server`) can't run `server.js`. `./scripts/librarian.sh site` (also run by every `maintain`)
+writes a static catalog at the archive root (`index.html`, a card grid per section and a detail
+page per item): plain HTML with relative links that works over `file://`. Every model, ZIM, tool,
+installer, dataset and source gets a picture (logo, ZIM illustration, model-card image or a badge),
+a description (web UI text, ZIM metadata, model card), its size and licence, and links straight to
+the files. Opening
+`web-ui/index.html` without a server now points there too. See
+[docs/LIBRARIAN.md](docs/LIBRARIAN.md#static-browse-pages-no-server).
+
 ## Project Structure
 
 Data dirs (`tools/`, `models/`, `content/`, `sources/`, ...) are symlinked to the
@@ -332,37 +378,58 @@ resolved data root, so the layout below works whether on one disk or a big mount
 ```
 val-ark/
 ├── start.sh                  # Entry point: interactive menu + CLI
+├── bootstrap.sh              # Offline LAN installer handed out at /bootstrap.sh
 ├── .env.example              # Config template -> copy to .env (gitignored)
+├── VERSION                   # Single source of truth for the release version
 ├── scripts/
 │   ├── server.js             # Zero-dep web UI server + JSON API + SSE
-│   ├── librarian.sh          # Self-fill engine: status|plan|fill|verify|evict|maintain|refresh
+│   ├── valark                # Admin & recovery CLI (passcode, Use Mode, recovery)
+│   ├── librarian.sh          # Self-fill engine: status|plan|fill|verify|evict|maintain|
+│   │                         #   refresh|scout|catalog|request|pin|unpin|pins|site
 │   ├── loop.sh               # 24/7 self-healing + verification loop (cron)
 │   ├── verify.sh             # Functional "does it actually run?" checks (local + fleet)
-│   ├── lib/
-│   │   ├── valark-env.sh     # Data-root resolution (.env / autodetect)
-│   │   ├── catalog.sh        # Unifies live catalog sources into candidates
-│   │   ├── kiwix_catalog.py  # Fetch live Kiwix OPDS catalog
-│   │   └── planner.py        # Diversity-first value/byte fill planner
-│   ├── update.sh             # Update tools, apps, assets, sources
+│   ├── mirror-self.sh        # Mirror Val Ark's own source for LAN self-replication
+│   ├── lib/                  # Shared building blocks (see scripts/README.md):
+│   │   ├── valark-env.sh     #   data-root resolution (.env / autodetect)
+│   │   ├── catalog.sh        #   unifies live catalog sources into candidates
+│   │   ├── kiwix_catalog.py  #   live Kiwix OPDS catalog
+│   │   ├── planner.py        #   essentials-first, value/byte fill planner
+│   │   ├── *_mirror.py, apt_offline.py, oci_pull.py
+│   │   │                     #   mirror CLIs: dev stack, APT, git bundles (run by hand);
+│   │   │                     #   Lastbook, references, container images (via tools/*.sh)
+│   │   ├── moderation.sh, mod-sweep.sh   # fail-closed on-device moderation
+│   │   ├── auth.js, commission.js        # admin identity + first-boot commissioning
+│   │   └── tls.sh            #   offline local CA for LAN HTTPS
+│   ├── services/             # Community services (chat, mail, forum, paste, SeaweedFS)
+│   ├── tools/                # Per-tool download scripts (50+)
+│   ├── docs/popup_art.py     # Generates the animated pop-up-book doc art
+│   ├── update.sh             # Ollama installers, logos/assets, new tool releases
 │   ├── download-tools.sh     # Download AI inference engines
 │   ├── download-models.sh    # Download AI models by tier
 │   ├── download-zims.sh      # Download ZIM content
 │   ├── setup.sh              # Install dependencies
 │   ├── status.sh             # Show installed inventory
 │   ├── monitor.sh            # Watch active downloads
+│   ├── audit-tools.sh        # What is mirrored vs needs attention
+│   ├── retry-failed.sh       # Retry failed model downloads
 │   ├── screenshots.sh        # Capture screenshots & recordings
+│   ├── optimize-images.py    # Resize/compress web-UI screenshots + logos
 │   ├── release.sh            # Create git release tags
-│   └── tools/                # Per-tool download scripts (50 tool scripts)
-├── data/
-│   ├── installers.tsv        # OS / router / netboot install media catalog
-│   └── models-extra.tsv      # Diversity-expansion model catalog
+│   └── uninstall.sh          # Remove Val Ark config (keeps models + tools)
+├── data/                     # Catalogs (pipe-delimited TSV; schemas in data/AGENTS.md)
+│   ├── essentials.tsv        # Grid-down essentials, planned first (phase 0)
+│   ├── installers.tsv        # OS / router / netboot install media
+│   ├── models-extra.tsv      # Diversity-expansion model catalog
+│   ├── dev-stack.tsv         # Developer + security stack (release_mirror.py)
+│   ├── apt-sets.tsv          # Offline APT package sets (apt_offline.py)
+│   └── source-repos.tsv      # Upstream repos kept as git bundles (git_bundle_mirror.py)
 ├── web-ui/                   # Web interface + assets
 ├── tests/
-│   ├── run-all.sh            # Bash test runner
-│   ├── test-*.sh             # Validation scripts (deps, tools, models, urls)
-│   └── screenshots/          # Playwright suite (server + web-ui + install-icon + ui-exercise specs)
-└── docs/                     # ARCHITECTURE, TOOLS, PLATFORMS, OFFLINE,
-                              #   MODEL_INVENTORY, LIBRARIAN
+│   ├── run-all.sh            # One runner -> offline HTML report
+│   ├── test-*.sh             # Bash validators (50+)
+│   ├── lib/, fixtures/       # Shared test helpers + offline fixtures
+│   └── screenshots/          # Playwright suite (12 specs)
+└── docs/                     # Guides, design/, knowledge/, img/ (map: docs/README.md)
 ```
 
 Downloaded `tools/`, `models/`, `content/`, `sources/`, and `assets/` live on the
@@ -388,7 +455,7 @@ Governance: [CLAUDE.md](CLAUDE.md) · [AGENTS.md](AGENTS.md) · [CONTRIBUTING.md
 </picture>
 
 One runner covers every layer and renders a **self-contained, offline HTML report**
-(`tests/results/report.html`) — bash validators, a Playwright suite (300+ tests),
+(`tests/results/report.html`) — bash validators, a Playwright suite (hundreds of tests; the per-tool specs scale with the catalog),
 community-services e2e, and fresh-Ubuntu (22.04/24.04/26.04) setup VMs. See
 [tests/README.md](tests/README.md).
 
@@ -415,7 +482,9 @@ shipped series). Bump `VERSION` in the release commit, then on `main`'s tip:
 ./scripts/release.sh --push         # Create and push (triggers the GitHub release)
 ```
 
-The GitHub Actions workflow generates a changelog from commits and creates a release automatically.
+The GitHub Actions workflow generates a changelog from commits and creates the release
+automatically, attaching the offline self-replication artifacts: `val-ark-<version>.bundle`
+(git bundle), the source `.tar.gz` and `SHA256SUMS`.
 
 ## License
 

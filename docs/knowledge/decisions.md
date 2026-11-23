@@ -841,3 +841,22 @@ domains, loopback, and `$`/`{}`/`<>` placeholders pass automatically.
   whole fill before the maxi. The waste is bounded by the small variants' size (typically ~10% of the
   full ones), while getting the critical small copy onto the disk fast is the point of phase 0, so the
   behavior stays as is (documented in `docs/LIBRARIAN.md`).
+
+## 2026‑11 — Static browse pages for server-less archives (#257)
+
+- A NAS or USB disk is often reachable only as a plain file share; opening `web-ui/index.html` there
+  showed "nothing installed" because the SPA needs `server.js`. Decision: generate a **static**
+  catalog (`scripts/lib/static_site.py`, `librarian.sh site`, refreshed by `maintain`) instead of
+  teaching the SPA to read the disk: it works over `file://`, SMB and any dumb HTTP server.
+- Relative links only, no external URLs, no JS requirement: the page has to open on an offline
+  laptop pointed at a share. Names are escaped and links percent-encoded (archive file names come
+  from upstream and are untrusted).
+- Scale over completeness: per-section row caps, per-entry file caps and a walk limit, plus a
+  `--listing` TSV input so a mirror that already keeps an index never walks millions of files over a
+  slow share. Unchanged pages are not rewritten (fewer writes on network shares).
+- A file listing is not a catalog: every card carries a picture and a human description. Sources in
+  order: the web UI's own data tables (read from `web-ui/index.html` by a small JS-literal reader, so
+  there is one source of truth), the item's own metadata (ZIM `M/Title`, `M/Description`,
+  `M/Illustration_48x48@1`; model / dataset cards), the `data/*.tsv` notes, then a generated badge.
+  ZIM metadata is read with a few small random reads (header, URL-pointer binary search, one cluster)
+  instead of a ZIM library, and cached, because the archive may sit on a slow share.

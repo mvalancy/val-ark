@@ -35,12 +35,13 @@ directories, and every directory that is not a section (state/, private/, the re
 Pages are written with temp + rename (no chmod: network shares refuse it); art is copied only
 when it changed. Exit 0 ok, 1 root missing or output unwritable, 64 usage.
 """
-import argparse, heapq, html, json, os, re, sys, time, urllib.parse
+import argparse, fnmatch, heapq, html, json, os, re, sys, time, urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 
-# name, default dir, title, blurb, art scene, entry depth per first path component ('*' = default)
+# name, default dir, title, blurb, art scene, entry depth by path prefix: a key is matched (fnmatch) against
+# the same number of leading path components, the longest matching key wins, '*' is the default
 SECTIONS = [
     ('models', 'models', 'AI models',
      'Language, speech, vision and image models. Each row is one model folder; GGUF files run in '
@@ -61,7 +62,7 @@ SECTIONS = [
      'Upstream release assets and offline package sets.', 'architecture', {'releases': 3, '*': 2}),
     ('datasets', 'datasets', 'Datasets',
      'Training and reference datasets: robotics, agriculture, weather, climate, earth observation.',
-     'nas', {'open-data': 4, '*': 3}),
+     'nas', {'open-data/*/huggingface': 5, 'open-data': 4, '*': 3}),
     ('sources', 'sources', 'Source code', 'Source archives and git bundles of the projects in the archive.',
      'community', {'github': 3, '*': 1}),
 ]
@@ -111,9 +112,18 @@ class Section:
         self.entries = {}
         self.truncated = False
 
+    def depth_for(self, parts):
+        best, d = -1, self.depth['*']
+        for key, depth in self.depth.items():
+            kp = key.split('/')
+            if key != '*' and len(kp) < len(parts) and len(kp) > best and \
+                    all(fnmatch.fnmatchcase(p, k) for p, k in zip(parts, kp)):
+                best, d = len(kp), depth
+        return d
+
     def entry_for(self, rel):
         parts = rel.split('/')
-        d = self.depth.get(parts[0], self.depth['*']) if len(parts) > 1 else 1
+        d = self.depth_for(parts) if len(parts) > 1 else 1
         if len(parts) <= d:
             return self.entries.setdefault(rel, Entry(rel, False)), parts[-1]
         key = '/'.join(parts[:d])

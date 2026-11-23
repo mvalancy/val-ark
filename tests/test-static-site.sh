@@ -124,6 +124,14 @@ check "listing: state/, .. and .part rows ignored" '! grep -qE "secret|escape|x.
 check "--walk adds the uncovered section" '[ -f "$T/l/browse/tools.html" ] && grep -q ">btop</a>" "$T/l/browse/tools.html"'
 check "listing: ZIM nopic explained" 'grep -q "X (en) · text only · 2025-02" "$T/l/browse/content.html"'
 
+# datasets: depth by path prefix (open-data/<topic>/huggingface/<org>/<repo> is one entry)
+printf 'datasets/open-data/weather/huggingface/org1/ds1/data/a.parquet\t10\t\ndatasets/open-data/weather/noaa/ghcnd/x.csv\t5\t\ndatasets/robotics/lerobot/set1/d/e.bin\t7\t\n' > "$T/ds.tsv"
+python3 -I "$PY" --root "$A" --out "$T/ds" --listing "$T/ds.tsv" --now 1700000000 >/dev/null 2>&1
+DS="$T/ds/browse/datasets.html"
+check "datasets: HF open-data repo is one entry" 'grep -q ">weather/huggingface/org1/ds1</a>" "$DS"'
+check "datasets: other open-data sources four levels" 'grep -q ">weather/noaa/ghcnd</a>" "$DS"'
+check "datasets: robotics three levels" 'grep -q ">lerobot/set1</a>" "$DS"'
+
 # exit codes
 python3 -I "$PY" --root "$T/nope" >/dev/null 2>&1; rc=$?
 check "missing root -> 1" '[ "$rc" -eq 1 ]'

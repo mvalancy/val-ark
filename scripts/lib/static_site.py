@@ -57,7 +57,7 @@ SECTIONS = [
      'in transformers, vLLM or similar.', 'models', {'huggingface': 3, '*': 2}),
     ('content', 'content', 'Library',
      'Offline encyclopedias, manuals, Q&A sites and maps. ZIM files open in Kiwix (desktop, Android or '
-     'kiwix-serve).', 'knowledge', {'*': 2}),
+     'kiwix-serve).', 'knowledge', {'lastbook': 1, '*': 2}),
     ('tools', 'tools', 'Tools & apps',
      'Portable programs for Linux (x86_64 + arm64), macOS and Windows.', 'tools', {'*': 2}),
     ('installers', 'installers', 'OS installers',
@@ -448,6 +448,29 @@ def zim_note(name):
     return ' '.join(bits)
 
 
+def zim_title(z):
+    """A readable title from the file name when the ZIM itself can't be read (not downloaded yet)."""
+    if not z:
+        return ''
+    proj = z['proj']
+    if proj.endswith('.stackexchange.com'):
+        base = proj[:-len('.stackexchange.com')].replace('-', ' ').title() + ' Stack Exchange'
+    elif '.' in proj:
+        base = proj
+    else:
+        base = proj.replace('_', ' ').replace('-', ' ').title()
+    topic = z['topic'] if z['topic'] not in ('', 'all') else ''
+    return f'{base} — {topic.replace("_", " ").replace("-", " ")}' if topic else base
+
+
+def zim_group(z):
+    if not z:
+        return 'other'
+    if z['proj'].endswith(('stackexchange.com', 'stackoverflow.com', 'superuser.com', 'serverfault.com', 'askubuntu.com')):
+        return 'stack_exchange'
+    return 'other' if '.' in z['proj'] else z['proj']
+
+
 def kiwix_counts(root):
     """name|flavour -> (category, articles, media) from a cached Kiwix catalog, if any."""
     out = {}
@@ -500,6 +523,9 @@ def card(text):
     for para in re.split(r'\n\s*\n', text):
         p = para.strip()
         if not p or p[0] in '#<|![>`-*=+' or p.startswith(('```', '[!', '[![')):
+            continue
+        if re.match(r'^(import |from \S+ import|pip |\$ |>>>|def |class |git clone|python |curl )', p) or \
+                sum(c.isalpha() or c == ' ' for c in p) < 0.75 * len(p):
             continue
         p = clean_md(p)
         if len(p) < 40:
@@ -556,6 +582,19 @@ def initials(name):
 
 
 # --------------------------------------------------------------------------- the model
+TOOL_SUFFIX = re.compile(r'(?i)(\.(tar\.(zst|gz|xz|bz2)|tgz|zip|exe|dmg|appimage|msi|txt|md|readme)|[-_]src|[-_]v?\d[\w.]*)$')
+
+
+def tool_key(name):
+    """tools/<platform>/<name>: 'blender.tar.zst.README.txt', 'maddy-0.9.7-src' -> 'blender', 'maddy'."""
+    name = name.split('.stale-', 1)[0]
+    while True:
+        new = TOOL_SUFFIX.sub('', name)
+        if new == name or not new:
+            return name
+        name = new
+
+
 class Entry:
     __slots__ = ('key', 'is_dir', 'bytes', 'files', 'mtime', 'top', 'pending_bytes', 'pending_files',
                  'readme', 'license', 'names', 'platforms')
@@ -589,8 +628,7 @@ class Section:
         """-> (entry, path inside the entry, platform)."""
         parts = rel.split('/')
         if self.name == 'tools' and len(parts) >= 2 and parts[0] in PLATFORMS:
-            tool = re.sub(r'\.(tar\.(zst|gz|xz)|zip|exe|dmg|appimage|msi|README\.txt)$', '', parts[1], flags=re.I)
-            tool = tool.split('.stale-', 1)[0]
+            tool = tool_key(parts[1])
             e = self.entries.setdefault(tool, Entry(tool, True))
             return e, '/'.join(parts[1:]), parts[0]
         d = self.depth_for(parts) if len(parts) > 1 else 1
@@ -601,6 +639,8 @@ class Section:
         return e, '/'.join(parts[d:]), None
 
     def add(self, rel, size, mtime, max_files, pending=False):
+        if self.name == 'tools' and re.fullmatch(r'[^/]+/(INSTALL|README)(\.(txt|md))?', rel, re.I):
+            return
         e, inner, plat = self.entry_for(rel)
         if pending:
             e.pending_bytes += size; e.pending_files += 1
@@ -988,7 +1028,7 @@ class Builder:
         info['sub'] = zim_note(fn)
         cur = self.cur.content_for(fn)
         meta = self.zim_info(os.path.join(s.path, e.key), fn, e.bytes)
-        info['title'] = meta.get('title') or (cur or {}).get('name') or fn[:-4]
+        info['title'] = meta.get('title') or (cur or {}).get('name') or zim_title(z) or fn[:-4]
         info['desc'] = meta.get('description') or (cur or {}).get('desc') or ''
         if cur:
             det = cur.get('details') or {}
@@ -998,7 +1038,6 @@ class Builder:
                 info['extra'] += '<h3>What is inside</h3><ul>' + ''.join(f'<li>{esc(x)}</li>' for x in feats[:10]) + '</ul>'
         k = self.kiwix.get(f'{z.get("name")}|{z.get("flavour")}')
         if k:
-            info['chips'].append(k[0])
             try:
                 info['facts'].append(('Articles', f'{int(k[1]):,}'))
                 if int(k[2]):
@@ -1018,7 +1057,7 @@ class Builder:
             info['icon'] = self.badge(initials(z.get('proj', fn)), z.get('proj', fn), z.get('lang', ''))
         info['extra'] += ('<h3>How to open</h3><p>Open the file in Kiwix (desktop or Android), or serve it on the '
                           f'network with <code>kiwix-serve {esc(fn)}</code>.</p>')
-        info['group'] = z.get('proj', '') if z else ''
+        info['group'] = (k[0] if k else '') or zim_group(z)
 
     def zim_info(self, path, fn, size):
         key = f'{fn}|{size}'
@@ -1151,10 +1190,12 @@ class Builder:
             spb = sum(e.pending_bytes for e in entries); spf = sum(e.pending_files for e in entries)
             summary['sections'].append({'name': s.name, 'title': s.title, 'entries': len(entries), 'bytes': sb, 'files': sf,
                                         'pending_bytes': spb, 'pending_files': spf, 'truncated': s.truncated})
-            listed = entries[:a.max_rows]
+            # what is on disk first, then what is still queued; cards then group by kind
+            listed = sorted(entries, key=lambda e: not e.files)[:a.max_rows]
+            described = [(e, self.describe(s, e)) for e in listed]
+            described.sort(key=lambda t: (t[1]['group'].lower(), not t[0].files, t[1]['title'].lower()))
             cards, groups, last = [], [], None
-            for e in listed:
-                info = self.describe(s, e)
+            for e, info in described:
                 g = info['group']
                 if g != last and g:
                     cards.append(f'<div class="group">{esc(g)}</div>')
@@ -1184,7 +1225,7 @@ class Builder:
                              + (f'<div class="sub">{esc(info["sub"])}</div>' if info['sub'] else '')
                              + (f'<p>{esc(info["desc"])}</p>' if info['desc'] else '')
                              + f'<div class="chips">{"".join(chips)}</div></div></a>')
-            rest = entries[a.max_rows:]
+            rest = sorted(entries, key=lambda e: not e.files)[a.max_rows:]
             more = ''
             folder = self.rel(s.path, self.browse) + '/'
             if rest:

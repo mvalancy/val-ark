@@ -215,6 +215,23 @@ check "listing: state/, .. and .part rows ignored" '! grep -rqE "secret|escape|x
 check "--walk adds the uncovered section" 'grep -q "<h4>btop++</h4>" "$T/l/browse/tools.html"'
 check "listing: ZIM nopic explained" 'grep -q "X (en) · text only · 2025-02" "$T/l/browse/content.html"'
 
+# naming helpers: tool archives / notes / versioned source dirs fold into one tool; queued ZIMs get
+# a readable title and a kind group; code paragraphs never become a card description
+check "tool_key, zim_title, zim_group, code paragraphs skipped" 'python3 -I -c "
+import importlib.util,sys
+s=importlib.util.spec_from_file_location(\"ss\",\"$PY\");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+ok = [m.tool_key(n) for n in (\"blender.tar.zst.README.txt\",\"maddy-0.9.7-src\",\"node\",\"llama-server.exe\")] == [\"blender\",\"maddy\",\"node\",\"llama-server\"]
+z = m.zim_parts(\"3dprinting.stackexchange.com_en_all_2026-10.zim\")
+ok = ok and m.zim_title(z) == \"3Dprinting Stack Exchange\" and m.zim_group(z) == \"stack_exchange\"
+z = m.zim_parts(\"wikipedia_en_medicine_maxi_2026-01.zim\")
+ok = ok and m.zim_title(z) == \"Wikipedia — medicine\" and m.zim_group(z) == \"wikipedia\"
+c = m.card(\"import ChatTTS\\nfrom IPython.display import Audio\\n\\nChatTTS is a text-to-speech model designed for dialogue scenarios such as assistants.\\n\")
+ok = ok and c[\"excerpt\"].startswith(\"ChatTTS is a text-to-speech\")
+sys.exit(0 if ok else 1)"'
+mkdir -p "$T/lb/content/lastbook/maps" "$T/lb/content/lastbook/packs"; echo a > "$T/lb/content/lastbook/maps/m.pmtiles"; echo b > "$T/lb/content/lastbook/packs/p.zip"
+gen --root "$T/lb" >/dev/null 2>&1
+check "Lastbook is one card" '[ "$(grep -c "class=\"item\"" "$T/lb/browse/content.html")" = 1 ]'
+
 # datasets: depth by path prefix (open-data/<topic>/huggingface/<org>/<repo> is one entry)
 printf 'datasets/open-data/weather/huggingface/org1/ds1/data/a.parquet\t10\t\ndatasets/open-data/weather/noaa/ghcnd/x.csv\t5\t\ndatasets/robotics/lerobot/set1/d/e.bin\t7\t\n' > "$T/ds.tsv"
 gen --root "$A" --out "$T/ds" --listing "$T/ds.tsv" >/dev/null 2>&1

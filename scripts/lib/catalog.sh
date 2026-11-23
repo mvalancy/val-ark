@@ -82,7 +82,7 @@ catalog_refresh_zim() {
 # VALARK_SCOUT_RETRY (default 1 day), so maintain (every ~30 min) does not re-scout on
 # every cycle while offline. The scout's stderr is kept in <cache>.err.
 # VALARK_SCOUT=0 turns it off (the cache is then ignored too); VALARK_SCOUT_SWEEPS picks
-# the sweeps (default small; small,frontier adds big open-weight releases).
+# the sweeps (default small,speech-vision; add frontier for big open-weight releases).
 SCOUT_RETRY="${VALARK_SCOUT_RETRY:-86400}"
 _scout_age() {   # _scout_age FILE NOW -> seconds since FILE's mtime (huge when missing)
     [ -f "$1" ] && echo $(( $2 - $(stat -c %Y "$1" 2>/dev/null || echo 0) )) || echo 99999999
@@ -96,7 +96,7 @@ catalog_refresh_scout() {
         [ "$(_scout_age "${SCOUT_CACHE}.attempt" "$now")" -lt "$SCOUT_RETRY" ] && return 0
     fi
     local tmp="${SCOUT_CACHE}.tmp.$$" rc=0
-    python3 "$SCOUT_PY" plan --sweep "${VALARK_SCOUT_SWEEPS:-small}" \
+    python3 "$SCOUT_PY" plan --sweep "${VALARK_SCOUT_SWEEPS:-small,speech-vision}" \
         --skip-tsv "${DATA_DIR}/models-extra.tsv" > "$tmp" 2>"${SCOUT_CACHE}.err" || rc=$?
     if grep -q '^# hf_scout plan' "$tmp" 2>/dev/null && { [ "$rc" -eq 0 ] || [ ! -f "$SCOUT_CACHE" ]; }; then
         mv -f "$tmp" "$SCOUT_CACHE"

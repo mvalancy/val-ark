@@ -8,6 +8,8 @@
 #     too-old / too-big (by the REAL file list, even when the safetensors estimate is
 #     small) / low-like repos are skipped; --skip-tsv repos are not emitted
 #   - frontier sweep is opt-in; picks big lab releases, never small ones twice
+#   - speech-vision sweep (default): speech + vision tasks of any age without safetensors,
+#     real size <= --sv-max-gb, likes >= --sv-likes, valued 560-700 above every small row
 #   - rows are valid models-extra.tsv rows (10 fields, format repo, gated no, real bytes)
 #     ranked by likes, values 300-550 (frontier 200-400), --cap honoured per sweep; ids are
 #     scout-<owner>--<name>; categories reuse the curated words or `scouted`
@@ -68,10 +70,15 @@ MODELS = [
     m('indie/pipe|name', 900, 10, 1 * G),
     m('indie/odd-tag', 300, 10, 1 * G, tag='weird|tag\tx'),     # kept, tag sanitised
     m('indie/vanished', 900, 10, 1 * G),                         # 404s at lookup: skipped
+    m('indie/classic-asr', 50, 900, 0, tag='automatic-speech-recognition'),  # speech-vision: old, no safetensors
+    m('indie/yolo-x', 300, 30, 0, tag='object-detection'),       # speech-vision
+    m('indie/huge-seg', 300, 30, 0, tag='image-segmentation'),   # speech-vision but 9 GB
+    m('indie/meh-tts', 5, 30, 0, tag='text-to-speech'),          # speech-vision below --sv-likes
     m('Qwen/Big-Frontier-300B', 50, 20, 300 * G),                # frontier (lab, fresh)
     m('indie/big-unloved-300B', 50, 20, 300 * G),                # frontier: needs 2x likes
 ]
-REAL = {'indie/hidden-big': 30 * G, 'Qwen/Big-Frontier-300B': 600 * G}
+REAL = {'indie/hidden-big': 30 * G, 'Qwen/Big-Frontier-300B': 600 * G, 'indie/classic-asr': 1 * G,
+        'indie/yolo-x': G // 5, 'indie/huge-seg': 9 * G, 'indie/meh-tts': G // 10}
 class H(http.server.BaseHTTPRequestHandler):
     limited = False
     def log_message(self, *a): pass
@@ -90,6 +97,7 @@ class H(http.server.BaseHTTPRequestHandler):
             if open(flag).read().strip() == 'fail' and q.get('sort') == ['likes7d']:
                 return self.send(404, {'error': 'gone'})
             if 'author' in q: return self.send(200, [x for x in MODELS if x['id'].split('/')[0] == q['author'][0]])
+            if 'pipeline_tag' in q: return self.send(200, [x for x in MODELS if x['pipeline_tag'] == q['pipeline_tag'][0]])
             return self.send(200, MODELS)
         if u.path.startswith('/api/models/'):
             repo = urllib.parse.unquote(u.path[len('/api/models/'):])
@@ -109,7 +117,7 @@ export VALARK_HF_API="$B" VALARK_SCOUT_RETRY_SLEEP=0
 run() { python3 -I "$PY" "$@"; }
 
 # --- small sweep ------------------------------------------------------------------------
-run plan --skip-tsv "$ROOT/data/models-extra.tsv" > "$T/small.out" 2>"$T/small.err"; rc=$?
+run plan --sweep small --skip-tsv "$ROOT/data/models-extra.tsv" > "$T/small.out" 2>"$T/small.err"; rc=$?
 check "small sweep exits 0 (a 429 with Retry-After is retried)" '[ $rc -eq 0 ] && grep -q "lab-few-likes" "$T/small.out"'
 check "header line" 'head -1 "$T/small.out" | grep -q "^# hf_scout plan .*small=4 frontier=0"'
 rows() { grep -v '^#' "$1" | cut -d'|' -f4 | tr '\n' ' '; }
@@ -125,7 +133,7 @@ check "category mapped onto the curated word" 'grep -q "^[0-9]*|scout-indie--sec
 check "unknown tag -> scouted bucket, note tag sanitised" 'grep "|indie/odd-tag|" "$T/small.out" | grep -q "^[0-9]*|scout-indie--odd-tag|scouted|.*weird-tag-x$"'
 check "every row still has 10 fields after a hostile tag" '[ -z "$(grep -v "^#" "$T/small.out" | awk -F"|" "NF!=10")" ]'
 check "ids are unique" '[ "$(grep -v "^#" "$T/small.out" | cut -d"|" -f2 | sort | uniq -d)" = "" ]'
-run plan --cap 1 > "$T/cap.out" 2>/dev/null
+run plan --sweep small --cap 1 > "$T/cap.out" 2>/dev/null
 check "--cap keeps the most-liked" '[ "$(rows "$T/cap.out")" = "indie/good-small " ]'
 
 # --- frontier sweep -----------------------------------------------------------------------
@@ -135,6 +143,19 @@ check "frontier skips an unliked non-lab giant" '! grep -q big-unloved "$T/fr.ou
 check "frontier still includes the small picks" '[ "$(grep -vc "^#" "$T/fr.out")" -eq 5 ]'
 check "frontier rows go to the scouted bucket" 'grep -q "|scout-qwen--big-frontier-300b|scouted|" "$T/fr.out"'
 check "frontier values below small ones" '[ "$(grep Big-Frontier "$T/fr.out" | cut -d"|" -f1)" -lt 400 ]'
+
+# --- speech-vision sweep (default with small) -----------------------------------------------
+run plan --skip-tsv "$ROOT/data/models-extra.tsv" > "$T/sv.out" 2>/dev/null; rc=$?
+check "default sweeps = small + speech-vision" '[ $rc -eq 0 ] && head -1 "$T/sv.out" | grep -q "sweeps=small,speech-vision small=4 frontier=0 speech-vision=2"'
+check "speech-vision takes an OLD speech model without safetensors" 'grep -q "|scout-indie--classic-asr|speech-asr|indie/classic-asr|\*|repo|no|1000000000|" "$T/sv.out"'
+check "speech-vision takes a detection model" 'grep -q "|scout-indie--yolo-x|detection|" "$T/sv.out"'
+check "speech-vision skips > --sv-max-gb and < --sv-likes" '! grep -q "huge-seg\|meh-tts" "$T/sv.out"'
+check "speech-vision values sit in the curated band (560-700)" '[ -z "$(grep -E "classic-asr|yolo-x" "$T/sv.out" | awk -F"|" "\$1<560 || \$1>700")" ]'
+check "speech-vision rows rank above every small row" '[ "$(grep -E "yolo-x|classic-asr" "$T/sv.out" | cut -d"|" -f1 | sort -n | head -1)" -gt "$(grep -vE "^#|yolo-x|classic-asr" "$T/sv.out" | cut -d"|" -f1 | sort -n | tail -1)" ]'
+run plan --sweep small --skip-tsv "$ROOT/data/models-extra.tsv" > "$T/nosv.out" 2>/dev/null
+check "--sweep small alone leaves them out" '! grep -q "classic-asr\|yolo-x" "$T/nosv.out"'
+run plan --sv-max-gb 10 --skip-tsv "$ROOT/data/models-extra.tsv" > "$T/sv10.out" 2>/dev/null
+check "--sv-max-gb is honoured" 'grep -q huge-seg "$T/sv10.out"'
 
 # --- errors ---------------------------------------------------------------------------------
 echo fail > "$T/flag"
@@ -154,7 +175,7 @@ cat_sh() {  # run a catalog.sh snippet against a throwaway data root
 }
 cat_sh 'catalog_refresh_scout' >/dev/null 2>&1; rc=$?
 CACHE="$(cat_sh 'echo $SCOUT_CACHE')"
-check "complete scout writes the cache" '[ $rc -eq 0 ] && [ "$(grep -vc "^#" "$CACHE")" -eq 4 ]'
+check "complete scout writes the cache (default sweeps)" '[ $rc -eq 0 ] && [ "$(grep -vc "^#" "$CACHE")" -eq 6 ]'
 check "...and its stderr file" '[ -f "$CACHE.err" ]'
 check "candidates work with no curated catalog and no cache" 'T="$T" bash -c "unset _VALARK_CATALOG_LOADED _VALARK_ENV_LOADED; export VAL_ARK_DATA=$T/data2 VAL_ARK_CONFIG=$T/none.env VALARK_SCOUT=0; mkdir -p \$VAL_ARK_DATA; source $ROOT/scripts/lib/catalog.sh; DATA_DIR=$T/nodata; catalog_model_candidates" >/dev/null 2>&1'
 cat_sh 'catalog_model_candidates' > "$T/cands" 2>/dev/null
@@ -186,7 +207,7 @@ echo ok > "$T/flag"
 
 # --- librarian.sh scout, end to end -----------------------------------------------------------
 LS=$(VAL_ARK_DATA="$T/lib-data" VAL_ARK_CONFIG="$T/none.env" bash "$ROOT/scripts/librarian.sh" scout 2>&1); rc=$?
-check "librarian.sh scout exits 0 and reports 4 repos" '[ $rc -eq 0 ] && echo "$LS" | grep -q "(4 repos)"'
+check "librarian.sh scout exits 0 and reports 6 repos" '[ $rc -eq 0 ] && echo "$LS" | grep -q "(6 repos)"'
 echo fail > "$T/flag"; rm -rf "$T/lib-data2"; mkdir -p "$T/lib-data2"
 LS=$(VAL_ARK_DATA="$T/lib-data2" VAL_ARK_CONFIG="$T/none.env" VALARK_SCOUT=1 bash -c ". '$ROOT/scripts/lib/valark-env.sh'; mkdir -p \"\$STATE_DIR/catalog\"; echo '# hf_scout plan x' > \"\$STATE_DIR/catalog/models-scouted.tsv\"; bash '$ROOT/scripts/librarian.sh' scout" 2>&1); rc=$?
 check "librarian.sh scout on failure: exit 1, count 0 (one number)" '[ $rc -eq 1 ] && echo "$LS" | grep -q "(0 repos)"'

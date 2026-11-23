@@ -914,13 +914,15 @@ class Builder:
                 real, base = os.path.realpath(src), os.path.realpath(within)
                 if not real.startswith(base.rstrip(os.sep) + os.sep):
                     return None
-            # already copied (and checked) by an earlier run: no read
+            # keyed by path + size + mtime: a replaced picture gets a new thumbnail, an unchanged
+            # one copied (and checked) by an earlier run is reused with one stat and no read
+            st = os.stat(src)
+            key = sha(f'{src}|{st.st_size}|{st.st_mtime_ns}', 16)
             for ext in ('.png', '.jpg', '.gif', '.webp') + (('.svg',) if allow_svg else ()):
-                name = sha(src, 16) + ext
-                if name in self.thumbs_have:
-                    self.thumbs_used.add(name)
-                    return 'thumbs/' + name
-            if os.path.getsize(src) > max_bytes:
+                if key + ext in self.thumbs_have:
+                    self.thumbs_used.add(key + ext)
+                    return 'thumbs/' + key + ext
+            if st.st_size > max_bytes:
                 return None
             with open(src, 'rb') as f:
                 data = f.read(max_bytes + 1)
@@ -929,7 +931,7 @@ class Builder:
         ext = image_kind(data, allow_svg)
         if not ext:
             return None
-        return self.thumb_bytes(sha(src, 16) + ext, data)
+        return self.thumb_bytes(key + ext, data)
 
     def badge(self, label, key, sub=''):
         color = PALETTE[int(sha(key, 4), 16) % len(PALETTE)]

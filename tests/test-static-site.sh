@@ -262,6 +262,9 @@ chmod 000 "$A/models/huggingface/acme/tiny-7b/assets/logo.png"
 gen --root "$A" >/dev/null 2>&1
 check "cached thumbnail reused without reading the source" 'grep -q "thumbs/[0-9a-f]\{16\}\.png" "$M"'
 chmod 644 "$A/models/huggingface/acme/tiny-7b/assets/logo.png"
+printf '\x89PNG\r\n\x1a\nreplaced-picture' > "$A/models/huggingface/acme/tiny-7b/assets/logo.png"
+gen --root "$A" >/dev/null 2>&1
+check "a replaced picture gets a new thumbnail (old one removed)" 'cmp -s "$A/models/huggingface/acme/tiny-7b/assets/logo.png" "$A/browse/$(grep -o "thumbs/[0-9a-f]\{16\}\.png" "$M" | head -1)" && [ "$(grep -rl "fakepng" "$A/browse/thumbs" | wc -l)" = 0 ]'
 
 # review #261: real tool paths, image containment + magic bytes, malformed cache, JS reader, stamps, temp files
 R="$T/r"; mkdir -p "$R/tools/linux-x86_64" "$R/tools/sources/maddy-0.9.7-src" "$R/models/huggingface/o/m/assets"

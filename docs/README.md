@@ -166,6 +166,10 @@ this doc cleanup; the links resolve after integration.)
 - **Web server** — `scripts/server.js` (zero-dep Node) serves the UI, a JSON API,
   and SSE, and auto-launches `kiwix-serve` for any complete ZIM. See
   [ARCHITECTURE.md](ARCHITECTURE.md).
+- **Static browse pages** — `scripts/librarian.sh site` writes `index.html` + `browse/` at the
+  archive root: plain HTML with relative links, so a box or NAS reached only as a file share can
+  still be explored without the server. See
+  [LIBRARIAN.md](LIBRARIAN.md#static-browse-pages-no-server).
 
 ## Pop-up art
 

@@ -238,7 +238,8 @@ scripts/librarian.sh fill --time 1800 --max-bytes 53687091200   # bounded chunk 
 scripts/librarian.sh verify        # integrity-check managed files; requeue bad
 scripts/librarian.sh evict --need 107374182400   # free space (raw bytes), lowest value/byte first
 scripts/librarian.sh refresh       # re-pull the live ZIM catalog
-scripts/librarian.sh maintain      # refresh + verify + bounded top-up + report (loop core)
+scripts/librarian.sh maintain      # refresh + verify + bounded top-up + report + static pages (loop core)
+scripts/librarian.sh site          # rewrite the static browse pages (index.html + browse/)
 ```
 
 Downloads prefer **aria2** (8 connections, ~3x faster on per-connection-throttled
@@ -253,6 +254,34 @@ it, because an aria2 `.part` is segmented and `curl -C -` would "complete" it wi
 holes. Failed attempts keep the partial + control file so the next cycle resumes
 where it left off; abandoned partials are garbage-collected by `verify` after
 `VALARK_PARTIAL_MAX_AGE_DAYS` (default 14).
+
+## Static browse pages (no server)
+
+`scripts/librarian.sh site` (and every `maintain`) runs `scripts/lib/static_site.py`, which writes
+`<VALARK_HOME>/index.html` and `browse/<section>.html`: plain HTML with inline CSS, **relative links
+only**, no external URLs and no JavaScript requirement (a small filter box appears when scripts run).
+Open `index.html` from a file explorer, an SMB share, a USB disk or any dumb file server and you can
+see what the archive holds without starting `server.js`:
+
+- an overview with totals per section (models, Library/ZIMs, tools, installers, developer stack,
+  software releases, datasets, sources) and the pop-up art from `docs/img/popup`;
+- one page per section: each model repo / ZIM / tool / installer folder with its size, file count,
+  last update, model-card summary + licence (from a small README, at most 64 KiB read), its largest
+  files and links straight to the folder and files; ZIM file names are spelled out
+  (`wikipedia_en_all_maxi_2024-01` → "Wikipedia (en) · full, with images · 2024-01").
+
+Only section directories are scanned (`state/`, `private/` and the repo's own code never appear);
+`*.part`, `*.tmp` and dot files are skipped. Big trees stay cheap: `--max-rows` (default 3000 per
+section) summarises the rest, `--max-files` (8) caps each entry's file list and `--walk-limit` stops a
+runaway walk (the page then says its totals are partial). Pages are written temp + rename, and an
+unchanged page is not rewritten, so a network share sees few writes.
+
+A mirror that keeps its own index can skip the walk entirely: `--listing FILE` takes
+`path<TAB>size[<TAB>mtime]` rows (relative to `--root`) for what is present, `--pending FILE` the same
+for what is still queued (shown as "queued" chips), and `--walk NAME` adds a section the listing does
+not cover. `VALARK_STATIC_SITE=0` turns the `maintain` refresh off. Opening `web-ui/index.html` over
+`file://` shows a hint linking to the static catalog, since the dynamic UI needs its server. Tests:
+`tests/test-static-site.sh`.
 
 ## The 24/7 loop
 

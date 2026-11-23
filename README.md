@@ -145,7 +145,7 @@ cp .env.example .env            # set VAL_ARK_DATA=/your/disk (git-ignored)
 ./scripts/loop.sh install 30    # flock-guarded 24/7 self-healing cron (every 30 min)
 ```
 
-Commands: `status | plan | fill | verify | evict | maintain | refresh`.
+Commands: `status | plan | fill | verify | evict | maintain | refresh | catalog | request | pin | unpin | pins | site`.
 See **[docs/LIBRARIAN.md](docs/LIBRARIAN.md)** for the full design.
 
 ## What's Included
@@ -324,6 +324,16 @@ exist in `content/zim/`, the server auto-launches kiwix-serve (loopback-only on
 internal port 8888) and proxies it same-origin at `/kiwix/` for offline Wikipedia
 browsing without internet access.
 
+### No server? Browse the static catalog
+
+A box or NAS that is only reachable as a **plain file share** (SMB, a USB disk, `python3 -m
+http.server`) can't run `server.js`. `./scripts/librarian.sh site` (also run by every `maintain`)
+writes `index.html` + `browse/*.html` at the archive root: plain HTML with relative links that
+works over `file://`. It lists every model, ZIM, tool, installer, dataset and source folder with
+its size, file count, model-card summary and licence, and links straight to the files. Opening
+`web-ui/index.html` without a server now points there too. See
+[docs/LIBRARIAN.md](docs/LIBRARIAN.md#static-browse-pages-no-server).
+
 ## Project Structure
 
 Data dirs (`tools/`, `models/`, `content/`, `sources/`, ...) are symlinked to the
@@ -335,7 +345,7 @@ val-ark/
 ├── .env.example              # Config template -> copy to .env (gitignored)
 ├── scripts/
 │   ├── server.js             # Zero-dep web UI server + JSON API + SSE
-│   ├── librarian.sh          # Self-fill engine: status|plan|fill|verify|evict|maintain|refresh
+│   ├── librarian.sh          # Self-fill engine: status|plan|fill|verify|evict|maintain|refresh|site
 │   ├── loop.sh               # 24/7 self-healing + verification loop (cron)
 │   ├── verify.sh             # Functional "does it actually run?" checks (local + fleet)
 │   ├── lib/

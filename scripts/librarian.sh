@@ -18,6 +18,8 @@
 #   catalog [kind]         list not-yet-downloaded items (content|model|installer)
 #   request KIND ID        pin + fetch ONE item now (auto-evicts to fit the cap)
 #   pin/unpin/pins         manage durable user requests (pins [--refill])
+#   site                   rewrite the static browse pages (index.html + browse/)
+#                          so the archive can be explored from a plain file server
 #
 # fill/maintain opts: --max-bytes B  --max-items N  --time SECONDS  --budget B
 #   KIND = content | model | tool   (request / pin)
@@ -560,7 +562,19 @@ cmd_maintain() {
   "failed_queued": $( [ -f "$FAILED" ] && wc -l < "$FAILED" || echo 0 )
 }
 EOF
+    cmd_site >/dev/null 2>>"$LL_LOG" || warn "static browse pages not refreshed (see $LL_LOG)"
     ok "maintain: done (health -> $HEALTH)"
+}
+
+# Static browse pages (#257): <VALARK_HOME>/index.html + browse/*.html, plain HTML with
+# relative links, so the archive can be explored from a file explorer / SMB share / USB disk
+# without server.js. Models may live outside VALARK_HOME (<DATA_ROOT>/models), so their dir
+# is passed explicitly. VALARK_STATIC_SITE=0 turns the refresh off.
+cmd_site() {
+    [ "${VALARK_STATIC_SITE:-1}" = "0" ] && { log "site: disabled (VALARK_STATIC_SITE=0)"; return 0; }
+    python3 "${PROJECT_ROOT}/scripts/lib/static_site.py" --root "$VALARK_HOME" \
+        --section "models=${MODELS_DIR}" --section "tools=${TOOLS_DIR}" --section "content=${CONTENT_DIR}" \
+        --section "installers=${INSTALLERS_DIR}" --section "sources=${SOURCES_DIR}" "$@"
 }
 
 # When sourced (tests/tooling), expose the functions without dispatching a command.
@@ -568,7 +582,7 @@ EOF
 
 # DISPATCH: command -> cmd_<name> (grep `cmd_status` etc. to jump to a handler).
 # status/plan/fill/verify/evict/maintain -> cmd_*; refresh -> catalog_refresh_zim;
-# catalog/request/pin/unpin/pins -> cmd_*. See the Commands block at the top of file.
+# catalog/request/pin/unpin/pins/site -> cmd_*. See the Commands block at the top of file.
 case "${1:-status}" in
     status)   cmd_status ;;
     plan)     shift; [ "$1" = "--budget" ] && cmd_plan "$2" || cmd_plan ;;
@@ -582,5 +596,6 @@ case "${1:-status}" in
     pin)      shift; cmd_pin "$1" "$2" ;;
     unpin)    shift; cmd_unpin "$1" ;;
     pins)     shift; [ "$1" = "--refill" ] && cmd_pins_refill || cmd_pins ;;
-    *) echo "usage: librarian.sh {status|plan|fill|verify|evict|maintain|refresh|catalog|request|pin|unpin|pins}"; exit 1 ;;
+    site)     shift; cmd_site "$@" ;;
+    *) echo "usage: librarian.sh {status|plan|fill|verify|evict|maintain|refresh|catalog|request|pin|unpin|pins|site}"; exit 1 ;;
 esac

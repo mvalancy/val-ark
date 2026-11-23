@@ -279,7 +279,8 @@ unchanged page is not rewritten, so a network share sees few writes.
 A mirror that keeps its own index can skip the walk entirely: `--listing FILE` takes
 `path<TAB>size[<TAB>mtime]` rows (relative to `--root`) for what is present, `--pending FILE` the same
 for what is still queued (shown as "queued" chips), and `--walk NAME` adds a section the listing does
-not cover. `VALARK_STATIC_SITE=0` turns the `maintain` refresh off. Opening `web-ui/index.html` over
+not cover. `maintain` rewrites the pages at most every `VALARK_STATIC_SITE_HOURS` (default 6);
+`VALARK_STATIC_SITE=0` turns both off. Opening `web-ui/index.html` over
 `file://` shows a hint linking to the static catalog, since the dynamic UI needs its server. Tests:
 `tests/test-static-site.sh`.
 

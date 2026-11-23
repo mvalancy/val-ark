@@ -461,12 +461,13 @@ def main(argv=None):
         summary['sections'].append({'name': s.name, 'title': s.title, 'entries': len(entries), 'bytes': sb, 'files': sf,
                                     'pending_bytes': spb, 'pending_files': spf, 'truncated': s.truncated})
         rows, group, listed = [], None, entries[:a.max_rows]
+        grouped = {e.key.split('/')[0] if '/' in e.key else '' for e in listed} != {''}
         for e in listed:
             g = e.key.split('/')[0] if '/' in e.key else ''
-            if g != group:
+            if g != group and grouped:
                 group = g
                 rows.append(f'<tr><th colspan="4">{esc(g or "(top level)")}</th></tr>')
-            name = e.key[len(g) + 1:] if g else e.key
+            name = e.key[len(g) + 1:] if g and grouped else e.key
             target = os.path.relpath(os.path.join(s.path, e.key), browse) + ('/' if e.is_dir else '')
             desc, chips = '', []
             if s.name == 'content' and not e.is_dir and e.key.lower().endswith('.zim'):

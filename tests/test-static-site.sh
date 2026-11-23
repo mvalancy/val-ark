@@ -146,6 +146,29 @@ check "models outside VALARK_HOME linked relatively" 'grep -q "href=\"../../mode
 VALARK_STATIC_SITE=0 VAL_ARK_DATA="$T/data2" bash "$ROOT/scripts/librarian.sh" site >/dev/null 2>&1; rc=$?
 check "VALARK_STATIC_SITE=0 is a no-op" '[ "$rc" -eq 0 ] && [ ! -e "$T/data2/val-ark/index.html" ]'
 
+# a top-level-only section (sources: one folder per project) has no "(top level)" header row
+mkdir -p "$A/sources/proj"; echo s > "$A/sources/proj/p.tar.gz"
+python3 -I "$PY" --root "$A" --out "$T/src" --now 1700000000 >/dev/null 2>&1
+check "no group header when every entry is top level" '! grep -q "(top level)" "$T/src/browse/sources.html" && grep -q ">proj</a>" "$T/src/browse/sources.html"'
+
+# maintain throttles the refresh (VALARK_STATIC_SITE_HOURS) and runs it when stale. Sourced
+# librarian with the network/disk steps stubbed out; cmd_site just records that it ran.
+M2="$T/m"; mkdir -p "$M2/val-ark/state"
+run_maintain() {
+    VAL_ARK_DATA="$M2" bash -c '. "$1/scripts/librarian.sh"
+        catalog_refresh_zim() { return 0; }; cmd_verify() { :; }; cmd_fill() { :; }
+        cmd_site() { echo ran >> "$VALARK_HOME/site.calls"; }
+        cmd_maintain >/dev/null 2>&1' _ "$ROOT"
+}
+run_maintain
+check "maintain refreshes the pages when there is no index.html" '[ "$(wc -l < "$M2/val-ark/site.calls" 2>/dev/null)" = 1 ]'
+: > "$M2/val-ark/index.html"; run_maintain
+check "maintain skips a fresh index.html" '[ "$(wc -l < "$M2/val-ark/site.calls")" = 1 ]'
+touch -d "7 hours ago" "$M2/val-ark/index.html"; run_maintain
+check "maintain refreshes a stale index.html (default 6 h)" '[ "$(wc -l < "$M2/val-ark/site.calls")" = 2 ]'
+: > "$M2/val-ark/index.html"; VALARK_STATIC_SITE_HOURS=0 run_maintain
+check "VALARK_STATIC_SITE_HOURS=0 refreshes every time" '[ "$(wc -l < "$M2/val-ark/site.calls")" = 3 ]'
+
 # web UI opened from file:// points at the static catalog
 check "web UI file:// hint links ../index.html" 'grep -q "id=\"static-hint\"" "$ROOT/web-ui/index.html" && grep -q "location.protocol===.file:." "$ROOT/web-ui/index.html"'
 

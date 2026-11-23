@@ -562,7 +562,13 @@ cmd_maintain() {
   "failed_queued": $( [ -f "$FAILED" ] && wc -l < "$FAILED" || echo 0 )
 }
 EOF
-    cmd_site >/dev/null 2>>"$LL_LOG" || warn "static browse pages not refreshed (see $LL_LOG)"
+    # Static pages at most every VALARK_STATIC_SITE_HOURS (default 6): the walk is cheap on a
+    # local disk, but a big archive does not need a rewrite every loop cycle.
+    local site_idx="${VALARK_HOME}/index.html" site_age=999999999
+    [ -f "$site_idx" ] && site_age=$(( $(date +%s) - $(stat -c %Y "$site_idx" 2>/dev/null || echo 0) ))
+    if [ "$site_age" -ge $(( ${VALARK_STATIC_SITE_HOURS:-6} * 3600 )) ]; then
+        cmd_site >/dev/null 2>>"$LL_LOG" || warn "static browse pages not refreshed (see $LL_LOG)"
+    fi
     ok "maintain: done (health -> $HEALTH)"
 }
 

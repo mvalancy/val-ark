@@ -682,7 +682,8 @@ ${n}. Rebuild Ubuntu's package with no internet: the 'desktop-src' set put the s
    index, so install the build deps from the .dsc file (not by package name):
      cd <dir>/source/${usrc} && D=\$(ls -v ${usrc}_*.dsc | tail -1)     # the newest .dsc
      sudo apt-get build-dep ./\$D
-     dpkg-source -x \$D && cd ${usrc}-*/ && dpkg-buildpackage -us -uc -b
+     rm -rf build-${usrc} && dpkg-source -x \$D build-${usrc} && cd build-${usrc}
+     dpkg-buildpackage -us -uc -b
      sudo apt-get install ../*.deb
    This is Ubuntu noble's version of ${title}, which can be older than upstream's.
 "

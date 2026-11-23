@@ -302,5 +302,23 @@ assert not os.path.exists(os.path.join(dest, "source/demo/demo_1-2.dsc.part"))
 PY
 kill "$SRC_PID" 2>/dev/null; wait "$SRC_PID" 2>/dev/null
 
+# 12. prune_sources on its own: two uploads' files in source/<pkg>/ -> only the wanted (newest)
+#     remain; a package whose wanted file is missing keeps everything; .deb rows are ignored.
+python3 - "$ROOT/scripts/lib" "$T/prune" <<'PY' && pass || fail "apt_offline.prune_sources"
+import sys, os; sys.path.insert(0, sys.argv[1]); import apt_offline as ao
+dest = sys.argv[2]; d = os.path.join(dest, "source/pkg"); os.makedirs(d)
+for n in ("pkg_1.0-1.dsc", "pkg_1.0.orig.tar.xz", "pkg_1.0-1.debian.tar.xz", "pkg_1.0-2.dsc", "pkg_1.0-2.debian.tar.xz"):
+    open(os.path.join(d, n), "w").write(n)
+want = [("u", "source/pkg/pkg_1.0-2.dsc", 1, ""), ("u", "source/pkg/pkg_1.0.orig.tar.xz", 1, ""),
+        ("u", "source/pkg/pkg_1.0-2.debian.tar.xz", 1, ""), ("u", "lib_1_arm64.deb", 1, "")]
+assert ao.prune_sources(want, dest) == 2
+assert sorted(os.listdir(d)) == ["pkg_1.0-2.debian.tar.xz", "pkg_1.0-2.dsc", "pkg_1.0.orig.tar.xz"], os.listdir(d)
+e = os.path.join(dest, "source/half"); os.makedirs(e)
+open(os.path.join(e, "half_1.dsc"), "w").write("old")
+assert ao.prune_sources([("u", "source/half/half_2.dsc", 1, "")], dest) == 0
+assert os.listdir(e) == ["half_1.dsc"]
+assert ao.prune_sources([("u", "x_1_amd64.deb", 1, "")], dest) == 0
+PY
+
 echo "server-stack: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

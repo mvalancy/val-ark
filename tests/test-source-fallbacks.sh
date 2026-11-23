@@ -67,7 +67,7 @@ run 'mirror_source_tarball app 4.0 "'"$B"'/rel/app-4.0.tar.xz" >/dev/null' 2>/de
 run 'build_from_source_hint demo "Demo App" linux-arm64 demo-pkg demo tools/sources/demo-1.0-src/demo-1.0.tar.xz owner/demo "  make && make install"' >/dev/null 2>&1
 H="$T/data/val-ark/tools/linux-arm64/demo/INSTALL.txt"; [ -f "$H" ] || H="$(find "$T/data" -path '*linux-arm64/demo/INSTALL.txt' | head -1)"
 for want in "Demo App - linux-arm64" "--set desktop-apps --set desktop-src --dest" "--arch arm64" "apt-get install demo-pkg" \
-            "'desktop-src'" "source/demo/" 'D=$(ls -v demo_*.dsc | tail -1)' 'apt-get build-dep ./$D' 'dpkg-source -x $D' "dpkg-buildpackage" \
+            "'desktop-src'" "source/demo/" 'D=$(ls -v demo_*.dsc | tail -1)' 'apt-get build-dep ./$D' 'dpkg-source -x $D build-demo' 'cd build-demo' "dpkg-buildpackage" \
             "tools/sources/demo-1.0-src/demo-1.0.tar.xz" "owner/demo.bundle" "make && make install" "release tarball" \
             "Ubuntu noble's version" "may need newer" "1. Install" "2. Rebuild" "3. Upstream source" "4. Full-history"; do
     grep -qF -- "$want" "$H" 2>/dev/null && pass || fail "hint must mention: $want"

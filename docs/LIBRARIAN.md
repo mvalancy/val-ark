@@ -251,7 +251,8 @@ python3 scripts/lib/apt_offline.py build --suite noble --arch arm64 --set deskto
 # so build deps come from the .dsc FILE, not the package name)
 cd <dir>/source/inkscape && D=$(ls -v inkscape_*.dsc | tail -1)   # the newest .dsc
 sudo apt-get build-dep ./$D
-dpkg-source -x $D && cd inkscape-*/ && dpkg-buildpackage -us -uc -b
+rm -rf build-inkscape && dpkg-source -x $D build-inkscape && cd build-inkscape
+dpkg-buildpackage -us -uc -b
 ```
 
 These build the Ubuntu suite's version of each app (noble: e.g. KiCad 7, Blender 4.0,

@@ -257,31 +257,38 @@ where it left off; abandoned partials are garbage-collected by `verify` after
 
 ## Static browse pages (no server)
 
-`scripts/librarian.sh site` (and every `maintain`) runs `scripts/lib/static_site.py`, which writes
-`<VALARK_HOME>/index.html` and `browse/<section>.html`: plain HTML with inline CSS, **relative links
-only**, no external URLs and no JavaScript requirement (a small filter box appears when scripts run).
-Open `index.html` from a file explorer, an SMB share, a USB disk or any dumb file server and you can
-see what the archive holds without starting `server.js`:
+`scripts/librarian.sh site` (and `maintain`, at most every `VALARK_STATIC_SITE_HOURS`, default 6)
+runs `scripts/lib/static_site.py`, which writes a **static catalog** of the archive at
+`<VALARK_HOME>`: `index.html`, one card-grid page per section (`browse/<section>.html`) and one
+detail page per item (`browse/item/*.html`). Plain HTML with inline CSS, **relative links only**,
+no external URLs and no JavaScript requirement (a search box and group filter appear when scripts
+run). Open `index.html` from a file explorer, an SMB share, a USB disk or any dumb file server.
 
-- an overview with totals per section (models, Library/ZIMs, tools, installers, developer stack,
-  software releases, datasets, sources) and the pop-up art from `docs/img/popup`;
-- one page per section: each model repo / ZIM / tool / installer folder with its size, file count,
-  last update, model-card summary + licence (from a small README, at most 64 KiB read), its largest
-  files and links straight to the folder and files; ZIM file names are spelled out
-  (`wikipedia_en_all_maxi_2024-01` → "Wikipedia (en) · full, with images · 2024-01").
+Every card has a picture and a description, from the best source available:
+
+| Section | Picture | Description |
+|---------|---------|-------------|
+| Tools & apps (one card per tool, all platforms) | the web UI's logo; screenshots on the detail page | the web UI's `TOOLS` / `TOOL_META`: description, overview, features, CLI, maker, licence |
+| Library (ZIM) | the ZIM's own 48x48 illustration | the ZIM's own title + description (read from its header and directory with a few small reads; uncompressed, xz and, with the `zstd` CLI, zstd clusters), the web UI's `CONTENT_LIBRARY` overview, article counts from a cached Kiwix catalog |
+| AI models, datasets | the first image the model / dataset card shows from its own repo | the card's first paragraphs, licence and pipeline tag; curated `MODEL_FAMILIES` text for the classic `llm/` folders |
+| Installers, developer stack, sources | generated badge | `data/installers.tsv`, `data/dev-stack.tsv`, `data/source-repos.tsv` notes |
+
+Anything without a picture gets a generated badge (initials or a modality glyph). Pictures are copied
+into `browse/thumbs/` (deduplicated, size-capped) so the catalog works without the repo next to it.
 
 Only section directories are scanned (`state/`, `private/` and the repo's own code never appear);
-`*.part`, `*.tmp` and dot files are skipped. Big trees stay cheap: `--max-rows` (default 3000 per
-section) summarises the rest, `--max-files` (8) caps each entry's file list and `--walk-limit` stops a
-runaway walk (the page then says its totals are partial). Pages are written temp + rename, and an
-unchanged page is not rewritten, so a network share sees few writes.
+`*.part`, `*.tmp`, `.source.json` sidecars and dot files are skipped. Big trees stay cheap:
+`--max-rows` (3000 cards per section), `--max-files` (60 files per detail page), `--max-details`
+(8000 detail pages), `--meta-limit` (4000 README reads, 64 KiB each), `--zim-limit` (400 ZIMs
+opened per run; results are cached in `browse/zim-meta.json`, so later runs fill in the rest) and
+`--walk-limit` (the page then says its totals are partial). Pages are written temp + rename,
+unchanged files are not rewritten, and stale detail pages and thumbnails are removed.
 
 A mirror that keeps its own index can skip the walk entirely: `--listing FILE` takes
 `path<TAB>size[<TAB>mtime]` rows (relative to `--root`) for what is present, `--pending FILE` the same
 for what is still queued (shown as "queued" chips), and `--walk NAME` adds a section the listing does
-not cover. `maintain` rewrites the pages at most every `VALARK_STATIC_SITE_HOURS` (default 6);
-`VALARK_STATIC_SITE=0` turns both off. Opening `web-ui/index.html` over
-`file://` shows a hint linking to the static catalog, since the dynamic UI needs its server. Tests:
+not cover. `VALARK_STATIC_SITE=0` turns the refresh off. Opening `web-ui/index.html` over `file://`
+shows a hint linking to the static catalog, since the dynamic UI needs its server. Tests:
 `tests/test-static-site.sh`.
 
 ## The 24/7 loop

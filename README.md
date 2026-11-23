@@ -328,9 +328,11 @@ browsing without internet access.
 
 A box or NAS that is only reachable as a **plain file share** (SMB, a USB disk, `python3 -m
 http.server`) can't run `server.js`. `./scripts/librarian.sh site` (also run by every `maintain`)
-writes `index.html` + `browse/*.html` at the archive root: plain HTML with relative links that
-works over `file://`. It lists every model, ZIM, tool, installer, dataset and source folder with
-its size, file count, model-card summary and licence, and links straight to the files. Opening
+writes a static catalog at the archive root (`index.html`, a card grid per section and a detail
+page per item): plain HTML with relative links that works over `file://`. Every model, ZIM, tool,
+installer, dataset and source gets a picture (logo, ZIM illustration, model-card image or a badge),
+a description (web UI text, ZIM metadata, model card), its size and licence, and links straight to
+the files. Opening
 `web-ui/index.html` without a server now points there too. See
 [docs/LIBRARIAN.md](docs/LIBRARIAN.md#static-browse-pages-no-server).
 

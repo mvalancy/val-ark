@@ -854,3 +854,9 @@ domains, loopback, and `$`/`{}`/`<>` placeholders pass automatically.
 - Scale over completeness: per-section row caps, per-entry file caps and a walk limit, plus a
   `--listing` TSV input so a mirror that already keeps an index never walks millions of files over a
   slow share. Unchanged pages are not rewritten (fewer writes on network shares).
+- A file listing is not a catalog: every card carries a picture and a human description. Sources in
+  order: the web UI's own data tables (read from `web-ui/index.html` by a small JS-literal reader, so
+  there is one source of truth), the item's own metadata (ZIM `M/Title`, `M/Description`,
+  `M/Illustration_48x48@1`; model / dataset cards), the `data/*.tsv` notes, then a generated badge.
+  ZIM metadata is read with a few small random reads (header, URL-pointer binary search, one cluster)
+  instead of a ZIM library, and cached, because the archive may sit on a slow share.

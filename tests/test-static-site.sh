@@ -82,7 +82,7 @@ EOF
 # Hand-built ZIM files: M/Title, M/Description, M/Illustration_48x48@1 in one cluster
 # (uncompressed for the first, xz for the second).
 python3 -I - "$A/content/zim" <<'PYEOF'
-import lzma, struct, sys
+import lzma, shutil, struct, subprocess, sys
 def zim(path, comp):
     blobs = [b'A tiny test wiki', b'\x89PNG\r\n\x1a\nicon-' + bytes([comp]), b'Testipedia']
     names = ['Description', 'Illustration_48x48@1', 'Title']   # sorted URL order
@@ -91,7 +91,11 @@ def zim(path, comp):
     for b in blobs: offs.append(pos); pos += len(b)
     offs.append(pos)
     body = b''.join(struct.pack('<I', o) for o in offs) + b''.join(blobs)
-    cluster = bytes([comp]) + (lzma.compress(body, format=lzma.FORMAT_XZ) if comp == 4 else body)
+    if comp == 4:
+        body = lzma.compress(body, format=lzma.FORMAT_XZ)
+    elif comp == 5:
+        body = subprocess.run(['zstd', '-q', '-c'], input=body, capture_output=True, check=True).stdout
+    cluster = bytes([comp]) + body
     dirents = [struct.pack('<HBcIII', 0, 0, b'M', 0, 0, i) + n.encode() + b'\0\0' for i, n in enumerate(names)]
     mime_pos = 80; d0 = mime_pos + len(mimes)
     dpos, p = [], d0
@@ -104,6 +108,8 @@ def zim(path, comp):
                 + struct.pack('<Q', cl0) + cluster)
 zim(sys.argv[1] + '/wikipedia_en_all_maxi_2024-01.zim', 1)
 zim(sys.argv[1] + '/xzwiki_en_all_nopic_2025-03.zim', 4)
+if shutil.which('zstd'):
+    zim(sys.argv[1] + '/zstwiki_en_all_maxi_2025-04.zim', 5)
 PYEOF
 
 gen() { python3 -I "$PY" --web-ui "$W" --now 1700000000 "$@"; }
@@ -163,7 +169,12 @@ check "tool: website shown as text, not a link" 'grep -q "github.com/aristocrato
 # ZIMs
 WI="$(grep -l "kiwix-serve wikipedia_en_all_maxi_2024-01.zim" "$I"/*.html | head -1)"
 check "ZIM: title + description read from the file (uncompressed cluster)" 'grep -q "<h4>Testipedia</h4>" "$C" && grep -q "A tiny test wiki" "$C"'
-check "ZIM: xz cluster read too" '[ "$(grep -o "<h4>Testipedia</h4>" "$C" | wc -l)" = 2 ]'
+check "ZIM: xz cluster read too" 'grep -q "Xzwiki (en) · text only · 2025-03" "$C" && [ "$(grep -o "<h4>Testipedia</h4>" "$C" | wc -l)" -ge 2 ]'
+if command -v zstd >/dev/null 2>&1; then
+    check "ZIM: zstd cluster read through the zstd CLI" '[ "$(grep -o "<h4>Testipedia</h4>" "$C" | wc -l)" = 3 ] && [ "$(ls "$A/browse/thumbs"/z-*.png | wc -l)" = 3 ]'
+else
+    echo "SKIP: zstd cluster case (no zstd CLI)" >&2
+fi
 check "ZIM: illustration extracted as thumbnail" 'ls "$A/browse/thumbs"/z-*.png >/dev/null 2>&1 && grep -q "thumbs/z-" "$C"'
 check "ZIM: curated overview + how to open on the detail page" 'grep -q "Curated overview." "$WI" && grep -q "kiwix-serve wikipedia_en_all_maxi_2024-01.zim" "$WI"'
 check "ZIM: name explained as subtitle" 'grep -q "Wikipedia (en) · full, with images · 2024-01" "$C"'
@@ -171,7 +182,8 @@ check "ZIM: metadata cached" 'grep -q "Testipedia" "$A/browse/zim-meta.json"'
 gen --root "$A" --zim-limit 0 >/dev/null 2>&1
 check "ZIM: cache used when no ZIM may be opened" 'grep -q "<h4>Testipedia</h4>" "$C"'
 check "generated badge for items without a picture" 'grep -q "thumbs/b-[0-9a-f]\{12\}\.svg" "$C"'
-check "totals in summary.json" 'python3 -I -c "import json,sys;d=json.load(open(sys.argv[1]));s={x[\"name\"]:x for x in d[\"sections\"]};sys.exit(0 if s[\"models\"][\"files\"]==11 and s[\"content\"][\"files\"]==4 and s[\"tools\"][\"entries\"]==1 else 1)" "$A/browse/summary.json"'
+NZ=$(ls "$A/content/zim" | grep -c '\.zim$')
+check "totals in summary.json" 'python3 -I -c "import json,sys;d=json.load(open(sys.argv[1]));s={x[\"name\"]:x for x in d[\"sections\"]};sys.exit(0 if s[\"models\"][\"files\"]==11 and s[\"content\"][\"files\"]==int(sys.argv[2]) and s[\"tools\"][\"entries\"]==1 else 1)" "$A/browse/summary.json" "$NZ"'
 check "search box progressive (hidden until script runs)" 'grep -q "id=\"q\" type=\"search\"" "$M" && grep -q "aria-label=\"Search\" hidden" "$M"'
 check "the shipped web UI data tables parse" 'python3 -I -c "
 import importlib.util,sys
@@ -244,6 +256,12 @@ check "datasets: robotics three levels" 'grep -q "<h4>set1</h4><div class=\"sub\
 mkdir -p "$A/sources/github/own"; echo b > "$A/sources/github/own/repo.bundle"
 gen --root "$A" --out "$T/src" >/dev/null 2>&1
 check "git bundles listed one per repo" 'grep -q "<h4>repo</h4><div class=\"sub\">own</div>" "$T/src/browse/sources.html"'
+
+# thumbnails already copied are reused without reading the source again
+chmod 000 "$A/models/huggingface/acme/tiny-7b/assets/logo.png"
+gen --root "$A" >/dev/null 2>&1
+check "cached thumbnail reused without reading the source" 'grep -q "thumbs/[0-9a-f]\{16\}\.png" "$M"'
+chmod 644 "$A/models/huggingface/acme/tiny-7b/assets/logo.png"
 
 # review #261: real tool paths, image containment + magic bytes, malformed cache, JS reader, stamps, temp files
 R="$T/r"; mkdir -p "$R/tools/linux-x86_64" "$R/tools/sources/maddy-0.9.7-src" "$R/models/huggingface/o/m/assets"

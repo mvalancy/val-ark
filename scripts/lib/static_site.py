@@ -322,9 +322,10 @@ ZIM_DECODED_MAX = 4_000_000       # decoded bytes kept from one compressed clust
 ZIM_COMPRESSED_MAX = 8_388_608    # compressed bytes read from one cluster
 
 
-def decode_cluster(rd, pos, comp):
+def decode_cluster(rd, pos, comp, path=None):
     """The first ZIM_DECODED_MAX bytes of a compressed cluster (4 = xz via lzma, 5 = zstd via the
-    zstd CLI when present, since the stdlib has no zstd before 3.14); None when unsupported."""
+    zstd CLI when present, since the stdlib has no zstd before 3.14); None when unsupported.
+    The zstd feeder thread reads through its own handle on `path`, never the caller's."""
     if comp == 4:
         dec, data, read = lzma.LZMADecompressor(), b'', 0
         while len(data) < ZIM_DECODED_MAX and read < ZIM_COMPRESSED_MAX and not dec.eof:
@@ -336,7 +337,7 @@ def decode_cluster(rd, pos, comp):
             while not dec.eof and not dec.needs_input and len(data) < ZIM_DECODED_MAX:
                 data += dec.decompress(b'', max_length=ZIM_DECODED_MAX - len(data))
         return data
-    if comp == 5 and shutil.which('zstd'):
+    if comp == 5 and path and shutil.which('zstd'):
         p = subprocess.Popen(['zstd', '-dcq'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL)
         stop = threading.Event()
@@ -344,12 +345,14 @@ def decode_cluster(rd, pos, comp):
         def feed():
             sent = 0
             try:
-                while sent < ZIM_COMPRESSED_MAX and not stop.is_set():
-                    chunk = rd(pos + sent, 65536)
-                    if not chunk:
-                        break
-                    p.stdin.write(chunk)
-                    sent += len(chunk)
+                with open(path, 'rb') as g:
+                    g.seek(pos)
+                    while sent < ZIM_COMPRESSED_MAX and not stop.is_set():
+                        chunk = g.read(65536)
+                        if not chunk:
+                            break
+                        p.stdin.write(chunk)
+                        sent += len(chunk)
             except (OSError, ValueError):
                 pass
             finally:
@@ -370,7 +373,7 @@ def decode_cluster(rd, pos, comp):
             stop.set()
             p.kill()
             p.wait()
-            t.join(5)
+            t.join()          # the pipe is closed, so the feeder's next write fails and it ends
         return data[:ZIM_DECODED_MAX]
     return None
 
@@ -425,7 +428,7 @@ def zim_meta(path, want=('Title', 'Description', 'Language', 'Creator', 'Illustr
                         return None
                     return rd(off + 1 + a, b - a)
                 if cl not in decoded:
-                    decoded[cl] = decode_cluster(rd, off + 1, comp)
+                    decoded[cl] = decode_cluster(rd, off + 1, comp, path)
                 data = decoded[cl]
                 if data is None or len(data) < size * (n + 2):
                     return None
@@ -911,6 +914,12 @@ class Builder:
                 real, base = os.path.realpath(src), os.path.realpath(within)
                 if not real.startswith(base.rstrip(os.sep) + os.sep):
                     return None
+            # already copied (and checked) by an earlier run: no read
+            for ext in ('.png', '.jpg', '.gif', '.webp') + (('.svg',) if allow_svg else ()):
+                name = sha(src, 16) + ext
+                if name in self.thumbs_have:
+                    self.thumbs_used.add(name)
+                    return 'thumbs/' + name
             if os.path.getsize(src) > max_bytes:
                 return None
             with open(src, 'rb') as f:
@@ -1408,10 +1417,12 @@ class Builder:
             except OSError:
                 pass
         # temp files of an interrupted run (write_atomic: <name>.tmp-<pid>), older than an hour
-        ours = re.compile(r'^(index\.html|summary\.json|zim-meta\.json|[a-z-]+\.html)\.tmp-\d+$')
-        for d in (self.items_dir, self.thumbs_dir, self.browse, self.out):
+        patterns = {self.items_dir: r'.+\.tmp-\d+', self.thumbs_dir: r'.+\.tmp-\d+',
+                    self.browse: r'(summary\.json|zim-meta\.json|[a-z-]+\.html)\.tmp-\d+',
+                    self.out: r'index\.html\.tmp-\d+'}
+        for d, pat in patterns.items():
             for name in listdir(d):
-                if re.search(r'\.tmp-\d+$', name) and (d in (self.items_dir, self.thumbs_dir) or ours.match(name)):
+                if re.fullmatch(pat, name):
                     path = os.path.join(d, name)
                     try:
                         if time.time() - os.path.getmtime(path) > 3600:

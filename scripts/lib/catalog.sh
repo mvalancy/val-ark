@@ -76,26 +76,38 @@ catalog_refresh_zim() {
 # --- Models: weekly Hugging Face scout cache (hf_scout.py) -------------------
 # Writes <state>/catalog/models-scouted.tsv (models-extra.tsv schema). Same rule as the
 # ZIM cache: only a COMPLETE scout (exit 0, a header line) replaces the cache, so a
-# flaky link never trades a good list for a partial one; with no cache yet, a partial
-# scout is accepted (better than nothing; the next refresh heals it). VALARK_SCOUT=0
-# turns it off (the cache is then ignored too); VALARK_SCOUT_SWEEPS picks the sweeps
-# (default small; small,frontier adds big open-weight releases).
+# flaky link never trades a good list for a partial one. With no cache yet, a partial
+# scout is accepted (better than nothing) but dated so it is retried after
+# VALARK_SCOUT_RETRY. A failed attempt is stamped (<cache>.attempt) and not repeated for
+# VALARK_SCOUT_RETRY (default 1 day), so maintain (every ~30 min) does not re-scout on
+# every cycle while offline. The scout's stderr is kept in <cache>.err.
+# VALARK_SCOUT=0 turns it off (the cache is then ignored too); VALARK_SCOUT_SWEEPS picks
+# the sweeps (default small; small,frontier adds big open-weight releases).
+SCOUT_RETRY="${VALARK_SCOUT_RETRY:-86400}"
 catalog_refresh_scout() {
     [ "${VALARK_SCOUT:-1}" = "0" ] && return 0
     mkdir -p "$CATALOG_DIR" 2>/dev/null || true
-    local age=99999999
-    [ -f "$SCOUT_CACHE" ] && age=$(( $(date +%s) - $(stat -c %Y "$SCOUT_CACHE" 2>/dev/null || echo 0) ))
-    if [ "$1" != "--force" ] && [ -f "$SCOUT_CACHE" ] && [ "$age" -lt "$SCOUT_TTL" ]; then
-        return 0
+    local now; now=$(date +%s)
+    _scout_age() { [ -f "$1" ] && echo $(( now - $(stat -c %Y "$1" 2>/dev/null || echo 0) )) || echo 99999999; }
+    if [ "$1" != "--force" ]; then
+        [ -f "$SCOUT_CACHE" ] && [ "$(_scout_age "$SCOUT_CACHE")" -lt "$SCOUT_TTL" ] && return 0
+        [ "$(_scout_age "${SCOUT_CACHE}.attempt")" -lt "$SCOUT_RETRY" ] && return 0
     fi
     local tmp="${SCOUT_CACHE}.tmp.$$" rc=0
     python3 "$SCOUT_PY" plan --sweep "${VALARK_SCOUT_SWEEPS:-small}" \
-        --skip-tsv "${DATA_DIR}/models-extra.tsv" > "$tmp" 2>/dev/null || rc=$?
+        --skip-tsv "${DATA_DIR}/models-extra.tsv" > "$tmp" 2>"${SCOUT_CACHE}.err" || rc=$?
     if grep -q '^# hf_scout plan' "$tmp" 2>/dev/null && { [ "$rc" -eq 0 ] || [ ! -f "$SCOUT_CACHE" ]; }; then
         mv -f "$tmp" "$SCOUT_CACHE"
+        if [ "$rc" -eq 0 ]; then
+            rm -f "${SCOUT_CACHE}.attempt" 2>/dev/null
+        else   # partial bootstrap: age it so the next try comes after SCOUT_RETRY, not a week
+            touch -d "@$(( now - SCOUT_TTL + SCOUT_RETRY ))" "$SCOUT_CACHE" 2>/dev/null
+            : > "${SCOUT_CACHE}.attempt"
+        fi
         return "$rc"
     fi
     rm -f "$tmp" 2>/dev/null
+    : > "${SCOUT_CACHE}.attempt"
     return 1
 }
 

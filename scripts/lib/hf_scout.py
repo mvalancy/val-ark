@@ -19,7 +19,11 @@ Sweeps:
             created within --frontier-days, from a lab (any likes if created within --days,
             else >= --frontier-likes) or anyone with >= 2x --frontier-likes. No size cap:
             the planner orders by value per byte, so these fill last.
-Both skip quantised / converted / abliterated re-uploads (QUANT): the originals are kept.
+Both skip (QUANT, by repo name): quantised / converted re-uploads (GGUF, AWQ, GPTQ, MLX,
+FP8/FP4/INT re-packs; the originals are kept), speculative-decoding heads (EAGLE),
+abliterated / uncensored community fine-tunes, `-base` pre-training checkpoints and
+`-exp` / `-bf16` duplicates. Only repos with `safetensors` metadata are considered (the
+size pre-filter needs it), so ONNX-, GGUF- or .bin-only repos are not scouted.
 Candidates come from the API's trending, recent-likes and all-time-likes listings plus
 each lab's newest repos. Repos named in a --skip-tsv file (column 4, the curated catalog)
 are not emitted again.
@@ -28,12 +32,17 @@ The parameter count (and so the size estimate used to pre-filter) comes from the
 listing's `safetensors` block; the final size check uses the repo's file list
 (`/api/models/<id>?blobs=true`), so a repo carrying extra formats is measured truly.
 
-Value (planner importance, 0-1000; curated rows sit at 600-900, so scouted rows come
-after them): small = 300 + up to 250 by likes (log scale); frontier = 200 + up to 200.
+Value (planner importance, 0-1000; most curated rows sit at 480-900): small = 300 + up to
+250 by likes (log scale); frontier = 200 + up to 200. Categories reuse the curated words
+(small-llm, tiny-vlm, embed, speech-asr, ...) or `scouted`, so scouted rows never open a
+new category; the planner also never spends a diversity slot on a `scout-` row.
 
 Network: base URL $VALARK_HF_API (default https://huggingface.co), $HF_TOKEN sent as a
-bearer token when set. Each request gets 4 attempts on DNS/connection errors, 5xx and
-429. Exit 0 = every listing answered; 1 = some listing or repo lookup failed (rows that
+bearer token when set and the base is huggingface.co. Each request gets 4 attempts on
+DNS/connection errors, 5xx and 429 (Retry-After honoured up to 60 s). A repo that 404s /
+401s / 403s at lookup (deleted or locked since the listing) is skipped, not an error.
+Repo ids must be plain `owner/name` ([A-Za-z0-9._-], no '..'); pipeline tags are reduced
+to [a-z0-9-] before they reach a row. Exit 0 = every listing answered; 1 = some listing or repo lookup failed (rows that
 were found are still printed, so a caller can decide; catalog.sh only replaces its cache
 on 0); 64 = usage.
 """
@@ -44,24 +53,33 @@ LABS = ['moonshotai', 'deepseek-ai', 'Qwen', 'zai-org', 'mistralai', 'google', '
         'nvidia', 'MiniMaxAI', 'tencent', 'baidu', 'stepfun-ai', 'inclusionAI', 'XiaomiMiMo', 'allenai',
         'microsoft', 'ibm-granite', 'CohereLabs', 'ai21labs', 'LiquidAI', 'HuggingFaceTB', 'apple',
         'openbmb', 'stabilityai', 'black-forest-labs']
-QUANT = re.compile(r'(?i)gguf|awq|gptq|mlx|bnb|nvfp4|mxfp4|fp4|int4|int8|exl2|eagle|-fp8$|4bit|8bit|'
+QUANT = re.compile(r'(?i)gguf|awq|gptq|mlx|bnb|nvfp4|mxfp4|fp4|int4|int8|exl2|eagle3|-eagle|-fp8$|4bit|8bit|'
                    r'abliterat|obliterat|uncensored|dolphin|venice|-bf16$|-base$|dspark|-mopd|-exp$|-interleave')
 DTYPE_BYTES = {'F64': 8, 'I64': 8, 'F32': 4, 'I32': 4, 'U32': 4, 'BF16': 2, 'F16': 2, 'I16': 2,
                'F8_E4M3': 1, 'F8_E5M2': 1, 'I8': 1, 'U8': 1, 'BOOL': 1}
 EXPAND = ['gated', 'private', 'likes', 'downloads', 'createdAt', 'pipeline_tag', 'safetensors']
-# Map pipeline tags onto the catalog's category words (anything else keeps its own tag).
-CATEGORY = {'text-generation': 'llm', 'image-text-to-text': 'vlm', 'feature-extraction': 'embedding',
-            'sentence-similarity': 'embedding', 'text-ranking': 'reranker',
-            'automatic-speech-recognition': 'stt', 'text-to-speech': 'tts', 'image-to-text': 'ocr',
-            'time-series-forecasting': 'time-series', 'text-to-image': 'image-gen', 'robotics': 'robotics'}
+# Map pipeline tags onto the CURATED catalog's category words, so a scouted repo joins an
+# existing category instead of opening a new one (a new category would win the planner's
+# diversity phase and the sole-representative eviction shield). Anything else, and every
+# frontier pick, goes to the one `scouted` bucket.
+CATEGORY = {'text-generation': 'small-llm', 'image-text-to-text': 'tiny-vlm', 'feature-extraction': 'embed',
+            'sentence-similarity': 'embed', 'text-ranking': 'reranker',
+            'automatic-speech-recognition': 'speech-asr', 'text-to-speech': 'tts', 'image-to-text': 'ocr-doc',
+            'time-series-forecasting': 'time-series', 'depth-estimation': 'depth',
+            'object-detection': 'detection', 'image-segmentation': 'segmentation',
+            'mask-generation': 'segmentation', 'text-to-audio': 'audio-gen',
+            'audio-classification': 'audio-clf', 'voice-activity-detection': 'speech-vad'}
+# Repo ids go into a path (scouted/<id>) and a '|' row: only plain Hugging Face ids pass.
+REPO_ID = re.compile(r'^[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*$')
 API = os.environ.get('VALARK_HF_API', 'https://huggingface.co').rstrip('/')
+SEND_TOKEN = urllib.parse.urlparse(API).hostname == 'huggingface.co'   # never leak it to another host
 ERRORS = []
 
 
 def get_json(path, params=None):
     url = API + path + ('?' + urllib.parse.urlencode(params, doseq=True) if params else '')
     headers = {'User-Agent': 'val-ark-hf-scout', 'Accept': 'application/json'}
-    if os.environ.get('HF_TOKEN'):
+    if os.environ.get('HF_TOKEN') and SEND_TOKEN:
         headers['Authorization'] = 'Bearer ' + os.environ['HF_TOKEN']
     for attempt in range(4):
         try:
@@ -71,6 +89,10 @@ def get_json(path, params=None):
             if e.code != 429 and e.code < 500:
                 raise
             err = e
+            wait = e.headers.get('Retry-After', '') if e.headers else ''
+            if e.code == 429 and wait.isdigit() and attempt < 3:
+                time.sleep(min(60, int(wait)))
+                continue
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
             err = e
         if attempt < 3:
@@ -103,7 +125,14 @@ def params_and_bytes(m):
 
 
 def repo_bytes(repo):
-    info = get_json('/api/models/' + urllib.parse.quote(repo, safe='/'), {'blobs': 'true'})
+    """Real repo size, or None when the repo is gated/private/disabled or gone (404/401/403:
+    it vanished or locked between the listing and this lookup; skip it, not an error)."""
+    try:
+        info = get_json('/api/models/' + urllib.parse.quote(repo, safe='/'), {'blobs': 'true'})
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403, 404, 410):
+            return None
+        raise
     if info.get('gated') or info.get('private') or info.get('disabled'):
         return None
     return sum(int(s.get('size') or 0) for s in info.get('siblings') or [])
@@ -121,7 +150,8 @@ def load_skip(paths):
 
 
 def slug(repo):
-    return re.sub(r'[^a-z0-9.]+', '-', repo.lower()).strip('-')
+    # Hugging Face forbids '--' in names, so owner--name cannot collide (a-b/c vs a/b-c).
+    return repo.lower().replace('/', '--')
 
 
 def plan(a):
@@ -141,7 +171,9 @@ def plan(a):
             pool[m['id']] = m
     picks = []
     for m in pool.values():
-        repo = m['id']
+        repo = m.get('id') or ''
+        if not REPO_ID.match(repo) or '..' in repo:
+            continue
         if m.get('gated') or m.get('private') or QUANT.search(repo) or repo.lower() in skip:
             continue
         when = created(m)
@@ -173,8 +205,8 @@ def plan(a):
         count[sweep] += 1
         bonus = min(250 if sweep == 'small' else 200, int(math.log10(likes + 1) * 70))
         value = (300 if sweep == 'small' else 200) + bonus
-        tag = m.get('pipeline_tag') or 'model'
-        cat = CATEGORY.get(tag, tag)
+        tag = re.sub(r'[^a-z0-9-]', '-', str(m.get('pipeline_tag') or 'model').lower())
+        cat = CATEGORY.get(tag, 'scouted') if sweep == 'small' else 'scouted'
         note = f'scouted {sweep}: {likes} likes, created {created(m).date()}, {tag}'
         rows.append(f'{value}|scout-{slug(repo)}|{cat}|{repo}|*|repo|no|{size}|scouted/{repo}|{note}')
     print('# hf_scout plan ' + now.strftime('%Y-%m-%dT%H:%MZ') +

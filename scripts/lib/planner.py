@@ -78,13 +78,18 @@ def marker_present(c):
             sz = os.path.getsize(fn)
             return sz >= int(b * 0.9) if b > 0 else sz > 0
         if src == "hf-repo":
-            return os.path.isdir(dest) and any(
-                os.path.isfile(os.path.join(r, f))
-                for r, _, fs in os.walk(dest) for f in fs
-            )
+            # Only a finished `hf download` counts: librarian.sh writes this stamp after
+            # it exits 0. A cut-off pull leaves config.json + .incomplete blobs behind,
+            # which must not read as present (it would never be resumed or verified).
+            return os.path.isfile(os.path.join(dest, ".valark-complete"))
     except OSError:
         return False
     return False
+
+
+def is_scouted(c):
+    """A row from the weekly Hugging Face scout (scripts/lib/hf_scout.py)."""
+    return str(c.get("id", "")).startswith("model:scout-")
 
 
 def density(c):
@@ -231,7 +236,9 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
     for cat in sorted(by_cat):
         if cat in taken_cats:
             continue
-        for c in sorted(by_cat[cat], key=lambda x: x["bytes"]):
+        # Scouted rows (hf_scout.py, ids model:scout-*) never take a diversity slot: they
+        # are guesses from popularity, and the smallest one would jump the curated work.
+        for c in sorted((x for x in by_cat[cat] if not is_scouted(x)), key=lambda x: x["bytes"]):
             if take(c, 1):
                 break
 
@@ -297,8 +304,8 @@ def evict(cands, manifest_path, need, pinned=None):
             break
         if it["id"] in pinned:
             continue  # user-requested/pinned content is protected from eviction
-        if rep.get(it["category"], 0) <= 1:
-            continue  # protect sole representative of a category (diversity floor)
+        if rep.get(it["category"], 0) <= 1 and not is_scouted(it):
+            continue  # protect sole representative of a category (diversity floor; not scouted rows)
         victims.append(it)
         rep[it["category"]] -= 1
         freed += it["bytes"]

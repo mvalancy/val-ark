@@ -101,6 +101,21 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Downloads / mirroring
 
+- **A whole-repo (`hf-repo`) pull is a DIRECTORY, so "any file present" is not "done" and
+  `rm -f` does not evict it** (#259). A cut-off `hf download` leaves `config.json` and
+  `.cache/huggingface/download/*.incomplete` behind; the old present check (any file in `dest`)
+  treated that as complete forever (never resumed, never in the manifest). Now `librarian.sh`
+  writes `<dest>/.valark-complete` after `hf download` exits 0 and both present checks
+  (`librarian.sh`, `planner.py`) require it. One-time cost: repos pulled before the stamp
+  existed are re-run once (`hf download` skips files it already has, then stamps). Eviction goes
+  through `evict_path`, which `rm -rf`s a directory only when it resolves strictly inside
+  `MODELS_DIR` / `CONTENT_DIR` / `INSTALLERS_DIR`.
+- **Scouted model rows must not open new categories** (#259). The planner's diversity phase takes
+  the smallest item of every uncovered category first, and eviction shields a category's sole
+  item; a scouted repo with its own raw pipeline tag (`text-classification`, …) would get both.
+  `hf_scout.py` maps tags onto the curated category words (or `scouted`), and the planner skips
+  `model:scout-*` ids in phase 1 and in the sole-representative shield.
+
 - **`apt-get --print-uris` is a trap for offline .deb sets** (`scripts/lib/apt_offline.py`): (1) it
   prints only an **MD5** digest, so take SHA256 from the signed `*_Packages` lists; (2) its local
   file name carries the **epoch** URL-encoded (`zlib1g_1%3a1.3…deb`) while the pool/`Packages`

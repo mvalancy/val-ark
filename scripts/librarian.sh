@@ -100,8 +100,8 @@ candidate_present() {
             fn="${dest}/$(basename "$url")"; [ -f "$fn" ] || return 1
             sz=$(stat -c%s "$fn" 2>/dev/null || echo 0)
             if [ "$bytes" -gt 0 ]; then [ "$sz" -ge $(( bytes * 90 / 100 )) ]; else [ "$sz" -gt 0 ]; fi ;;
-        hf-repo)
-            [ -d "$dest" ] && [ -n "$(find "$dest" -type f 2>/dev/null | head -1)" ] ;;
+        hf-repo)   # only a finished pull (stamp written after `hf download` exits 0)
+            [ -f "$dest/.valark-complete" ] ;;
         *) return 1 ;;
     esac
 }
@@ -210,6 +210,7 @@ download_one() {
             [ -n "$hf" ] || { warn "hf CLI missing; skip $id"; return 1; }
             mkdir -p "$dest" 2>/dev/null
             if "$hf" download "$url" --local-dir "$dest" --include "$extra" >>"$LL_LOG" 2>&1; then
+                date -u +%FT%TZ > "$dest/.valark-complete" 2>/dev/null || true
                 local sz; sz=$(du -sb "$dest" 2>/dev/null | cut -f1); manifest_add "$id" "$bucket" "$cat" "$dest" "${sz:-0}" "$value" "$source" && return 0
             fi
             return 1 ;;
@@ -370,8 +371,24 @@ cmd_evict() {
     gen_candidates | python3 "$PLANNER" --budget 1 --evict-need "$need" --manifest "$MANIFEST" --pins "$PINS" | \
     while IFS=$'\t' read -r id cat dest bytes value; do
         warn "evict $id ($cat, $(human "$bytes"), value $value) -> $dest"
-        rm -f "$dest" 2>/dev/null && manifest_drop "$id"
+        evict_path "$dest" && manifest_drop "$id"
     done
+}
+
+# Delete one managed download: a file, or a whole-repo (hf-repo) directory. A directory is
+# removed only when it resolves strictly inside the managed roots (never a root itself).
+evict_path() {
+    local p="$1" real root
+    [ -n "$p" ] || return 1
+    if [ -d "$p" ] && [ ! -L "$p" ]; then
+        real=$(realpath -e -- "$p" 2>/dev/null) || return 1
+        for root in "$MODELS_DIR" "$CONTENT_DIR" "$INSTALLERS_DIR"; do
+            root=$(realpath -e -- "$root" 2>/dev/null) || continue
+            case "$real" in "$root"/?*) rm -rf -- "$real" 2>/dev/null; return $? ;; esac
+        done
+        warn "evict: refusing to delete $p (outside the managed roots)"; return 1
+    fi
+    rm -f -- "$p" 2>/dev/null
 }
 
 # --- catalog: list every not-yet-downloaded candidate (the web browse feed) --
@@ -582,8 +599,8 @@ case "${1:-status}" in
     refresh)  catalog_refresh_zim --force && ok "catalog cached: $ZIM_CACHE ($(wc -l < "$ZIM_CACHE") entries)" ;;
     scout)    catalog_refresh_scout --force; rc=$?
               [ "${VALARK_SCOUT:-1}" = "0" ] && { warn "VALARK_SCOUT=0: scout disabled"; exit 0; }
-              n=$(grep -vc '^#' "$SCOUT_CACHE" 2>/dev/null || echo 0)
-              [ "$rc" -eq 0 ] && ok "scouted models cached: $SCOUT_CACHE ($n repos)" || warn "scout incomplete; cache: $SCOUT_CACHE ($n repos)"
+              n=$(grep -vc '^#' "$SCOUT_CACHE" 2>/dev/null); n=${n:-0}
+              [ "$rc" -eq 0 ] && ok "scouted models cached: $SCOUT_CACHE ($n repos)" || warn "scout incomplete (see ${SCOUT_CACHE}.err); cache: $SCOUT_CACHE ($n repos)"
               exit "$rc" ;;
     catalog)  shift; cmd_catalog "${1:-all}" ;;
     request)  shift; cmd_request "$1" "$2" ;;

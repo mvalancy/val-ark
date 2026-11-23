@@ -98,13 +98,24 @@ schema. `librarian.sh scout` does it now.
   ≥ 20B parameters from the last 18 months, from a lab or heavily liked. No size cap; the
   planner's value-per-byte order fills them last, so they only land on a big disk.
 
-Both skip gated and private repos (no accepted licence), quantised / converted /
-abliterated re-uploads (the originals are kept) and any repo the curated catalog already
-names. Scouted rows have values of 200–550, below the curated 600+ band, so the curated
-picks always come first. A scout that cannot reach every listing never replaces a good
-cache (the same completeness rule as the ZIM catalog); `VALARK_SCOUT=0` turns it off and
-ignores the cache. Rows are fetched with `hf download --include '*'` like any `repo` row.
-Tests: `tests/test-hf-scout.sh`.
+Both skip gated and private repos (no accepted licence), quantised / converted re-uploads
+(the originals are kept), speculative-decoding heads, abliterated / uncensored fine-tunes,
+`-base` checkpoints and any repo the curated catalog already names. Only repos that publish
+`safetensors` metadata are considered (the size pre-filter needs it), so ONNX-, GGUF- or
+`.bin`-only repos are left to the curated catalog.
+
+How they rank: scouted rows get values of 300–550 (frontier 200–400), against 480–900 for
+the curated rows, and reuse the curated category words (`small-llm`, `tiny-vlm`, `embed`,
+`speech-asr`, …; anything else is `scouted`). They never take a diversity slot and are not
+shielded from eviction as a category's only item, so on a small disk the curated set is
+planned first; in the small-valuable phase a scouted repo can still beat a curated one on
+value **per byte** when it is much smaller. A scout that cannot reach every listing never
+replaces a good cache (the ZIM catalog's completeness rule); a failed attempt waits
+`VALARK_SCOUT_RETRY` (1 day) before the next, and the scout's stderr is kept next to the
+cache as `models-scouted.tsv.err`. `VALARK_SCOUT=0` turns it off and ignores the cache.
+Rows are fetched with `hf download --include '*'` like any `repo` row; a whole-repo pull
+counts as present only once it finished (`.valark-complete` stamp). Tests:
+`tests/test-hf-scout.sh`.
 
 ### Developer + security stack (`release_mirror.py`)
 

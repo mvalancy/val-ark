@@ -91,27 +91,41 @@ never reach a box on their own. Once a week (`librarian.sh maintain`, TTL
 and writes the picks to `<state>/catalog/models-scouted.tsv`, in the `models-extra.tsv`
 schema. `librarian.sh scout` does it now.
 
+- **speech-vision** (default): **speech and vision models are small but important, so they
+  always come early.** ASR, TTS, voice activity, audio enhancement/classification/generation,
+  and object detection (YOLO-class), segmentation, depth, image classification, zero-shot,
+  keypoints, image features and OCR. **Any age** (the classics count), real repo size ≤ 6 GB,
+  at least 15 likes, drawn from each task's all-time most-downloaded and most-liked lists, up
+  to 150 per run. Valued about 600–700, ahead of the other scouted rows. No `safetensors`
+  requirement (many are ONNX / PyTorch / NeMo), and `-base` is kept (here it is a size:
+  `whisper-base`, `vit-base`).
 - **small** (default): any modality, created in the last 180 days, **real repo size ≤ 10 GB**
   (summed from the repo's file list, not guessed), at least 40 likes (10 for a repo owned by
   a well-known lab), up to 200 per run. These are the cheap wins: OCR, embeddings, small
   LLMs and VLMs, speech, time-series.
-- **frontier** (opt-in, `VALARK_SCOUT_SWEEPS=small,frontier`): open-weight releases with
+- **frontier** (opt-in, `VALARK_SCOUT_SWEEPS=small,speech-vision,frontier`): open-weight releases with
   ≥ 20B parameters from the last 18 months, from a lab or heavily liked. No size cap; the
   planner's value-per-byte order fills them last, so they only land on a big disk.
 
 Both skip gated and private repos (no accepted licence), quantised / converted re-uploads
 (the originals are kept), speculative-decoding heads, abliterated / uncensored fine-tunes,
-`-base` checkpoints and any repo the curated catalog already names. Only repos that publish
-`safetensors` metadata are considered (the size pre-filter needs it), so ONNX-, GGUF- or
-`.bin`-only repos are left to the curated catalog.
+`-base` checkpoints and any repo the curated catalog already names. The small and frontier
+sweeps only consider repos that publish `safetensors` metadata (their size pre-filter needs
+it); the speech-vision sweep sizes every candidate from its file list instead.
 
-How they rank: scouted rows get values of 300–550 (frontier 200–400), against 480–900 for
-the curated rows, and reuse the curated category words (`small-llm`, `tiny-vlm`, `embed`,
-`speech-asr`, …; anything else is `scouted`). They never take a diversity slot and are not
-shielded from eviction as a category's only item, so on a small disk the curated set is
-planned first; in the small-valuable phase a scouted repo can still beat a curated one on
-value **per byte** when it is much smaller. A scout that cannot reach every listing never
-replaces a good cache (the ZIM catalog's completeness rule); a failed attempt waits
+How they rank: speech-vision rows get about 600–700, small rows 300–550, frontier 200–400,
+against 480–900 for the curated rows, and reuse the curated category words (`small-llm`,
+`tiny-vlm`, `embed`, `speech-asr`, `detection`, …; captioners are `captioning`, anything else
+`scouted`). They never take a diversity slot and are not shielded from eviction as a
+category's only item, and they skip the small-valuable phase (their tiny size would win it
+outright). They are planned in the final fill phase by intrinsic value: after every curated
+item valued above them (the setup-assistant LLMs, for example), before curated items valued
+below them, with speech and vision picks ahead of the other scouted rows. Under disk
+pressure scouted rows are evicted before any curated item. A curated model too big for the
+small-valuable phase and valued below a speech-vision pick (`qwen25-coder-7b`, 670) can wait
+behind it on a small disk; raise its value in `data/models-extra.tsv` if it must come first.
+
+A scout that cannot reach every listing never replaces a good cache (the ZIM catalog's completeness rule); a failed attempt waits
 `VALARK_SCOUT_RETRY` (1 day) before the next, and the scout's stderr is kept next to the
 cache as `models-scouted.tsv.err`. `VALARK_SCOUT=0` turns it off and ignores the cache.
 Rows are fetched with `hf download --include '*'` like any `repo` row; a whole-repo pull

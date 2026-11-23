@@ -221,10 +221,12 @@ broadens modality coverage with small, high-value files the
 | Safety | Llama-Guard-3-8B |
 
 **New models arrive on their own.** Each week the Librarian's
-[model scout](LIBRARIAN.md#model-scout-hf_scoutpy) (`scripts/lib/hf_scout.py`) adds new
-open models of any modality up to 10 GB that are getting attention on Hugging Face
-(optionally also big frontier releases). They are planned after the curated rows above on a
-small disk and fill around them on a big one.
+[model scout](LIBRARIAN.md#model-scout-hf_scoutpy) (`scripts/lib/hf_scout.py`) adds open
+**speech and vision** models (ASR, TTS, YOLO-class detection, segmentation, depth, OCR, …;
+any age, up to 6 GB) at high priority, plus new models of any modality up to 10 GB that are
+getting attention on Hugging Face (optionally also big frontier releases). Speech and vision
+picks rank with the curated rows; the rest are planned after them on a small disk and fill
+around them on a big one.
 
 ---
 

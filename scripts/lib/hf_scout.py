@@ -4,7 +4,8 @@ data/models-extra.tsv rows, so the Librarian picks up good releases without anyo
 editing the curated catalog by hand.
 
 Commands (stdlib only):
-  plan [--sweep small,frontier] [--max-gb 10] [--days 180] [--min-likes 40]
+  plan [--sweep small,speech-vision,frontier] [--max-gb 10] [--days 180] [--min-likes 40]
+       [--sv-max-gb 6] [--sv-likes 15] [--sv-cap 150]
        [--lab-likes 10] [--cap 200] [--frontier-params 20] [--frontier-likes 300]
        [--frontier-days 540] [--skip-tsv F ...]
        print pipe rows in the models-extra.tsv schema:
@@ -12,8 +13,18 @@ Commands (stdlib only):
        format is always `repo` (file = `*`, the whole repo), gated is always `no` (gated
        and private repos are skipped), bytes is the REAL repo total from the file list.
 
-Sweeps:
-  small     (default) any modality; created within --days; real size <= --max-gb;
+Sweeps (default: small,speech-vision):
+  speech-vision  speech (ASR, TTS, VAD, audio enhancement/classification/generation) and
+            vision (detection incl. YOLO, segmentation, depth, classification, zero-shot,
+            keypoints, image features, OCR) models: small but important, so ANY age, no
+            safetensors requirement, real size <= --sv-max-gb, likes >= --sv-likes, from each
+            tag's all-time most-downloaded and most-liked lists. Valued ~600-700 (560 + likes,
+            log scale), above every other scouted row. The planner keeps scouted rows out of
+            its small-valuable phase; they compete by value in the fill phase (after curated
+            rows valued above them, before those valued below) and are evicted first.
+            QUANT's `-base` / `-exp` / EAGLE rules are not applied (in speech/vision
+            `-base` is a model size: whisper-base, vit-base); quantised re-uploads still are.
+  small     any modality; created within --days; real size <= --max-gb;
             likes >= --min-likes, or >= --lab-likes for a repo owned by a well-known lab.
   frontier  (opt-in) open-weight releases with >= --frontier-params billion parameters
             created within --frontier-days, from a lab (any likes if created within --days,
@@ -53,6 +64,11 @@ LABS = ['moonshotai', 'deepseek-ai', 'Qwen', 'zai-org', 'mistralai', 'google', '
         'nvidia', 'MiniMaxAI', 'tencent', 'baidu', 'stepfun-ai', 'inclusionAI', 'XiaomiMiMo', 'allenai',
         'microsoft', 'ibm-granite', 'CohereLabs', 'ai21labs', 'LiquidAI', 'HuggingFaceTB', 'apple',
         'openbmb', 'stabilityai', 'black-forest-labs']
+# Quantised / converted re-uploads: skipped by every sweep.
+QUANT_CORE = re.compile(r'(?i)gguf|awq|gptq|mlx|bnb|nvfp4|mxfp4|fp4|int4|int8|exl2|-fp8$|4bit|8bit|'
+                        r'abliterat|obliterat|uncensored')
+# Full list for the LLM-shaped sweeps; in speech/vision `-base` is a model SIZE (whisper-base,
+# vit-base), so speech-vision only applies QUANT_CORE.
 QUANT = re.compile(r'(?i)gguf|awq|gptq|mlx|bnb|nvfp4|mxfp4|fp4|int4|int8|exl2|eagle3|-eagle|-fp8$|4bit|8bit|'
                    r'abliterat|obliterat|uncensored|dolphin|venice|-bf16$|-base$|dspark|-mopd|-exp$|-interleave')
 DTYPE_BYTES = {'F64': 8, 'I64': 8, 'F32': 4, 'I32': 4, 'U32': 4, 'BF16': 2, 'F16': 2, 'I16': 2,
@@ -64,11 +80,23 @@ EXPAND = ['gated', 'private', 'likes', 'downloads', 'createdAt', 'pipeline_tag',
 # frontier pick, goes to the one `scouted` bucket.
 CATEGORY = {'text-generation': 'small-llm', 'image-text-to-text': 'tiny-vlm', 'feature-extraction': 'embed',
             'sentence-similarity': 'embed', 'text-ranking': 'reranker',
-            'automatic-speech-recognition': 'speech-asr', 'text-to-speech': 'tts', 'image-to-text': 'ocr-doc',
+            'automatic-speech-recognition': 'speech-asr', 'text-to-speech': 'tts',
             'time-series-forecasting': 'time-series', 'depth-estimation': 'depth',
+            'image-to-text': 'captioning',
             'object-detection': 'detection', 'image-segmentation': 'segmentation',
             'mask-generation': 'segmentation', 'text-to-audio': 'audio-gen',
-            'audio-classification': 'audio-clf', 'voice-activity-detection': 'speech-vad'}
+            'audio-classification': 'audio-clf', 'voice-activity-detection': 'speech-vad',
+            'image-feature-extraction': 'img-embed', 'zero-shot-image-classification': 'img-embed'}
+SV_TAGS = ['automatic-speech-recognition', 'text-to-speech', 'voice-activity-detection', 'audio-to-audio',
+           'audio-classification', 'text-to-audio', 'object-detection', 'zero-shot-object-detection',
+           'image-segmentation', 'mask-generation', 'depth-estimation', 'image-classification',
+           'zero-shot-image-classification', 'keypoint-detection', 'image-feature-extraction',
+           'image-to-text', 'video-classification']
+SWEEPS = {'small', 'speech-vision', 'frontier'}
+try:
+    PACE = max(0.0, float(os.environ.get('VALARK_SCOUT_PACE', 0.2)))   # seconds between repo lookups
+except ValueError:
+    PACE = 0.2
 # Repo ids go into a path (scouted/<id>) and a '|' row: only plain Hugging Face ids pass.
 REPO_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$')
 API = os.environ.get('VALARK_HF_API', 'https://huggingface.co').rstrip('/')
@@ -157,8 +185,8 @@ def slug(repo):
 def plan(a):
     now = datetime.now(timezone.utc)
     sweeps = {s.strip() for s in a.sweep.split(',') if s.strip()}
-    if not sweeps <= {'small', 'frontier'}:
-        print('unknown sweep: ' + ','.join(sorted(sweeps - {'small', 'frontier'})), file=sys.stderr)
+    if not sweeps <= SWEEPS:
+        print('unknown sweep: ' + ','.join(sorted(sweeps - SWEEPS)), file=sys.stderr)
         return 64
     skip = load_skip(a.skip_tsv)
     pool = {}
@@ -169,12 +197,20 @@ def plan(a):
     for org in LABS:
         for m in listing('lab ' + org, author=org, sort='createdAt', limit=40):
             pool[m['id']] = m
+    if 'speech-vision' in sweeps:
+        for tag in SV_TAGS:
+            for sort in ('downloads', 'likes'):   # any age: trending adds little
+                for m in listing(f'{tag} {sort}', pipeline_tag=tag, sort=sort, limit=60):
+                    pool[m['id']] = m
     picks = []
     for m in pool.values():
         repo = m.get('id') or ''
         if not REPO_ID.match(repo) or '..' in repo:
             continue
-        if m.get('gated') or m.get('private') or QUANT.search(repo) or repo.lower() in skip:
+        if m.get('gated') or m.get('private') or QUANT_CORE.search(repo) or repo.lower() in skip:
+            continue
+        sv = 'speech-vision' in sweeps and m.get('pipeline_tag') in SV_TAGS
+        if not sv and QUANT.search(repo):
             continue
         when = created(m)
         if not when:
@@ -183,34 +219,45 @@ def plan(a):
         org = repo.split('/')[0]
         params, est = params_and_bytes(m)
         fresh = when >= now - timedelta(days=a.days)
-        if 'small' in sweeps and fresh and 0 < est <= a.max_gb * 1e9 and \
+        if sv and likes >= a.sv_likes:
+            picks.append(('speech-vision', likes, m))
+        elif QUANT.search(repo):
+            continue
+        elif 'small' in sweeps and fresh and 0 < est <= a.max_gb * 1e9 and \
                 likes >= (a.lab_likes if org in LABS else a.min_likes):
             picks.append(('small', likes, m))
         elif 'frontier' in sweeps and params >= a.frontier_params * 1e9 and \
                 when >= now - timedelta(days=a.frontier_days) and \
                 ((org in LABS and (fresh or likes >= a.frontier_likes)) or likes >= 2 * a.frontier_likes):
             picks.append(('frontier', likes, m))
-    rows, count = [], {'small': 0, 'frontier': 0}
+    rows, count = [], {'small': 0, 'frontier': 0, 'speech-vision': 0}
+    cap = {'small': a.cap, 'frontier': a.cap, 'speech-vision': a.sv_cap}
+    limit = {'small': a.max_gb * 1e9, 'speech-vision': a.sv_max_gb * 1e9, 'frontier': float('inf')}
     for sweep, likes, m in sorted(picks, key=lambda t: -t[1]):
-        if count[sweep] >= a.cap:
+        if count[sweep] >= cap[sweep]:
             continue
         repo = m['id']
+        time.sleep(PACE)   # be gentle: up to ~350 lookups per run
         try:
             size = repo_bytes(repo)
         except Exception as e:
             ERRORS.append(f'repo {repo}: {e}')
             continue
-        if not size or (sweep == 'small' and size > a.max_gb * 1e9):
+        if not size or size > limit[sweep]:
             continue
         count[sweep] += 1
-        bonus = min(250 if sweep == 'small' else 200, int(math.log10(likes + 1) * 70))
-        value = (300 if sweep == 'small' else 200) + bonus
+        if sweep == 'speech-vision':
+            value = 560 + min(140, int(math.log10(likes + 1) * 40))
+        else:
+            bonus = min(250 if sweep == 'small' else 200, int(math.log10(likes + 1) * 70))
+            value = (300 if sweep == 'small' else 200) + bonus
         tag = re.sub(r'[^a-z0-9-]', '-', str(m.get('pipeline_tag') or 'model').lower())
-        cat = CATEGORY.get(tag, 'scouted') if sweep == 'small' else 'scouted'
+        cat = CATEGORY.get(tag, 'scouted') if sweep != 'frontier' else 'scouted'
         note = f'scouted {sweep}: {likes} likes, created {created(m).date()}, {tag}'
         rows.append(f'{value}|scout-{slug(repo)}|{cat}|{repo}|*|repo|no|{size}|scouted/{repo}|{note}')
     print('# hf_scout plan ' + now.strftime('%Y-%m-%dT%H:%MZ') +
-          f' sweeps={",".join(sorted(sweeps))} small={count["small"]} frontier={count["frontier"]}')
+          f' sweeps={",".join(sorted(sweeps))} small={count["small"]} frontier={count["frontier"]}'
+          f' speech-vision={count["speech-vision"]}')
     for r in rows:
         print(r)
     for e in ERRORS:
@@ -229,7 +276,10 @@ def main(argv=None):
     p = Parser(prog='hf_scout.py', description='Scout new Hugging Face models (see module docstring).')
     sub = p.add_subparsers(dest='cmd', required=True, parser_class=Parser)
     q = sub.add_parser('plan')
-    q.add_argument('--sweep', default='small')
+    q.add_argument('--sweep', default='small,speech-vision')
+    q.add_argument('--sv-max-gb', type=float, default=6)
+    q.add_argument('--sv-likes', type=int, default=15)
+    q.add_argument('--sv-cap', type=int, default=150)
     q.add_argument('--max-gb', type=float, default=10)
     q.add_argument('--days', type=int, default=180)
     q.add_argument('--min-likes', type=int, default=40)

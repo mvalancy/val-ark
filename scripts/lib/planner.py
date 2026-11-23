@@ -244,16 +244,16 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
 
     # Phase 2: small valuable - value/byte desc, size-capped, per-category capped.
     p2 = [c for c in pool if c["id"] not in planned_ids and c["bytes"] <= small_max]
-    # Scouted rows have their own per-category count, so dense scouted repos cannot use up
-    # a curated category's cap and push the curated items there to phase 3.
-    scout_count = {}
+    # Scouted rows (hf_scout.py) skip this phase: a tiny, high-value scouted speech/vision
+    # repo has ~30x the value per byte of a 2 GB curated model, so it would crowd curated
+    # items out here (and, by spending the budget, starve the curated items over small_max
+    # that only phase 3 considers). They compete in phase 3 by intrinsic value instead.
     for c in sorted(p2, key=lambda x: (-density(x), x["bytes"])):
-        counts = scout_count if is_scouted(c) else cat_count
-        if counts.get(c["category"], 0) >= cap_for(c["category"]):
+        if is_scouted(c):
             continue
-        if take(c, 2) and is_scouted(c):
-            cat_count[c["category"]] -= 1   # take() counted it; keep it out of the curated tally
-            scout_count[c["category"]] = scout_count.get(c["category"], 0) + 1
+        if cat_count.get(c["category"], 0) >= cap_for(c["category"]):
+            continue
+        take(c, 2)
 
     # Phase 3: fill remaining - intrinsic value desc (flagships), then small.
     p3 = [c for c in pool if c["id"] not in planned_ids]
@@ -305,7 +305,9 @@ def evict(cands, manifest_path, need, pinned=None):
             rep[cat] = rep.get(cat, 0) + 1
             items.append(dict(id=mid, category=cat, dest=dest, bytes=bytes_, value=value))
     victims, freed = [], 0
-    for it in sorted(items, key=lambda x: (x["value"] / max(1, x["bytes"]), -x["bytes"])):
+    # Scouted rows go before any curated item (their tiny size would otherwise give them the
+    # best value per byte and keep them while curated models and ZIMs are evicted).
+    for it in sorted(items, key=lambda x: (not is_scouted(x), x["value"] / max(1, x["bytes"]), -x["bytes"])):
         if freed >= need:
             break
         if it["id"] in pinned:

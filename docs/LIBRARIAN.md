@@ -117,11 +117,11 @@ How they rank: speech-vision rows get about 600–700, small rows 300–550, fro
 against 480–900 for the curated rows, and reuse the curated category words (`small-llm`,
 `tiny-vlm`, `embed`, `speech-asr`, `detection`, …; captioners are `captioning`, anything else
 `scouted`). They never take a diversity slot and are not shielded from eviction as a
-category's only item, and the small-valuable phase plans every curated row before any
-scouted one, so on a small disk the curated set comes first; after that, speech and vision
-picks come before the other scouted rows. In the final fill phase rows go by value, so a
-speech-vision pick can come before a lower-valued curated item that was too big for the
-small-valuable phase. A scout that cannot reach every listing never
+category's only item, and they skip the small-valuable phase (their tiny size would win it
+outright). They are planned in the final fill phase by intrinsic value: after every curated
+item valued above them (the setup-assistant LLMs, for example), before curated items valued
+below them, with speech and vision picks ahead of the other scouted rows. Under disk
+pressure scouted rows are evicted before any curated item. A scout that cannot reach every listing never
 replaces a good cache (the ZIM catalog's completeness rule); a failed attempt waits
 `VALARK_SCOUT_RETRY` (1 day) before the next, and the scout's stderr is kept next to the
 cache as `models-scouted.tsv.err`. `VALARK_SCOUT=0` turns it off and ignores the cache.

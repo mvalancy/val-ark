@@ -303,18 +303,26 @@ printf 'model:scout-a--b\tmodels\tmodel:solo\t%s/sc\t1000\t500\thf-repo\t1\n' "$
 OUT=$(printf 'model:scout-a--b\tmodels\tmodel:solo\t500\t1000\thf-repo\ta/b\t%s/sc\t*\n' "$M" | python3 -I "$P" --budget 1 --evict-need 10 --manifest "$M/man.tsv" 2>/dev/null)
 check "a scouted sole representative is still evictable" 'echo "$OUT" | grep -q "^model:scout-a--b"'
 
-# phase 2 plans every curated row before any (denser, higher-valued) scouted one
+# scouted rows skip phase 2, so dense, high-valued ones never crowd curated rows out — neither
+# the small ones nor a big (> small_max) one that only phase 3 considers
 python3 -I - "$P" > "$M/dense.tsv" <<'PYEOF'
 import sys
 rows = []
 for i in range(8):     # curated: 2 GB each, value 600
     rows.append(f"model:cur{i}\tmodels\tmodel:small-llm\t600\t2000000000\thf-repo\tx/c{i}\t/nonexistent/c{i}\t*")
+rows.append("model:curbig\tmodels\tmodel:assistant\t860\t5000000000\thf-repo\tx/big\t/nonexistent/big\t*")
 for i in range(60):    # scouted speech/vision: 100 MB each, value 700 (~35x the density)
     rows.append(f"model:scout-sv--{i}\tmodels\tmodel:tts\t700\t100000000\thf-repo\tsv/{i}\t/nonexistent/s{i}\t*")
 print("\n".join(rows))
 PYEOF
-OUT=$(python3 -I "$P" --budget 17000000000 < "$M/dense.tsv" 2>/dev/null)
-check "dense scouted rows never crowd out curated ones (budget fits the curated set)" '[ "$(echo "$OUT" | grep -c "^model:cur")" -eq 8 ]'
+OUT=$(python3 -I "$P" --budget 22000000000 < "$M/dense.tsv" 2>/dev/null)
+check "dense scouted rows never crowd out curated ones (budget fits the curated set)" '[ "$(echo "$OUT" | grep -c "^model:cur[0-9]")" -eq 8 ]'
+check "...including a big, high-valued curated row only phase 3 sees" 'echo "$OUT" | grep -q "^model:curbig"'
+check "...scouted rows never planned in phase 2" '[ -z "$(echo "$OUT" | awk -F"\t" "\$1 ~ /^model:scout-/ && \$NF==2")" ]'
+mkdir -p "$M/ev/c0" "$M/ev/c1" "$M/ev/s1" "$M/ev/s2"
+printf 'model:cur0\tmodels\tmodel:small-llm\t%s/c0\t2000000000\t875\thf-repo\t1\nmodel:cur1\tmodels\tmodel:small-llm\t%s/c1\t2000000000\t875\thf-repo\t1\nmodel:scout-sv--1\tmodels\tmodel:tts\t%s/s1\t50000000\t650\thf-repo\t1\nmodel:scout-sv--2\tmodels\tmodel:tts\t%s/s2\t50000000\t650\thf-repo\t1\n' "$M/ev" "$M/ev" "$M/ev" "$M/ev" > "$M/man2.tsv"
+EV2=$(printf '' | python3 -I "$P" --budget 1 --evict-need 60000000 --manifest "$M/man2.tsv" 2>/dev/null | cut -f1 | tr '\n' ' ')
+check "eviction takes scouted rows before curated ones" '[ "$EV2" = "model:scout-sv--1 model:scout-sv--2 " ] || [ "$EV2" = "model:scout-sv--2 model:scout-sv--1 " ]'
 check "...and scouted rows fill what is left" '[ "$(echo "$OUT" | grep -c "^model:scout-sv--")" -ge 5 ]'
 
 # --- evict_path: hf-repo directories, contained -----------------------------------------------

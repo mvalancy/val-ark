@@ -19,9 +19,9 @@ Sweeps (default: small,speech-vision):
             keypoints, image features, OCR) models: small but important, so ANY age, no
             safetensors requirement, real size <= --sv-max-gb, likes >= --sv-likes, from each
             tag's all-time most-downloaded and most-liked lists. Valued ~600-700 (560 + likes,
-            log scale), above every other scouted row. The planner still plans curated rows
-            first in its small-valuable phase, so a scouted row never displaces a curated one
-            there. QUANT's `-base` / `-exp` / EAGLE rules are not applied (in speech/vision
+            log scale), above every other scouted row. The planner keeps scouted rows out of
+            its small-valuable phase; they compete by value in the fill phase (after curated
+            rows valued above them, before those valued below) and are evicted first. QUANT's `-base` / `-exp` / EAGLE rules are not applied (in speech/vision
             `-base` is a model size: whisper-base, vit-base); quantised re-uploads still are.
   small     any modality; created within --days; real size <= --max-gb;
             likes >= --min-likes, or >= --lab-likes for a repo owned by a well-known lab.
@@ -92,7 +92,10 @@ SV_TAGS = ['automatic-speech-recognition', 'text-to-speech', 'voice-activity-det
            'zero-shot-image-classification', 'keypoint-detection', 'image-feature-extraction',
            'image-to-text', 'video-classification']
 SWEEPS = {'small', 'speech-vision', 'frontier'}
-PACE = float(os.environ.get('VALARK_SCOUT_PACE', 0.2))   # seconds between repo lookups
+try:
+    PACE = max(0.0, float(os.environ.get('VALARK_SCOUT_PACE', 0.2)))   # seconds between repo lookups
+except ValueError:
+    PACE = 0.2
 # Repo ids go into a path (scouted/<id>) and a '|' row: only plain Hugging Face ids pass.
 REPO_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$')
 API = os.environ.get('VALARK_HF_API', 'https://huggingface.co').rstrip('/')

@@ -333,10 +333,12 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 - <a id="share-the-data-root"></a>**Sharing the data root also shares `val-ark/state/` (#274).** The
   static pages want `<DATA_ROOT>` shared (models are a sibling of `val-ark/`), but `state/` holds the
   passcode hash, the recovery code (which resets the admin passcode from the LAN) and the claim
-  code; `private/`, `uploads/` and `seaweedfs/` sit there too. The secret files are `0600`, so an
+  code, plus the community services' data; `private/` and `seaweedfs/` sit there too. The secret files are `0600`, so an
   SMB guest can't read them, but a file server running **as the Ark's own user** (`python3 -m
   http.server`, a same-uid NFS client) serves them with directory listings. **Rule:** `librarian.sh
-  site` sets those dirs to `700` every run; shares must run as another account
+  site` sets `state/`, `private/` and `seaweedfs/` to `700` every run (not the uploads drop,
+  which an operator may share on purpose; fleet nodes leaving notes in `state/coordination/` need
+  the Ark's uid); shares must run as another account
   ([SERVING.md](../SERVING.md#what-to-share-and-what-not-to)); never share a dev checkout (it holds
   `.env`).
 - **Default footprint cap can be tiny** — a box with 7 TB free had `VALARK_MAX_GB=500`, so almost

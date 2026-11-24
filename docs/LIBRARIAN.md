@@ -399,7 +399,8 @@ temp files are removed.
 `<DATA_ROOT>/models`, next to it, and the model links climb out to `../models`. Share (or open) the
 whole `<DATA_ROOT>` so those links resolve; a share of `val-ark/` alone shows the model cards but
 their file links break. A single-disk dev box keeps everything in the repo, so nothing climbs out.
-The data root also holds the Ark's private folders (`state/`, `private/`, `uploads/`, `seaweedfs/`).
+The data root also holds the Ark's private folders (`state/`, `private/`, `seaweedfs/`; the
+uploads drop is left alone).
 `site` sets them to mode `700` on every run, so a share must run as a different account; see
 [SERVING.md](SERVING.md#what-to-share-and-what-not-to).
 

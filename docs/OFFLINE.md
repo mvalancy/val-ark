@@ -135,6 +135,10 @@ GPU inference on served models over the network. Set `VALARK_FLEET` in `.env` an
 verification loop checks each remote node over SSH (reachable, sees the shared content,
 GPU inference works on NFS-served models).
 
+Nodes only need to read the shared `models/`, `content/` and `tools/`. The Ark keeps `val-ark/state/`
+private (mode `700`, see [SERVING.md](SERVING.md#what-to-share-and-what-not-to)), so a node that
+leaves notes in the loop's `state/coordination/` drop must mount as the Ark's own uid.
+
 ### Option B — Syncthing P2P
 
 1. Syncthing ships in the tools download:

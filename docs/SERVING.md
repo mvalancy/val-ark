@@ -85,7 +85,10 @@ still downloading.*
    **A NAS that can't run code:** write the pages from any Linux or macOS machine with `python3` and
    a Val Ark checkout. Mount the NAS share read-write there, then run
    `VAL_ARK_DATA=<mount point> scripts/librarian.sh site`. Re-run it after the archive changes.
-   Over a slow share, see the cost notes in the [Librarian guide](LIBRARIAN.md#static-browse-pages).
+   This assumes the NAS uses the Val Ark layout (`<mount>/val-ark/` and `<mount>/models/`). The run
+   also writes its log under `val-ark/state/logs/` on the NAS, and folder modes don't apply over
+   SMB, so keep `state/` out of reach with the NAS's own share permissions. Over a slow share, see
+   the cost notes in the [Librarian guide](LIBRARIAN.md#static-browse-pages).
 
 2. **Share the archive.** Share the data root (`<DATA_ROOT>`), not only `val-ark/`: models live
    in `<DATA_ROOT>/models`, a sibling of `val-ark/`, and the model pages link out of `val-ark/` to it.
@@ -96,7 +99,7 @@ still downloading.*
    |-----|---------|
    | SMB / Windows share | share `<DATA_ROOT>` read-only, for a guest or a dedicated read-only user, then open `\\<ark>\<share>\val-ark\index.html` |
    | NFS | export `<DATA_ROOT>` read-only with `all_squash` (clients map to an anonymous user), mount it, open `val-ark/index.html` |
-   | USB disk or a copy | copy `val-ark/` (without `state/`, `private/`, `uploads/`) and `models/`, then open `val-ark/index.html` in a file explorer |
+   | USB disk or a copy | copy `val-ark/` (without `state/`, `private/`, `seaweedfs/` or `uploads/`) and `models/`, then open `val-ark/index.html` in a file explorer |
    | Any small web server | run it as an account other than the Ark's, e.g. `sudo -u nobody python3 -m http.server 8000 --bind <lan-ip> --directory <DATA_ROOT>`, then browse to `http://<ark>:8000/val-ark/` |
 
 3. **Browse.** Every page uses relative links and loads nothing from the internet. JavaScript is
@@ -118,16 +121,19 @@ readable through a share:
 
 | Folder | Holds |
 |--------|-------|
-| `val-ark/state/` | the admin passcode hash, the **recovery code** (it resets the passcode) and the claim code |
+| `val-ark/state/` | the admin passcode hash, the **recovery code** (it resets the passcode), the claim code, and the community services' data (chat logs, mailboxes, boards, pastes) |
 | `val-ark/private/` | copies kept for the Ark's own use that it may not hand out |
-| `val-ark/uploads/`, `val-ark/seaweedfs/` | what people uploaded to the community services |
+| `val-ark/seaweedfs/` | the opt-in SeaweedFS blob store |
 
 `librarian.sh site` makes these folders readable by the Ark's own account only (mode `700`) each
 time it runs, so they are safe as long as the share **does not run as the Ark's account**. Use an
 SMB guest or a separate read-only user, NFS `all_squash`, or `sudo -u nobody` for a small web
-server. To be thorough, also hide them from SMB with `veto files = /state/private/uploads/seaweedfs/`.
-That setting matches those names at any depth, so check that no archive folder you need has one of
-them.
+server. To be thorough, also hide them from SMB with `veto files = /state/private/seaweedfs/`. That
+setting matches those names at any depth, so check that no archive folder you need has one of them.
+
+The uploads drop folder (`VAL_ARK_UPLOADS`, default `val-ark/uploads/`) is left alone, because you
+may share it on purpose. It holds unreviewed uploads, so decide whether it belongs in an archive
+share (add `/uploads/` to the veto list if not).
 
 On a single-disk or development install, the data root is the Val Ark checkout itself, which also
 holds `.env`. Don't share that checkout; use a data disk (`VAL_ARK_DATA`) for an Ark you share.

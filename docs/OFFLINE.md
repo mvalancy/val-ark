@@ -82,7 +82,7 @@ llama/whisper/sd require a CUDA source build — see [PLATFORMS.md](PLATFORMS.md
 
 To let other machines browse the archive, either run the web server (`./start.sh serve`) or
 share the data disk and open the static `val-ark/index.html`. Both work offline; see
-[SERVING.md](SERVING.md) for which to choose.
+[SERVING.md](SERVING.md) for which to choose and what (not) to share.
 
 ## 24/7 self-healing
 

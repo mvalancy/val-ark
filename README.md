@@ -349,7 +349,7 @@ There are two ways to open an Ark, and **both work fully offline**. Use either o
 
 | | Static | Dynamic |
 |---|---|---|
-| **Runs** | nothing: any file share (SMB, NFS, USB disk, `python3 -m http.server`) | `./start.sh serve` (zero-dependency Node.js) |
+| **Runs** | no Val Ark process: any file share (SMB, NFS, USB disk, `python3 -m http.server`) | `./start.sh serve` (zero-dependency Node.js) |
 | **Gives you** | a browsable catalog of every item, with pictures, descriptions and direct file links | the full web UI: live status, one-click requests, Wikipedia in the browser, the AI assistant, chat, mail, boards, file drop |
 | **Pick it for** | a simple, secure, read-only file server; a NAS that can't run code; a disk you hand to someone | a community hub on the LAN; an Ark you manage from a browser |
 
@@ -358,7 +358,7 @@ step, screenshots, and the security trade-offs.
 
 | Static (any file share) | Dynamic (`./start.sh serve`) |
 |---|---|
-| ![Static catalog home page](docs/screenshots/serving/static-home.png) | ![Dynamic web UI home page](docs/screenshots/serving/dyn-home.png) |
+| ![Static catalog home page](docs/screenshots/serving/static-home.png) | ![Dynamic web UI home page (a freshly set-up box)](docs/screenshots/serving/dyn-home.png) |
 
 ### Dynamic: the web server
 

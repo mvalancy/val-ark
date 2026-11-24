@@ -335,11 +335,14 @@ gen --root "$A" --section models=- --out "$T/drop" >/dev/null 2>&1
 check "NAME=- drops a section" '[ ! -e "$T/drop/browse/models.html" ] && [ -f "$T/drop/browse/content.html" ]'
 
 # librarian.sh site on the data-root layout (models live next to, not inside, VALARK_HOME)
-D="$T/data"; mkdir -p "$D/models/llm/m1" "$D/val-ark/content/zim" "$D/val-ark/state"
+D="$T/data"; mkdir -p "$D/models/llm/m1" "$D/val-ark/content/zim" "$D/val-ark/state" "$D/val-ark/private" "$D/val-ark/uploads"
+chmod 755 "$D/val-ark/state" "$D/val-ark/private" "$D/val-ark/uploads"
 head -c 10 /dev/zero > "$D/models/llm/m1/m.gguf"; echo z > "$D/val-ark/content/zim/wiktionary_en_all_2025-01.zim"
 VAL_ARK_DATA="$D" bash "$ROOT/scripts/librarian.sh" site > "$T/lib.out" 2>&1; rc=$?
 check "librarian.sh site exits 0" '[ "$rc" -eq 0 ] || { cat "$T/lib.out" >&2; false; }'
 check "librarian.sh site writes VALARK_HOME/index.html" '[ -f "$D/val-ark/index.html" ] && [ -f "$D/val-ark/browse/models.html" ]'
+check "site locks state/ private/ uploads/ to the owner (safe to share the data root)" '[ "$(stat -c %a "$D/val-ark/state")" = 700 ] && [ "$(stat -c %a "$D/val-ark/private")" = 700 ] && [ "$(stat -c %a "$D/val-ark/uploads")" = 700 ]'
+check "...and leaves the shared trees readable" '[ "$(stat -c %a "$D/val-ark/content")" != 700 ]'
 check "models outside VALARK_HOME linked relatively" 'grep -rq "href=\"../../../models/llm/m1/\"" "$D/val-ark/browse/item"'
 VALARK_STATIC_SITE=0 VAL_ARK_DATA="$T/data2" bash "$ROOT/scripts/librarian.sh" site >/dev/null 2>&1; rc=$?
 check "VALARK_STATIC_SITE=0 is a no-op" '[ "$rc" -eq 0 ] && [ ! -e "$T/data2/val-ark/index.html" ]'

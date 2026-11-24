@@ -1769,8 +1769,9 @@ class Builder:
                 'folders load in transformers, vLLM or similar.</li>'
                 '<li><b>Tools &amp; installers</b>: pick the folder for your platform; checksums sit next to the files '
                 'where upstream publishes them.</li>'
-                '<li>When the Val Ark server runs on this box, its web UI adds search, chat and downloads; these pages are '
-                'the server-free view.</li></ul></div>'
+                '<li>These pages are the <b>static</b> view: plain files, served by any file share. When the Val Ark '
+                'server runs on this box, its web UI adds live status, Wikipedia in the browser, chat, mail and '
+                'one-click downloads (see docs/SERVING.md in the Val Ark source).</li></ul></div>'
                 f'<footer>Static snapshot generated {esc(stamp)} · <a href="browse/summary.json">summary.json</a></footer>')
         write_atomic(os.path.join(self.browse, 'summary.json'), json.dumps(summary, indent=1) + '\n')
         write_atomic(os.path.join(self.out, 'index.html'), page(f'{a.title} archive', body, self.nav('', None, shown)))

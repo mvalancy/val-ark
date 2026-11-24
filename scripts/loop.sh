@@ -100,7 +100,8 @@ Val Ark fleet coordination drop.
 Agents running on other mesh nodes can leave notes here; this path lives on the
 shared (exported) data disk and the loop reads any *.md / *.txt notes each
 cycle. Drop files like:  <node>-ark-tests.md, <node>-notes.txt
-state/ is owner-only (librarian.sh site), so write here as the Ark's own uid.
+state/ is owner-only (valark_lock_private: setup, every loop cycle, site),
+so write here as the Ark's own uid.
 EOF
     local notes; notes=$(find "$COORD_DIR" -maxdepth 1 -type f \( -name '*.md' -o -name '*.txt' \) ! -name 'README.txt' 2>/dev/null)
     if [ -n "$notes" ]; then

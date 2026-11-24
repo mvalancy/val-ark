@@ -228,6 +228,21 @@ valark_ensure_layout() {
         valark_link installers "$INSTALLERS_DIR"
         valark_data_stamp     # record the data-disk identity (idempotent, one-shot)
     fi
+    valark_lock_private
+}
+
+# Keep the Ark's own private trees owner-only (mode 700), so a share of the data root served
+# as another account (SMB guest, NFS all_squash, `sudo -u nobody python3 -m http.server`;
+# docs/SERVING.md) cannot enter them: state/ (passcode hash, recovery code, claim code,
+# community service data), private/ (copies the Ark may not hand out), seaweedfs/ (opt-in
+# blob store). Not the uploads drop (VAL_ARK_UPLOADS): an operator may share that on purpose.
+# Only dirs this user owns; a filesystem without modes (SMB, exFAT) ignores it. Runs from
+# valark_ensure_layout (setup, every loop cycle) and `librarian.sh site`.
+valark_lock_private() {
+    local d
+    for d in "$STATE_DIR" "$PRIVATE_DIR" "$SEAWEED_DIR"; do
+        if [ -d "$d" ] && [ -O "$d" ]; then chmod 700 "$d" 2>/dev/null || true; fi
+    done
 }
 
 # --- Data-disk identity guard (issue #58) -------------------------------------

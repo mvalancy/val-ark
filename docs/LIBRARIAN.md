@@ -401,7 +401,7 @@ whole `<DATA_ROOT>` so those links resolve; a share of `val-ark/` alone shows th
 their file links break. A single-disk dev box keeps everything in the repo, so nothing climbs out.
 The data root also holds the Ark's private folders (`state/`, `private/`, `seaweedfs/`; the
 uploads drop is left alone).
-`site` sets them to mode `700` on every run, so a share must run as a different account; see
+Setup, every loop cycle and every `site` run set them to mode `700` (`valark_lock_private`), so a share must run as a different account; see
 [SERVING.md](SERVING.md#what-to-share-and-what-not-to).
 
 **Cost.** `librarian.sh site` walks the section folders (`os.scandir` + one `stat` per file) on every

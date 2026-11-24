@@ -338,13 +338,20 @@ check "NAME=- drops a section" '[ ! -e "$T/drop/browse/models.html" ] && [ -f "$
 D="$T/data"; mkdir -p "$D/models/llm/m1" "$D/val-ark/content/zim" "$D/val-ark/state" "$D/val-ark/private" "$D/val-ark/uploads" "$D/val-ark/seaweedfs"
 chmod 755 "$D/val-ark/state" "$D/val-ark/private" "$D/val-ark/uploads" "$D/val-ark/seaweedfs"
 head -c 10 /dev/zero > "$D/models/llm/m1/m.gguf"; echo z > "$D/val-ark/content/zim/wiktionary_en_all_2025-01.zim"
-VAL_ARK_DATA="$D" bash "$ROOT/scripts/librarian.sh" site > "$T/lib.out" 2>&1; rc=$?
+VAL_ARK_CONFIG=/dev/null VAL_ARK_DATA="$D" bash "$ROOT/scripts/librarian.sh" site > "$T/lib.out" 2>&1; rc=$?
 check "librarian.sh site exits 0" '[ "$rc" -eq 0 ] || { cat "$T/lib.out" >&2; false; }'
 check "librarian.sh site writes VALARK_HOME/index.html" '[ -f "$D/val-ark/index.html" ] && [ -f "$D/val-ark/browse/models.html" ]'
 check "site locks state/ private/ seaweedfs/ to the owner (safe to share the data root)" '[ "$(stat -c %a "$D/val-ark/state")" = 700 ] && [ "$(stat -c %a "$D/val-ark/private")" = 700 ] && [ "$(stat -c %a "$D/val-ark/seaweedfs")" = 700 ]'
 check "...and leaves the shared trees and the uploads drop alone" '[ "$(stat -c %a "$D/val-ark/content")" != 700 ] && [ "$(stat -c %a "$D/val-ark/uploads")" = 755 ]'
+# valark_lock_private also runs from valark_ensure_layout (setup + every loop cycle), not only `site`.
+chmod 755 "$D/val-ark/state"; chmod 750 "$D/val-ark/private"
+# Run the real valark_ensure_layout, with the repo-symlink + disk-stamp steps stubbed out so the
+# checkout is never touched (VAL_ARK_CONFIG=/dev/null keeps a developer .env out of it).
+VAL_ARK_CONFIG=/dev/null VAL_ARK_DATA="$D" bash -c '. "$1/scripts/lib/valark-env.sh"
+    valark_link() { :; }; valark_data_stamp() { :; }; valark_ensure_layout' _ "$ROOT"
+check "valark_ensure_layout (setup + every loop cycle) sets state/ + private/ to exactly 700" '[ "$(stat -c %a "$D/val-ark/state")" = 700 ] && [ "$(stat -c %a "$D/val-ark/private")" = 700 ]'
 check "models outside VALARK_HOME linked relatively" 'grep -rq "href=\"../../../models/llm/m1/\"" "$D/val-ark/browse/item"'
-VALARK_STATIC_SITE=0 VAL_ARK_DATA="$T/data2" bash "$ROOT/scripts/librarian.sh" site >/dev/null 2>&1; rc=$?
+VALARK_STATIC_SITE=0 VAL_ARK_CONFIG=/dev/null VAL_ARK_DATA="$T/data2" bash "$ROOT/scripts/librarian.sh" site >/dev/null 2>&1; rc=$?
 check "VALARK_STATIC_SITE=0 is a no-op" '[ "$rc" -eq 0 ] && [ ! -e "$T/data2/val-ark/index.html" ]'
 
 # maintain throttles the refresh (VALARK_STATIC_SITE_HOURS) and runs it when stale. Sourced

@@ -176,7 +176,8 @@ ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts   # 1. trust GitHub
 git clone git@github.com:mvalancy/val-ark.git && cd val-ark
 cp .env.example .env                                      # then edit for your unit:
 #   VAL_ARK_DATA=/data_n001                    (Val Ark on drive 1)
-#   VALARK_SEAWEED_DIR=/data_n002/seaweedfs    (SeaweedFS on drive 2)
+#   VALARK_SEAWEED_DIR=/data_n002/seaweedfs    (SeaweedFS on drive 2; a subfolder, never the
+#                                               drive root: it is kept owner-only, mode 700)
 #   VALARK_SEAWEED_VOLUME_PORT=8085            (avoid a vendor stack on 8080)
 ./start.sh setup                                          # bootstraps Node, shows storage
 ./start.sh serve &                                        # web UI on :3000

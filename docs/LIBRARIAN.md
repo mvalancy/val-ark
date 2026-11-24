@@ -236,6 +236,33 @@ template row):**
 
 Tests: `tests/test-release-mirror.sh` (offline fixture for every kind).
 
+### Offline .deb sets: desktop apps and building from source
+
+`desktop-apps` holds Inkscape, GIMP, Krita, Blender, Kdenlive, KiCad (+ symbols/footprints),
+OpenSCAD, PrusaSlicer, Audacity, VLC, mpv, FFmpeg, LibreOffice, Calibre, darktable, Shotcut,
+OBS, tmux, btop and htop for Ubuntu on both arches (~1.2 GB each for noble): the offline path
+where upstream ships no Linux arm64 build. `desktop-src` adds, for the apps with no arm64
+build, Ubuntu's source package and every build dependency (~2.7 GB each), so a box with no
+internet can rebuild them:
+
+```bash
+python3 scripts/lib/apt_offline.py build --suite noble --arch arm64 --set desktop-apps --set desktop-src --dest <dir>
+# on the target: deb [trusted=yes] file:<dir> ./  then (the flat repo has no deb-src index,
+# so build deps come from the .dsc FILE, not the package name)
+cd <dir>/source/inkscape && D=$(ls -v inkscape_*.dsc | tail -1)   # the newest .dsc
+sudo apt-get build-dep ./$D
+rm -rf build-inkscape && dpkg-source -x $D build-inkscape && cd build-inkscape
+dpkg-buildpackage -us -uc -b
+```
+
+These build the Ubuntu suite's version of each app (noble: e.g. KiCad 7, Blender 4.0,
+Audacity 3.4). A newer upstream release, whose source the tool script mirrors separately,
+may need newer or extra libraries.
+
+Set entries `build-dep:SRC` / `source:SRC` drive this (see `data/AGENTS.md`); the tool
+scripts' `INSTALL.txt` for those platforms name the same sets, the mirrored upstream release
+tarball and the git bundle ([TOOLS.md](TOOLS.md#no-upstream-build-for-a-platform-offline-install--source)).
+
 ### Offline .deb sets: exit codes and a real-box check
 
 `apt_offline.py` exits with one of these codes:
@@ -323,7 +350,10 @@ holes. Failed attempts keep the partial + control file so the next cycle resumes
 where it left off; abandoned partials are garbage-collected by `verify` after
 `VALARK_PARTIAL_MAX_AGE_DAYS` (default 14).
 
-## Static browse pages (no server)
+## Static browse pages
+
+When to serve an Ark statically or dynamically, and how to set up each: [SERVING.md](SERVING.md).
+This section covers how the pages are built.
 
 `scripts/librarian.sh site` (and `maintain`, at most every `VALARK_STATIC_SITE_HOURS`, default 6)
 runs `scripts/lib/static_site.py`, which writes a **static catalog** of the archive at
@@ -336,10 +366,21 @@ Every card has a picture and a description, from the best source available:
 
 | Section | Picture | Description |
 |---------|---------|-------------|
-| Tools & apps (one card per tool, all platforms) | the web UI's logo; screenshots on the detail page | the web UI's `TOOLS` / `TOOL_META`: description, overview, features, CLI, maker, licence |
+| Tools & apps (one card per tool, all platforms) | the web UI's logo; screenshots on the detail page | the web UI's `TOOLS` / `TOOL_META` (matched by id, download folder or name): description, overview, features, CLI, maker, licence; else the header comment of `scripts/tools/<name>.sh` |
 | Library (ZIM) | the ZIM's own 48x48 illustration | the ZIM's own title + description (read from its header and directory with a few small reads; uncompressed, xz and, with the `zstd` CLI, zstd clusters, each decoded once and capped at 4 MB), the web UI's `CONTENT_LIBRARY` overview, article counts from a cached Kiwix catalog |
 | AI models, datasets | the first image the model / dataset card shows from its own repo (a real PNG / JPEG / GIF / WebP file inside the repo: symlinks out of it and upstream SVGs are refused) | the card's first paragraphs, licence and pipeline tag; curated `MODEL_FAMILIES` text for the classic `llm/` folders |
-| Installers, developer stack, sources | generated badge | `data/installers.tsv`, `data/dev-stack.tsv`, `data/source-repos.tsv` notes |
+| Installers, developer stack, sources | generated badge | `data/installers.tsv`, `data/dev-stack.tsv`, `data/source-repos.tsv` notes; a PyPI package's `Summary` from its wheel's `METADATA`; the web UI text for a known tool |
+
+**Every card has a description.** When none of the sources above has one, the generator uses, in
+order: a caller's `--hints` file (`path<TAB>json` lines with `description` / `title` / `item` /
+`collection` / `topic` / `platform` / `version` / `repo` / `publisher`; a NAS collector passes what it
+recorded at download time), the curated sentences in
+[`data/static-descriptions.json`](../data/static-descriptions.json) (Kiwix projects such as Wikipedia,
+TED, DevDocs, Gutenberg, and tool folder names such as `maddy` or `node`), and finally a sentence built from
+what is known: task (from the model card or the folder name), organisation, format and how to run it,
+topic, version, platforms, file count and size. Folders named after a version (`3.12.1`, `latest`,
+`24.04`) are titled by their project. `summary.json` counts, per section, how many descriptions came
+from hints and how many were generated, and the run prints the totals.
 
 Anything without a picture gets a generated badge (initials or a modality glyph). Pictures are copied
 into `browse/thumbs/` (deduplicated, size-capped) so the catalog works without the repo next to it.
@@ -358,6 +399,10 @@ temp files are removed.
 `<DATA_ROOT>/models`, next to it, and the model links climb out to `../models`. Share (or open) the
 whole `<DATA_ROOT>` so those links resolve; a share of `val-ark/` alone shows the model cards but
 their file links break. A single-disk dev box keeps everything in the repo, so nothing climbs out.
+The data root also holds the Ark's private folders (`state/`, `private/`, `seaweedfs/`; the
+uploads drop is left alone).
+Setup, every loop cycle and every `site` run set them to mode `700` (`valark_lock_private`), so a share must run as a different account; see
+[SERVING.md](SERVING.md#what-to-share-and-what-not-to).
 
 **Cost.** `librarian.sh site` walks the section folders (`os.scandir` + one `stat` per file) on every
 refresh. That is quick on a local disk; on a very large tree on a slow disk raise

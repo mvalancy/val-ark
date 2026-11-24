@@ -11,6 +11,8 @@
 #  * apt_offline.py exit codes: usage errors exit 64 (never argparse's 2 =
 #    "a download failed"), and the most severe class wins (1 > 2 > 3 > 0).
 #  * bad --tsv / `--set all --set bogus` -> 64; no apt-get / unwritable --dest -> 1, no traceback.
+#  * build-dep:SRC / source:SRC tokens: deb-src lists only when needed, source files under
+#    source/<pkg>/ with SHA256 from *_Sources, fetch never escapes --dest, desktop sets complete.
 # No network: every check runs on repo files and fixtures.
 ###############################################################################
 PASS=0; FAIL=0
@@ -36,7 +38,7 @@ for n, line in enumerate(open(sys.argv[1]), 1):
     assert sid not in ids, f"line {n}: duplicate id {sid}"
     ids.add(sid)
     for p in pkgs.split():
-        assert re.fullmatch(r"[a-z0-9][a-z0-9+.-]+", p), f"line {n}: bad package {p!r}"
+        assert re.fullmatch(r"(build-dep:|source:)?[a-z0-9][a-z0-9+.-]+", p), f"line {n}: bad package {p!r}"
     assert pkgs.split() and note.strip(), f"line {n}: empty packages/note"
 EOF
 
@@ -210,6 +212,113 @@ PY
 ERR=$(VALARK_DEBUG=1 PATH="$T/empty-path" "$(command -v python3)" "$A" resolve --suite noble --arch amd64 --set lamp --cache "$T/nopath2" 2>&1); RC=$?
 [ "$RC" = 1 ] && grep -q Traceback <<<"$ERR" && grep -q "apt_offline:" <<<"$ERR" && pass \
     || fail "VALARK_DEBUG=1 must add the traceback to an environment failure (got $RC: $ERR)"
+
+# 10. Build-from-source tokens (#desktop-apps): build-dep:SRC / source:SRC.
+python3 - "$ROOT/scripts/lib" "$T/src-root" "$ROOT/data/apt-sets.tsv" <<'PY' && pass || fail "apt_offline build-dep/source tokens"
+import sys, io, contextlib, pathlib; sys.path.insert(0, sys.argv[1]); import apt_offline as ao
+plain, bdep, src = ao.split_tokens(["vlc", "build-dep:vlc", "source:vlc", "mpv"])
+assert (plain, bdep, src) == (["vlc", "mpv"], ["vlc"], ["vlc"]), (plain, bdep, src)
+sets = ao.load_sets(sys.argv[3])
+assert ao.needs_src(sets, ["desktop-src"]) and not ao.needs_src(sets, ["lamp", "desktop-apps"])
+# deb-src lines only when a selected set needs them
+r = ao.AptRoot("noble", "arm64", sys.argv[2], src=True); r.prepare()
+sl = (r.dir / "sources.list").read_text()
+assert sl.count("deb-src ") == 3 and sl.count("\ndeb [") + sl.startswith("deb [") == 3, sl
+r2 = ao.AptRoot("noble", "amd64", sys.argv[2]); r2.prepare()
+assert "deb-src" not in (r2.dir / "sources.list").read_text()
+# resolve: source files go to source/<pkg>/, build-deps join the flat repo, SHA256 from *_Sources
+lists = r.dir / "var/lib/apt/lists"; lists.mkdir(parents=True, exist_ok=True)
+(lists / "x_noble_main_source_Sources").write_text(
+    "Package: vlc\nChecksums-Sha256:\n " + "c" * 64 + " 10 vlc_3.0.orig.tar.xz\n " + "d" * 64 + " 5 vlc_3.0-1.dsc\n")
+(lists / "x_noble_main_binary-arm64_Packages").write_text(
+    "Package: libfoo-dev\nFilename: pool/main/f/foo/libfoo-dev_1_arm64.deb\nSHA256: " + "e" * 64 + "\n")
+r.available = lambda pkgs: (pkgs, [])
+calls = []
+def pu(self, *args):
+    calls.append(args)
+    if args[0] == "build-dep":
+        return [("http://x/pool/libfoo-dev_1_arm64.deb", "libfoo-dev_1_arm64.deb", 1, "")]
+    if args[0] == "source":
+        return [("http://x/pool/vlc_3.0.orig.tar.xz", "vlc_3.0.orig.tar.xz", 10, ""), ("http://x/pool/vlc_3.0-1.dsc", "vlc_3.0-1.dsc", 5, "")]
+    return [("http://x/pool/mpv_1_arm64.deb", "mpv_1_arm64.deb", 2, "")]
+ao.AptRoot._print_uris = pu
+rows, missing = r.resolve(["mpv", "build-dep:vlc", "source:vlc"])
+names = {n: sha for _, n, _, sha in rows}
+assert "source/vlc/vlc_3.0.orig.tar.xz" in names and names["source/vlc/vlc_3.0.orig.tar.xz"] == "c" * 64, names
+assert names["source/vlc/vlc_3.0-1.dsc"] == "d" * 64 and names["libfoo-dev_1_arm64.deb"] == "e" * 64, names
+assert ("install", "mpv") in calls and ("build-dep", "vlc") in calls and ("source", "vlc") in calls, calls
+# fetch never writes outside --dest
+err = io.StringIO()
+with contextlib.redirect_stderr(err):
+    assert ao.fetch([("http://x/evil", "../evil", 1, ""), ("http://x/abs", "/tmp/abs", 1, "")], sys.argv[2] + "/d") == 2
+assert "unsafe file name" in err.getvalue() and not pathlib.Path(sys.argv[2] + "/evil").exists()
+# the desktop sets: apps with no upstream linux-arm64 binary are installable AND rebuildable
+apps, srcset = sets["desktop-apps"]["packages"], sets["desktop-src"]["packages"]
+for app in ["inkscape", "blender", "kdenlive", "kicad", "vlc", "audacity"]:
+    assert app in apps, app
+    assert f"build-dep:{app}" in srcset and f"source:{app}" in srcset, app
+for t in srcset:
+    kind, name = t.split(":", 1)
+    assert kind in ("build-dep", "source") and f"build-dep:{name}" in srcset and f"source:{name}" in srcset, t
+PY
+
+# 11. A source row (name "source/<pkg>/<file>") is really FETCHED into <dest>/source/<pkg>/ from
+#     a local HTTP server (the .part name must be built from the basename), with size + SHA256
+#     checked; a bad SHA is a counted failure (exit 2 through main), never a traceback; stale
+#     source files of an older upload are pruned only once the new set is complete.
+. "$ROOT/tests/lib/ports.sh"
+SP="$(free_port)"; mkdir -p "$T/srcwww"; printf 'Format: 3.0 (quilt)\nSource: demo\n' > "$T/srcwww/demo_1-1.dsc"
+(cd "$T/srcwww" && exec python3 -m http.server "$SP" --bind 127.0.0.1) >/dev/null 2>&1 & SRC_PID=$!
+for _ in $(seq 50); do curl -s "http://127.0.0.1:$SP/" >/dev/null 2>&1 && break; sleep 0.1; done
+python3 - "$ROOT/scripts/lib" "$T/fetchdest" "http://127.0.0.1:$SP/demo_1-1.dsc" "$T/srcwww/demo_1-1.dsc" <<'PY' && pass || fail "a source/<pkg>/<file> row is fetched for real"
+import sys, io, contextlib, hashlib, os; sys.path.insert(0, sys.argv[1]); import apt_offline as ao
+dest, url, local = sys.argv[2], sys.argv[3], sys.argv[4]
+data = open(local, "rb").read(); sha = hashlib.sha256(data).hexdigest()
+assert ao.fetch([(url, "source/demo/demo_1-1.dsc", len(data), sha)], dest) == 0
+got = os.path.join(dest, "source/demo/demo_1-1.dsc")
+assert open(got, "rb").read() == data and not os.path.exists(got + ".part")
+# idempotent: present + verified -> nothing fetched again, still 0
+assert ao.fetch([(url, "source/demo/demo_1-1.dsc", len(data), sha)], dest) == 0
+# prune_sources: an older .dsc/tarball left by a previous -updates upload is removed once
+# this run's files are all present; a package whose fetch is incomplete is left alone.
+d = os.path.join(dest, "source/demo")
+open(os.path.join(d, "demo_1-0.dsc"), "w").write("old"); open(os.path.join(d, "demo_1.orig.tar.xz"), "w").write("old")
+assert ao.prune_sources([(url, "source/demo/demo_1-1.dsc", len(data), sha), ("u", "x_1_amd64.deb", 1, "")], dest) == 2
+assert sorted(os.listdir(d)) == ["demo_1-1.dsc"], os.listdir(d)
+os.makedirs(os.path.join(dest, "source/other")); open(os.path.join(dest, "source/other/other_0.dsc"), "w").write("keep")
+assert ao.prune_sources([(url, "source/other/other_1.dsc", 1, "")], dest) == 0      # wanted file missing -> keep
+assert os.listdir(os.path.join(dest, "source/other")) == ["other_0.dsc"]
+# a bad SHA256 through the real CLI path (stubbed resolve) -> exit 2, a clean message, no traceback
+ao.AptRoot.update = lambda self: None
+ao.AptRoot.has_lists = lambda self: True
+ao.AptRoot.resolve = lambda self, pkgs: ([(url, "source/demo/demo_1-2.dsc", len(data), "0" * 64)], [])
+tsv = dest + ".tsv"; open(tsv, "w").write("1|s|source:demo|n\n")
+err = io.StringIO()
+with contextlib.redirect_stderr(err):
+    rc = ao.main(["fetch", "--tsv", tsv, "--suite", "noble", "--arch", "amd64", "--dest", dest])
+assert rc == 2, (rc, err.getvalue())
+assert "FAILED source/demo/demo_1-2.dsc" in err.getvalue() and "Traceback" not in err.getvalue(), err.getvalue()
+assert not os.path.exists(os.path.join(dest, "source/demo/demo_1-2.dsc.part"))
+PY
+kill "$SRC_PID" 2>/dev/null; wait "$SRC_PID" 2>/dev/null
+
+# 12. prune_sources on its own: two uploads' files in source/<pkg>/ -> only the wanted (newest)
+#     remain; a package whose wanted file is missing keeps everything; .deb rows are ignored.
+python3 - "$ROOT/scripts/lib" "$T/prune" <<'PY' && pass || fail "apt_offline.prune_sources"
+import sys, os; sys.path.insert(0, sys.argv[1]); import apt_offline as ao
+dest = sys.argv[2]; d = os.path.join(dest, "source/pkg"); os.makedirs(d)
+for n in ("pkg_1.0-1.dsc", "pkg_1.0.orig.tar.xz", "pkg_1.0-1.debian.tar.xz", "pkg_1.0-2.dsc", "pkg_1.0-2.debian.tar.xz"):
+    open(os.path.join(d, n), "w").write(n)
+want = [("u", "source/pkg/pkg_1.0-2.dsc", 1, ""), ("u", "source/pkg/pkg_1.0.orig.tar.xz", 1, ""),
+        ("u", "source/pkg/pkg_1.0-2.debian.tar.xz", 1, ""), ("u", "lib_1_arm64.deb", 1, "")]
+assert ao.prune_sources(want, dest) == 2
+assert sorted(os.listdir(d)) == ["pkg_1.0-2.debian.tar.xz", "pkg_1.0-2.dsc", "pkg_1.0.orig.tar.xz"], os.listdir(d)
+e = os.path.join(dest, "source/half"); os.makedirs(e)
+open(os.path.join(e, "half_1.dsc"), "w").write("old")
+assert ao.prune_sources([("u", "source/half/half_2.dsc", 1, "")], dest) == 0
+assert os.listdir(e) == ["half_1.dsc"]
+assert ao.prune_sources([("u", "x_1_amd64.deb", 1, "")], dest) == 0
+PY
 
 echo "server-stack: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

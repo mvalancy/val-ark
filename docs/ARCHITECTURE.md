@@ -267,6 +267,10 @@ graph TB
 
 ## Web Server
 
+This is the **dynamic** way to serve an Ark. The **static** way needs no server: the
+pages written by `librarian.sh site` work from any file share. [SERVING.md](SERVING.md) compares
+the two.
+
 `server.js` is a **zero-dependency Node** server. It serves the static web UI plus a
 JSON API and Server-Sent Events (SSE) for live progress. Download actions spawn the
 relevant shell scripts as child processes and stream their output back to the browser.

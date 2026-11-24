@@ -585,6 +585,135 @@ create_source_tarball() {
     fi
 }
 
+# --- Source fallbacks for platforms with no upstream binary --------------------
+# Mirror an upstream RELEASE source tarball to ${TOOLS_DIR}/sources/<tool>-<version>-src/.
+# Release tarballs usually include git submodules / vendored third-party code, which a bare
+# git clone lacks, so an offline box can build from them. URLs are tried in order (the first
+# one that answers is downloaded); every URL failing is an honest log_error.
+#   mirror_source_tarball TOOL VERSION URL [URL...]   -> echoes the file's archive path
+mirror_source_tarball() {
+    local tool="$1" ver="$2"; shift 2
+    local dest="${TOOLS_DIR}/sources/${tool}-${ver}-src" u name code
+    local urls=() last
+    for u in "$@"; do [ -n "$u" ] && urls+=("$u"); done
+    [ ${#urls[@]} -gt 0 ] || { log_error "${tool}: no source URL for ${ver}" >&2; return 1; }
+    last="${urls[${#urls[@]}-1]}"
+    for u in "${urls[@]}"; do
+        name="$(basename "${u%%\?*}")"
+        if [ -s "${dest}/${name}" ]; then echo "tools/sources/${tool}-${ver}-src/${name}"; return 0; fi
+        if [ "$u" != "$last" ]; then
+            # Earlier mirrors: a quiet attempt, so a mirror that is down or slow (but recovered
+            # by the next one) is not counted as a failure. A definite 4xx skips it at once.
+            code=$(_http_probe "$u")
+            case "$code" in 4??) log_info "${tool} source: ${u} answered ${code}; trying the next mirror" >&2; continue ;; esac
+            ensure_dir "$dest"
+            if curl -fsSL --retry 2 --connect-timeout 30 --max-time 7200 -o "${dest}/${name}.part" "$u" 2>/dev/null \
+                && [ -s "${dest}/${name}.part" ] && mv -f "${dest}/${name}.part" "${dest}/${name}"; then
+                log_success "Downloaded: ${tool} ${ver} source" >&2
+                _prune_old_sources "$tool" "$ver"
+                echo "tools/sources/${tool}-${ver}-src/${name}"; return 0
+            fi
+            rm -f "${dest}/${name}.part" 2>/dev/null
+            log_info "${tool} source: ${u} failed; trying the next mirror" >&2
+            continue
+        fi
+        # The last mirror: download_file (retries, resume, size check) logs an honest error.
+        if download_file "$u" "${dest}/${name}" "${tool} ${ver} source" >&2; then
+            _prune_old_sources "$tool" "$ver"
+            echo "tools/sources/${tool}-${ver}-src/${name}"; return 0
+        fi
+        return 1
+    done
+    log_error "${tool}: no mirror answered for the ${ver} source tarball ($*)" >&2
+    return 1
+}
+
+# After a new version's source is mirrored, drop older <tool>-<version>-src dirs (the newest
+# one is kept). Only dirs named exactly <tool>-<digit…>-src match, so "kicad" never touches
+# "kicad-libs-…".
+_prune_old_sources() {
+    local tool="$1" ver="$2" d have
+    for d in "${TOOLS_DIR}/sources/${tool}-"[0-9]*-src; do
+        [ -d "$d" ] || continue
+        have="${d##*/${tool}-}"; have="${have%-src}"
+        # Only OLDER versions go (version_gate's downgrade rule): if this run fell back to an
+        # older pin, a newer source mirrored earlier is kept.
+        _version_newer "$ver" "$have" || continue
+        rm -rf -- "$d" && log_info "Removed superseded source: $(basename "$d")" >&2
+    done
+}
+
+# The standard hint for a platform with no upstream binary: install from the offline .deb
+# set, or build from source with everything the build needs mirrored too. Sections are
+# numbered as they are included.
+#   build_from_source_hint TOOL TITLE PLATFORM APT_PKG UBUNTU_SRC SRC_PATH BUNDLE BUILD_STEPS [SRC_KIND]
+#     APT_PKG     package(s) in the desktop-apps .deb set ('' = none)
+#     UBUNTU_SRC  source package in the desktop-src set ('' = none)
+#     SRC_PATH    archive path of the upstream source tarball ('' = not mirrored)
+#     BUNDLE      owner/repo of the full-history git bundle (data/source-repos.tsv; '' = none)
+#     BUILD_STEPS upstream build commands (shown verbatim)
+#     SRC_KIND    release (default: a maintainer-made release tarball, usually with its
+#                 submodules / vendored code) | archive (a forge's auto-generated tag archive:
+#                 NO submodules)
+build_from_source_hint() {
+    local tool="$1" title="$2" plat="$3" apt="$4" usrc="$5" src="$6" bundle="$7" steps="$8" kind="${9:-release}"
+    local arch; case "$plat" in linux-arm64) arch=arm64 ;; *) arch=amd64 ;; esac
+    local n=0 sets="--set desktop-apps"
+    [ -n "$usrc" ] && sets="--set desktop-apps --set desktop-src"
+    local text="${title} - ${plat}
+$(printf '%*s' "$(( ${#title} + ${#plat} + 3 ))" '' | tr ' ' '=')
+
+Upstream publishes no ${plat} build, so this mirror keeps the offline ways to get it:
+"
+    if [ -n "$apt" ] || [ -n "$usrc" ]; then
+        n=$((n + 1)); text+="
+${n}. Install from the offline .deb sets (data/apt-sets.tsv; see docs/LIBRARIAN.md):
+     python3 scripts/lib/apt_offline.py build --suite noble --arch ${arch} ${sets} --dest <dir>
+   then on the target box (no internet needed):
+     echo 'deb [trusted=yes] file:<dir> ./' | sudo tee /etc/apt/sources.list.d/val-ark.list
+     sudo apt-get update${apt:+ && sudo apt-get install ${apt}}
+"
+    fi
+    if [ -n "$usrc" ]; then
+        n=$((n + 1)); text+="
+${n}. Rebuild Ubuntu's package with no internet: the 'desktop-src' set put the source package in
+   <dir>/source/${usrc}/ and EVERY build dependency in the flat repo. The repo has no deb-src
+   index, so install the build deps from the .dsc file (not by package name):
+     cd <dir>/source/${usrc} && D=\$(ls -v ${usrc}_*.dsc | tail -1)     # the newest .dsc
+     sudo apt-get build-dep ./\$D
+     rm -rf build-${usrc} && dpkg-source -x \$D build-${usrc} && cd build-${usrc}
+     dpkg-buildpackage -us -uc -b
+     sudo apt-get install ../*.deb
+   This is Ubuntu noble's version of ${title}, which can be older than upstream's.
+"
+    fi
+    if [ -n "$src" ]; then
+        n=$((n + 1))
+        local what="release tarball (a maintainer-made release usually bundles its submodules / vendored code)"
+        [ "$kind" = archive ] && what="tag archive (auto-generated by the forge: it does NOT include git submodules)"
+        text+="
+${n}. Upstream source, ${what}:
+     ${src}
+"
+        [ -n "$usrc" ] && text+="   Build dependencies: the 'desktop-src' set (the build-dep step above) covers
+   Ubuntu's version; a newer upstream release may need newer or extra libraries.
+"
+        text+="   Build:
+${steps}
+"
+    fi
+    if [ -n "$bundle" ]; then
+        n=$((n + 1)); text+="
+${n}. Full-history git: the ${bundle} bundle from scripts/lib/git_bundle_mirror.py
+   (<bundle-dest>/${bundle}.bundle):  git clone ${bundle##*/}.bundle
+   A bundle has no submodules either: prefer a release tarball to build.
+"
+    fi
+    text+="
+Online fallback: flatpak install flathub <app>, or the upstream download page."
+    write_install_hint "${TOOLS_DIR}/${plat}/${tool}" "${tool} (${plat})" "$text"
+}
+
 # Create an install instructions file for package-managed tools
 write_install_hint() {
     local dest_dir="$1"

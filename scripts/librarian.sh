@@ -647,6 +647,9 @@ EOF
 # is passed explicitly. VALARK_STATIC_SITE=0 turns the refresh off.
 cmd_site() {
     [ "${VALARK_STATIC_SITE:-1}" = "0" ] && { log "site: disabled (VALARK_STATIC_SITE=0)"; return 0; }
+    # The pages invite sharing the data root (docs/SERVING.md): keep state/ private/ seaweedfs/
+    # owner-only first (also done by valark_ensure_layout on setup and every loop cycle).
+    valark_lock_private
     python3 "${PROJECT_ROOT}/scripts/lib/static_site.py" --root "$VALARK_HOME" \
         --section "models=${MODELS_DIR}" --section "tools=${TOOLS_DIR}" --section "content=${CONTENT_DIR}" \
         --section "installers=${INSTALLERS_DIR}" --section "sources=${SOURCES_DIR}" "$@"

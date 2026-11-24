@@ -68,6 +68,10 @@ cat > "$W/index.html" <<'EOF'
 <script>
 const TOOLS = [
     {
+        id: 'piper-tts', name: 'Piper TTS', category: 'ai-inference', icon: 'P', downloadTarget: 'piper',
+        desc: 'Fast local neural text to speech',
+    },
+    {
         id: 'btop', name: 'btop++', category: 'dev-tools', icon: 'B', iconBg: '#123456', logo: 'logos/btop.svg',
         desc: 'Resource monitor ' + 'with CPU and memory graphs', // trailing comment
         screenshots: ['screenshots/btop-1.png'],
@@ -331,13 +335,23 @@ gen --root "$A" --section models=- --out "$T/drop" >/dev/null 2>&1
 check "NAME=- drops a section" '[ ! -e "$T/drop/browse/models.html" ] && [ -f "$T/drop/browse/content.html" ]'
 
 # librarian.sh site on the data-root layout (models live next to, not inside, VALARK_HOME)
-D="$T/data"; mkdir -p "$D/models/llm/m1" "$D/val-ark/content/zim" "$D/val-ark/state"
+D="$T/data"; mkdir -p "$D/models/llm/m1" "$D/val-ark/content/zim" "$D/val-ark/state" "$D/val-ark/private" "$D/val-ark/uploads" "$D/val-ark/seaweedfs"
+chmod 755 "$D/val-ark/state" "$D/val-ark/private" "$D/val-ark/uploads" "$D/val-ark/seaweedfs"
 head -c 10 /dev/zero > "$D/models/llm/m1/m.gguf"; echo z > "$D/val-ark/content/zim/wiktionary_en_all_2025-01.zim"
-VAL_ARK_DATA="$D" bash "$ROOT/scripts/librarian.sh" site > "$T/lib.out" 2>&1; rc=$?
+VAL_ARK_CONFIG=/dev/null VAL_ARK_DATA="$D" bash "$ROOT/scripts/librarian.sh" site > "$T/lib.out" 2>&1; rc=$?
 check "librarian.sh site exits 0" '[ "$rc" -eq 0 ] || { cat "$T/lib.out" >&2; false; }'
 check "librarian.sh site writes VALARK_HOME/index.html" '[ -f "$D/val-ark/index.html" ] && [ -f "$D/val-ark/browse/models.html" ]'
+check "site locks state/ private/ seaweedfs/ to the owner (safe to share the data root)" '[ "$(stat -c %a "$D/val-ark/state")" = 700 ] && [ "$(stat -c %a "$D/val-ark/private")" = 700 ] && [ "$(stat -c %a "$D/val-ark/seaweedfs")" = 700 ]'
+check "...and leaves the shared trees and the uploads drop alone" '[ "$(stat -c %a "$D/val-ark/content")" != 700 ] && [ "$(stat -c %a "$D/val-ark/uploads")" = 755 ]'
+# valark_lock_private also runs from valark_ensure_layout (setup + every loop cycle), not only `site`.
+chmod 755 "$D/val-ark/state"; chmod 750 "$D/val-ark/private"
+# Run the real valark_ensure_layout, with the repo-symlink + disk-stamp steps stubbed out so the
+# checkout is never touched (VAL_ARK_CONFIG=/dev/null keeps a developer .env out of it).
+VAL_ARK_CONFIG=/dev/null VAL_ARK_DATA="$D" bash -c '. "$1/scripts/lib/valark-env.sh"
+    valark_link() { :; }; valark_data_stamp() { :; }; valark_ensure_layout' _ "$ROOT"
+check "valark_ensure_layout (setup + every loop cycle) sets state/ + private/ to exactly 700" '[ "$(stat -c %a "$D/val-ark/state")" = 700 ] && [ "$(stat -c %a "$D/val-ark/private")" = 700 ]'
 check "models outside VALARK_HOME linked relatively" 'grep -rq "href=\"../../../models/llm/m1/\"" "$D/val-ark/browse/item"'
-VALARK_STATIC_SITE=0 VAL_ARK_DATA="$T/data2" bash "$ROOT/scripts/librarian.sh" site >/dev/null 2>&1; rc=$?
+VALARK_STATIC_SITE=0 VAL_ARK_CONFIG=/dev/null VAL_ARK_DATA="$T/data2" bash "$ROOT/scripts/librarian.sh" site >/dev/null 2>&1; rc=$?
 check "VALARK_STATIC_SITE=0 is a no-op" '[ "$rc" -eq 0 ] && [ ! -e "$T/data2/val-ark/index.html" ]'
 
 # maintain throttles the refresh (VALARK_STATIC_SITE_HOURS) and runs it when stale. Sourced
@@ -345,7 +359,7 @@ check "VALARK_STATIC_SITE=0 is a no-op" '[ "$rc" -eq 0 ] && [ ! -e "$T/data2/val
 M2="$T/m"; mkdir -p "$M2/val-ark/state"
 run_maintain() {
     VAL_ARK_DATA="$M2" bash -c '. "$1/scripts/librarian.sh"
-        catalog_refresh_zim() { return 0; }; cmd_verify() { :; }; cmd_fill() { :; }
+        catalog_refresh_zim() { return 0; }; catalog_refresh_scout() { return 0; }; cmd_verify() { :; }; cmd_fill() { :; }
         cmd_site() { echo ran >> "$VALARK_HOME/site.calls"; }
         cmd_maintain >/dev/null 2>&1' _ "$ROOT"
 }
@@ -360,6 +374,128 @@ check "VALARK_STATIC_SITE_HOURS=0 refreshes every time" '[ "$(wc -l < "$M2/val-a
 
 # web UI opened from file:// points at the static catalog
 check "web UI file:// hint links ../index.html" 'grep -q "id=\"static-hint\"" "$ROOT/web-ui/index.html" && grep -q "location.protocol===.file:." "$ROOT/web-ui/index.html"'
+
+# --- every card carries a description (#270): web UI aliases, tool-script headers, wheel METADATA,
+#     version-named folders, ZIM name templates, caller hints, and a generated sentence otherwise
+D="$T/d"
+mkdir -p "$T/tsh" "$D/tools/linux-x86_64/foo" "$D/tools/linux-x86_64/piper" "$D/tools/linux-x86_64/zzz" \
+         "$D/dev-stack/python/pypi/demo" "$D/dev-stack/python/python/3.12.1" "$D/datasets/open-data/weather/noaa" \
+         "$D/datasets/open-data/crops/huggingface/acme/fields" "$D/installers/ubuntu/24.04" "$D/content/zim" \
+         "$D/models/huggingface/acme/yolo-tiny" "$D/sources/blender" "$D/software/releases/acme/widget/1.0"
+printf '#!/bin/bash\n# Val Ark - Mirror Foo, the frobnicator\n#\n# Foo turns widgets into gadgets offline. It also does more.\n' > "$T/tsh/foo.sh"
+echo x > "$D/tools/linux-x86_64/foo/foo"; echo x > "$D/tools/linux-x86_64/piper/piper"; echo x > "$D/tools/linux-x86_64/zzz/zzz"
+python3 -I -c 'import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    z.writestr("demo-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: demo\nSummary: Demo package that does demos\n\nlong text")' \
+    "$D/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"
+echo x > "$D/dev-stack/python/python/3.12.1/Python-3.12.1.tar.xz"
+echo x > "$D/content/zim/devdocs_en_react_2025-01.zim"
+echo x > "$D/content/zim/ted_mul_ai_2026-01.zim"
+echo x > "$D/content/zim/weirdsite.org_fr_all_nopic_2026-02.zim"
+echo x > "$D/datasets/open-data/weather/noaa/readme.txt"
+echo x > "$D/datasets/open-data/crops/huggingface/acme/fields/data.parquet"
+echo x > "$D/installers/ubuntu/24.04/ubuntu.iso"
+echo x > "$D/models/huggingface/acme/yolo-tiny/model.onnx"
+echo x > "$D/sources/blender/blender-4.0.tar.xz"
+echo x > "$D/software/releases/acme/widget/1.0/widget.zip"
+printf 'datasets/open-data/weather/noaa/readme.txt\t{"description": "NOAA daily weather station records", "collection": "Public open data"}\n' > "$T/hints.tsv"
+printf 'bad line without json\nx/../y\t{"description": "escape attempt here"}\n' >> "$T/hints.tsv"
+dout=$(python3 -I "$PY" --root "$D" --web-ui "$W" --tools-dir "$T/tsh" --hints "$T/hints.tsv" --now 1700000000 2>&1); rc=$?
+check "description build exits 0" '[ "$rc" -eq 0 ] || { echo "$dout" >&2; false; }'
+nodesc=$(python3 -I - "$D/browse" <<'PYEOF'
+import glob, re, sys
+bad = []
+for f in glob.glob(sys.argv[1] + '/*.html'):
+    s = open(f, encoding='utf-8').read()
+    for t, body in re.findall(r'<div class="tx"><h4>(.*?)</h4>(.*?)</a>', s, re.S):
+        if not re.search(r'<p>\s*\S', body):
+            bad.append(f.rsplit('/', 1)[-1] + ':' + t)
+for f in glob.glob(sys.argv[1] + '/item/*.html'):
+    s = open(f, encoding='utf-8').read()
+    m = re.search(r'</h1>(.*?)<h3|</h1>(.*?)</main>', s, re.S)
+    if m and not re.search(r'<p[^>]*>\s*[^<\s]', m.group(0)):
+        bad.append('item:' + f.rsplit('/', 1)[-1])
+print(' '.join(bad))
+PYEOF
+)
+check "every card has a description" '[ -z "$nodesc" ] || { echo "no description: $nodesc" >&2; false; }'
+check "tool found by its download target (piper -> Piper TTS)" 'grep -q "Fast local neural text to speech" "$D/browse/tools.html"'
+check "tool without a web-UI card: scripts/tools header" 'grep -q "<p>Foo, the frobnicator. Foo turns widgets into gadgets offline.</p>" "$D/browse/tools.html"'
+check "unknown tool: generated sentence" 'grep -q "zzz: portable builds for Linux x86_64" "$D/browse/tools.html"'
+check "pypi package: Summary from the wheel METADATA" 'grep -q "Demo package that does demos" "$D/browse/dev-stack.html"'
+check "version folder named by its project" 'grep -q "<h4>python</h4>" "$D/browse/dev-stack.html" && ! grep -q "<h4>3.12.1</h4>" "$D/browse/dev-stack.html"'
+check "installer version folder titled with its parent" 'grep -q "<h4>ubuntu 24.04</h4>" "$D/browse/installers.html"'
+check "ZIM template: DevDocs" 'grep -q "DevDocs reference for react" "$D/browse/content.html"'
+check "ZIM template: TED" 'grep -q "TED talks about ai (several languages)" "$D/browse/content.html"'
+check "ZIM without a template: generated" 'grep -q "in French, text only: an offline archive" "$D/browse/content.html"'
+check "caller hint used as the description" 'grep -q "NOAA daily weather station records" "$D/browse/datasets.html"'
+check "hint with .. ignored" '! grep -rq "escape attempt" "$D/browse"'
+check "dataset: generated with topic and org" 'grep -q "A crops dataset: fields from acme" "$D/browse/datasets.html"'
+check "model without a card: task from its name" 'grep -q "An object detection model — yolo-tiny from acme" "$D/browse/models.html" && grep -q "ONNX Runtime" "$D/browse/models.html"'
+check "software release: generated" 'grep -q "Upstream release assets of acme/widget" "$D/browse/software.html"'
+check "source archive: generated" 'grep -q "Source archive of blender" "$D/browse/sources.html"'
+check "summary.json counts generated descriptions" 'python3 -I -c "import json,sys;d=json.load(open(sys.argv[1]));c={s[\"name\"]:s[\"descriptions\"] for s in d[\"sections\"]};sys.exit(0 if c[\"datasets\"][\"hint\"]==1 and c[\"tools\"][\"generated\"]>=1 else 1)" "$D/browse/summary.json"'
+check "the run reports hint + generated counts" 'echo "$dout" | grep -q "descriptions from hints 1 / generated"'
+
+# review fixes (#271): corrupt wheel, script headers, task words, a/an, run hints, tool hints, long hint
+#     lines, wheel cache, scoped tool names
+D2="$T/d2"; mkdir -p "$T/tsh2" "$D2/dev-stack/python/pypi/broken" "$D2/models/huggingface/acme/dinov2-vits14" \
+    "$D2/models/huggingface/acme/vae-decoder" "$D2/models/huggingface/acme/dolphin-x" "$D2/models/huggingface/acme/ocr-small" \
+    "$D2/models/huggingface/acme/yolo11n" "$D2/tools/linux-x86_64/audio" "$D2/tools/linux-x86_64/bar" \
+    "$D2/tools/linux-x86_64/hinted" "$D2/datasets/misc/node" "$D2/dev-stack/python/pypi/demo"
+python3 -I -c 'import sys, zipfile, zlib
+with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED) as z:
+    z.writestr("broken-1.0.dist-info/METADATA", "Summary: should not crash\n" * 50)
+b = bytearray(open(sys.argv[1], "rb").read()); i = b.find(b"PK\x03\x04") + 30 + len("broken-1.0.dist-info/METADATA")
+b[i:i + 20] = b"\xff" * 20; open(sys.argv[1], "wb").write(bytes(b))' "$D2/dev-stack/python/pypi/broken/broken-1.0-py3-none-any.whl"
+python3 -I -c 'import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    z.writestr("demo-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: demo\nSummary: Cached summary text\n")' \
+    "$D2/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"
+printf '#!/bin/bash\n# Val Ark - Download Audio\nsource x\n' > "$T/tsh2/audio.sh"
+printf '#!/bin/bash\n# Val Ark - Mirror Bar, the offline thing (https://bar.example, MIT;\n# source https://github.com/x/bar): docs and maps.\n#\n# linux + windows: rolling builds -- current by design.\n' > "$T/tsh2/bar.sh"
+for m in dinov2-vits14 vae-decoder dolphin-x ocr-small; do echo x > "$D2/models/huggingface/acme/$m/weights.bin"; done
+echo x > "$D2/models/huggingface/acme/yolo11n/yolo11n.pt"
+echo x > "$D2/tools/linux-x86_64/audio/audio"; echo x > "$D2/tools/linux-x86_64/bar/bar"; echo x > "$D2/tools/linux-x86_64/hinted/hinted"
+echo x > "$D2/datasets/misc/node/data.csv"
+{ printf 'tools/linux-x86_64/hinted/hinted\t{"description": "A hinted tool description"}\n'
+  python3 -I -c 'print("x" * 200000)'
+  printf 'datasets/misc/node/data.csv\t{"description": "after the long line"}\n'; } > "$T/hints2.tsv"
+d2() { python3 -I "$PY" --root "$D2" --web-ui "$W" --tools-dir "$T/tsh2" --hints "$T/hints2.tsv" --now 1700000000 "$@"; }
+out2=$(d2 2>&1); rc=$?
+check "a corrupt wheel METADATA does not crash the build" '[ "$rc" -eq 0 ] || { echo "$out2" >&2; false; }'
+check "...the fixture really is corrupt (zlib error on read)" '! python3 -I -c "import sys,zipfile;zipfile.ZipFile(sys.argv[1]).read(\"broken-1.0.dist-info/METADATA\")" "$D2/dev-stack/python/pypi/broken/broken-1.0-py3-none-any.whl" 2>/dev/null'
+check "...and still gets a description" 'grep -A3 "<h4>broken</h4>" "$D2/browse/dev-stack.html" | grep -q "<p>"'
+check "a 'Download X' header is not used as the description" '! grep -q "<p>Download Audio\|<p>Audio\.</p>" "$D2/browse/tools.html" && grep -q "audio: portable builds" "$D2/browse/tools.html"'
+check "header: verb dropped, URLs removed, build notes skipped" 'grep -q "Bar, the offline thing: docs and maps\." "$D2/browse/tools.html" && ! grep -q "rolling builds\|https://" "$D2/browse/tools.html"'
+check "task words are whole tokens (vits14, decoder, dolphin)" '! grep -q "text to speech model — dinov2\|code language model — vae\|language model — dolphin" "$D2/browse/models.html"'
+check "a / an" 'grep -q "An OCR / document model — ocr-small" "$D2/browse/models.html" && grep -q "An object detection model — yolo11n" "$D2/browse/models.html"'
+check "no transformers hint without safetensors / config.json" 'grep -o "<h4>yolo11n</h4>[^<]*<div[^>]*>[^<]*</div><p>[^<]*</p>" "$D2/browse/models.html" | grep -q "acme (1 file, 2 B)\.</p>"'
+check "a hint reaches the tool card (tools/<platform>/<name>)" 'grep -q "A hinted tool description" "$D2/browse/tools.html"'
+check "an over-long hint line is skipped, later lines still read" 'grep -q "after the long line" "$D2/browse/datasets.html"'
+check "tool names do not leak into other sections (datasets/node)" '! grep -q "Node.js LTS runtime" "$D2/browse/datasets.html"'
+check "wheel Summary cached by file + size" 'grep -q "demo-1.0-py3-none-any.whl|" "$D2/browse/pypi-meta.json"'
+rm "$D2/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"; python3 -I -c 'import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    z.writestr("demo-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: demo\nSummary: Cached summary text\n")' \
+    "$D2/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"
+chmod 000 "$D2/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"
+d2 >/dev/null 2>&1
+if [ "$(id -u)" -ne 0 ]; then   # root reads a mode-000 file, so this proves nothing there
+    check "...and reused without opening the wheel again" 'grep -q "Cached summary text" "$D2/browse/dev-stack.html"'
+fi
+chmod 644 "$D2/dev-stack/python/pypi/demo/demo-1.0-py3-none-any.whl"
+
+printf '#!/bin/bash\n# Val Ark - Mirror Baz, a mapping kit with offline tiles\n#\n# scripts/lib/baz_mirror.py reads the manifest and keeps the current release.\n' > "$T/tsh2/baz.sh"
+mkdir -p "$D2/tools/linux-x86_64/baz"; echo x > "$D2/tools/linux-x86_64/baz/baz"; d2 >/dev/null 2>&1
+check "header: implementation notes (script paths) skipped" 'grep -q "<p>Baz, a mapping kit with offline tiles.</p>" "$D2/browse/tools.html"'
+
+printf '#!/bin/bash\n# Val Ark - Download Qux\n# Distributed widget store (S3-compatible) for the fleet.\n' > "$T/tsh2/qux.sh"
+printf '#!/bin/bash\n# Val Ark - Mirror lower-kit and everything it needs offline.\n' > "$T/tsh2/lower-kit.sh"
+mkdir -p "$D2/tools/linux-x86_64/qux" "$D2/tools/linux-x86_64/lower-kit"
+echo x > "$D2/tools/linux-x86_64/qux/qux"; echo x > "$D2/tools/linux-x86_64/lower-kit/lower-kit"; d2 >/dev/null 2>&1
+check "header line keeps a full stop before the next sentence" 'grep -q "<p>Qux. Distributed widget store (S3-compatible) for the fleet.</p>" "$D2/browse/tools.html"'
+check "a lowercase project name keeps its casing" 'grep -q "<p>lower-kit and everything it needs offline.</p>" "$D2/browse/tools.html"'
 
 echo "static-site: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

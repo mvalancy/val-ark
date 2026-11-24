@@ -189,6 +189,8 @@ Add the tool ID to the `TOOL_IDS` array (the spec iterates it per tool and asser
 | `create_source_tarball SRC_DIR LABEL VERSION` | Pack a checked-out dir into a `.tar.gz` (excludes `.git`) |
 | `scripts/lib/oci_pull.py IMAGE --platform os/arch --out X.tar` | Mirror one platform of a container image as a `docker load` archive (stdlib Python; see `scripts/tools/cad-agent.sh`) |
 | `write_install_hint DIR TOOL INSTRUCTIONS` | Write INSTALL.txt for non-binary tools |
+| `mirror_source_tarball TOOL VERSION URL...` | Mirror an upstream release source tarball (first URL that answers) to `tools/sources/<tool>-<version>-src/`; echoes its archive path |
+| `build_from_source_hint TOOL TITLE PLATFORM APT_PKG UBUNTU_SRC SRC_PATH BUNDLE STEPS` | INSTALL.txt for a platform with no upstream build: the `desktop-apps` / `desktop-src` .deb sets, the mirrored source tarball, the git bundle and the build steps |
 | `ensure_dir PATH` | mkdir -p with safety |
 
 ## Terminology

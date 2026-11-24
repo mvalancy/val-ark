@@ -14,6 +14,16 @@ Commands (stdlib only; needs apt-get + the ubuntu-archive-keyring on the host):
                                             repo:  deb [trusted=yes] file:DIR ./
   build   --suite S --arch A --set ID --dest DIR   resolve + fetch + index
 
+Set entries are binary package names, plus two prefixes for building from source offline:
+  build-dep:SRC  every package `apt-get build-dep SRC` needs (the Build-Depends of the
+                 Ubuntu source package SRC, with their dependencies), into the flat repo
+  source:SRC     the Ubuntu source package itself (.dsc + orig/debian tarballs), stored
+                 under <dest>/source/SRC/. On the target, with only the flat repo as a source
+                 (it has no deb-src index, so `apt-get build-dep SRC` by NAME fails), install
+                 the build deps from the .dsc file:  sudo apt-get build-dep ./SRC_*.dsc
+                 then `dpkg-source -x SRC_*.dsc` and `dpkg-buildpackage -us -uc -b`.
+                 These are Ubuntu's (suite's) versions; a newer upstream release may need more.
+A set that uses either prefix makes the APT root also read deb-src lists.
 Missing packages (not in that suite/arch) are reported on stderr and skipped.
 Exit codes (when several apply, the MOST SEVERE wins, in this order):
   64 usage error (bad/unknown option or set id, a required flag missing, an unreadable
@@ -70,9 +80,24 @@ def parse_print_uris(text):
     return out
 
 
+SRC_PREFIXES = ("build-dep:", "source:")
+
+
+def split_tokens(pkgs):
+    """-> (binary names, build-dep source names, source names)."""
+    plain = [p for p in pkgs if not p.startswith(SRC_PREFIXES)]
+    bdep = [p.split(":", 1)[1] for p in pkgs if p.startswith("build-dep:")]
+    src = [p.split(":", 1)[1] for p in pkgs if p.startswith("source:")]
+    return plain, bdep, src
+
+
+def needs_src(sets, ids):
+    return any(p.startswith(SRC_PREFIXES) for i in ids for p in sets[i]["packages"])
+
+
 class AptRoot:
-    def __init__(self, suite, arch, cache):
-        self.suite, self.arch = suite, arch
+    def __init__(self, suite, arch, cache, src=False):
+        self.suite, self.arch, self.src = suite, arch, src
         self.dir = Path(cache) / f"{suite}-{arch}"
 
     def env(self):
@@ -100,10 +125,10 @@ class AptRoot:
         sec = SECURITY.get(self.arch, PORTS)
         comps = "main restricted universe multiverse"
         sb = f"[arch={self.arch} signed-by={KEYRING}]"
-        (d / "sources.list").write_text(
-            f"deb {sb} {main} {self.suite} {comps}\n"
-            f"deb {sb} {main} {self.suite}-updates {comps}\n"
-            f"deb {sb} {sec} {self.suite}-security {comps}\n")
+        lines = [f"{sb} {main} {self.suite} {comps}", f"{sb} {main} {self.suite}-updates {comps}",
+                 f"{sb} {sec} {self.suite}-security {comps}"]
+        kinds = ("deb", "deb-src") if self.src else ("deb",)
+        (d / "sources.list").write_text("".join(f"{k} {l}\n" for k in kinds for l in lines))
 
     def update(self):
         self.prepare()
@@ -112,7 +137,18 @@ class AptRoot:
             raise RuntimeError(f"apt-get update {self.suite}/{self.arch} failed: {r.stderr[-400:]}")
 
     def available(self, pkgs):
-        r = subprocess.run(["apt-cache", *self.opts(), "policy", *pkgs], capture_output=True, text=True,
+        plain, bdep, src = split_tokens(pkgs)
+        have_src = set()
+        for name in sorted(set(bdep + src)):
+            r = subprocess.run(["apt-cache", *self.opts(), "showsrc", name], capture_output=True, text=True,
+                               env=self.env())
+            if r.returncode == 0 and re.search(r"^Package: ", r.stdout, re.M):
+                have_src.add(name)
+        ok_src = [p for p in pkgs if p.startswith(SRC_PREFIXES) and p.split(":", 1)[1] in have_src]
+        miss_src = [p for p in pkgs if p.startswith(SRC_PREFIXES) and p.split(":", 1)[1] not in have_src]
+        if not plain:
+            return ok_src, miss_src
+        r = subprocess.run(["apt-cache", *self.opts(), "policy", *plain], capture_output=True, text=True,
                            env=self.env())
         have, cur = set(), None
         for line in r.stdout.splitlines():
@@ -120,21 +156,30 @@ class AptRoot:
                 cur = line[:-1].split(":")[0]
             elif cur and "Candidate:" in line and "(none)" not in line:
                 have.add(cur)
-        return [p for p in pkgs if p in have], [p for p in pkgs if p not in have]
+        return ([p for p in plain if p in have] + ok_src), ([p for p in plain if p not in have] + miss_src)
+
+    def _print_uris(self, *args):
+        r = subprocess.run(["apt-get", "-qq", "-y", *self.opts(), "--print-uris", *args],
+                           capture_output=True, text=True, env=self.env())
+        if r.returncode:
+            raise RuntimeError(f"resolve failed ({self.suite}/{self.arch}, {args[0]}): {r.stderr[-600:]}")
+        return parse_print_uris(r.stdout)
 
     def resolve(self, pkgs):
         ok, missing = self.available(pkgs)
         if not ok:
             return [], missing
-        r = subprocess.run(["apt-get", "-qq", "-y", *self.opts(), "--print-uris", "install", *ok],
-                           capture_output=True, text=True, env=self.env())
-        if r.returncode:
-            raise RuntimeError(f"resolve failed ({self.suite}/{self.arch}): {r.stderr[-600:]}")
-        rows = parse_print_uris(r.stdout)
+        plain, bdep, src = split_tokens(ok)
+        rows = self._print_uris("install", *plain) if plain else []
+        if bdep:
+            rows += self._print_uris("build-dep", *bdep)
+        for name in src:
+            # Source files land in source/<name>/ so the flat .deb repo stays clean.
+            rows += [(u, f"source/{name}/{n}", z, sha) for u, n, z, sha in self._print_uris("source", name)]
         # print-uris always reports MD5; take SHA256 from the signed lists.
         if any(not sha for _, _, _, sha in rows):
             shas = self.sha256_map()
-            rows = [(u, n, z, sha or shas.get(n, "")) for u, n, z, sha in rows]
+            rows = [(u, n, z, sha or shas.get(n.rsplit("/", 1)[-1], "")) for u, n, z, sha in rows]
         return rows, missing
 
     def sha256_map(self):
@@ -144,6 +189,13 @@ class AptRoot:
             sh = re.search(r"^SHA256: ([0-9a-f]{64})$", block, re.M)
             if fn and sh:
                 m[fn.group(1).rsplit("/", 1)[-1]] = sh.group(1)
+        # Source packages: "Checksums-Sha256:" lines are " <sha256> <size> <file>".
+        lists = self.dir / "var/lib/apt/lists"
+        for f in sorted(lists.glob("*_Sources")):
+            for line in f.read_text(errors="replace").splitlines():
+                mm = re.match(r"^ ([0-9a-f]{64}) \d+ (\S+)$", line)
+                if mm:
+                    m.setdefault(mm.group(2), mm.group(1))
         return m
 
     def has_lists(self):
@@ -191,10 +243,15 @@ def fetch(rows, dest):
     dest.mkdir(parents=True, exist_ok=True)
     failed = 0
     for url, name, size, sha in rows:
+        if name.startswith("/") or ".." in Path(name).parts:
+            failed += 1
+            print(f"FAILED {name}: unsafe file name", file=sys.stderr)
+            continue
         target = dest / name
+        target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists() and target.stat().st_size == size and (not sha or sha256(target) == sha):
             continue
-        part = target.with_name(name + ".part")
+        part = target.with_name(target.name + ".part")
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "val-ark-apt-offline"})
             with urllib.request.urlopen(req, timeout=120) as r, open(part, "wb") as f:
@@ -207,6 +264,27 @@ def fetch(rows, dest):
             part.unlink(missing_ok=True)
             print(f"FAILED {name}: {e}", file=sys.stderr)
     return failed
+
+
+def prune_sources(rows, dest):
+    """Keep only this resolve's files under <dest>/source/<pkg>/: when an -updates upload
+    replaces a source package, the older .dsc/tarballs would otherwise linger, and a second
+    .dsc breaks `dpkg-source -x <pkg>_*.dsc`. A package dir is only pruned once every file
+    this run wants for it is present (a failed fetch never leaves it with nothing)."""
+    want = {}
+    for _, name, _, _ in rows:
+        parts = Path(name).parts
+        if len(parts) == 3 and parts[0] == "source":
+            want.setdefault(parts[1], set()).add(parts[2])
+    removed = 0
+    for pkg, names in want.items():
+        d = Path(dest) / "source" / pkg
+        if not d.is_dir() or not all((d / n).is_file() for n in names):
+            continue
+        for f in d.iterdir():
+            if f.is_file() and f.name not in names:
+                f.unlink(); removed += 1
+    return removed
 
 
 EX_OK, EX_RESOLVE, EX_FETCH, EX_INCOMPLETE, EX_USAGE = 0, 1, 2, 3, 64
@@ -258,7 +336,8 @@ def _main(argv=None):
         return EX_OK
     if not (a.suite and a.arch):
         ap.error("--suite and --arch are required")
-    root = AptRoot(a.suite, a.arch, a.cache)
+    ids = list(sets) if "all" in a.set or not a.set else [i for i in a.set if i in sets]
+    root = AptRoot(a.suite, a.arch, a.cache, src=needs_src(sets, ids))
     if a.command == "index":
         if not (a.debs or a.dest):
             ap.error("--debs (or --dest) is required")
@@ -311,6 +390,9 @@ def _main(argv=None):
             print(f"{url}\t{name}\t{size}\t{sha}")
         return status
     failed = fetch(rows, a.dest)
+    stale = prune_sources(rows, a.dest)
+    if stale:
+        print(f"removed {stale} superseded source file(s)", file=sys.stderr)
     if a.command == "build":
         status = worst(status, report_index(*write_index(root.stanzas(), a.dest)))
     return worst(status, EX_FETCH if failed else EX_OK)

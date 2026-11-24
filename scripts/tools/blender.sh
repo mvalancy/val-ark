@@ -49,25 +49,16 @@ download_blender() {
     # linux-arm64: no official arm64 Linux build (release dir ships only
     # linux-x64, macos-arm64, and windows-x64/arm64 assets)
     dest="${TOOLS_DIR}/linux-arm64/blender"
-    write_install_hint "$dest" "blender (linux-arm64)" "Blender - linux-arm64
-======================
-
-Blender does not provide official arm64 Linux builds.
-
-Options:
-  1. Build from source:
-     git clone https://projects.blender.org/blender/blender.git
-     cd blender
-     make update
-     make
-
-  2. Use snap (if available for arm64):
-     sudo snap install blender --classic
-
-  3. Use the x86_64 version with emulation (not recommended for performance)
-
-For more info: https://www.blender.org/download/
-"
+    local src_path=""
+    src_path=$(mirror_source_tarball blender "$ver" \
+        "https://download.blender.org/source/blender-${ver}.tar.xz" \
+        "https://mirrors.ocf.berkeley.edu/blender/source/blender-${ver}.tar.xz") || src_path=""
+    build_from_source_hint blender "Blender" linux-arm64 blender blender "$src_path" blender/blender \
+"  tar xf blender-${ver}.tar.xz && cd blender-${ver}
+  cmake -B build -DCMAKE_BUILD_TYPE=Release -DWITH_LIBS_PRECOMPILED=OFF
+  cmake --build build --parallel     (https://developer.blender.org/docs/handbook/building_blender/linux/;
+  'make update' needs internet for the precompiled libraries, so build against the system
+  libraries from the desktop-src set instead)"
 
     # macos-arm64 (dmg mirrored as-is for offline install)
     dest="${TOOLS_DIR}/macos-arm64/blender"

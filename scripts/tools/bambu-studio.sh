@@ -57,19 +57,15 @@ download_bambu_studio() {
     _bambu_fetch linux-x86_64 "$url" "BambuStudio.AppImage" "$tag" || failed=1
 
     # linux-arm64: Bambu Lab publishes no aarch64 build.
-    write_install_hint "${TOOLS_DIR}/linux-arm64/bambu-studio" "bambu-studio (linux-arm64)" "Bambu Studio - linux-arm64
-==========================
-
-Bambu Lab publishes no Linux aarch64 build (releases: x86_64 AppImage, macOS,
-Windows). On an aarch64 host, either slice on an x86_64 machine with the
-mirrored AppImage (tools/linux-x86_64/bambu-studio/BambuStudio.AppImage), or
-build from source:
-
-  https://github.com/bambulab/BambuStudio/blob/master/BuildLinux.sh
-
-OrcaSlicer (same CLI lineage) ships official linux-arm64 builds:
-  https://github.com/OrcaSlicer/OrcaSlicer/releases
-"
+    local src_path=""
+    src_path=$(mirror_source_tarball bambu-studio "${tag#v}" \
+        "https://github.com/bambulab/BambuStudio/archive/refs/tags/${tag}.tar.gz") || src_path=""
+    build_from_source_hint bambu-studio "Bambu Studio" linux-arm64 "" "" "$src_path" bambulab/BambuStudio \
+"  tar xf ${tag}.tar.gz && cd BambuStudio-${tag#v}
+  ./BuildLinux.sh -u && ./BuildLinux.sh -dsi   (https://github.com/bambulab/BambuStudio/blob/master/BuildLinux.sh)
+  NOTE: its deps/ step downloads third-party sources (wxWidgets, OpenCV, ...) from the internet:
+  run it once on a connected box and copy deps/build back, or slice with the mirrored x86_64
+  AppImage (tools/linux-x86_64/bambu-studio/) or OrcaSlicer, which ships official linux-arm64 builds" archive
 
     # macos-arm64: universal dmg
     _bambu_fetch macos-arm64 "$(_bambu_url "$tag" "mac.*\.dmg" "$BAMBU_PINNED_MAC")" "BambuStudio.dmg" "$tag" || failed=1

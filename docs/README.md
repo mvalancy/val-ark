@@ -18,6 +18,7 @@ offline content (ZIM via Kiwix), with a zero-dependency web UI.
 | To know **why** something was built a certain way | [`knowledge/decisions.md`](knowledge/decisions.md) |
 | To avoid a **known trap** while coding | [`knowledge/gotchas.md`](knowledge/gotchas.md) |
 | To understand the **appliance design** | [`design/README.md`](design/README.md) |
+| To **share an Ark**: static file share or live web server | [`SERVING.md`](SERVING.md) |
 | To **run the tests** | [`../tests/AGENTS.md`](../tests/AGENTS.md) |
 
 ## The documentation graph
@@ -28,7 +29,7 @@ graph TD
     ROOT --> CLAUDE[CLAUDE.md<br/>rules, auto-loaded]
     ROOT --> AGENTS[AGENTS.md<br/>agent operating manual]
 
-    DOCS --> GUIDES[Reference guides<br/>ARCHITECTURE · LIBRARIAN · PLATFORMS<br/>TOOLS · COMMUNITY · OFFLINE · …]
+    DOCS --> GUIDES[Reference guides<br/>ARCHITECTURE · LIBRARIAN · PLATFORMS<br/>TOOLS · COMMUNITY · SERVING · OFFLINE · …]
     DOCS --> DESIGN[docs/design/<br/>consumer-appliance architecture]
     DOCS --> KNOW[docs/knowledge/<br/>the git-tracked shared brain]
     AGENTS --> AG[.agents/<br/>skills + pipeline knowledge]
@@ -79,6 +80,7 @@ sync](#keeping-this-map-in-sync)).
 | [TOOLS.md](TOOLS.md) | Catalog of the mirrored tools and their usage (source of truth: the web-ui TOOLS array / tests `TOOL_IDS`). |
 | [PLATFORMS.md](PLATFORMS.md) | Supported platforms and chips, including builds and the OpenWRT subset. |
 | [ARM64-NAS.md](ARM64-NAS.md) | ARM64 NAS appliances (chips such as the Rockchip RK3588): setup notes and gotchas. |
+| [SERVING.md](SERVING.md) | The two ways to serve an Ark, static (any file share) or dynamic (the web server): how to choose, step-by-step setup, screenshots, security. |
 | [OFFLINE.md](OFFLINE.md) | Offline operation, P2P sync, and the NFS-shared mesh. |
 | [OFFLINE-GAPS.md](OFFLINE-GAPS.md) | "Internet went off today" gap analysis: ranked missing tools, cold-start warnings, content roadmap. |
 | [MODEL_INVENTORY.md](MODEL_INVENTORY.md) | Model families, tiers, and availability. |
@@ -174,9 +176,9 @@ Each important folder carries local operating notes.
   and SSE, and auto-launches `kiwix-serve` for any complete ZIM. See
   [ARCHITECTURE.md](ARCHITECTURE.md).
 - **Static browse pages** — `scripts/librarian.sh site` writes `index.html` + `browse/` at the
-  archive root: plain HTML with relative links, so a box or NAS reached only as a file share can
-  still be explored without the server. See
-  [LIBRARIAN.md](LIBRARIAN.md#static-browse-pages-no-server).
+  archive root: plain HTML with relative links, so any file share can serve the archive with no
+  server running. Static vs dynamic (when to use which): [SERVING.md](SERVING.md); how the pages
+  are built: [LIBRARIAN.md](LIBRARIAN.md#static-browse-pages).
 
 ## Pop-up art
 

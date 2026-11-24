@@ -13,10 +13,11 @@ file is the canonical schema.
 | File | Purpose |
 |------|---------|
 | `installers.tsv` | Freely-redistributable OS / router-firmware / netboot / Jetson-BSP images for PXE commissioning of the mesh. |
-| `apt-sets.tsv` | Offline APT package **sets** (LAMP, LAN core: DHCP/DNS/NTP/PXE/firewall, routing/VPN, file, mail/chat, directory, apps, containers, ops, plus dev-toolchain, security, reverse-eng and virt-cloud). Resolved per Ubuntu suite+arch with all dependencies by `scripts/lib/apt_offline.py` into a flat local repo. |
+| `apt-sets.tsv` | Offline APT package **sets** (LAMP, LAN core: DHCP/DNS/NTP/PXE/firewall, routing/VPN, file, mail/chat, directory, apps, containers, ops, plus dev-toolchain, security, reverse-eng, virt-cloud, the `desktop-apps` creative/engineering/office apps and `desktop-src`, their Ubuntu source + every build dependency). Resolved per Ubuntu suite+arch with all dependencies by `scripts/lib/apt_offline.py` into a flat local repo. |
 | `essentials.tsv` | Grid-down **essentials**, ranked: what the box must hold first if the internet disappears (water, medicine, food, shelter, a pocket encyclopedia + small assistant, repair/power/radio, netboot). The planner takes these in rank order before any other phase, smallest variant first. Schema `rank\|kind\|match\|focus\|note` (`kind` = zim/model/inst, `focus` = `all` or profiles). |
 | `models-extra.tsv` | Curated small, high-value models that broaden modality diversity (embeddings, rerankers, tiny VLMs, OCR, speech, safety, plus setup-assistant chat LLMs). |
 | `dev-stack.tsv` | The developer + security stack: projects (not files) whose **current release** `scripts/lib/release_mirror.py` resolves live for every platform: Python, compilers, decompilers, security tools, containers/Kubernetes, cloud, S3 storage, databases, everyday CLI tools. Schema `rank\|kind\|ref\|match\|group\|note`; `match` is a regex and may contain `\|` (ref, group and note never do). |
+| `static-descriptions.json` | Descriptions for the static browse pages (`scripts/lib/static_site.py`) where nothing else has one: `zim` = Kiwix project → sentence template (`{topic}`, `{lang}`, `{flavour}`, `{topic_in}`, `{topic_on}`, `{topic_paren}`, `{site}`), `tools` = folder name → sentence (Tools & apps and Software releases only). Optional: anything missing still gets a generated sentence. |
 | `source-repos.tsv` | Curated upstream source repos (`value\|owner/repo\|group`, ~240: toolchains/OS, firmware, containers, CAD, robotics, Jetson, ML, LLM inference, LAMP/LAN servers, self-hosted apps) mirrored as full-history git bundles by `scripts/lib/git_bundle_mirror.py`. |
 
 ## Schemas (field order the consumers depend on)
@@ -32,6 +33,12 @@ value|id|name|category|arch|url|bytes|sha_url|note
 ```
 value|set|packages|note
 ```
+
+`packages` are binary package names, plus `build-dep:SRC` (the Build-Depends of the Ubuntu
+source package SRC) and `source:SRC` (that source package, stored under `source/SRC/`). A set
+using either makes `apt_offline.py` also read deb-src lists. On the target the flat repo has
+no deb-src index: install build deps with `apt-get build-dep ./SRC_*.dsc` (from the .dsc file). Keep each `build-dep:X` paired
+with `source:X` (tests/test-server-stack.sh checks it).
 
 `dev-stack.tsv`:
 

@@ -101,6 +101,20 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 ## Downloads / mirroring
 
+- **`github_asset_url` patterns are BASIC grep regexes** (`grep -i "$pattern"`): `(a|b)` matches
+  the literal text "(a|b)". Write alternation as `\(a\|b\)`. Audacity 4.x renamed its assets
+  (`-x86_64` / `-aarch64` / `.msi`), and the old `x64…AppImage` / `64bit.*exe` patterns silently
+  found nothing.
+- **A flat offline repo has no deb-src index**, so `apt-get build-dep <pkg>` by NAME fails there
+  ("You must put some 'deb-src' URIs"). Install build deps from the source package's file:
+  `apt-get build-dep ./<pkg>_*.dsc` (the `desktop-src` set ships the .dsc under `source/<pkg>/`).
+  And in `apt_offline.fetch`, names like `source/<pkg>/<file>` contain a `/`: build the `.part`
+  path from the target's basename (`target.with_name(target.name + ".part")`), never from the
+  row name (`with_name` rejects a name with a separator).
+- **Tailscale's stable channel keeps only the newest build**: a pinned
+  `tailscale_<ver>_<arch>.tgz` 404s after the next release. Read the version from
+  `https://pkgs.tailscale.com/stable/?mode=json` (`TarballsVersion`) each run.
+
 - **A whole-repo (`hf-repo`) pull is a DIRECTORY, so "any file present" is not "done" and
   `rm -f` does not evict it** (#259). A cut-off `hf download` leaves `config.json` and
   `.cache/huggingface/download/*.incomplete` behind; the old present check (any file in `dest`)
@@ -316,6 +330,18 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 - **`VAL_ARK_DATA` autodetect can pick the wrong mount** (once landed on a backup target that
   got pruned overnight). **Fix:** set `VAL_ARK_DATA` explicitly in `.env` on multi‑mount hosts.
+- <a id="share-the-data-root"></a>**Sharing the data root also shares `val-ark/state/` (#274).** The
+  static pages want `<DATA_ROOT>` shared (models are a sibling of `val-ark/`), but `state/` holds the
+  passcode hash, the recovery code (which resets the admin passcode from the LAN) and the claim
+  code, plus the community services' data; `private/` and `seaweedfs/` sit there too. The secret files are `0600`, so an
+  SMB guest can't read them, but a file server running **as the Ark's own user** (`python3 -m
+  http.server`, a same-uid NFS client) serves them with directory listings. **Rule:** `librarian.sh
+  site` and `valark_ensure_layout` (setup + every loop cycle) set `state/`, `private/` and
+  `seaweedfs/` to `700` via `valark_lock_private` (not the uploads drop,
+  which an operator may share on purpose; fleet nodes leaving notes in `state/coordination/` need
+  the Ark's uid); shares must run as another account
+  ([SERVING.md](../SERVING.md#what-to-share-and-what-not-to)); never share a dev checkout (it holds
+  `.env`).
 - **Default footprint cap can be tiny** — a box with 7 TB free had `VALARK_MAX_GB=500`, so almost
   nothing mirrored. Check the cap when "nothing downloads."
 - <a id="apparent-vs-allocated-size"></a>**Allocated-block sizes read ~0 on ZFS, compressed or

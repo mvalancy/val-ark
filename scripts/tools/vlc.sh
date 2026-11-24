@@ -35,31 +35,19 @@ download_vlc() {
     # linux-arm64: No official portable build, use install hint
     local dest="${TOOLS_DIR}/linux-arm64/vlc"
     ensure_dir "$dest"
-    write_install_hint "$dest" "vlc (linux-arm64)" "VLC Media Player - linux-arm64
-==============================
-
-Install via package manager:
-  sudo apt install vlc
-
-Or via Flatpak:
-  flatpak install flathub org.videolan.VLC
-"
+    local src_path=""
+    src_path=$(mirror_source_tarball vlc "$version" \
+        "https://get.videolan.org/vlc/${version}/vlc-${version}.tar.xz" \
+        "https://download.videolan.org/pub/videolan/vlc/${version}/vlc-${version}.tar.xz") || src_path=""
+    local vlc_steps="  tar xf vlc-${version}.tar.xz && cd vlc-${version}
+  ./configure --prefix=/usr/local && make -j\$(nproc) && sudo make install
+  (https://wiki.videolan.org/UnixCompile/)"
+    build_from_source_hint vlc "VLC Media Player" linux-arm64 vlc vlc "$src_path" videolan/vlc "$vlc_steps"
 
     # linux-x86_64: No official portable build, use install hint
     dest="${TOOLS_DIR}/linux-x86_64/vlc"
     ensure_dir "$dest"
-    write_install_hint "$dest" "vlc (linux-x86_64)" "VLC Media Player - linux-x86_64
-===============================
-
-Install via package manager:
-  sudo apt install vlc
-
-Or via Snap:
-  sudo snap install vlc
-
-Or via Flatpak:
-  flatpak install flathub org.videolan.VLC
-"
+    build_from_source_hint vlc "VLC Media Player" linux-x86_64 vlc vlc "$src_path" videolan/vlc "$vlc_steps"
 
     # macos-arm64: Universal DMG from official site
     dest="${TOOLS_DIR}/macos-arm64/vlc"

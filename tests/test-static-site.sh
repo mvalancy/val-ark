@@ -343,6 +343,11 @@ check "librarian.sh site exits 0" '[ "$rc" -eq 0 ] || { cat "$T/lib.out" >&2; fa
 check "librarian.sh site writes VALARK_HOME/index.html" '[ -f "$D/val-ark/index.html" ] && [ -f "$D/val-ark/browse/models.html" ]'
 check "site locks state/ private/ seaweedfs/ to the owner (safe to share the data root)" '[ "$(stat -c %a "$D/val-ark/state")" = 700 ] && [ "$(stat -c %a "$D/val-ark/private")" = 700 ] && [ "$(stat -c %a "$D/val-ark/seaweedfs")" = 700 ]'
 check "...and leaves the shared trees and the uploads drop alone" '[ "$(stat -c %a "$D/val-ark/content")" != 700 ] && [ "$(stat -c %a "$D/val-ark/uploads")" = 755 ]'
+# valark_lock_private also runs from valark_ensure_layout (setup + every loop cycle), not only `site`.
+chmod 755 "$D/val-ark/state"; chmod 750 "$D/val-ark/private"
+VAL_ARK_DATA="$D" bash -c '. "$1/scripts/lib/valark-env.sh"; valark_lock_private' _ "$ROOT"
+check "valark_lock_private sets state/ + private/ to exactly 700" '[ "$(stat -c %a "$D/val-ark/state")" = 700 ] && [ "$(stat -c %a "$D/val-ark/private")" = 700 ]'
+check "valark_ensure_layout calls valark_lock_private" 'sed -n "/^valark_ensure_layout()/,/^}/p" "$ROOT/scripts/lib/valark-env.sh" | grep -q valark_lock_private'
 check "models outside VALARK_HOME linked relatively" 'grep -rq "href=\"../../../models/llm/m1/\"" "$D/val-ark/browse/item"'
 VALARK_STATIC_SITE=0 VAL_ARK_DATA="$T/data2" bash "$ROOT/scripts/librarian.sh" site >/dev/null 2>&1; rc=$?
 check "VALARK_STATIC_SITE=0 is a no-op" '[ "$rc" -eq 0 ] && [ ! -e "$T/data2/val-ark/index.html" ]'

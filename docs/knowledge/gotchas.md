@@ -336,7 +336,8 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   code, plus the community services' data; `private/` and `seaweedfs/` sit there too. The secret files are `0600`, so an
   SMB guest can't read them, but a file server running **as the Ark's own user** (`python3 -m
   http.server`, a same-uid NFS client) serves them with directory listings. **Rule:** `librarian.sh
-  site` sets `state/`, `private/` and `seaweedfs/` to `700` every run (not the uploads drop,
+  site` and `valark_ensure_layout` (setup + every loop cycle) set `state/`, `private/` and
+  `seaweedfs/` to `700` via `valark_lock_private` (not the uploads drop,
   which an operator may share on purpose; fleet nodes leaving notes in `state/coordination/` need
   the Ark's uid); shares must run as another account
   ([SERVING.md](../SERVING.md#what-to-share-and-what-not-to)); never share a dev checkout (it holds

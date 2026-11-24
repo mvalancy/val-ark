@@ -125,13 +125,13 @@ readable through a share:
 | `val-ark/private/` | copies kept for the Ark's own use that it may not hand out |
 | `val-ark/seaweedfs/` | the opt-in SeaweedFS blob store |
 
-`librarian.sh site` makes these folders readable by the Ark's own account only (mode `700`) each
-time it runs, so they are safe as long as the share **does not run as the Ark's account**. Use an
-SMB guest or a separate read-only user, NFS `all_squash`, or `sudo -u nobody` for a small web
+Val Ark makes these folders readable by its own account only (mode `700`) on setup, on every loop
+cycle and on every `librarian.sh site` run. They are safe as long as the share **does not run as
+the Ark's account**. Use an SMB guest or a separate read-only user, NFS `all_squash`, or `sudo -u nobody` for a small web
 server. To be thorough, also hide them from SMB with `veto files = /state/private/seaweedfs/`. That
 setting matches those names at any depth, so check that no archive folder you need has one of them.
 
-The uploads drop folder (`VAL_ARK_UPLOADS`, default `val-ark/uploads/`) is left alone, because you
+The uploads drop folder (`VAL_ARK_UPLOADS`, for example `val-ark/uploads/`) is left alone, because you
 may share it on purpose. It holds unreviewed uploads, so decide whether it belongs in an archive
 share (add `/uploads/` to the veto list if not).
 

@@ -585,7 +585,6 @@ create_source_tarball() {
     fi
 }
 
-# Create an install instructions file for package-managed tools
 # --- Source fallbacks for platforms with no upstream binary --------------------
 # Mirror an upstream RELEASE source tarball to ${TOOLS_DIR}/sources/<tool>-<version>-src/.
 # Release tarballs usually include git submodules / vendored third-party code, which a bare
@@ -715,6 +714,7 @@ Online fallback: flatpak install flathub <app>, or the upstream download page."
     write_install_hint "${TOOLS_DIR}/${plat}/${tool}" "${tool} (${plat})" "$text"
 }
 
+# Create an install instructions file for package-managed tools
 write_install_hint() {
     local dest_dir="$1"
     local tool_name="$2"

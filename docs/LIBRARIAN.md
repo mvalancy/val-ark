@@ -350,7 +350,10 @@ holes. Failed attempts keep the partial + control file so the next cycle resumes
 where it left off; abandoned partials are garbage-collected by `verify` after
 `VALARK_PARTIAL_MAX_AGE_DAYS` (default 14).
 
-## Static browse pages (no server)
+## Static browse pages
+
+When to serve an Ark statically or dynamically, and how to set up each: [SERVING.md](SERVING.md).
+This section covers how the pages are built.
 
 `scripts/librarian.sh site` (and `maintain`, at most every `VALARK_STATIC_SITE_HOURS`, default 6)
 runs `scripts/lib/static_site.py`, which writes a **static catalog** of the archive at

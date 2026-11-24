@@ -80,6 +80,10 @@ helpers find them wherever they land); models
 live under `$VAL_ARK_DATA/models/{llm,stt,tts,...}`. On aarch64, GPU-accelerated
 llama/whisper/sd require a CUDA source build — see [PLATFORMS.md](PLATFORMS.md).
 
+To let other machines browse the archive, either run the web server (`./start.sh serve`) or
+share the data disk and open the static `val-ark/index.html`. Both work offline; see
+[SERVING.md](SERVING.md) for which to choose.
+
 ## 24/7 self-healing
 
 `scripts/loop.sh` keeps an offline mirror healthy without supervision: it ensures the

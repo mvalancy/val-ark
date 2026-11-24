@@ -647,6 +647,17 @@ EOF
 # is passed explicitly. VALARK_STATIC_SITE=0 turns the refresh off.
 cmd_site() {
     [ "${VALARK_STATIC_SITE:-1}" = "0" ] && { log "site: disabled (VALARK_STATIC_SITE=0)"; return 0; }
+    # The pages invite sharing the data root (docs/SERVING.md). Keep the Ark's own private trees
+    # unreadable to every other account, so a share served as another user (SMB guest, NFS
+    # all_squash, `sudo -u nobody python3 -m http.server`) cannot enter them: state/ (passcode
+    # hash, recovery code, claim token, community service data), private/ (copies the Ark may not
+    # hand out), seaweedfs/ (the opt-in blob store). Not the uploads drop (VAL_ARK_UPLOADS): the
+    # operator may share that one on purpose. Only dirs this user owns; a filesystem without modes
+    # (SMB, exFAT) just ignores it.
+    local d
+    for d in "$STATE_DIR" "$PRIVATE_DIR" "$SEAWEED_DIR"; do
+        if [ -d "$d" ] && [ -O "$d" ]; then chmod go-rwx "$d" 2>/dev/null || true; fi
+    done
     python3 "${PROJECT_ROOT}/scripts/lib/static_site.py" --root "$VALARK_HOME" \
         --section "models=${MODELS_DIR}" --section "tools=${TOOLS_DIR}" --section "content=${CONTENT_DIR}" \
         --section "installers=${INSTALLERS_DIR}" --section "sources=${SOURCES_DIR}" "$@"

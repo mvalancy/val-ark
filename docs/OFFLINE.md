@@ -80,6 +80,10 @@ helpers find them wherever they land); models
 live under `$VAL_ARK_DATA/models/{llm,stt,tts,...}`. On aarch64, GPU-accelerated
 llama/whisper/sd require a CUDA source build — see [PLATFORMS.md](PLATFORMS.md).
 
+To let other machines browse the archive, either run the web server (`./start.sh serve`) or
+share the data disk and open the static `val-ark/index.html`. Both work offline; see
+[SERVING.md](SERVING.md) for which to choose and what (not) to share.
+
 ## 24/7 self-healing
 
 `scripts/loop.sh` keeps an offline mirror healthy without supervision: it ensures the
@@ -130,6 +134,10 @@ The data root is NFS-exportable, so fleet nodes mount **one shared mirror** and 
 GPU inference on served models over the network. Set `VALARK_FLEET` in `.env` and the
 verification loop checks each remote node over SSH (reachable, sees the shared content,
 GPU inference works on NFS-served models).
+
+Nodes only need to read the shared `models/`, `content/` and `tools/`. The Ark keeps `val-ark/state/`
+private (mode `700`, see [SERVING.md](SERVING.md#what-to-share-and-what-not-to)), so a node that
+leaves notes in the loop's `state/coordination/` drop must mount as the Ark's own uid.
 
 ### Option B — Syncthing P2P
 

@@ -350,7 +350,10 @@ holes. Failed attempts keep the partial + control file so the next cycle resumes
 where it left off; abandoned partials are garbage-collected by `verify` after
 `VALARK_PARTIAL_MAX_AGE_DAYS` (default 14).
 
-## Static browse pages (no server)
+## Static browse pages
+
+When to serve an Ark statically or dynamically, and how to set up each: [SERVING.md](SERVING.md).
+This section covers how the pages are built.
 
 `scripts/librarian.sh site` (and `maintain`, at most every `VALARK_STATIC_SITE_HOURS`, default 6)
 runs `scripts/lib/static_site.py`, which writes a **static catalog** of the archive at
@@ -396,6 +399,10 @@ temp files are removed.
 `<DATA_ROOT>/models`, next to it, and the model links climb out to `../models`. Share (or open) the
 whole `<DATA_ROOT>` so those links resolve; a share of `val-ark/` alone shows the model cards but
 their file links break. A single-disk dev box keeps everything in the repo, so nothing climbs out.
+The data root also holds the Ark's private folders (`state/`, `private/`, `seaweedfs/`; the
+uploads drop is left alone).
+`site` sets them to mode `700` on every run, so a share must run as a different account; see
+[SERVING.md](SERVING.md#what-to-share-and-what-not-to).
 
 **Cost.** `librarian.sh site` walks the section folders (`os.scandir` + one `stat` per file) on every
 refresh. That is quick on a local disk; on a very large tree on a slow disk raise

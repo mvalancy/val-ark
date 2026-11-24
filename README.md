@@ -34,7 +34,7 @@ NFS-shareable, offline-capable — scales to a disk of any size.
 
 </details>
 
-**Contents:** [Architecture](#architecture) · [Librarian](#self-filling-mirror-librarian) · [What's Included](#whats-included) · [Community](#community--comms) · [Platforms](#platforms) · [Quick Start](#quick-start) · [Offline & P2P](#offline--p2p) · [Web Server](#web-server) · [Project Structure](#project-structure) · [Documentation map](#documentation-map) · [Testing](#testing) · [Releases](#releases)
+**Contents:** [Architecture](#architecture) · [Librarian](#self-filling-mirror-librarian) · [What's Included](#whats-included) · [Community](#community--comms) · [Platforms](#platforms) · [Quick Start](#quick-start) · [Offline & P2P](#offline--p2p) · [Static or Dynamic](#serving-static-or-dynamic) · [Project Structure](#project-structure) · [Documentation map](#documentation-map) · [Testing](#testing) · [Releases](#releases)
 
 ## Architecture
 
@@ -338,7 +338,29 @@ peers a full P2P copy; the data disk is also **NFS-exportable**, so fleet nodes 
 mount one shared mirror and run GPU inference directly on the served models over the
 network. All tools and models work fully offline after the initial download.
 
-## Web Server
+## Serving: static or dynamic
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/serving-dark.svg">
+  <img src="docs/img/popup/serving-light.svg" width="100%" alt="Pop-up book scene: Two ways to serve. Static pages on any file share, or a live server with chat, mail and requests.">
+</picture>
+
+There are two ways to open an Ark, and **both work fully offline**. Use either one, or both at once:
+
+| | Static | Dynamic |
+|---|---|---|
+| **Runs** | no Val Ark process: any file share (SMB, NFS, USB disk, `python3 -m http.server`) | `./start.sh serve` (zero-dependency Node.js) |
+| **Gives you** | a browsable catalog of every item, with pictures, descriptions and direct file links | the full web UI: live status, one-click requests, Wikipedia in the browser, the AI assistant, chat, mail, boards, file drop |
+| **Pick it for** | a simple, secure, read-only file server; a NAS that can't run code; a disk you hand to someone | a community hub on the LAN; an Ark you manage from a browser |
+
+**[docs/SERVING.md](docs/SERVING.md)** is the guide: how to choose, how to set up each mode step by
+step, screenshots, and the security trade-offs.
+
+| Static (any file share) | Dynamic (`./start.sh serve`) |
+|---|---|
+| ![Static catalog home page](docs/screenshots/serving/static-home.png) | ![Dynamic web UI home page (a freshly set-up box)](docs/screenshots/serving/dyn-home.png) |
+
+### Dynamic: the web server
 
 `./start.sh serve [port]` launches a **zero-dependency** Node.js server
 (`scripts/server.js`) serving the web UI with:
@@ -358,17 +380,18 @@ exist in `content/zim/`, the server auto-launches kiwix-serve (loopback-only on
 internal port 8888) and proxies it same-origin at `/kiwix/` for offline Wikipedia
 browsing without internet access.
 
-### No server? Browse the static catalog
+### Static: browse from any file share
 
-A box or NAS that is only reachable as a **plain file share** (SMB, a USB disk, `python3 -m
-http.server`) can't run `server.js`. `./scripts/librarian.sh site` (also run by every `maintain`)
+A box or NAS reached only as a **plain file share** (SMB, NFS, a USB disk, `python3 -m
+http.server`) doesn't need `server.js` at all. `./scripts/librarian.sh site` (also run by every `maintain`)
 writes a static catalog at the archive root (`index.html`, a card grid per section and a detail
 page per item): plain HTML with relative links that works over `file://`. Every model, ZIM, tool,
 installer, dataset and source gets a picture (logo, ZIM illustration, model-card image or a badge),
 a description (web UI text, ZIM metadata, model card), its size and licence, and links straight to
 the files. Opening
 `web-ui/index.html` without a server now points there too. See
-[docs/LIBRARIAN.md](docs/LIBRARIAN.md#static-browse-pages-no-server).
+[docs/SERVING.md](docs/SERVING.md) and
+[docs/LIBRARIAN.md](docs/LIBRARIAN.md#static-browse-pages).
 
 ## Project Structure
 

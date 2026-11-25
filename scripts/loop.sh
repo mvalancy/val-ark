@@ -440,7 +440,7 @@ CRON_TAG="val-ark-loop"
 _cron_read() {
     local out err rc
     err=$(mktemp 2>/dev/null || echo "${STATE_DIR}/.crontab.err.$$")
-    out=$(crontab -l 2>"$err"); rc=$?
+    out=$(LC_ALL=C crontab -l 2>"$err"); rc=$?   # C locale: "no crontab" in English
     if [ "$rc" -ne 0 ]; then
         if grep -qi 'no crontab' "$err" 2>/dev/null; then out=""
         else
@@ -455,6 +455,12 @@ cron_install() {
     local every="${1:-30}"   # minutes
     case "$every" in ''|*[!0-9]*) log "${RED}install: minutes must be a number${NC}"; return 64 ;; esac
     command -v crontab >/dev/null 2>&1 || { log "${RED}crontab not found${NC}: run 'loop.sh run' under a service manager instead"; return 1; }
+    # cron turns an unescaped '%' into a newline (the rest becomes stdin), so a path
+    # with one would run a broken command. Refuse rather than escape.
+    local p
+    for p in "$PROJECT_ROOT" "$_DIR" "$LOG_DIR"; do
+        case "$p" in *%*) log "${RED}install refused${NC}: cron treats '%' as a newline and this path has one: $p (move Val Ark, or run 'loop.sh run' under a service manager)"; return 1 ;; esac
+    done
     mkdir -p "$LOG_DIR" 2>/dev/null
     local cur
     cur=$(_cron_read) || return 1

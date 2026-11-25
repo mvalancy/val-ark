@@ -320,9 +320,20 @@ fi
 cat > "$CRON_WRITTEN"; exit 0
 EOF
 chmod +x "$T/bin/crontab-fails" "$T/bin/crontab-none"
-mkcron() {   # STUB -> a runner for loop.sh's real cron_install/_cron_read
-    mkdir -p "$T/cron/bin" "$T/cron/my repo" "$T/cron/logs"; cp "$T/bin/$1" "$T/cron/bin/crontab"
-    { echo 'PROJECT_ROOT="'"$T/cron/my repo"'"; _DIR="'"$T/cron/my repo/scripts"'"; LOG_DIR="'"$T/cron/logs"'"; STATE_DIR="'"$T/cron"'"'
+# Localised like a real cron: English "no crontab" only under LC_ALL=C.
+cat > "$T/bin/crontab-l10n" <<'EOF'
+#!/bin/bash
+if [ "$1" = "-l" ]; then
+  [ -f "$CRON_WRITTEN" ] && { cat "$CRON_WRITTEN"; exit 0; }
+  if [ "${LC_ALL:-}" = C ]; then echo "no crontab for tester" >&2; else echo "keine Crontab für tester" >&2; fi; exit 1
+fi
+cat > "$CRON_WRITTEN"; exit 0
+EOF
+chmod +x "$T/bin/crontab-l10n"
+mkcron() {   # STUB [REPO-DIR-NAME] -> a runner for loop.sh's real cron_install/_cron_read
+    local repo="${2:-my repo}"
+    mkdir -p "$T/cron/bin" "$T/cron/$repo" "$T/cron/logs"; cp "$T/bin/$1" "$T/cron/bin/crontab"
+    { echo 'PROJECT_ROOT="'"$T/cron/$repo"'"; _DIR="'"$T/cron/$repo/scripts"'"; LOG_DIR="'"$T/cron/logs"'"; STATE_DIR="'"$T/cron"'"'
       echo 'CRON_TAG=val-ark-loop; RED=""; NC=""; log(){ echo "$*"; }'
       awk '/^_cron_read\(\) \{/,/^\}/' "$ROOT/scripts/loop.sh"
       awk '/^cron_install\(\) \{/,/^\}/' "$ROOT/scripts/loop.sh"
@@ -341,6 +352,14 @@ grep -qF "cd \"$T/cron/my repo\" && bash \"$T/cron/my repo/scripts/loop.sh\" onc
 rm -f "$CRON_WRITTEN"
 PATH="$T/cron/bin:$PATH" bash "$T/cron/run.sh" >/dev/null 2>&1; rc=$?
 [ "$rc" = 0 ] && [ "$(grep -c val-ark-loop "$CRON_WRITTEN")" = 2 ] && pass || fail "'no crontab' starts from an empty table (rc=$rc)"
+# "no crontab" is recognised whatever the user's locale (crontab -l runs under LC_ALL=C)
+rm -f "$CRON_WRITTEN"; mkcron crontab-l10n
+LC_ALL=de_DE.UTF-8 LANG=de_DE.UTF-8 PATH="$T/cron/bin:$PATH" bash "$T/cron/run.sh" >"$T/cron.out" 2>&1; rc=$?
+[ "$rc" = 0 ] && [ "$(grep -c val-ark-loop "$CRON_WRITTEN" 2>/dev/null)" = 2 ] && pass || fail "a localised 'no crontab' must still install (rc=$rc: $(cat "$T/cron.out"))"
+# cron reads '%' as a newline: a path with one is refused, nothing written
+rm -f "$CRON_WRITTEN"; mkcron crontab-none 'ark%20box'
+PATH="$T/cron/bin:$PATH" bash "$T/cron/run.sh" >"$T/cron.out" 2>&1; rc=$?
+[ "$rc" != 0 ] && [ ! -e "$CRON_WRITTEN" ] && grep -q "cron treats '%' as a newline" "$T/cron.out" && pass || fail "a '%' in the repo path must refuse install (rc=$rc: $(cat "$T/cron.out"))"
 
 # --- 10. nothing left running ---------------------------------------------------
 left=$(pgrep -f "$T/" 2>/dev/null | grep -vx "$$" | tr '\n' ' ')

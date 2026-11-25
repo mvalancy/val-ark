@@ -1092,8 +1092,12 @@ a new one is a reviewed diff. A runtime CI can provide is pinned in CI instead: 
 CPython 3.12 (`actions/setup-python`) so test-cad-agent.sh's cp312 case fails there rather than
 skipping (#315). `tests/test-require-cmd.sh` runs every guarded test with that command removed from
 PATH and lints every `echo "SKIP:` / `printf 'SKIP` / `|| exit 0` / `|| { …; exit 0; }` line plus
-every test that calls python3 without `require_python3`, so a new bare guard fails CI. A stub
-script written from a heredoc counts too: write `if [ "$1" != start ]; then exit 0; fi`.
+every test that calls python3 without `require_python3`, so a new bare guard fails CI. Heredoc
+bodies (a stub script the test writes) are not linted: their `|| exit 0` doesn't skip the test.
+The same goes for PyYAML: `ci.yml` installs a pinned one, and test-ci-artifacts.sh's full YAML parse
+fails under CI without it. **The lint is a speed bump, not proof:** it matches text, so any code line
+that mentions `ci_is_set` on or just before a skip satisfies it, whether or not that code actually
+fails under CI. Reviewers still read the branch.
 
 <a id="browser-runner-failure-evidence"></a>
 ## Browser runner failure evidence

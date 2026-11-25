@@ -27,13 +27,13 @@ T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 [ -f "$WF" ] && pass || fail "release.yml must exist"
 # YAML forbids tab indentation — a cheap, dependency-free validity signal.
 if grep -Pq '\t' "$WF" 2>/dev/null; then fail "release.yml must not use tab indentation (invalid YAML)"; else pass; fi
-# Full parse when PyYAML happens to be present (skipped gracefully offline).
+# Full parse with PyYAML. ci.yml installs it, so under CI a missing PyYAML fails (#315);
+# locally it skips (the structural asserts below still gate the file).
 if python3 -c 'import yaml' 2>/dev/null; then
     python3 -c 'import yaml,sys; yaml.safe_load(open(sys.argv[1]))' "$WF" 2>/dev/null \
         && pass || fail "release.yml must be valid YAML"
-else
-    pass   # no PyYAML available offline; the structural asserts below still gate it
-fi
+elif ci_is_set; then fail "release.yml YAML parse needs PyYAML under CI (ci.yml installs it)"
+else echo "  SKIP: release.yml full YAML parse (no PyYAML here)" >&2; fi
 
 # --- 2. the artifact build + attach wiring must be present (keeps CI in lockstep)
 # Require the FULL-HISTORY form: `git bundle create … --all`. A future edit dropping

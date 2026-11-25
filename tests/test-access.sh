@@ -318,8 +318,19 @@ if start_open ""; then
     done
     c=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Host: valark.local:80' -H 'Origin: http://valark.local' -H 'Content-Type: application/json' --data '{}' "$B/api/maintenance/repair"); [ "$c" != "403" ] && pass || fail "Host with an explicit default port matches its Origin (got $c)"
     c=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Host: valark.local' -H 'Origin: https://valark.local' --data '{}' "$B/api/maintenance/repair"); [ "$c" = "403" ] && pass || fail "an https Origin on a plain-http request must be 403 (got $c)"
+    c=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Host: [fe80::1%25eth0]:80' -H 'Origin: http://[fe80::1%25eth0]' -H 'Content-Type: application/json' --data '{}' "$B/api/maintenance/repair"); [ "$c" != "403" ] && pass || fail "a zone-id IPv6 same-origin POST must be accepted (got $c)"
 else
     fail "open-mode server for the CSRF checks did not start"
+fi
+# A custom TLS domain: the box and every subdomain its certificate covers are served.
+stop_pids "$SRV_PID"; SRV_PID=""
+if start_open VALARK_TLS_DOMAIN=ark.example.org; then
+    for hn in ark.example.org lib.ark.example.org; do
+        c=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $hn" "$B/api/health"); [ "$c" = "200" ] && pass || fail "TLS-domain Host $hn must be served (got $c)"
+    done
+    c=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: example.org" "$B/api/health"); [ "$c" = "421" ] && pass || fail "the TLS domain's parent must be 421 (got $c)"
+else
+    fail "server with a custom TLS domain did not start"
 fi
 
 echo "access: ${PASS} passed, ${FAIL} failed"

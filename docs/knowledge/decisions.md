@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/decisions-dark.svg">
+  <img src="../img/popup/decisions-light.svg" width="100%" alt="Pop-up book scene: Why it is this way. Each big call: the context, the decision and the reason. Newest first.">
+</picture>
+
 # Val Ark — Decisions & Progress Log
 
 Architecturally significant decisions and notable progress, newest first. Format:
@@ -11,10 +16,14 @@ later). See [README](README.md).
 
 | Date | Decision | Issue / Phase |
 |------|----------|---------------|
+| 2026‑11 | [Docs as a picture book: a short README and a generated docs tree](#202611--docs-as-a-picture-book-a-short-readme-and-a-generated-docs-tree-282) | #282 |
+| 2026‑11 | [Grid-down essentials tier + survival profile](#202611--grid-down-essentials-tier--survival-profile) | |
+| 2026‑11 | [Static browse pages for server-less archives](#202611--static-browse-pages-for-server-less-archives-257) | #257 |
 | 2026‑11 | [Lastbook: auto-sized by default, every pack opt-in](#202611--lastbook-auto-sized-by-default-every-pack-opt-in-181) | #181 |
 | 2026‑11 | [cad-agent references: a private, content-addressed archive of every cited source](#202611--cad-agent-references-a-private-content-addressed-archive-of-every-cited-source-cad-agent323) | cad-agent#323 |
 | 2026‑11 | [Python wheelhouses + container archives as tool artifacts](#202611--python-wheelhouses--container-archives-as-tool-artifacts-149) | #149 |
 | 2026‑07 | [CI guards: doc-link integrity + secret/host-leak scan](#202607--ci-guards-doc-link-integrity--secrethost-leak-scan-130) | #130 |
+| 2026‑07 | [Notification center: bell/inbox slice 1](#202607--notification-center-bellinbox-slice-1-69) | #69 |
 | 2026‑07 | ["Ask Val Ark": an offline ask endpoint reusing the moderation runtime](#202607--ask-val-ark-slice-1-an-offline-ask-endpoint-that-reuses-the-moderation-runtime-phase-8-67) | Phase 8 · #67 |
 | 2026‑07 | [Four‑tab consumer nav: Home · Library · Activity · Settings](#202607--fourtab-consumer-nav-home--library--activity--settings-61--epic-91-slice-1) | #61 · epic #91 |
 | 2026‑07 | [Packages manifest: `/api/packages` = present inventory, not the catalog](#202607--packages-manifest-served-apipackages--present-inventory-not-the-catalog-89-slice-1) | #89 |
@@ -36,9 +45,78 @@ later). See [README](README.md).
 | 2026‑07 | [First `dev → main` release (v1.1.0) + community sign‑ups](#202607--first-dev--main-release-v110--community-signups-pr-23) | PR #2/#3 |
 | 2026‑07 | [Feature branch: discover/request + self‑replication + tests](#202607--feature-branch-discoverrequest--selfreplication--tests-pr-1) | PR #1 |
 | — | [Earlier project facts (fleet, curation)](#earlier-project-facts-fleet-curation) | — |
-| 2026‑07 | [Notification center: bell/inbox slice 1](#202607--notification-center-bellinbox-slice-1-69) | #69 |
 
 ---
+
+## 2026‑11 — Docs as a picture book: a short README and a generated docs tree (#282)
+
+**Context.** The front-page README had grown to 514 lines of diagrams, tool lists and command
+references that the guides already owned, and only the top-level guides had pop-up art.
+**Decision.** The README is a short front page (what an Ark is, screenshots, quick start, static vs
+dynamic, the docs tree) that links into the guides. Every human-facing doc opens with a generated
+pop-up scene, and `DOC_TREE` in `scripts/docs/popup_art.py` draws the whole docs hierarchy as one
+animated SVG tree, replacing the mermaid doc graph. `--check` fails when a tracked human-facing doc
+is left off the tree. Screenshots live in `docs/screenshots/<topic>/`.
+**Why.** People read pictures first; one fact keeps one home; and a generated tree with a test
+cannot drift the way a hand-drawn graph did.
+
+## 2026‑11 — Grid-down essentials tier + survival profile
+- <a id="griddown-essentials"></a>**The planner gains a phase 0 that always runs first:** the ranked
+  `data/essentials.tsv`. Val Ark's premise is "the internet may disappear", so the most critical small
+  items (water, field medicine, medicines, food, shelter, a pocket encyclopedia, a CPU-sized assistant)
+  must land before diversity or value/byte ever get a say, on ANY disk size.
+- **Smallest variant first, never blocking.** Phase 0 picks from the *uncollapsed* stream (the normal
+  pipeline keeps only the largest ZIM flavour) so it can take the mini/nopic variant, and it skips an
+  entry that doesn't fit instead of stopping. It deliberately does NOT reserve the content key, so on a
+  big disk phases 1–3 still upgrade to the maxi. Eviction would NOT clean up the small copy (it has the
+  *higher* value/byte, so evict() removes it last), hence an explicit step: `planner.py --superseded`
+  lists managed, unpinned smaller variants whose larger variant is complete on disk, and
+  `librarian.sh fill` removes them at the end of every fill, so nothing is stored twice.
+- Phase-0 picks count toward category coverage (phase 1) and the phase-2 per-category caps.
+- **Focus, not a fork:** rows carry `focus` (`all` or profile list). A new `survival` profile weights
+  content 1.4 / tools 1.2 / models 0.8 and unlocks survival-only rows (Army field manuals, self-reliance
+  video). Every profile still gets the `all` rows. Grid-down topics also get a +80 value boost for all
+  profiles in `catalog.sh`.
+- Backward compatible: without `--essentials` the planner is unchanged (tested).
+- <a id="prune-after-stop"></a>**The superseded prune is skipped after a STOP halt (#177).** A
+  `state/STOP` flag means "stop changing the disk" (the owner may be about to unplug or inspect it)
+  and the plan ran only partway, so `cmd_fill` does not delete anything after a STOP — the prune just
+  runs at the end of the next un-halted fill. Every other early exit (time / byte / item budget, low
+  headroom) still prunes, because freeing the redundant small copy is exactly what helps then. The
+  prune's manifest rewrite is an exact first-column match (`awk '$1!=id'`), so an id that is a prefix
+  or extension of the pruned id is never dropped; `tests/test-essentials.sh` §8 runs the real
+  `prune_superseded` + `cmd_fill` against a fixture to hold both rules.
+- <a id="mini-then-maxi"></a>**Known trade-off, kept on purpose: mini first, maxi later.** On a big
+  disk an essential ZIM is fetched twice — the mini in phase 0, the maxi in phase 1–3, then the mini is
+  pruned — so its small variant's bytes are downloaded and thrown away. And on a disk where the maxi
+  would fit alone but not beside the mini (budget between `maxi` and `mini + maxi`), the maxi is never
+  planned; that essential stays on its mini. We considered "skip the mini when the maxi is also planned":
+  it would either move a multi-GB download into phase 0 (delaying every lower-ranked life-safety item
+  behind it on a time-bounded `maintain` fill) or leave the essential with *no* copy until phase 3
+  reaches it. Crediting the mini's bytes back to the maxi's budget doesn't work either: the prune runs
+  after the fill, so the disk briefly holds both, and the fill's live headroom check would then stop the
+  whole fill before the maxi. The waste is bounded by the small variants' size (typically ~10% of the
+  full ones), while getting the critical small copy onto the disk fast is the point of phase 0, so the
+  behavior stays as is (documented in `docs/LIBRARIAN.md`).
+
+## 2026‑11 — Static browse pages for server-less archives (#257)
+
+- A NAS or USB disk is often reachable only as a plain file share; opening `web-ui/index.html` there
+  showed "nothing installed" because the SPA needs `server.js`. Decision: generate a **static**
+  catalog (`scripts/lib/static_site.py`, `librarian.sh site`, refreshed by `maintain`) instead of
+  teaching the SPA to read the disk: it works over `file://`, SMB and any dumb HTTP server.
+- Relative links only, no external URLs, no JS requirement: the page has to open on an offline
+  laptop pointed at a share. Names are escaped and links percent-encoded (archive file names come
+  from upstream and are untrusted).
+- Scale over completeness: per-section row caps, per-entry file caps and a walk limit, plus a
+  `--listing` TSV input so a mirror that already keeps an index never walks millions of files over a
+  slow share. Unchanged pages are not rewritten (fewer writes on network shares).
+- A file listing is not a catalog: every card carries a picture and a human description. Sources in
+  order: the web UI's own data tables (read from `web-ui/index.html` by a small JS-literal reader, so
+  there is one source of truth), the item's own metadata (ZIM `M/Title`, `M/Description`,
+  `M/Illustration_48x48@1`; model / dataset cards), the `data/*.tsv` notes, then a generated badge.
+  ZIM metadata is read with a few small random reads (header, URL-pointer binary search, one cluster)
+  instead of a ZIM library, and cached, because the archive may sit on a slow share.
 
 ## 2026‑11 — Lastbook: auto-sized by default, every pack opt-in (#181)
 - **Context:** [Lastbook](https://lastbook.org) (MIT, `Immortal-Protocols/lastbook`) is a free offline
@@ -58,7 +136,9 @@ later). See [README](README.md).
   and the pack ladder lets one rule fit any disk, from a small one (Small) to a big drive (All).
   Budgeting on bytes *still to fetch* makes the choice stable: once a pack is held it costs 0, so a
   later full disk never makes `auto` drop it or flap. The 50% share leaves the librarian (Wikipedia,
-  models, installers) the other half instead of letting whichever runs first take the disk. All
+  models, installers) the other half instead of letting whichever runs first take the disk.
+  *(Superseded by #203: the librarian's planner now sizes Lastbook; the share remains only for an
+  operator-chosen selection, see "Planned by the librarian" below.)* All
   downloads resume from `.part`, so the loop's 2-hour refresh window just continues a big pack next time.
 - **Why every-pack is opt-in for servers:** the packs nest, so `every` stores Small and Medium again
   inside All: worth it only for a mirror that hands packs to other machines of different sizes. On a
@@ -227,8 +307,89 @@ later). See [README](README.md).
     run `lastbook.sh --pack all`). That fetches the current All whatever its size. The old file is
     kept while it is larger than the verified new one (the held-pack guard), so delete it by hand
     once the new one is verified if the disk is tight.
-- **Follow-up (not done):** feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
-  rank) so value-per-byte, not a fixed share, decides its room.
+- **Planned by the librarian, not a fixed share (#203).** This supersedes the 50% share as the
+  default: a share either starved Lastbook on a disk with room or took half of a small disk from
+  everything else, whatever the profile.
+  - *Candidates.* `lastbook_mirror.py candidates` prints one planner row per pack (plus the base
+    maps), state map (plus its address index), the model (bucket `models`) and the installers.
+    It applies the same allow-list and validation as a mirror run, and a row with no size is
+    left out (#230). `catalog.sh` caches these rows daily, points them at the current Lastbook
+    dir and applies the profile weights. `planner.py` then places them with everything else.
+  - *Nesting.* The planner plans at most one pack per Lastbook dir. A later phase may replace the
+    planned pack with a larger one, and its bytes are refunded. A pack held and verified at its
+    recorded size, summed per pack, satisfies every pack no larger than it. The held pack's own
+    id is still charged when its listed files are not all there (a re-release under a new name,
+    a missing base map). Maps, the model and the installers need a pack, held or planned. The
+    survival profile lists `pack:small` and `app:*` in `essentials.tsv` (new kind `lastbook`).
+    That phase-0 essential is the one exception to "one pack": it stays planned beside a later,
+    larger pick. It is fetched first, and the nested prune drops it once the larger pack is
+    verified.
+  - *Charged what is left (review of PR #288).* Each Lastbook row costs only the bytes it still has
+    to fetch: held files cost 0 and a `.part` is credited, so a half-fetched Medium is not
+    stranded behind a fresh Small. The mirror's budget is the sum of the planned rows' remaining
+    bytes, not unlimited, so a held-item refresh is budgeted too. There is no "plus held"
+    re-enable path, so `MODEL=no` and `APPS=none` hold. A "no" means "do not fetch or refresh",
+    not "delete what is held".
+  - *Fetch and prune stay in the mirror.*
+    - `librarian.sh fill` passes the planned Lastbook rows to `lastbook.sh --plan-file`. The
+      phase-0 essentials go in their own batch, then every planned row. Each batch is checked
+      against free space as a whole, bounded by the remaining `--time`, and counted only by the
+      bytes the mirror really added. A busy lock (75) is a skip.
+    - The mirror run is `--pack auto --pack-limit <planned id>`, meaning that pack or a smaller
+      one, so a planned All that is broken upstream falls back down the ladder, never below the
+      held pack. When no pack will be held, the planned maps, model and installers wait too.
+    - The auto guards (step up never down, HEAD confirmation, keep the held pack, nested prune
+      after a verified larger pack) and the #182/#194 prune rules all still apply.
+    - The reserve and the STOP flag are re-checked every 256 MiB inside a download.
+    - The files never enter `manifest.tsv`, so `verify` and `evict` never delete them. `request`
+      and `catalog` never resolve a Lastbook row, and `request` refuses any source `download_one`
+      cannot fetch before it pins or evicts anything.
+    - Run alone (the weekly refresh or the Mirror button), `lastbook.sh` asks
+      `librarian.sh lastbook-plan` first.
+    - A flock on `state/lastbook.lock` serialises Lastbook mirror runs only. The fill's own
+      `fill.lock` is separate, so other librarian downloads are not serialised against it.
+  - *Opt-outs.*
+    - The candidate cache holds the full offer (header `format=2`; an older cache is ignored).
+      MAPS, ADDRESSES=none, MODEL=no and APPS=none are applied when the rows are read, so an
+      opt-out holds at once, even offline.
+    - Share mode, with no planner rows and the share as before, applies with:
+      `VALARK_LASTBOOK_PACK=every` (the server opt-in) or an explicit pack, an explicit
+      `VALARK_LASTBOOK_BUDGET`, `VALARK_LASTBOOK_PLAN=0`, `VALARK_LASTBOOK_ADDRESSES=all` or a
+      code list (the planner folds addresses into a map, and would otherwise quietly reduce
+      these to `follow`), CLI selection options, or a `VALARK_LASTBOOK_DIR` on another
+      filesystem than the data root (`stat -c %d`). The last one stays until there is a
+      per-destination budget.
+    - `VALARK_LASTBOOK_BUDGET_PCT` is kept as a **deprecated** fallback: set on its own it
+      selects share mode and logs a warning.
+  - *Never delete before the replacement verifies (re-review of PR #288).*
+    - Removing `--plus-held` made one case worse: a new app version that did not fit let prune
+      delete the old installers with nothing in their place.
+    - Now a held map, address index, model or installer that the release no longer names is
+      pruned only once its replacement is on disk and verified. For an old `app/<ver>/` file
+      that means all the current installers; for a map, address index or model it means the
+      current entry with the same id. An entry dropped upstream altogether still goes, under
+      the truncation guards, and a file whose entry cannot be told is kept.
+    - The entry id is recorded in `.lastbook-verified.json` (`entry`, like `pack`), at fetch time
+      and from the kept manifest on every run, so the link survives once the kept manifest
+      moves on.
+    - *Second re-review:* the model and the installers are each one slot. A renamed model (new id)
+      keeps the old file until every current model entry is verified, even with `MODEL=no`.
+      An unknown-entry model file follows the same slot rule, and an unknown-entry map or address
+      index is kept and logged. An address index upstream marks `available: false` is kept.
+      In planner mode the base maps are not wanted and are taken last, after every planned row
+      (third review). An unplanned base-map refresh never uses up budget charged for other rows,
+      and when nothing is left it is skipped, not deferred. So it no longer makes the run
+      incomplete or blocks the prune, though a run can still exit 3 for other reasons.
+      `lastbook_fill` never runs unbounded: with a `--time` budget and no seconds left it does
+      not start.
+    - Files kept indefinitely are logged with the reason on every run, and only an operator
+      removes them: an entry upstream marks unavailable, an unknown entry, an old model or
+      installer version kept under `MODEL=no` / `APPS=none`.
+    - Candidate rows carry each file's sha256, so a same-name, same-size re-release is not taken
+      for held. With these rules, every held item is at least as well off as with `--plus-held`:
+      it is kept until replaced, and its refresh is planned and charged.
+  - *Model category.* The Lastbook GGUF is `lastbook:model`, not `model:assistant`. It must not take
+    or cover the curated assistants' diversity slot, and it never takes a diversity slot itself.
 
 ## 2026‑11 — cad-agent references: a private, content-addressed archive of every cited source (cad-agent#323)
 - **Context:** cad-agent keeps a reference knowledge base of ~760 sources (≈330 GitHub repos, ≈350
@@ -347,6 +508,26 @@ to catch mechanically and expensive to catch by eye (the #129 review had to hand
 resolver); a public repo must never ship a real host/IP/credential. The scan is a ratchet — it fails
 any NEW leak while allowlisting the handful of reviewed examples/constants/fixtures; public dotted
 domains, loopback, and `$`/`{}`/`<>` placeholders pass automatically.
+
+## 2026‑07 — Notification center: bell/inbox slice 1 (#69)
+- <a id="notify-bell-69-slice1"></a>**The notification center is a READ‑ONLY aggregation, not a
+  new store.** `GET /api/status/notifications` composes the signals the box *already* writes —
+  `heal-events.jsonl` (self‑heal events) + `selfheal.json`/`verify.json`/disk/Safe‑Mode (current
+  conditions) — into one severity‑tagged list. No new state file, no daemon, zero deps. This keeps
+  the endpoint read‑gated like the rest of `/api/status/*` and avoids an unauthenticated write path.
+- **Dismiss is client‑side (localStorage) for slice 1** so the endpoint stays read‑only. That
+  needs **stable item identity**: `heal-events.jsonl` lines carry only `ts|kind|detail` (no id,
+  tail‑capped at 200), so the server assigns `ev-<djb2-hash(ts|kind|detail)>` for events and a
+  fixed key per condition (`cond-safemode`, `cond-disk-warning|critical`, `cond-verify-<comp>`,
+  `cond-missing-assets`). A disk *escalation* gets its own id (`…-critical` vs `…-warning`) so a
+  worsening condition re‑surfaces even if the warning was dismissed. **Server‑side, cross‑device
+  dismiss** is the deferred follow‑up (adds a write path → same adversarial bar as
+  `POST /api/maintenance/repair`); routing into mail/board/chat, the Immediately/Daily/Never
+  frequency, and the on‑box LED are also later #69 slices.
+- **Severity maps to the existing color grammar** (green info / yellow warning / red critical).
+  Self‑heal events are reassuring **info** ("handled it for you"); the lone exception is
+  `moderation-error` (could NOT quarantine) → **warning**. Failed functional‑verify checks are
+  **warning** ("working on it — self‑heal re‑verifies"), matching the Health page framing.
 
 ## 2026‑07 — "Ask Val Ark" slice 1: an offline ask endpoint that reuses the moderation runtime (Phase 8, #67)
 
@@ -782,81 +963,3 @@ domains, loopback, and `$`/`{}`/`<>` placeholders pass automatically.
   diversity → small‑value → fill → evict‑for‑better; value = curated category weight + language +
   density + topic boosts (now including a strong Linux/shell boost, so an offline user can get
   setup help from the box).
-
-## 2026‑07 — Notification center: bell/inbox slice 1 (#69)
-- <a id="notify-bell-69-slice1"></a>**The notification center is a READ‑ONLY aggregation, not a
-  new store.** `GET /api/status/notifications` composes the signals the box *already* writes —
-  `heal-events.jsonl` (self‑heal events) + `selfheal.json`/`verify.json`/disk/Safe‑Mode (current
-  conditions) — into one severity‑tagged list. No new state file, no daemon, zero deps. This keeps
-  the endpoint read‑gated like the rest of `/api/status/*` and avoids an unauthenticated write path.
-- **Dismiss is client‑side (localStorage) for slice 1** so the endpoint stays read‑only. That
-  needs **stable item identity**: `heal-events.jsonl` lines carry only `ts|kind|detail` (no id,
-  tail‑capped at 200), so the server assigns `ev-<djb2-hash(ts|kind|detail)>` for events and a
-  fixed key per condition (`cond-safemode`, `cond-disk-warning|critical`, `cond-verify-<comp>`,
-  `cond-missing-assets`). A disk *escalation* gets its own id (`…-critical` vs `…-warning`) so a
-  worsening condition re‑surfaces even if the warning was dismissed. **Server‑side, cross‑device
-  dismiss** is the deferred follow‑up (adds a write path → same adversarial bar as
-  `POST /api/maintenance/repair`); routing into mail/board/chat, the Immediately/Daily/Never
-  frequency, and the on‑box LED are also later #69 slices.
-- **Severity maps to the existing color grammar** (green info / yellow warning / red critical).
-  Self‑heal events are reassuring **info** ("handled it for you"); the lone exception is
-  `moderation-error` (could NOT quarantine) → **warning**. Failed functional‑verify checks are
-  **warning** ("working on it — self‑heal re‑verifies"), matching the Health page framing.
-
-## 2026‑11 — Grid-down essentials tier + survival profile
-- <a id="griddown-essentials"></a>**The planner gains a phase 0 that always runs first:** the ranked
-  `data/essentials.tsv`. Val Ark's premise is "the internet may disappear", so the most critical small
-  items (water, field medicine, medicines, food, shelter, a pocket encyclopedia, a CPU-sized assistant)
-  must land before diversity or value/byte ever get a say, on ANY disk size.
-- **Smallest variant first, never blocking.** Phase 0 picks from the *uncollapsed* stream (the normal
-  pipeline keeps only the largest ZIM flavour) so it can take the mini/nopic variant, and it skips an
-  entry that doesn't fit instead of stopping. It deliberately does NOT reserve the content key, so on a
-  big disk phases 1–3 still upgrade to the maxi. Eviction would NOT clean up the small copy (it has the
-  *higher* value/byte, so evict() removes it last), hence an explicit step: `planner.py --superseded`
-  lists managed, unpinned smaller variants whose larger variant is complete on disk, and
-  `librarian.sh fill` removes them at the end of every fill, so nothing is stored twice.
-- Phase-0 picks count toward category coverage (phase 1) and the phase-2 per-category caps.
-- **Focus, not a fork:** rows carry `focus` (`all` or profile list). A new `survival` profile weights
-  content 1.4 / tools 1.2 / models 0.8 and unlocks survival-only rows (Army field manuals, self-reliance
-  video). Every profile still gets the `all` rows. Grid-down topics also get a +80 value boost for all
-  profiles in `catalog.sh`.
-- Backward compatible: without `--essentials` the planner is unchanged (tested).
-- <a id="prune-after-stop"></a>**The superseded prune is skipped after a STOP halt (#177).** A
-  `state/STOP` flag means "stop changing the disk" (the owner may be about to unplug or inspect it)
-  and the plan ran only partway, so `cmd_fill` does not delete anything after a STOP — the prune just
-  runs at the end of the next un-halted fill. Every other early exit (time / byte / item budget, low
-  headroom) still prunes, because freeing the redundant small copy is exactly what helps then. The
-  prune's manifest rewrite is an exact first-column match (`awk '$1!=id'`), so an id that is a prefix
-  or extension of the pruned id is never dropped; `tests/test-essentials.sh` §8 runs the real
-  `prune_superseded` + `cmd_fill` against a fixture to hold both rules.
-- <a id="mini-then-maxi"></a>**Known trade-off, kept on purpose: mini first, maxi later.** On a big
-  disk an essential ZIM is fetched twice — the mini in phase 0, the maxi in phase 1–3, then the mini is
-  pruned — so its small variant's bytes are downloaded and thrown away. And on a disk where the maxi
-  would fit alone but not beside the mini (budget between `maxi` and `mini + maxi`), the maxi is never
-  planned; that essential stays on its mini. We considered "skip the mini when the maxi is also planned":
-  it would either move a multi-GB download into phase 0 (delaying every lower-ranked life-safety item
-  behind it on a time-bounded `maintain` fill) or leave the essential with *no* copy until phase 3
-  reaches it. Crediting the mini's bytes back to the maxi's budget doesn't work either: the prune runs
-  after the fill, so the disk briefly holds both, and the fill's live headroom check would then stop the
-  whole fill before the maxi. The waste is bounded by the small variants' size (typically ~10% of the
-  full ones), while getting the critical small copy onto the disk fast is the point of phase 0, so the
-  behavior stays as is (documented in `docs/LIBRARIAN.md`).
-
-## 2026‑11 — Static browse pages for server-less archives (#257)
-
-- A NAS or USB disk is often reachable only as a plain file share; opening `web-ui/index.html` there
-  showed "nothing installed" because the SPA needs `server.js`. Decision: generate a **static**
-  catalog (`scripts/lib/static_site.py`, `librarian.sh site`, refreshed by `maintain`) instead of
-  teaching the SPA to read the disk: it works over `file://`, SMB and any dumb HTTP server.
-- Relative links only, no external URLs, no JS requirement: the page has to open on an offline
-  laptop pointed at a share. Names are escaped and links percent-encoded (archive file names come
-  from upstream and are untrusted).
-- Scale over completeness: per-section row caps, per-entry file caps and a walk limit, plus a
-  `--listing` TSV input so a mirror that already keeps an index never walks millions of files over a
-  slow share. Unchanged pages are not rewritten (fewer writes on network shares).
-- A file listing is not a catalog: every card carries a picture and a human description. Sources in
-  order: the web UI's own data tables (read from `web-ui/index.html` by a small JS-literal reader, so
-  there is one source of truth), the item's own metadata (ZIM `M/Title`, `M/Description`,
-  `M/Illustration_48x48@1`; model / dataset cards), the `data/*.tsv` notes, then a generated badge.
-  ZIM metadata is read with a few small random reads (header, URL-pointer binary search, one cluster)
-  instead of a ZIM library, and cached, because the archive may sit on a slow share.

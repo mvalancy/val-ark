@@ -21,33 +21,17 @@ offline content (ZIM via Kiwix), with a zero-dependency web UI.
 | To **share an Ark**: static file share or live web server | [`SERVING.md`](SERVING.md) |
 | To **run the tests** | [`../tests/AGENTS.md`](../tests/AGENTS.md) |
 
-## The documentation graph
+## The documentation tree
 
-```mermaid
-graph TD
-    ROOT[README.md<br/>project front page] --> DOCS[docs/README.md<br/>THIS doc map]
-    ROOT --> CLAUDE[CLAUDE.md<br/>rules, auto-loaded]
-    ROOT --> AGENTS[AGENTS.md<br/>agent operating manual]
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/popup/docs-tree-dark.svg">
+  <img src="img/popup/docs-tree-light.svg" width="100%" alt="The documentation tree: the README leads to the docs map, the workshop guides, the policies and the AI-agent manuals; the docs map branches into the guides, the design hierarchy and the knowledge base. Each page at the tip of a branch shows its file path.">
+</picture>
 
-    DOCS --> GUIDES[Reference guides<br/>ARCHITECTURE · LIBRARIAN · PLATFORMS<br/>TOOLS · COMMUNITY · SERVING · OFFLINE · …]
-    DOCS --> DESIGN[docs/design/<br/>consumer-appliance architecture]
-    DOCS --> KNOW[docs/knowledge/<br/>the git-tracked shared brain]
-    AGENTS --> AG[.agents/<br/>skills + pipeline knowledge]
-
-    DESIGN --> D1[vision · commissioning<br/>admin-console · access-identity]
-    DESIGN --> D2[storage · downloads-monitoring<br/>errors-selfheal · safety-moderation]
-    DESIGN --> D3[recovery · deployment · roadmap<br/>research-brief · current-state]
-
-    KNOW --> K1[decisions.md · gotchas.md]
-    KNOW --> K2[workflow.md · governance.md]
-
-    AG --> S1[skills/: worker-protocol · review<br/>issue-discovery · release · recovery]
-    AG --> S2[knowledge/pipeline-insights.md]
-
-    KNOW -.->|"workflow + governance implemented by"| AG
-
-    CLAUDE --> FOLDERS[Per-folder AGENTS.md<br/>scripts · lib · services · tools · tests<br/>web-ui · data · docs · .github]
-```
+The tree is drawn by [`scripts/docs/popup_art.py`](../scripts/docs/popup_art.py) from its
+`DOC_TREE` list, and `tests/test-doc-art.sh` fails if a tracked human-facing doc is missing from it (see
+[Pop-up art](AGENTS.md#pop-up-art-the-chapter-scenes) for what is exempt).
+Every guide on it opens with its own pop-up scene.
 
 Every important folder also carries its own `AGENTS.md` (local operating notes) and/or a
 `README.md`; they are inventoried below.
@@ -62,7 +46,7 @@ sync](#keeping-this-map-in-sync)).
 
 | File | Purpose |
 |------|---------|
-| [`../README.md`](../README.md) | Project front page: overview, architecture diagrams, quick start. |
+| [`../README.md`](../README.md) | Project front page: what an Ark is, screenshots, quick start, static vs dynamic, and the docs tree. |
 | [`../CLAUDE.md`](../CLAUDE.md) | Codebase guide + rules, **auto-loaded every session**; the "how to add a tool" checklist. |
 | [`../AGENTS.md`](../AGENTS.md) | AI-agent operating manual: prime directives, the delivery pipeline, definition of done. |
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Contributor entry point; points at the authoritative workflow + knowledge base. |
@@ -128,7 +112,7 @@ Each important folder carries local operating notes.
 |--------|------|
 | `scripts/` | [scripts/AGENTS.md](../scripts/AGENTS.md) · [scripts/README.md](../scripts/README.md) — orchestration, curation, server layer. |
 | `scripts/lib/` | [scripts/lib/AGENTS.md](../scripts/lib/AGENTS.md) — data-root resolution + catalog/planner internals, the mirror CLIs (release / APT / git-bundle, run by hand; Lastbook / references / OCI, driven by `scripts/tools/*.sh`), auth + commissioning, moderation, TLS. |
-| `scripts/docs/` | `popup_art.py` — generator for the animated pop-up-book doc art (see [Pop-up art](#pop-up-art)). |
+| `scripts/docs/` | `popup_art.py` (the pop-up scenes and the docs tree) and `flow_art.py` (the animated how-it-works diagrams); see [Pop-up art](AGENTS.md#pop-up-art-the-chapter-scenes). |
 | `scripts/services/` | [scripts/services/AGENTS.md](../scripts/services/AGENTS.md) — offline community service launchers (chat/mail/forum/paste/seaweedfs). |
 | `scripts/tools/` | [scripts/tools/AGENTS.md](../scripts/tools/AGENTS.md) · [scripts/tools/README.md](../scripts/tools/README.md) — per-tool mirror scripts + `_common.sh` helpers. |
 | `tests/` | [tests/AGENTS.md](../tests/AGENTS.md) · [tests/README.md](../tests/README.md) — one runner → offline HTML report. |
@@ -137,6 +121,8 @@ Each important folder carries local operating notes.
 | `web-ui/` | [web-ui/AGENTS.md](../web-ui/AGENTS.md) · [web-ui/README.md](../web-ui/README.md) — zero-dep SPA (TOOLS array, TOOL_META, logos, screenshots). |
 | `data/` | [data/AGENTS.md](../data/AGENTS.md) — the six catalog TSVs (installers, models-extra, essentials, dev-stack, apt-sets, source-repos) and their schemas. |
 | `docs/` | [docs/AGENTS.md](AGENTS.md) — the reference guides (this folder). |
+| `docs/screenshots/` | Screenshots by topic: `web-ui/`, `serving/`, `mirror-honesty/`, and `terminal/` once `scripts/screenshots.sh` records one. |
+| `docs/img/` | Drawn art: `hero/` and the generated `popup/` scenes and docs tree. |
 | `docs/design/` | [docs/design/AGENTS.md](design/AGENTS.md) — the scope-first design set. |
 | `docs/knowledge/` | [docs/knowledge/AGENTS.md](knowledge/AGENTS.md) — the shared brain. |
 | `.github/` | [.github/AGENTS.md](../.github/AGENTS.md) — issue/PR templates + CI notes. |
@@ -157,8 +143,8 @@ Each important folder carries local operating notes.
   repo's dirs are symlinked to it. Scales to any disk size. Logic in
   `scripts/lib/valark-env.sh`. See [LIBRARIAN.md](LIBRARIAN.md).
 - **Librarian engine** — `scripts/librarian.sh` fills a disk from live catalogs
-  in priority order (grid-down essentials → diversity → small-valuable → fill-remaining →
-  evict-for-better), using aria2 multi-connection downloads with curl fallback. It
+  in priority order (grid-down essentials → diversity → small-valuable → fill-remaining;
+  `evict` and `request` trade up when room is needed), using aria2 multi-connection downloads with curl fallback. It
   curates hundreds of catalog items — 50+ tool mirror scripts (`scripts/tools/*.sh`),
   models and the live Kiwix library. See [LIBRARIAN.md](LIBRARIAN.md).
 - **Offline build & survival kit** — `data/essentials.tsv` front-loads the grid-down
@@ -193,7 +179,9 @@ This is the **one canonical index** — keeping it current is part of the defini
 When you add, remove, or rename a tracked `.md`, update this file in the same change:
 
 1. Add/adjust its row in the matching group above.
-2. If it introduces a new folder, add the folder to the graph and the per-folder table.
+2. If it is a human-facing doc, add it to `DOC_TREE` in `scripts/docs/popup_art.py`, give it a
+   pop-up scene (`SCENES`), and run `python3 scripts/docs/popup_art.py`. A new folder also goes
+   in the per-folder table.
 3. Sanity-check with `git ls-files '*.md'` — every path it prints must appear here.
 
 ---

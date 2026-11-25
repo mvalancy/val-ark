@@ -296,6 +296,37 @@ check "tools: every platform / card link resolves" 'grep -qx ok "$T/links3.out" 
 gen --root "$R" --out "$T/rnd" --max-details 0 >/dev/null 2>&1
 linkcheck "$T/rnd" > "$T/links4.out" 2>&1
 check "tools: card links resolve without detail pages" 'grep -qx ok "$T/links4.out" || { cat "$T/links4.out" >&2; false; }'
+
+# #276: a platform folder holding only the INSTALL.txt build hint is labelled as such (still
+# linked), and a card merging several platforms lists every platform folder as its Location
+H="$T/h"; mkdir -p "$H/tools/linux-arm64/inkscape" "$H/tools/macos-arm64/inkscape" "$H/tools/linux-x86_64/inkscape"
+printf 'Build from source: see the mirrored tarball.\n' > "$H/tools/linux-arm64/inkscape/INSTALL.txt"
+head -c 4000 /dev/zero > "$H/tools/macos-arm64/inkscape/Inkscape.dmg"
+head -c 3000 /dev/zero > "$H/tools/linux-x86_64/inkscape/Inkscape.AppImage"
+echo 'also here' > "$H/tools/linux-x86_64/inkscape/INSTALL.txt"
+gen --root "$H" >/dev/null 2>&1
+HI="$(grep -l "tools/macos-arm64/inkscape" "$H"/browse/item/*.html | head -1)"
+check "tools: hint-only platform labelled build-from-source and linked to the hint (#276)" '[ -n "$HI" ] && grep -q "href=\"../../tools/linux-arm64/inkscape/INSTALL.txt\">Linux arm64: build from source (INSTALL.txt)</a>" "$HI" && ! grep -q "Linux arm64</a><span class=\"muted\">" "$HI"'
+check "tools: a platform with a binary plus a hint stays a download (#276)" 'grep -q "href=\"../../tools/linux-x86_64/inkscape/\">[^<]*</a><span class=\"muted\">" "$HI" && ! grep -q "x86_64[^<]*: build from source (INSTALL.txt)</a>" "$HI"'
+check "tools: Location lists every platform folder of a merged card (#276)" 'grep -q "<dt>Location</dt><dd>tools/linux-arm64/inkscape, tools/linux-x86_64/inkscape, tools/macos-arm64/inkscape</dd>" "$HI"'
+linkcheck "$H" > "$T/links5.out" 2>&1
+check "tools: the install-hint link resolves (#276)" 'grep -qx ok "$T/links5.out" || { cat "$T/links5.out" >&2; false; }'
+check "tools: description counts only real builds, hint-only platform named as build from source (#276)" 'grep -q "portable builds for Linux x86_64, macOS ([^)]*), ready to copy and run offline. Linux arm64: build from source (INSTALL.txt)." "$H/browse/tools.html"'
+check "tools: hint-only platform chip says build from source, the others stay plain (#276)" 'grep -q ">Linux arm64 (build from source)<" "$HI" && grep -q ">macOS<" "$HI" && grep -q ">Linux x86_64<" "$HI"'
+# a single platform with two items (folder + archive) also lists both as its Location
+H2="$T/h2"; mkdir -p "$H2/tools/linux-x86_64/blender"; echo b > "$H2/tools/linux-x86_64/blender/blender"
+echo z > "$H2/tools/linux-x86_64/blender.tar.zst"; gen --root "$H2" >/dev/null 2>&1
+check "tools: one platform, two items -> Location lists both (#276)" 'grep -rq "<dt>Location</dt><dd>tools/linux-x86_64/blender, tools/linux-x86_64/blender.tar.zst</dd>" "$H2/browse/item"'
+# only the hint was seen before the walk budget ran out: never claim build-from-source
+H3="$T/h3"; mkdir -p "$H3/tools/linux-arm64/foo/sub"; echo hint > "$H3/tools/linux-arm64/foo/INSTALL.txt"
+echo bin > "$H3/tools/linux-arm64/foo/sub/foo.bin"; gen --root "$H3" --walk-limit 1 >/dev/null 2>&1
+check "tools: a truncated walk never labels a platform build-from-source (#276)" 'grep -q "Linux arm64" "$H3/browse/tools.html" && ! grep -rq "build from source" "$H3/browse"'
+gen --root "$H3" >/dev/null 2>&1
+check "tools: the same tree walked in full keeps its download link (control, #276)" '! grep -rq "build from source" "$H3/browse"'
+# only the exact write_install_hint name counts as a hint
+H4="$T/h4"; mkdir -p "$H4/tools/linux-arm64/bar"; echo notes > "$H4/tools/linux-arm64/bar/INSTALL.md"
+gen --root "$H4" >/dev/null 2>&1
+check "tools: INSTALL.md is not treated as the install hint (#276)" '! grep -rq "build from source" "$H4/browse"'
 check "images: a symlink out of the repo is never copied" '! for f in "$R"/browse/thumbs/*; do cmp -s "$f" "$T/secret.png" && echo leaked; done | grep -q leaked'
 check "images: non-image bytes and README SVGs are refused (badge instead)" '! ls "$R/browse/thumbs"/*.svg 2>/dev/null | xargs -r grep -l "<script>" | grep -q . && grep -q "thumbs/b-" "$R/browse/models.html"'
 printf '{"a.zim|1": "not a dict", "b.zim|2": {"title": "Ok", "icon": "../../../etc/passwd"}, "c": 5}\n' > "$R/browse/zim-meta.json"

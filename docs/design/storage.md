@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/storage-dark.svg">
+  <img src="../img/popup/storage-light.svg" width="100%" alt="Pop-up book scene: Add and remove drives. A small fixed brain plus a content pool that grows and shrinks.">
+</picture>
+
 # Val Ark — Flexible Storage (add & remove drives)
 
 Part of the [design hierarchy](README.md). Requirement: a **primary** location (e.g. a
@@ -98,7 +103,8 @@ Storage — 3.1 TB used of 14 TB
 ## Edge cases handled by design
 
 - **Drive fills up** → fills spill to another volume / the union rebalances; if the pool is
-  full, cap-aware evict runs (pinned/requested content protected).
+  full, the fill stops at the reserve; `evict` or a request that needs room removes low-value
+  unpinned content (pinned/requested content protected).
 - **Drive removed mid-download** → that item pauses, requeues to another volume, resumes.
 - **Primary must never be removable** — enforced: if the detected "largest disk" is
   removable, the wizard warns and prefers a fixed disk for the brain.

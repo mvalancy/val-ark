@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/gotchas-dark.svg">
+  <img src="../img/popup/gotchas-light.svg" width="100%" alt="Pop-up book scene: Hard-won fixes. Symptom, cause, fix: the traps that cost real time, so nobody falls in twice.">
+</picture>
+
 # Val Ark — Operational Gotchas & Hard‑Won Fixes
 
 Non‑obvious things that cost real time. Format: **symptom → cause → fix.** Add to this when
@@ -62,6 +67,15 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 - **Backgrounded processes die when the Bash tool command exits** (local sandbox kills the
   process group). **Fix:** for a persistent server use the tool's `run_in_background`, or on a
   remote host `setsid nohup … </dev/null & disown`.
+- **Re-reading `.env` in a long-running script needs two extra steps.** `valark-env.sh` is
+  include-guarded (`_VALARK_ENV_LOADED`), so sourcing it again does nothing. It also loads `.env`
+  with `set -a`, so a line you DELETE from `.env` stays alive in the exported environment. A
+  daemon that must notice edits (the link-DHCP watcher, #148) first unsets its own knob family
+  (`for v in "${!VALARK_LINK_DHCP@}"; do unset "$v"; done`), then `unset _VALARK_ENV_LOADED`, and
+  only then sources it again. Tested in `tests/test-link-dhcp.sh` §19.
+- **`"${*##* }"` is not "the last argument".** `${*##pat}` strips `pat` from EACH positional
+  parameter and then joins them, so on `ip -4 addr show dev eth0` it returns the whole line. Use
+  `"${!#}"` for the last argument. (This bit a test stub in #148.)
 - **`date +%s%3N` isn't portable** (busybox in a VM emits garbage) → nonsense durations. **Fix:**
   clamp absurd values in consumers (the report does).
 - <a id="tsv-exact-id"></a>**Never remove a TSV row with `grep -v -F "id<TAB>"`.** It is a substring

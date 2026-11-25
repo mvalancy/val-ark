@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/access-identity-dark.svg">
+  <img src="../img/popup/access-identity-light.svg" width="100%" alt="Pop-up book scene: Who can come in. One Admin, a choosable Use Mode, and the box itself is always trusted.">
+</picture>
+
 # Val Ark — Access & Identity
 
 Part of the [design hierarchy](README.md). Answers: *Can the operator choose open vs.
@@ -5,6 +10,11 @@ accounts? Are there real access controls? What's admin vs. user?* (See
 [recovery.md](recovery.md) for the lockout/forgot-password side.)
 
 ## The core idea: one Admin, a choosable "who can use it," and localhost is always trusted
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/flow/access-dark.svg">
+  <img src="../img/flow/access-light.svg" width="100%" alt="Animated diagram: Who can do what. The box is always the Admin; the LAN gets what the Use Mode allows; the internet gets no library.">
+</picture>
 
 Three independent layers, from bottom to top:
 
@@ -21,7 +31,7 @@ Three independent layers, from bottom to top:
 
 ### Layer 1 — Network floor (automatic, not a user setting)
 - **The box's own console and `localhost` are always trusted as admin.** Physical/loopback access means you own the device — this is what makes recovery possible with no password.
-- **LAN + tailnet** are allowed to reach the box; **the public internet is always denied** for write actions. (This already exists as the LAN/tailnet POST gate.)
+- **LAN + tailnet** are allowed to reach the box; **the public internet is always denied**: every change and request (the LAN/tailnet POST gate) and, in every Use Mode, every read of the library (#297).
 - This floor is invisible to Jordan; it just makes "on the box" and "on my network" safe.
 
 ### Layer 2 — Admin (always present)
@@ -67,7 +77,15 @@ Jordan sees this as one plain-language screen: **"Who can use Val Ark?"** → *E
 
 - Use Mode: **Open (household)**.
 - Admin: **created at first boot** (with a friendly "you can skip and set it later; until then, only this box/localhost can change settings").
-- Public internet: **denied**; LAN + tailnet: **allowed**; localhost/console: **admin**.
+- Public internet: **denied**, for changes, requests and library reads alike (#297); LAN + tailnet: **allowed**; localhost/console: **admin**. A reverse proxy or tunnel on the box (nginx, Caddy, cloudflared, Tailscale Funnel) makes every visitor look like localhost, so don't put one in front of an Ark.
+- **What counts as LAN** (`isLanOrTailnet` in `scripts/server.js`): the box itself; IPv4 10/8,
+  172.16/12, 192.168/16 and 169.254/16; IPv6 ::1, ULA (fc00::/7), link-local (fe80::/10) and a
+  global address on a /64 (or longer) of an interface that also has a private IPv4 (a home LAN,
+  not a cloud uplink). **Tailnet:** 100.64/10 only when the request arrived on Tailscale's own
+  interface (`tailscale0`, or a macOS `utun` with Tailscale's `fd7a:115c:a1e0::/48` address);
+  everything else is the internet. **Don't run Tailscale in userspace-networking mode on an
+  Ark** (common in containers and on some NAS boxes): with no interface, tailscaled connects
+  onward from 127.0.0.1, so every tailnet peer looks like the box itself, the Admin.
 
 > Design note: reconcile with research patterns (Synology's per-user + admin-group model,
 > Home Assistant's owner + users, Umbrel's single-password model, routers' admin-password +

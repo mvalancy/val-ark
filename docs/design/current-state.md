@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/current-state-dark.svg">
+  <img src="../img/popup/current-state-light.svg" width="100%" alt="Pop-up book scene: Where it stands today. Shipped: setup in a browser, an admin area, recovery and real access controls.">
+</picture>
+
 # Val Ark — Current State (as of `VERSION` 0.1.17)
 
 > Snapshot of the **shipped** consumer appliance. It answers, directly, the questions this
@@ -49,7 +54,9 @@ center bell/inbox, #69 slice 1, in 0.1.16), and Phase 8 shipped its first slice.
   inventory, not the catalog — epic #89 slice 1).
 
 **There is a real Val Ark identity + operator-chosen access model.**
-- **Use Mode: Open / Passworded / Accounts**, two roles (Admin + optional Viewer), with
+- **Use Mode: Open / Passworded / Accounts** (a new box starts Open; `scripts/valark usemode`
+  changes it, a Settings control is #303), one role today (Admin; Viewer and member accounts are
+  designed, not built), with
   **localhost & console implicitly trusted**. Login/logout/recover via `GET /api/auth/status`,
   `POST /api/auth/login|logout|recover`; admin-only POSTs are enforced server-side
   (`ADMIN_ONLY_POSTS`).
@@ -117,9 +124,10 @@ center bell/inbox, #69 slice 1, in 0.1.16), and Phase 8 shipped its first slice.
    forgot-password flow, a printed recovery card, Safe Mode, and a two-tier reset that keeps
    content; localhost & console are implicitly trusted.
 4. **Can the operator choose open vs. account-gated?** — *Yes.* Use Mode is **Open / Passworded /
-   Accounts**, chosen at setup and changeable later.
-5. **Real access controls (roles, admin vs. user)?** — *Yes.* A Val Ark identity with Admin +
-   optional Viewer roles and server-enforced admin-only actions, on top of the network-position
+   Accounts**. A box starts Open and the operator changes it with `scripts/valark usemode` (a
+   Settings control is tracked in #303).
+5. **Real access controls (roles, admin vs. user)?** — *Yes.* A Val Ark identity with an Admin
+   role (Viewer and member accounts are designed, not built) and server-enforced admin-only actions, on top of the network-position
    gate on writes.
 
 ---

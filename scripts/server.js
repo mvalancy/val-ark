@@ -1022,13 +1022,14 @@ function isLocalhost(req) {
     // Test hook: simulate a remote (LAN) client so the access gate can be exercised.
     // Fail-SAFE — it only REMOVES the localhost admin bypass, never grants access.
     if (process.env.VALARK_TEST_FORCE_REMOTE === '1') return false;
+    if (process.env.VALARK_TEST_FORCE_PUBLIC === '1') return false;
     const addr = req.socket?.remoteAddress || '';
     // IPv4 localhost
     if (addr === '127.0.0.1' || addr === '::1') return true;
     // IPv6 localhost
     if (addr === '::ffff:127.0.0.1') return true;
-    // Socket file (always local)
-    if (!addr) return true;
+    // No address: the server only listens on TCP, and Node reports no address once a
+    // socket is gone, so this is NOT a local peer (it used to count as admin).
     return false;
 }
 
@@ -1057,7 +1058,8 @@ function isSecureReq(req) {
 
 // Read-wall: content/data paths that reveal what's on the box. The UI shell, auth,
 // setup, health and the CA are NOT gated (so the login wall can render + you can sign
-// in). Gated paths are refused for un-authed LAN visitors in Passworded/Accounts mode.
+// in). Gated paths are refused for un-authed LAN visitors in Passworded/Accounts mode,
+// and for any peer that isn't LAN, tailnet or localhost in every mode (#297).
 function isReadGated(urlPath) {
     if (urlPath.startsWith('/api/auth/') || urlPath.startsWith('/api/setup/')) return false;
     if (urlPath === '/api/health' || urlPath === '/api/status/tls') return false;
@@ -1130,10 +1132,68 @@ function clientIp(req) {
 // internet — see docs/ARM64-NAS.md), so members can one-click downloads from those
 // peers. Every trigger is still guarded (allowlist targets, footprint-cap eviction,
 // single-flight fill lock, per-IP rate limit); public/unknown peers are refused.
+// Did this connection arrive on a tailscale interface (tailscale0, utunN with a 100.x
+// tailscale address)? Looked up per request, so a tailnet that comes up later works.
+// os.networkInterfaces(), cached for a few seconds (an internet peer can make us ask).
+let _ifCache = { at: 0, v: {} };
+function netIfaces() {
+    if (Date.now() - _ifCache.at > 5000) _ifCache = { at: Date.now(), v: require('os').networkInterfaces() };
+    return _ifCache.v;
+}
+// Linux names it tailscale0; macOS uses a utunN carrying Tailscale's 100.64/10 address AND
+// its fd7a:115c:a1e0::/48 IPv6 (other VPNs, e.g. WARP, also use 100.x on a utun).
+// Tailscale's userspace-networking mode has no interface: tailscaled connects onward from
+// 127.0.0.1, so its peers look like the box itself (Admin). Use the kernel interface.
+function arrivedOnTailnet(req, ifaces = netIfaces()) {
+    const la = (req.socket?.localAddress || '').replace(/^::ffff:/, '');
+    if (!la) return false;
+    const cgnat = a => /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(a);
+    for (const [name, addrs] of Object.entries(ifaces)) {
+        const list = addrs || [];
+        const tsV6 = list.some(a => /^fd7a:115c:a1e0:/i.test(a.address));
+        const tail = /^(tailscale|ts)\d*$/i.test(name) || (/^utun\d+$/i.test(name) && list.some(a => cgnat(a.address)) && tsV6);
+        if (tail && list.some(a => a.address === la)) return true;
+    }
+    return false;
+}
+// A global IPv6 peer is on the LAN when it shares an on-link prefix (/64 or longer) with
+// one of the box's own interfaces that ALSO carries a private (RFC 1918) IPv4 address, e.g.
+// a home router's delegated /64. A cloud uplink or an ISP's shared WAN /64 has no private
+// IPv4 beside it, so its neighbours (other customers) are not trusted.
+function ipv6ToBig(a) {
+    const s = a.split('%')[0].toLowerCase();
+    if (!/^[0-9a-f:]+$/.test(s) || (s.match(/::/g) || []).length > 1) return null;
+    const [h, t] = s.split('::');
+    const head = h ? h.split(':') : [], tail = t !== undefined && t ? t.split(':') : [];
+    const fill = t !== undefined ? 8 - head.length - tail.length : 0;
+    if (t !== undefined && fill < 1) return null;   // '::' must stand for at least one group
+    const parts = [...head, ...Array(Math.max(fill, 0)).fill('0'), ...tail];
+    if (parts.length !== 8 || parts.some(x => !/^[0-9a-f]{1,4}$/.test(x))) return null;
+    return parts.reduce((n, x) => (n << 16n) + BigInt(parseInt(x, 16)), 0n);
+}
+function onLinkV6(peer, ifaces = netIfaces()) {
+    const p = ipv6ToBig(peer); if (p === null) return false;
+    const rfc1918 = a => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a);
+    for (const addrs of Object.values(ifaces)) {
+        if (!(addrs || []).some(a => (a.family === 'IPv4' || a.family === 4) && rfc1918(a.address))) continue;
+        for (const a of addrs || []) {
+            if (a.family !== 'IPv6' && a.family !== 6) continue;
+            const bits = Number(String(a.cidr || '').split('/')[1]);
+            if (!(bits >= 64 && bits <= 128)) continue;
+            const mine = ipv6ToBig(a.address); if (mine === null) continue;
+            const mask = ((1n << BigInt(bits)) - 1n) << BigInt(128 - bits);
+            if ((mine & mask) === (p & mask)) return true;
+        }
+    }
+    return false;
+}
 function isLanOrTailnet(req) {
+    // Test hook: simulate a public-internet peer. Fail-SAFE like VALARK_TEST_FORCE_REMOTE:
+    // it only takes access away, never grants it.
+    if (process.env.VALARK_TEST_FORCE_PUBLIC === '1') return false;
     if (isLocalhost(req)) return true;
     const a = clientIp(req);
-    if (!a) return true;                       // unix socket
+    if (!a) return false;                      // no address (socket gone): not local
     const m = a.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
     if (m) {
         const o = m.slice(1, 5).map(Number);
@@ -1142,7 +1202,9 @@ function isLanOrTailnet(req) {
         if (o[0] === 10) return true;                                  // 10.0.0.0/8
         if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true;     // 172.16.0.0/12
         if (o[0] === 192 && o[1] === 168) return true;                 // 192.168.0.0/16
-        if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return true;    // 100.64.0.0/10 CGNAT (tailnet)
+        // 100.64.0.0/10 is the tailnet only when the request arrived on the box's own
+        // tailscale interface; on a carrier-CGNAT uplink the same range is other subscribers.
+        if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return arrivedOnTailnet(req);
         if (o[0] === 169 && o[1] === 254) return true;                 // link-local
         return false;
     }
@@ -1150,7 +1212,7 @@ function isLanOrTailnet(req) {
     if (low === '::1') return true;
     if (/^f[cd][0-9a-f]{2}:/.test(low)) return true;   // ULA fc00::/7 (tailnet fd7a:…⊂ this)
     if (/^fe[89ab][0-9a-f]:/.test(low)) return true;   // link-local fe80::/10
-    return false;
+    return onLinkV6(low);                               // global IPv6 on the box's own /64
 }
 
 // Per-IP token bucket for expensive POST triggers (download / request / service
@@ -1274,7 +1336,7 @@ function handleAPI(req, res, urlPath) {
                 // Read-only: is an admin set, which Use Mode, is this caller the
                 // trusted box/localhost (`trusted`) and are they an authenticated
                 // admin right now (`authed` = localhost or a valid session).
-                return sendJSON(res, req, { ...auth.status(STATE_DIR), trusted: isLocalhost(req), authed: isAdmin(req) });
+                return sendJSON(res, req, { ...auth.status(STATE_DIR), trusted: isLocalhost(req), authed: isAdmin(req), localOnly: !isLanOrTailnet(req) });
             case '/api/setup/state': {
                 // First-boot state for the wizard. Never leaks the claim token; only
                 // whether one is needed (LAN) or bypassed (this box/localhost).
@@ -1478,9 +1540,9 @@ function handleAPI(req, res, urlPath) {
                     result = commission.setProfile(STATE_DIR, body.profile);
                     break;
                 case '/api/moderation/review':
-                    // Act on a held item (remove / restore / dismiss). Admin-only
-                    // (ADMIN_ONLY_POSTS). The id is a bare quarantine basename — confined to
-                    // the quarantine dir; restore never overwrites and only into an existing dir.
+                    // Act on a held item (remove / dismiss). Admin-only (ADMIN_ONLY_POSTS).
+                    // The id is a bare quarantine basename, confined to the quarantine dir.
+                    // There is no restore over the web (a file-write risk); see reviewModerationItem.
                     result = reviewModerationItem(body);
                     break;
                 case '/api/setup/moderation':
@@ -2367,7 +2429,7 @@ function handleModerationCheck(req, res) {
 
 // ---- Review queue (Safety card) ----------------------------------------------------
 // The sweep appends each quarantined item to queue.jsonl; a review action (remove /
-// restore / dismiss) is recorded in reviewed.jsonl so the queue log stays append-only.
+// dismiss) is recorded in reviewed.jsonl so the queue log stays append-only.
 // An item's ID is its quarantine BASENAME (unique, contains no separators) — it both
 // correlates the two logs AND confines the file operation to the quarantine dir.
 function _modQueueFiles() {
@@ -2896,12 +2958,31 @@ function serveTlsStatus(res) {
 // =============================================================================
 function handleRequest(req, res) {
     // Block path traversal attempts early (before URL normalization resolves ..)
-    if (req.url.includes('..') || req.url.includes('%2e%2e') || req.url.includes('%2E%2E')) {
+    // Any '..' segment in the raw path, plain or with encoded dots (%2e., .%2e, %2e%2e): the
+    // URL parser would resolve it before we ever saw the path. Only whole segments count, so
+    // names like "...And_Justice_for_All" or "foo..tar.gz" and the query string are fine.
+    // %5c / %2f count as separators too: the Kiwix and app proxies forward the raw URL.
+    if (/(^|\/|\\|%5c|%2f)(\.|%2e){2}(\/|\\|%5c|%2f|$)/i.test(req.url.split(/[?#]/)[0])) {
         return send404(res);
     }
 
     const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
-    let urlPath = decodeURIComponent(parsedUrl.pathname);
+    let urlPath;
+    try { urlPath = decodeURIComponent(parsedUrl.pathname); } catch (_) { return send404(res); }
+    if (urlPath.split('/').includes('..')) return send404(res);   // belt and braces
+    if (urlPath.includes('\0')) return send404(res);   // a NUL never names a real file
+    // One canonical path for every check and route below. Without this, an encoded or
+    // doubled slash or a dot segment (/%2fdocs, //docs, /./docs) slips past the
+    // read-wall's prefix match and is then normalized straight back into a gated tree
+    // by the file server (#297). '..' is already refused above.
+    urlPath = path.posix.normalize(urlPath);
+    // The Kiwix and app proxies forward the raw URL, so they only take a request whose
+    // path was already clean and whose route prefix wasn't percent-encoded: then the raw
+    // URL and the path we checked name the same thing.
+    const rawPath = req.url.split(/[?#]/)[0];
+    const proxyPathOk = (prefix) => {
+        try { return decodeURIComponent(rawPath) === urlPath && (rawPath === prefix || rawPath.startsWith(prefix + '/')); } catch (_) { return false; }
+    };
 
     // The CA trust anchor must be fetchable over BOTH http and https (you can't
     // require trusted HTTPS to download the cert that establishes that trust).
@@ -2936,6 +3017,12 @@ function handleRequest(req, res) {
     // library, catalog, downloads or apps — they get a 401 and the SPA shows a login
     // wall. The shell/auth/setup/health/CA above are always reachable so the wall can
     // render and you can sign in; localhost/console is always in.
+    // The library is for the local network: whatever the Use Mode, a peer that isn't on
+    // the LAN, the tailnet or the box itself can't read it (#297). Open mode means open to
+    // people here, not to the internet. The shell, health, setup and auth stay reachable.
+    if (isReadGated(urlPath) && !isLanOrTailnet(req)) {
+        return sendJSON(res, req, { error: 'This Val Ark shares its library only on the local network.', localOnly: true }, 403);
+    }
     if (isReadGated(urlPath) && !readAllowed(req)) {
         return sendJSON(res, req, { error: 'Sign in to view this Val Ark.', needsAuth: true }, 401);
     }
@@ -2952,6 +3039,7 @@ function handleRequest(req, res) {
     // runs with --urlRootLocation /kiwix, so its own links already point at
     // /kiwix/* — we just pipe bytes through, no HTML rewriting.
     if (urlPath === '/kiwix' || urlPath.startsWith('/kiwix/')) {
+        if (!proxyPathOk('/kiwix')) return send404(res);
         return proxyKiwix(req, res);
     }
 
@@ -2959,6 +3047,7 @@ function handleRequest(req, res) {
     // so they render inside the Val Ark shell with the same back-to-ark header.
     const appMatch = urlPath.match(/^\/app\/([a-z0-9-]+)(?:\/|$)/);
     if (appMatch) {
+        if (!proxyPathOk('/app/' + appMatch[1])) return send404(res);
         return proxyAppService(req, res, appMatch[1]);
     }
 

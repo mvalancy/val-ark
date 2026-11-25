@@ -1,7 +1,15 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/security-policy-dark.svg">
+  <img src="docs/img/popup/security-policy-light.svg" width="100%" alt="Pop-up book scene: Reporting a problem. A LAN appliance, never on the open internet. Report it privately, fixed in private.">
+</picture>
+
 # Security Policy
 
 Val Ark is an offline, LAN/tailnet appliance — it is **not** meant to be exposed to the public
-internet. Security model, access controls, and the trust posture live in
+internet. The server refuses library reads, changes and requests from any peer outside the LAN,
+the tailnet and the box itself. Don't put a reverse proxy or tunnel (nginx, Caddy, cloudflared,
+Tailscale Funnel, or Tailscale in userspace-networking mode) on the box in front of it: every
+visitor would then look like the box itself, which is the Admin. Security model, access controls, and the trust posture live in
 [`docs/design/access-identity.md`](docs/design/access-identity.md),
 [`docs/design/deployment.md`](docs/design/deployment.md), and
 [`docs/knowledge/governance.md`](docs/knowledge/governance.md). The latest code audit and its open findings

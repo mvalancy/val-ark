@@ -39,7 +39,7 @@ creds, or host paths.**
 - **Stacked chains and doc anchors:** parallel workers appending to the same
   `docs/knowledge/gotchas.md` section conflict — use distinct anchors, and when rebasing keep both
   entries in issue order.
-- **Screenshot binary churn:** some Playwright runs regenerate `docs/screenshots/*.png`; don't
+- **Screenshot binary churn:** some Playwright runs regenerate `docs/screenshots/web-ui/*.png`; don't
   commit that churn unless the change intentionally alters those screens.
 - **Merging a stacked chain is a trap with squash.** Squash-merging a stacked PR's *parent* gives
   the merged commit a new SHA, so the *child* branch (which still contains the parent's original

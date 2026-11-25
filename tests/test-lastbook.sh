@@ -406,7 +406,9 @@ VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/manifest-v1.json=$B/trun
 check "release with an emptied section: no prune, says why" '[ "$rc" = 0 ] && [ -s "$D/maps/Lastbook-Map-CA.zip" ] && [ -s "$D/addresses/Lastbook-Addresses-CA.zip" ] && grep -q "NOT pruning: the release lists no" "$T/err"'
 VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/manifest-v1.json=$B/trunc/renamed.json https://downloads.lastbook.org/app-v1.json=$B/trunc/app-bumped.json $TINY" \
     python3 "$PY" mirror --dest "$D" --budget -1 --pack none --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
-check "release dropping most held files: no prune, says why" '[ "$rc" = 0 ] && grep -q "NOT pruning: the release would drop" "$T/err"'
+# (#203 review) the held files whose replacement was not verified are kept first, so the whole-mirror
+# guard may no longer be what stops it; either way nothing held goes, and the run says why
+check "release dropping most held files: no prune, says why" '[ "$rc" = 0 ] && grep -q "NOT pruning: the release would drop\|replacement in this release is not downloaded" "$T/err"'
 check "bad releases left every held file in place" '[ "$(find "$D" -type f ! -name ".*" | sort | md5sum)" = "$held_before" ]'
 # restore the real manifests in D for the later sections
 mir --dest "$D" --pack small --maps CA --model yes > "$T/out" 2>"$T/err"
@@ -527,7 +529,18 @@ VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/manifest-v1.json=$B/sec/
 check "a manifest listing only a few maps: no prune (per-section guard), says why" '[ "$rc" = 0 ] && [ "$(ls "$D21/maps" | wc -l)" = 4 ] && grep -q "NOT pruning: the release would drop 3 of the 4 maps held" "$T/err"'
 VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/manifest-v1.json=$B/sec/new-model.json $TINY" \
     python3 "$PY" mirror --dest "$D21" --budget -1 --pack none --maps none --addresses none --model no > "$T/out" 2>"$T/err"; rc=$?
-check "a replaced model (release lists as many as held) is still pruned" '[ "$rc" = 0 ] && [ ! -e "$D21/models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf" ] && ! grep -q "NOT pruning" "$T/err"'
+check "a replaced model that was NOT fetched (--model no): the old model stays (#203 review)" '[ "$rc" = 0 ] && [ -s "$D21/models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf" ] && grep -q "keeping models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf" "$T/err"'
+cp "$T/www/tiny/hf/$(cd "$T/www/tiny/hf" && find . -name gemma-4-26B-A4B-it-UD-Q4_K_M.gguf | head -1)" "$T/www/sec/gemma-next.gguf" 2>/dev/null
+python3 - "$T/www/sec/new-model.json" "$B/sec/gemma-next.gguf" "$T/www/sec/gemma-next.gguf" <<'PYEOF'
+import hashlib, json, sys
+m = json.load(open(sys.argv[1])); md = m["models"][0]
+md["url"] = "https://huggingface.co/sec/gemma-next.gguf"
+data = open(sys.argv[3], "rb").read(); md["size"], md["sha256"] = len(data), hashlib.sha256(data).hexdigest()
+json.dump(m, open(sys.argv[1], "w"))
+PYEOF
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/manifest-v1.json=$B/sec/new-model.json https://huggingface.co/sec/=$B/sec/ $TINY" \
+    python3 "$PY" mirror --dest "$D21" --budget -1 --pack none --maps none --addresses none --model yes > "$T/out" 2>"$T/err"; rc=$?
+check "a replaced model, new file fetched + verified: the old model is pruned" '[ "$rc" = 0 ] && [ -s "$D21/models/gemma-next.gguf" ] && [ ! -e "$D21/models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf" ] && ! grep -q "NOT pruning" "$T/err" || { cat "$T/err" >&2; false; }'
 # stray .parts from before .part stamps existed: only names the kept / current manifests give
 python3 - "$D21/manifest-v1.json" <<'PYEOF'
 import json, sys
@@ -734,19 +747,247 @@ VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_PACK=nope bash "$SH" > "$T/sh.ou
 check "lastbook.sh: bad option -> non-zero + error" '[ "$rc" != 0 ] && grep -q "bad option" "$T/sh.out"'
 VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_BUDGET_PCT=500 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
 check "lastbook.sh: BUDGET_PCT over 100 is clamped, not rejected" '[ "$rc" != 64 ] && grep -q "^# Lastbook manifest" "$T/sh.out"'
-# the default budget is worked out by lastbook_mirror.py on the Lastbook dir (not DATA_ROOT), as a share;
+# the (deprecated) share budget is worked out by lastbook_mirror.py on the Lastbook dir (not DATA_ROOT);
 # --cap (VALARK_MAX_GB) only when the dir is inside the data trees that cap accounts for
 mkdir -p "$T/bin"; REALPY=$(command -v python3)
 printf '#!/bin/sh\n[ "$(basename "$1")" = lastbook_mirror.py ] && echo "$*" >> "%s"\nexec "%s" "$@"\n' "$T/py.args" "$REALPY" > "$T/bin/python3"; chmod +x "$T/bin/python3"
 : > "$T/py.args"
-PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_MAX_GB=1 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
+PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_BUDGET_PCT=50 VALARK_MAX_GB=1 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
 check "lastbook.sh: default budget = --share PCT + --cap (VALARK_MAX_GB) for content/lastbook, no DATA_ROOT --budget" \
     'grep -q -- "--dest .*/content/lastbook .*--share 50 --cap [0-9]" "$T/py.args" && ! grep -q -- "--budget" "$T/py.args" && grep -q "^# Lastbook manifest" "$T/sh.out"'
 : > "$T/py.args"
 PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$T/elsewhere/lastbook" VALARK_MAX_GB=1 \
-    bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
+    VALARK_LASTBOOK_BUDGET_PCT=50 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
 check "lastbook.sh: a Lastbook dir outside the data trees gets --share but no --cap, and says so" \
     'grep -q -- "--dest $T/elsewhere/lastbook .*--share 50" "$T/py.args" && ! grep -q -- "--cap\|--budget" "$T/py.args" && grep -q "outside the Val Ark data trees" "$T/sh.out"'
+
+# --- 12. planned by the librarian (#203) --------------------------------------------------------
+# candidates: one planner row per pack (+ base maps), state map (+ its address index), model, installers
+VALARK_LASTBOOK_REWRITE="$REAL" python3 "$PY" candidates --dest /lb > "$T/cand.out" 2>"$T/cand.err"; rc=$?
+cid() { grep -v '^#' "$T/cand.out" | cut -f1 | sort | tr '\n' ' ' | sed 's/ $//'; }
+cfield() { awk -F'\t' -v i="$1" -v c="$2" '$1==i {print $c}' "$T/cand.out"; }
+check "candidates: exit 0 + header" '[ "$rc" = 0 ] && head -1 "$T/cand.out" | grep -q "^# lastbook candidates format=2 manifest=2026-11-13 app=1.1.11 maps=auto addresses=follow model=auto apps=current rows=8"'
+check "candidates: 3 packs, 3 state maps, the model, the installers" '[ "$(cid)" = "lastbook:app:1.1.11 lastbook:map:AK lastbook:map:CA lastbook:map:TX lastbook:model:gemma-4-26b-a4b lastbook:pack:all lastbook:pack:medium lastbook:pack:small" ]'
+check "candidates: 9 planner columns, source lastbook, dest = --dest" '[ -z "$(grep -v "^#" "$T/cand.out" | awk -F"\t" "NF!=9 || \$6!=\"lastbook\" || \$8!=\"/lb\"")" ]'
+check "candidates: a pack row = its file + the base map" '[ "$(cfield lastbook:pack:small 5)" = $((7691528852 + 1100000000)) ] && cfield lastbook:pack:small 9 | grep -q "^pack|-|packs/Lastbook-Small-20261113.zip=7691528852@[0-9a-f]\{64\},maps/Lastbook-Map-base.zip=1100000000@[0-9a-f]\{64\}$"'
+check "candidates: a map row carries its address index and needs a pack" 'cfield lastbook:map:CA 9 | grep -q "^map|pack|maps/Lastbook-Map-CA.zip=3218756405@[0-9a-f]\{64\},addresses/Lastbook-Addresses-CA.zip=526161211@[0-9a-f]\{64\}$"'
+check "candidates: the model is a models-bucket row" '[ "$(cfield lastbook:model:gemma-4-26b-a4b 2)" = models ] && [ "$(cfield lastbook:model:gemma-4-26b-a4b 5)" = 16947541728 ]'
+check "candidates: larger packs carry more value (fill tries them first)" '[ "$(cfield lastbook:pack:small 4)" -lt "$(cfield lastbook:pack:medium 4)" ] && [ "$(cfield lastbook:pack:medium 4)" -lt "$(cfield lastbook:pack:all 4)" ]'
+VALARK_LASTBOOK_REWRITE="$REAL" python3 "$PY" candidates --dest /lb --maps CA --addresses none --model no --apps none > "$T/cand.out" 2>&1
+check "candidates: --maps/--addresses/--model/--apps filter what is offered" '[ "$(cid)" = "lastbook:map:CA lastbook:pack:all lastbook:pack:medium lastbook:pack:small" ] && cfield lastbook:map:CA 9 | grep -q "^map|pack|maps/Lastbook-Map-CA.zip=3218756405@[0-9a-f]\{64\}$"'
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/nosize/dl/ https://lastbook.org/=$B/nosize/site/ https://huggingface.co/=$B/nosize/hf/" \
+    python3 "$PY" candidates --dest /lb > "$T/cand.out" 2>&1
+check "candidates: a pack with no size is left out (never looks free), and says so" '! cid | grep -q "pack:all" && grep -q "^# skipped pack:all" "$T/cand.out"'
+rm -rf "$T/www/bad"; mkdir -p "$T/www/bad/dl" "$T/www/bad/site"; cp "$FIX/app-v1.json" "$T/www/bad/dl/"; cp "$FIX/SHA256SUMS.txt" "$T/www/bad/site/"
+python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); m["packs"][0]["files"][0]["url"]="https://evil.example/x.zip"; json.dump(m,open(sys.argv[2],"w"))' "$FIX/manifest-v1.json" "$T/www/bad/dl/manifest-v1.json"
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/bad/dl/ https://lastbook.org/=$B/bad/site/" python3 "$PY" candidates --dest /lb > "$T/cand.out" 2>/dev/null; rc=$?
+check "candidates: an off-list URL -> exit 1, no rows" '[ "$rc" = 1 ] && [ ! -s "$T/cand.out" ]'
+
+# --pack-limit: auto over the planned id(s) + what is held, with every auto guard
+plan --pack-limit medium --budget -1 > "$T/plan.out"; rc=$?
+check "--pack-limit medium, unlimited: Medium (not All)" '[ "$(got get pack)" = medium ] && [ "$rc" = 0 ]'
+plan --pack-limit "" --maps none --model no --apps none --budget -1 > "$T/plan.out"; rc=$?
+check "--pack-limit empty, nothing held: no pack, exit 0, no 'does not fit' note" '[ -z "$(got get pack)$(got get map)" ] && [ "$rc" = 0 ] && ! grep -q "no Lastbook pack" "$T/plan.out"'
+D40="$T/m40"; held_all "$D40"
+VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" plan --dest "$D40" --pack-limit small --budget -1 > "$T/plan.out" 2>&1
+check "--pack-limit small with All held: the held All stays chosen (step up, never down)" '[ "$(got get pack)" = all ]'
+mir --dest "$D40" --pack-limit "" --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "--pack-limit empty with All held: keeps All, prunes the nested Small/Medium" '[ "$rc" = 0 ] && [ -s "$D40/packs/Lastbook-All.zip" ] && [ ! -e "$D40/packs/Lastbook-Medium.zip" ] && grep -q "pruned packs/Lastbook-Medium.zip (nested" "$T/err"'
+# --pack-limit X = X or a smaller pack: a planned All that is broken upstream falls back down the ladder
+variant smallbroken 'P={p["id"]: p for p in m["packs"]}; P["small"]["files"][0]["size"]=1; P["small"]["installed_bytes"]=1'
+vplan() { local v=$1; shift; VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/$v/dl/ https://lastbook.org/=$B/$v/site/ https://huggingface.co/=$B/$v/hf/" \
+    python3 "$PY" plan "$@" > "$T/plan.out" 2>&1; }
+variant allbig 'a=[p for p in m["packs"] if p["id"]=="all"][0]; a["files"][0]["size"]*=10; a["installed_bytes"]=a["files"][0]["size"]'
+vplan allbig --dest "$T/plim-fresh1" --pack-limit all --budget -1; rc=$?
+check "--pack-limit all, All broken upstream (HEAD size differs): falls back to Medium, exit 3" '[ "$(got get pack)" = medium ] && [ "$rc" = 3 ] || { { echo "rc=$rc"; cat "$T/plan.out"; } >&2; false; }'
+vplan smallbroken --dest "$T/plim-fresh2" --pack-limit small --maps CA --model yes --apps current --budget -1; rc=$?
+check "--pack-limit small, Small broken, nothing held: no pack, so no maps / model / installers either" \
+    '[ -z "$(got get pack)$(got get map)$(got get model)$(got get app)$(got get address)" ] && grep -q "no Lastbook pack will be held this run" "$T/plan.out" && [ "$rc" = 3 ]'
+check "--plus-held is gone: a 'no' stays no (no held-item re-enable path)" '! grep -q -- "--plus-held" "$PY" "$SH"'
+# lastbook.sh fetches what the planner chose (--plan-file = librarian.sh fill's rows)
+LBD="$T/planned/lastbook"
+# plan rows = the candidates for a fresh dir (bytes still to fetch = full size) + a phase column
+VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" candidates --dest "$LBD" 2>/dev/null \
+    | awk -F'\t' -v OFS='\t' '$1=="lastbook:pack:small" || $1=="lastbook:map:TX" {print $0, 3}' > "$T/lbplan.tsv"
+LBBUD=$(awk -F'\t' '{s+=$5} END {print s}' "$T/lbplan.tsv")
+: > "$T/py.args"
+PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD" VALARK_DL_RETRY_DELAY=0 \
+    bash "$SH" --plan-file "$T/lbplan.tsv" > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh --plan-file: exit 0, the planned pack + map, no model / installers" \
+    '[ "$rc" = 0 ] && [ -s "$LBD/packs/Lastbook-Small-20261113.zip" ] && [ -s "$LBD/maps/Lastbook-Map-TX.zip" ] && [ -s "$LBD/addresses/Lastbook-Addresses-TX.zip" ] && [ ! -e "$LBD/models" ] && [ ! -e "$LBD/app" ] || { cat "$T/sh.out" >&2; false; }'
+check "lastbook.sh --plan-file: auto limited to the planned pack, budget = the planned bytes, no share" \
+    'grep -q -- "--pack auto --pack-limit small --maps TX --addresses follow --model no --apps none --budget $LBBUD " "$T/py.args" && ! grep -q -- "--share" "$T/py.args"'
+check "lastbook.sh --plan-file: says the planner sized it" 'grep -q "sized by the librarian.s planner: pack:small map:TX" "$T/sh.out"'
+printf '' > "$T/lbempty.tsv"
+VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD" bash "$SH" --plan-file "$T/lbempty.tsv" > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh, nothing new planned: keeps + refreshes what is held, exit 0" '[ "$rc" = 0 ] && [ -s "$LBD/packs/Lastbook-Small-20261113.zip" ] && [ -s "$LBD/maps/Lastbook-Map-TX.zip" ] && grep -q "pack: small" "$T/sh.out"'
+VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD" VALARK_LASTBOOK_PACK=every VALARK_LASTBOOK_BUDGET=-1 \
+    bash "$SH" plan --plan-file "$T/lbplan.tsv" > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh: every (server opt-in) ignores the planner's rows" '[ "$rc" = 0 ] && [ "$(grep -c "^get	pack" "$T/sh.out")" = 3 ] && grep -q "planner.s rows are ignored" "$T/sh.out"'
+VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_BUDGET_PCT=50 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh: VALARK_LASTBOOK_BUDGET_PCT still works, with a deprecation warning" '[ "$rc" = 0 ] && grep -q "BUDGET_PCT is deprecated" "$T/sh.out" && grep -q "^# Lastbook manifest" "$T/sh.out"'
+# On its own (weekly refresh / the Mirror button) lastbook.sh asks the librarian's planner first:
+# end to end on a fresh data root (a fresh stub ZIM cache keeps the Kiwix fetch offline).
+D2="$T/disk2"; mkdir -p "$D2/val-ark/state/catalog"; printf 'x\t\tother\teng\t0\t0\t\t\n' > "$D2/val-ark/state/catalog/zim.tsv"
+VAL_ARK_DATA="$D2" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_SCOUT=0 VALARK_DL_RETRY_DELAY=0 \
+    bash "$SH" > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh alone: the planner sizes it (unlimited tiny disk -> All, one pack)" \
+    '[ "$rc" = 0 ] && [ -s "$D2/val-ark/content/lastbook/packs/Lastbook-All.zip" ] && [ -z "$(ls "$D2/val-ark/content/lastbook/packs" | grep -v Lastbook-All.zip)" ] || { cat "$T/sh.out" >&2; false; }'
+check "lastbook.sh alone: the candidates cache was written by the librarian" 'grep -q "^lastbook:pack:all	" "$D2/val-ark/state/catalog/lastbook.tsv"'
+check "lastbook.sh alone: installers + maps planned too" '[ -d "$D2/val-ark/content/lastbook/app/1.1.11" ] && [ -s "$D2/val-ark/content/lastbook/maps/Lastbook-Map-CA.zip" ]'
+check "lastbook.sh: one mirror run at a time (flock)" 'grep -q "flock -n 8" "$SH"'
+check "lastbook.sh alone: the cache holds the full offer (format=2 header)" 'head -1 "$D2/val-ark/state/catalog/lastbook.tsv" | grep -q "^# lastbook candidates format=2 .* maps=all addresses=follow model=auto apps=current "'
+# a real concurrent run: another process holds lastbook.lock -> skip (75 under --plan-file, nothing fetched)
+LOCKF="$VAL_ARK_DATA/val-ark/state/lastbook.lock"; mkdir -p "$(dirname "$LOCKF")"
+( exec 9>"$LOCKF"; flock 9; exec sleep 30 ) & LOCKPID=$!
+for _ in $(seq 1 50); do flock -n "$LOCKF" true 2>/dev/null || break; sleep 0.1; done
+LBD2="$T/locked/lastbook"
+VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD2" bash "$SH" --plan-file "$T/lbplan.tsv" > "$T/sh.out" 2>&1; rc=$?
+check "lock held elsewhere, --plan-file: exit 75, nothing fetched" '[ "$rc" = 75 ] && [ ! -e "$LBD2/packs" ] && grep -q "another Lastbook mirror run is active" "$T/sh.out"'
+VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD2" bash "$SH" --pack small > "$T/sh.out" 2>&1; rc=$?
+check "lock held elsewhere, run on its own: skipped, exit 0" '[ "$rc" = 0 ] && [ ! -e "$LBD2/packs" ] && grep -q "another Lastbook mirror run is active" "$T/sh.out"'
+kill "$LOCKPID" 2>/dev/null; wait "$LOCKPID" 2>/dev/null
+# the STOP flag: the mirror starts no download (deferred, exit 3 -> lastbook.sh "incomplete")
+LBD3="$T/stopped/lastbook"; : > "$T/STOP"
+VALARK_STOP_FLAG="$T/STOP" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD3" bash "$SH" --plan-file "$T/lbplan.tsv" > "$T/sh.out" 2>&1; rc=$?
+check "STOP flag: no file is started, reported incomplete" '[ "$rc" = 0 ] && [ -z "$(ls "$LBD3/packs" 2>/dev/null)" ] && grep -q "the STOP flag is set" "$T/sh.out" && grep -q "incomplete" "$T/sh.out"'
+rm -f "$T/STOP"
+check "the reserve / STOP are re-checked inside a long download" 'grep -q "RECHECK_BYTES" "$PY" && grep -q "raise Deferred(why)" "$PY"'
+# a survival plan: the phase-0 essential Small plus a larger pick -> Small first, then All, then Small pruned
+LBD4="$T/survival/lastbook"
+VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" candidates --dest "$LBD4" 2>/dev/null \
+    | awk -F'\t' -v OFS='\t' '$1=="lastbook:pack:small" {print $0, 0} $1=="lastbook:app:1.1.11" {print $0, 0} $1=="lastbook:pack:all" {print $0, 3}' > "$T/survplan.tsv"
+: > "$T/py.args"
+PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD4" VALARK_DL_RETRY_DELAY=0 \
+    bash "$SH" --plan-file "$T/survplan.tsv" > "$T/sh.out" 2>&1; rc=$?
+check "survival plan (Small essential + All): two mirror steps, Small first" \
+    '[ "$(grep -c " mirror " "$T/py.args")" = 2 ] && head -1 "$T/py.args" | grep -q -- "--pack-limit small " && sed -n 2p "$T/py.args" | grep -q -- "--pack-limit all "'
+check "survival plan: All verified, then the nested Small pruned" '[ "$rc" = 0 ] && [ -s "$LBD4/packs/Lastbook-All.zip" ] && [ ! -e "$LBD4/packs/Lastbook-Small-20261113.zip" ] && grep -q "pruned packs/Lastbook-Small-20261113.zip (nested" "$T/sh.out" || { cat "$T/sh.out" >&2; false; }'
+# candidates: an installer with no size (manifest or HEAD) is left out of the app row
+rm -rf "$T/www/appnohead"; cp -r "$T/www/tiny" "$T/www/appnohead"; : > "$T/www/appnohead/dl/Lastbook_1.1.11_ubuntu26.04_amd64.deb.nohead"
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/appnohead/dl/ https://lastbook.org/=$B/appnohead/site/ https://huggingface.co/=$B/appnohead/hf/" \
+    python3 "$PY" candidates --dest /lb > "$T/cand.out" 2>&1
+check "candidates: an unsized installer is left out (never counted as 0 bytes), and says so" \
+    '! cfield lastbook:app:1.1.11 9 | grep -q ubuntu26.04 && cfield lastbook:app:1.1.11 9 | grep -q "Lastbook-1.1.11-mac.dmg=" && grep -q "^# skipped app:1.1.11 Lastbook_1.1.11_ubuntu26.04_amd64.deb" "$T/cand.out"'
+check "candidates: the model has its own category (not model:assistant)" 'VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" candidates --dest /lb 2>/dev/null | awk -F"\t" "\$1 ~ /^lastbook:model:/ {print \$3}" | grep -qx "lastbook:model"'
+
+# --- 13. never drop a held installer / map / address index / model before its replacement verifies --------
+# appbump: the same release with installers 1.1.12 (new names, new bytes); 1.1.11 is gone upstream
+rm -rf "$T/www/appbump"; cp -r "$T/www/tiny" "$T/www/appbump"
+python3 - "$T/www/appbump" <<'EOF'
+import hashlib, json, os, sys
+root = sys.argv[1]; dl = os.path.join(root, "dl")
+a = json.load(open(os.path.join(dl, "app-v1.json")))
+sums = []
+for line in open(os.path.join(root, "site", "SHA256SUMS.txt")):
+    sha, name = line.split()
+    if "1.1.11" in name:
+        new = name.replace("1.1.11", "1.1.12")
+        data = f"lastbook 1.1.12 {new}\n".encode() * 50
+        open(os.path.join(dl, new), "wb").write(data)
+        sha = hashlib.sha256(data).hexdigest(); name = new
+        for v in a.values():
+            if isinstance(v, dict) and v.get("url", "").endswith("/" + new.replace("1.1.12", "1.1.11")):
+                v.update(version="1.1.12", url=v["url"].replace("1.1.11", "1.1.12"), size=len(data), sha256=sha)
+    sums.append(f"{sha}  {name}")
+json.dump(a, open(os.path.join(dl, "app-v1.json"), "w"))
+open(os.path.join(root, "site", "SHA256SUMS.txt"), "w").write("\n".join(sums) + "\n")
+EOF
+AB="https://downloads.lastbook.org/=$B/appbump/dl/ https://lastbook.org/=$B/appbump/site/ https://huggingface.co/=$B/appbump/hf/"
+D50="$T/m50"; mir --dest "$D50" --pack small --maps CA --model no > "$T/out" 2>"$T/err"
+check "setup: 1.1.11 installers + Small + CA held" '[ "$(ls "$D50/app/1.1.11" | wc -l)" = 4 ] && [ -s "$D50/maps/Lastbook-Map-CA.zip" ]'
+# the planner charges the new installers: they are not held
+VALARK_LASTBOOK_REWRITE="$AB" python3 "$PY" candidates --dest "$D50" 2>/dev/null > "$T/ab.cand"
+python3 "$ROOT/scripts/lib/planner.py" --budget 1000000000 < "$T/ab.cand" > "$T/ab.plan" 2>/dev/null
+check "new app version: the planner charges lastbook:app:1.1.12 (not held)" 'awk -F"\t" "\$1==\"lastbook:app:1.1.12\" && \$5>0" "$T/ab.plan" | grep -q .'
+python3 "$ROOT/scripts/lib/planner.py" --budget 100 < "$T/ab.cand" > "$T/ab.plan" 2>/dev/null
+check "new app version, no room: not planned" '! grep -q "^lastbook:app:" "$T/ab.plan"'
+# no room -> nothing planned -> the run must keep the old installers (their replacement is not verified)
+: > "$T/empty.plan"
+VALARK_LASTBOOK_REWRITE="$AB" VALARK_LASTBOOK_DIR="$D50" bash "$SH" --plan-file "$T/empty.plan" > "$T/sh.out" 2>&1; rc=$?
+check "new app version, no room: exit 0 and the 1.1.11 installers are all still there" \
+    '[ "$rc" = 0 ] && [ "$(ls "$D50/app/1.1.11" 2>/dev/null | wc -l)" = 4 ] && [ ! -d "$D50/app/1.1.12" ] && grep -q "keeping app/1.1.11/.*replacement .* not downloaded and verified" "$T/sh.out" || { cat "$T/sh.out" >&2; false; }'
+check "new app version, no room: the old installers stay recorded (still served / listed)" 'python3 -c "import json,sys; s=json.load(open(sys.argv[1])); sys.exit(0 if sum(k.startswith(\"app/1.1.11/\") for k in s) == 4 else 1)" "$D50/.lastbook-verified.json"'
+# once the new installers are fetched and verified, the old version goes
+VALARK_LASTBOOK_REWRITE="$AB" python3 "$PY" mirror --dest "$D50" --pack auto --pack-limit "" --maps none --model no --apps current --budget -1 --tries 1 --retry-wait 0 > "$T/out" 2>"$T/err"; rc=$?
+check "new app version verified: 1.1.12 held, 1.1.11 pruned" '[ "$rc" = 0 ] && [ "$(ls "$D50/app/1.1.12" | wc -l)" = 4 ] && [ ! -e "$D50/app/1.1.11" ]'
+# a map renamed upstream (new file name, same id) that is not fetched keeps the old file; once fetched, it goes
+variant renamedca 'C=[x for x in m["maps"] if x["id"]=="CA"][0]; C["files"][0]["name"]="Lastbook-Map-CA-2.zip"; C["files"][0]["url"]=C["files"][0]["url"].replace("Lastbook-Map-CA.zip","Lastbook-Map-CA-2.zip")'
+cp "$T/www/renamedca/dl/maps/Lastbook-Map-CA.zip" "$T/www/renamedca/dl/maps/Lastbook-Map-CA-2.zip"
+D51="$T/m51"; mir --dest "$D51" --pack small --maps CA,TX --model no --apps none > "$T/out" 2>"$T/err"
+vrun renamedca --dest "$D51" --pack auto --pack-limit "" --maps none; rc=$?
+check "renamed held map, new name not fetched: the old CA map stays" '[ "$rc" = 0 ] && [ -s "$D51/maps/Lastbook-Map-CA.zip" ] && grep -q "keeping maps/Lastbook-Map-CA.zip" "$T/err" || { cat "$T/err" >&2; false; }'
+vrun renamedca --dest "$D51" --pack auto --pack-limit "" --maps CA; rc=$?
+check "renamed held map, new name verified: the old CA map goes" '[ "$rc" = 0 ] && [ -s "$D51/maps/Lastbook-Map-CA-2.zip" ] && [ ! -e "$D51/maps/Lastbook-Map-CA.zip" ] || { { echo "rc=$rc"; cat "$T/err"; } >&2; false; }'
+# a map the release drops altogether has no replacement: it still goes (truncation guards permitting)
+variant noTX 'm["maps"]=[x for x in m["maps"] if x["id"]!="TX"]; m["address_indexes"]=[x for x in m["address_indexes"] if x["id"]!="TX"]'
+vrun noTX --dest "$D51" --pack auto --pack-limit "" --maps none; rc=$?
+check "a map dropped upstream (no replacement) is still pruned" '[ "$rc" = 0 ] && [ ! -e "$D51/maps/Lastbook-Map-TX.zip" ]'
+# a same-name, same-size re-release (new sha) is not taken for held: the planner charges it
+VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" candidates --dest "$D50" 2>/dev/null > "$T/rr.cand"
+python3 -c 'import json,sys; f=sys.argv[1]; s=json.load(open(f)); s["maps/Lastbook-Map-CA.zip"]["sha256"]="f"*64; json.dump(s,open(f,"w"))' "$D50/.lastbook-verified.json"
+python3 "$ROOT/scripts/lib/planner.py" --budget 1000000000 < "$T/rr.cand" > "$T/rr.plan" 2>/dev/null
+check "same name + size, different sha held: lastbook:map:CA is planned (charged), not held" 'awk -F"\t" "\$1==\"lastbook:map:CA\" && \$5>0" "$T/rr.plan" | grep -q .'
+
+# --- 14. re-review: the model is one slot; base maps don't block prune; unknown / unavailable entries kept --
+# newmodelid: upstream renames the model (new id AND new file); the old id is gone from the release
+rm -rf "$T/www/newmodelid"; cp -r "$T/www/tiny" "$T/www/newmodelid"
+python3 - "$T/www/newmodelid" <<'EOF'
+import hashlib, json, os, sys, urllib.parse
+root = sys.argv[1]; mp = os.path.join(root, "dl", "manifest-v1.json"); m = json.load(open(mp))
+md = m["models"][0]
+data = b"lastbook fixture gemma-5\n" * 60
+path = "unsloth/gemma-5-GGUF/resolve/main/gemma-5-Q4.gguf"
+os.makedirs(os.path.join(root, "hf", os.path.dirname(path)), exist_ok=True)
+open(os.path.join(root, "hf", path), "wb").write(data)
+md.update(id="gemma-5", title="Gemma 5", file="gemma-5-Q4.gguf", url="https://huggingface.co/" + path,
+          size=len(data), sha256=hashlib.sha256(data).hexdigest())
+json.dump(m, open(mp, "w"))
+EOF
+NM="https://downloads.lastbook.org/=$B/newmodelid/dl/ https://lastbook.org/=$B/newmodelid/site/ https://huggingface.co/=$B/newmodelid/hf/"
+OLDM=models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf
+D60="$T/m60"; mir --dest "$D60" --pack small --maps none --apps none --model yes > "$T/out" 2>"$T/err"
+check "setup: Small + the gemma-4 model held" '[ -s "$D60/$OLDM" ]'
+: > "$T/empty.plan"
+VALARK_LASTBOOK_REWRITE="$NM" VALARK_LASTBOOK_DIR="$D60" bash "$SH" --plan-file "$T/empty.plan" > "$T/sh.out" 2>&1; rc=$?
+check "model renamed upstream (gemma-5), new one not planned: the old model is KEPT" \
+    '[ "$rc" = 0 ] && [ -s "$D60/$OLDM" ] && [ ! -e "$D60/models/gemma-5-Q4.gguf" ] && grep -q "keeping $OLDM: its replacement" "$T/sh.out" || { cat "$T/sh.out" >&2; false; }'
+VALARK_LASTBOOK_MODEL=no VALARK_LASTBOOK_REWRITE="$NM" VALARK_LASTBOOK_DIR="$D60" bash "$SH" --plan-file "$T/empty.plan" > "$T/sh.out" 2>&1; rc=$?
+check "model renamed upstream, MODEL=no: the old model is still kept (a no is not a delete)" '[ "$rc" = 0 ] && [ -s "$D60/$OLDM" ]'
+VALARK_LASTBOOK_REWRITE="$NM" python3 "$PY" mirror --dest "$D60" --pack auto --pack-limit "" --maps none --apps none --model yes --budget -1 --tries 1 --retry-wait 0 > "$T/out" 2>"$T/err"; rc=$?
+check "model renamed upstream, gemma-5 fetched + verified: the old model is pruned" '[ "$rc" = 0 ] && [ -s "$D60/models/gemma-5-Q4.gguf" ] && [ ! -e "$D60/$OLDM" ] || { cat "$T/err" >&2; false; }'
+# a held model file whose entry is unknown follows the one-slot rule (current model verified -> it goes)
+echo old > "$D60/models/old-unknown.gguf"; stamp "$D60" models/old-unknown.gguf
+VALARK_LASTBOOK_REWRITE="$NM" python3 "$PY" mirror --dest "$D60" --pack auto --pack-limit "" --maps none --apps none --model no --budget 0 --tries 1 --retry-wait 0 > "$T/out" 2>"$T/err"; rc=$?
+check "unknown-entry model file: one slot, the current model is verified -> pruned" '[ "$rc" = 0 ] && [ ! -e "$D60/models/old-unknown.gguf" ]'
+# a held MAP whose entry is unknown is kept, and the run says so
+mkdir -p "$D60/maps"; echo zz > "$D60/maps/Lastbook-Map-ZZ.zip"; stamp "$D60" maps/Lastbook-Map-ZZ.zip
+VALARK_LASTBOOK_REWRITE="$NM" python3 "$PY" mirror --dest "$D60" --pack auto --pack-limit "" --maps none --apps none --model no --budget 0 --tries 1 --retry-wait 0 > "$T/out" 2>"$T/err"; rc=$?
+check "unknown-entry map file: kept, and logged as unknown" '[ "$rc" = 0 ] && [ -s "$D60/maps/Lastbook-Map-ZZ.zip" ] && grep -q "keeping maps/Lastbook-Map-ZZ.zip: its entry is unknown" "$T/err"'
+# an address index upstream now marks available:false is kept, not pruned
+variant caaddrgone 'A=[x for x in m["address_indexes"] if x["id"]=="CA"][0]; A["available"]=False; A["unavailable_reason"]="records withdrawn"'
+D61="$T/m61"; mir --dest "$D61" --pack small --maps CA,TX --model no --apps none > "$T/out" 2>"$T/err"
+vrun caaddrgone --dest "$D61" --pack auto --pack-limit "" --maps CA,TX; rc=$?
+check "address index marked available:false upstream: the held CA index is kept, and says why" \
+    '[ "$rc" = 0 ] && [ -s "$D61/addresses/Lastbook-Addresses-CA.zip" ] && grep -q "keeping addresses/Lastbook-Addresses-CA.zip: upstream marks CA unavailable (records withdrawn)" "$T/err" || { cat "$T/err" >&2; false; }'
+# planner mode: an unplanned base-map refresh is skipped, not deferred, so the nested Small is still pruned
+variant basebump 'b=m["maps"]; B=[x for x in b if x["id"]=="base"][0]; B["files"][0]["name"]="Lastbook-Map-base-2.zip"; B["files"][0]["url"]=B["files"][0]["url"].replace("Lastbook-Map-base.zip","Lastbook-Map-base-2.zip")'
+cp "$T/www/basebump/dl/maps/Lastbook-Map-base.zip" "$T/www/basebump/dl/maps/Lastbook-Map-base-2.zip"
+D62="$T/m62"; mir --dest "$D62" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+ALLB=$(VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" plan --pack all --maps none --apps none --model no --budget -1 2>/dev/null | awk -F'\t' '$2=="pack" {print $5}')
+vrun basebump --dest "$D62" --pack auto --pack-limit all --budget "$ALLB"; rc=$?
+check "planner mode, base-map re-release not planned: exit 0 (not 3), All verified, nested Small pruned, old base kept" \
+    '[ "$rc" = 0 ] && [ -s "$D62/packs/Lastbook-All.zip" ] && [ ! -e "$D62/packs/Lastbook-Small-20261113.zip" ] && [ -s "$D62/maps/Lastbook-Map-base.zip" ] && [ ! -e "$D62/maps/Lastbook-Map-base-2.zip" ] && grep -q "map base .* was not planned: skipped" "$T/err" || { echo "rc=$rc ALLB=$ALLB" >&2; cat "$T/err" >&2; false; }'
+# survival box holding Medium; upstream re-releases the base map; the plan holds ONLY the installers:
+# the unplanned base map must not eat the installers' budget (taken last, skipped when nothing is left)
+D63="$T/m63"; mir --dest "$D63" --pack medium --maps none --apps none --model no > "$T/out" 2>"$T/err"
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/basebump/dl/ https://lastbook.org/=$B/basebump/site/ https://huggingface.co/=$B/basebump/hf/" \
+    python3 "$PY" candidates --dest "$D63" 2>/dev/null | awk -F'\t' -v OFS='\t' '$1 ~ /^lastbook:app:/ {print $0, 0}' > "$T/apponly.plan"
+check "setup: the plan is only the installers" '[ "$(wc -l < "$T/apponly.plan")" = 1 ]'
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/basebump/dl/ https://lastbook.org/=$B/basebump/site/ https://huggingface.co/=$B/basebump/hf/" \
+    VALARK_LASTBOOK_DIR="$D63" bash "$SH" --plan-file "$T/apponly.plan" > "$T/sh.out" 2>&1; rc=$?
+check "installers-only plan + unplanned base re-release: installers fetched, base skipped, exit 0 (complete)" \
+    '[ "$rc" = 0 ] && [ "$(ls "$D63/app/1.1.11" 2>/dev/null | wc -l)" = 4 ] && [ ! -e "$D63/maps/Lastbook-Map-base-2.zip" ] && [ -s "$D63/maps/Lastbook-Map-base.zip" ] && grep -q "current release mirrored" "$T/sh.out" && grep -q "map base .* was not planned: skipped" "$T/sh.out" || { cat "$T/sh.out" >&2; false; }'
 
 # server.js reports a VALARK_LASTBOOK_DIR outside content/ under lastbook/, flagged external (not served)
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"

@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/commissioning-dark.svg">
+  <img src="../img/popup/commissioning-light.svg" width="100%" alt="Pop-up book scene: The first five minutes. A fresh box becomes a working Ark in a browser: no files, flags or jargon.">
+</picture>
+
 # Val Ark — First-Boot Commissioning
 
 Part of the [design hierarchy](README.md). The single most important experience: a fresh
@@ -15,6 +20,11 @@ A new box must be *findable* without knowing an IP:
 > No step ever asks Jordan to "find the IP" or "SSH in." Discovery is the box's job.
 
 ## The wizard — screens
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/flow/setup-dark.svg">
+  <img src="../img/flow/setup-light.svg" width="100%" alt="Animated diagram: Setting up a new box. A few screens in a browser. Then the 24/7 loop fills the disk on its own.">
+</picture>
 
 Each screen: one question, a smart default already filled, a big **Continue**, and an
 optional **"Advanced"** disclosure. Progress dots at the top ("Step 2 of 6").
@@ -46,7 +56,7 @@ optional **"Advanced"** disclosure. Progress dots at the top ("Step 2 of 6").
 - Writes `.env` (data root, cap, services, port) — never shown as a file.
 - Runs `setup.sh` headlessly (`VALARK_YES`) to install deps + Node (from the source Ark if this was bootstrapped, else the internet).
 - Sets the hostname + mDNS, enables port 80 if chosen, installs the self-heal loop cron/@reboot.
-- Seeds curation priorities from the topic picks and kicks off the first `librarian fill` + service starts.
+- Seeds curation priorities from the topic picks. *(As built, it does not start a fill or services; the 24/7 loop does that once `loop.sh install` has run. Tracked in #306.)*
 - Creates the admin identity ([access-identity.md](access-identity.md)).
 
 ## Headless with *no* second device

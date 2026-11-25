@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../docs/img/popup/scripts-dark.svg">
+  <img src="../docs/img/popup/scripts-light.svg" width="100%" alt="Pop-up book scene: The scripts. Orchestration, curation and the server; all find the data through one file.">
+</picture>
+
 # Scripts
 
 Orchestration, curation, and server layer for Val Ark. All scripts resolve their
@@ -112,7 +117,7 @@ Shared library under `lib/` — sourced/required building blocks, not entry poin
 ## Librarian (`librarian.sh`)
 
 Fills a disk of **any size** from live catalogs in priority order:
-`grid-down essentials → diversity → small-valuable → fill-remaining → evict-for-better`. Downloads prefer
+`grid-down essentials → diversity → small-valuable → fill-remaining` (`evict` and `request` trade up when room is needed; `fill` never deletes). Downloads prefer
 **aria2** multi-connection (~3× faster on per-connection-throttled mirrors) with a
 curl fallback; both resume, retry, verify size, atomic-rename, and never abort on a
 single failure. A single `flock` prevents concurrent fills from racing.

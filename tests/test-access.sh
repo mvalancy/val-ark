@@ -91,6 +91,9 @@ c=$(gcode -b "$T/cj" "$B/api/status/disk"); [ "$c" = "200" ] && pass || fail "au
 for p in content models tools sources assets docs; do
     [ "$(gcode "$B/$p/")" = "401" ] && pass || fail "unauthed /$p/ must be 401 (data-tree read-wall)"
 done
+for p in %2fcontent/ %2Fdocs/ ./docs/; do   # #297: no encoded / doubled slash or dot-segment bypass
+    [ "$(gcode --path-as-is "$B/$p")" = "401" ] && pass || fail "unauthed /$p must be 401 (normalized before the read-wall)"
+done
 c=$(gcode -b "$T/cj" "$B/content/"); [ "$c" != "401" ] && pass || fail "authed data-tree read must be allowed (got $c)"
 # the UI shell + its assets stay open so the login wall can render
 [ "$(gcode "$B/styles.css")" = "200" ] && pass || fail "/styles.css must stay open for the wall"
@@ -105,6 +108,102 @@ RESP="$(curl -s -X POST -H 'Content-Type: application/json' -d "{\"code\":\"$RCO
 printf '%s' "$RESP" | grep -qE '"ok" ?: ?true' && pass || fail "recover with the correct code must succeed"
 printf '%s' "$RESP" | grep -q '"recovery"' && pass || fail "recover returns a fresh (rotated) recovery code"
 [ "$(jpost -d "{\"code\":\"$RCODE\",\"password\":\"another99\"}" "$B/api/auth/recover")" = "401" ] && pass || fail "old recovery code must be single-use (dead after use)"
+
+# 12. Library reads stay on the local network (#297). Even in Open mode, a peer that
+#     isn't LAN, tailnet or localhost can't read the library; the shell, health, auth
+#     and setup stay reachable. VALARK_TEST_FORCE_PUBLIC=1 simulates that peer (fail-safe:
+#     it only takes access away).
+stop_pids "$SRV_PID"; SRV_PID=""
+mkdir -p "$T/open"
+"$NODE" -e 'const a=require(process.argv[1]);const d=process.argv[2];a.setPassword("testpass","admin",d);a.setUseMode("open",d);' \
+    "$ROOT/scripts/lib/auth.js" "$T/open"
+start_open() {   # $1 = extra env assignment (or empty)
+    PORT=$(free_port); B="http://127.0.0.1:$PORT"
+    env $1 VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" \
+      VALARK_STATE_DIR="$T/open" VALARK_CONTENT_DIR="$T/content" VALARK_MODELS_DIR="$T/models" \
+      "$NODE" "$ROOT/scripts/server.js" "$PORT" >"$T/srv-open.log" 2>&1 &
+    SRV_PID=$!
+    for i in $(seq 1 24); do sleep 0.5; curl -s -o /dev/null --max-time 2 "$B/api/health" && return 0; done
+    return 1
+}
+if start_open VALARK_TEST_FORCE_PUBLIC=1; then
+    for p in api/status/disk api/catalog/content api/packages api/archive/content/x api/downloads/stream \
+             content/ models/ tools/ sources/ docs/ DOCS/ kiwix/ app/chat/ \
+             %2fdocs/ %2Fcontent/ ./docs/ api/status/disk/; do
+        c=$(gcode --path-as-is "$B/$p"); [ "$c" = "403" ] && pass || fail "Open mode: public peer reading /$p must be 403 (got $c)"
+    done
+    c=$(gcode "$B/docs%00/x"); [ "$c" = "404" ] && pass || fail "a NUL in the path must be 404, not 500 (got $c)"
+    c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -I "$B/docs/"); [ "$c" = "403" ] && pass || fail "Open mode: public HEAD /docs/ must be 403 (got $c)"
+    # "//docs/…" is read as a protocol-relative URL (host "docs"), so it serves the shell: no doc leaks
+    curl -s "$B//docs/ARCHITECTURE.md" | grep -q 'Val Ark - Architecture' && fail "public //docs/ must not leak a doc" || pass
+    curl -s "$B/api/auth/status" | grep -q '"localOnly":true' && pass || fail "auth/status must tell a public peer localOnly:true (UI wall)"
+    for p in "" api/health api/auth/status styles.css; do
+        c=$(gcode "$B/$p"); [ "$c" = "200" ] && pass || fail "Open mode: /$p must stay reachable for a public peer (got $c)"
+    done
+    c=$(jpost -d '{"kind":"content","id":"x"}' "$B/api/request"); [ "$c" = "403" ] && pass || fail "public peer POST must stay 403 (got $c)"
+else
+    fail "open-mode server (public peer) did not start"
+fi
+stop_pids "$SRV_PID"; SRV_PID=""
+if start_open VALARK_TEST_FORCE_REMOTE=1; then
+    c=$(gcode "$B/api/status/disk"); [ "$c" = "200" ] && pass || fail "Open mode: a LAN peer can still read (got $c)"
+    curl -s "$B/api/auth/status" | grep -q '"localOnly":false' && pass || fail "auth/status must tell a LAN peer localOnly:false"
+else
+    fail "open-mode server (LAN peer) did not start"
+fi
+
+# 13. Edge cases from the 0.1.30 review (#300): a macOS/utun tailnet, a global-IPv6 LAN
+#     peer on the box's own /64, and '..' segments hidden behind encoded dots.
+"$NODE" -e '
+const src = require("fs").readFileSync(process.argv[1], "utf8");
+const grab = n => src.match(new RegExp("function " + n + "\\([\\s\\S]*?\\n}\\n"))[0];
+const f = new Function("function netIfaces(){return {};}" + grab("arrivedOnTailnet") + grab("ipv6ToBig") + grab("onLinkV6") + "return {arrivedOnTailnet, onLinkV6};")();
+const ifs = {
+  tailscale0: [{ address: "100.101.1.2", family: "IPv4" }],
+  utun4: [{ address: "100.88.7.6", family: "IPv4" }, { address: "fd7a:115c:a1e0::5", family: "IPv6", cidr: "fd7a:115c:a1e0::5/128" }],
+  utun7: [{ address: "100.96.0.3", family: "IPv4" }],                    // another VPN (WARP-like): not Tailscale
+  eth9: [{ address: "203.0.113.5", family: "IPv4" },                     // a cloud / WAN uplink with a shared /64
+         { address: "2001:db8:9:9::5", family: "IPv6", cidr: "2001:db8:9:9::5/64" }],
+  utun1: [{ address: "fe80::1", family: "IPv6", cidr: "fe80::1/64" }],
+  en0: [{ address: "10.0.0.5", family: "IPv4" },
+        { address: "2001:db8:1:2::10", family: "IPv6", cidr: "2001:db8:1:2::10/64" },
+        { address: "2001:db8:ffff::1", family: "IPv6", cidr: "2001:db8:ffff::1/48" }],
+};
+const rq = la => ({ socket: { localAddress: la } });
+const ok = [
+  f.arrivedOnTailnet(rq("100.101.1.2"), ifs) === true,      // linux tailscale0
+  f.arrivedOnTailnet(rq("100.88.7.6"), ifs) === true,       // macOS utunN with a 100.64/10 address
+  f.arrivedOnTailnet(rq("100.70.0.9"), ifs) === false,      // CGNAT uplink, not ours
+  f.arrivedOnTailnet(rq("100.96.0.3"), ifs) === false,      // a utun with 100.x but no Tailscale IPv6
+  f.onLinkV6("2001:db8:9:9::77", ifs) === false,            // shared /64 on an uplink with no private IPv4
+  f.onLinkV6("::1:2:3:4:5:6:7:8", ifs) === false,           // 9 groups: malformed
+  f.arrivedOnTailnet(rq(""), ifs) === false,
+  f.onLinkV6("2001:db8:1:2::abcd", ifs) === true,           // same /64 as en0
+  f.onLinkV6("2001:db8:1:3::1", ifs) === false,             // another /64
+  f.onLinkV6("2001:db8:ffff:1::1", ifs) === false,          // only a /48 shared: too wide to trust
+  f.onLinkV6("2606:4700::1111", ifs) === false,             // the internet
+  f.onLinkV6("not-an-ip", ifs) === false,
+];
+process.exit(ok.every(Boolean) ? 0 : (console.error(ok), 1));
+' "$ROOT/scripts/server.js" && pass || fail "tailnet (tailscale0/utun) and on-link IPv6 detection (#300)"
+stop_pids "$SRV_PID"; SRV_PID=""   # §12's LAN server; don't leave it running
+if start_open VALARK_TEST_FORCE_REMOTE=1; then
+    for p in content/%2e./docs/ content/.%2e/docs/ content/../docs/ kiwix/a/..%5cb kiwix/a/%5c%2e%2e%5cb kiwix/a/%2e%2e%5cb; do
+        c=$(gcode --path-as-is "$B/$p"); [ "$c" = "404" ] && pass || fail "a '..' segment behind encoded dots (/$p) must be 404 (got $c)"
+    done
+    # dots inside a name or in the query are not traversal (Kiwix titles like "...And_Justice")
+    # (Kiwix is off here, so a request that passes the traversal check gets 503, not 404)
+    for p in "kiwix/content/w/A/...And_Justice_for_All" "kiwix/search?pattern=wait..." "kiwix/content/w/A/foo..bar"; do
+        c=$(gcode --path-as-is "$B/$p"); [ "$c" != "404" ] && pass || fail "/$p must not be refused as traversal (got $c)"
+    done
+    # the proxies forward the raw URL, so a path that only looks like /kiwix or /app after
+    # decoding or cleaning is refused (0.1.31 Gate-2 follow-up)
+    for p in "kiwix/./a" "kiwix//a" "%6biwix/a" "app/chat/./x" "%61pp/chat/x" "kiwix%2Fa" "app/chat%2Fx"; do
+        c=$(gcode --path-as-is "$B/$p"); [ "$c" = "404" ] && pass || fail "/$p must be 404 before the proxy (got $c)"
+    done
+else
+    fail "open-mode server for the '..' checks did not start"
+fi
 
 echo "access: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

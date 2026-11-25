@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
 
-const OUTPUT_DIR = path.resolve(__dirname, '../../../docs/screenshots');
+const OUTPUT_DIR = path.resolve(__dirname, '../../../docs/screenshots/web-ui');
 const WEB_UI = path.resolve(__dirname, '../../../web-ui/index.html');
 
 // All tool IDs from the web UI
@@ -69,6 +69,14 @@ test.describe('Val Ark Web UI - Navigation', () => {
     const cards = page.locator('.card');
     await expect(cards.first()).toBeVisible();
     await page.screenshot({ path: path.join(OUTPUT_DIR, 'model-cards.png'), fullPage: true });
+  });
+
+  test('navigate to the Offline Library via nav', async ({ page }) => {
+    // README image: keeps docs/screenshots/web-ui/library-page.png current.
+    await openLibrarySection(page, 'Offline Library');
+    await page.waitForTimeout(300);
+    await expect(page.locator('h1', { hasText: 'Offline Library' })).toBeVisible();
+    await page.screenshot({ path: path.join(OUTPUT_DIR, 'library-page.png') });
   });
 
   test('navigate to Getting Started page via footer', async ({ page }) => {

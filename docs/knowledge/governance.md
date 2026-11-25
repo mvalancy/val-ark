@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/governance-dark.svg">
+  <img src="../img/popup/governance-light.svg" width="100%" alt="Pop-up book scene: Agents you can trust. Agents work issues and merge PRs, but strangers cannot steer the repo.">
+</picture>
+
 # Val Ark — Self‑Guided Agent Project: Governance, Automation & Trust
 
 Part of the [knowledge base](README.md); extends [workflow.md](workflow.md). Defines how Val
@@ -13,7 +18,7 @@ internet strangers contaminate the repo** via fake issues or malicious PRs.
 | **Branch protection** (main/dev PR‑only, required checks, no force‑push) | ✅ applied via `gh api` | main = high bar; dev = decent (see below) |
 | **Issue templates** (structured, agent‑readable) | ✗ | `.github/ISSUE_TEMPLATE/` → *scaffolded* |
 | **PR template** (scope + issue link + test evidence + checklist) | ✗ | `.github/PULL_REQUEST_TEMPLATE.md` → *scaffolded* |
-| **CODEOWNERS** (review routing) | ✗ | `CODEOWNERS` → *scaffolded* |
+| **CODEOWNERS** (review routing) | ✗ | `.github/CODEOWNERS` → *scaffolded* |
 | **SECURITY.md** (policy + private reporting) | ✗ | `SECURITY.md` → *scaffolded* |
 | **CONTRIBUTING.md** (points here + workflow) | ✗ | `CONTRIBUTING.md` → *scaffolded* |
 | **Agent operating model + trust model** | ✗ | This doc |

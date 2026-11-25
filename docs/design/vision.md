@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/vision-dark.svg">
+  <img src="../img/popup/vision-light.svg" width="100%" alt="Pop-up book scene: What the Ark is for. A knowledge-and-comms appliance for when the internet is not there.">
+</picture>
+
 # Val Ark — Product Vision
 
 Part of the [design hierarchy](README.md). Read [current-state.md](current-state.md) first.

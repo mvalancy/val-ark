@@ -20,6 +20,8 @@ Design rules (enforced by tests/test-doc-art.sh):
 import math
 import pathlib
 import random
+import re
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -109,13 +111,13 @@ SCENES = {
         cards=[('key', '.env', None), ('terminal', 'start.sh', None), ('gear', 'loop.sh', None),
                ('disk', 'Librarian', None), ('server', 'server.js', None), ('globe', 'Web UI', None)],
         links=[(0, 1, 'side'), (0, 2, 'arc'), (1, 3, 'arc'), (2, 3, 'side'), (2, 4, 'arc'), (4, 5, 'side')],
-        used=['docs/ARCHITECTURE.md', 'README.md']),
+        used=['docs/ARCHITECTURE.md']),
     'librarian': dict(chapter='Chapter 2', title='The Librarian fills the shelves',
-        sub='Essentials first, then diversity, small and valuable, fill, then trade up.', backdrop='shelf',
+        sub='Essentials first, then diversity, small and valuable, then fill the rest.', backdrop='shelf',
         cards=[('shield', 'Essentials', '0'), ('cube', 'Diversity', '1'), ('leaf', 'Small + valuable', '2'),
-               ('disk', 'Fill the rest', '3'), ('magnifier', 'Evict for better', '4')],
-        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side')],
-        used=['docs/LIBRARIAN.md', 'README.md']),
+               ('disk', 'Fill the rest', '3'), ('magnifier', 'Trade up', None)],
+        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side')],
+        used=['docs/LIBRARIAN.md']),
     'tools': dict(chapter='Chapter 3', title='A toolbox for every job',
         sub='Dev tools, AI runtimes, creative suites and media, mirrored for each platform.', backdrop='hills',
         cards=[('terminal', 'Dev tools', None), ('brain', 'AI inference', None), ('cube', 'Creative', None),
@@ -131,25 +133,25 @@ SCENES = {
         sub='One mirror serves x86_64, arm64, Jetson, macOS, Windows and OpenWRT.', backdrop='city',
         cards=[('chip', 'x86_64', None), ('chip', 'arm64', None), ('brain', 'Jetson', None),
                ('cube', 'macOS', None), ('globe', 'Windows', None), ('wifi', 'OpenWRT', None)],
-        links=[], used=['docs/PLATFORMS.md', 'README.md']),
+        links=[], used=['docs/PLATFORMS.md']),
     'community': dict(chapter='Chapter 6', title='The village square',
         sub='Chat, mail, message boards, pastes and shared files: no internet needed.', backdrop='village',
         cards=[('chat', 'Chat', None), ('mail', 'Mail', None), ('board', 'Forum', None),
                ('paste', 'Paste', None), ('disk', 'Shared files', None)],
         links=[(0, 1, 'arc'), (1, 2, 'arc'), (2, 3, 'arc'), (3, 4, 'arc')],
-        used=['docs/COMMUNITY.md', 'README.md']),
+        used=['docs/COMMUNITY.md']),
     'offline': dict(chapter='Chapter 7', title='Off the grid, together',
         sub='Pull everything once, then share it across the LAN with no internet.', backdrop='waves',
         cards=[('house', 'Home', None), ('house', 'Workshop', None), ('ark', 'The Ark', None),
                ('house', 'School', None), ('house', 'Clinic', None)],
         links=[(2, 0, 'arc'), (2, 1, 'arc'), (2, 3, 'arc'), (2, 4, 'arc')],
-        used=['docs/OFFLINE.md', 'README.md']),
+        used=['docs/OFFLINE.md']),
     'serving': dict(chapter='Chapter 8', title='Two ways to serve',
         sub='Static pages on any file share, or a live server with chat, mail and requests.', backdrop='city',
         cards=[('disk', 'Plain files', None), ('book', 'Static pages', None), ('lock', 'File share', None),
                ('server', 'server.js', None), ('globe', 'Live web UI', None), ('chat', 'Chat + mail', None)],
         links=[(0, 1, 'side'), (1, 2, 'side'), (3, 4, 'side'), (4, 5, 'side')],
-        used=['docs/SERVING.md', 'README.md']),
+        used=['docs/SERVING.md']),
     'offline-gaps': dict(chapter='Field notes', title='Mapping the gaps',
         sub='What still needs the internet, and the plan to close each gap.', backdrop='hills',
         cards=[('map', 'Survey', None), ('magnifier', 'Find gaps', None), ('wrench', 'Close them', None),
@@ -189,10 +191,146 @@ SCENES = {
         cards=[('terminal', 'Validators', None), ('globe', 'Playwright', None), ('server', 'Fresh VMs', None),
                ('check', 'Report', None)],
         links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side')],
-        used=['tests/README.md', 'README.md']),
+        used=['tests/README.md']),
+    # ---- design hierarchy (docs/design/)
+    'vision': dict(chapter='Design', title='What the Ark is for',
+        sub='A knowledge-and-comms appliance for when the internet is not there.', backdrop='village',
+        cards=[('house', 'Your home', None), ('ark', 'The Ark', None), ('book', 'Wikipedia', None),
+               ('brain', 'AI helper', None), ('chat', 'Chat + mail', None)],
+        links=[(0, 1, 'side'), (1, 2, 'arc'), (1, 3, 'arc'), (1, 4, 'arc')],
+        used=['docs/design/vision.md']),
+    'current-state': dict(chapter='Design', title='Where it stands today',
+        sub='Shipped: setup in a browser, an admin area, recovery and real access controls.', backdrop='hills',
+        cards=[('check', 'Set up', None), ('lock', 'Admin', None), ('key', 'Recovery', None),
+               ('shield', 'Use Mode', None), ('terminal', 'CLI too', None)],
+        links=[], used=['docs/design/current-state.md']),
+    'research-brief': dict(chapter='Design', title='What we learned first',
+        sub='Eight research tracks, from NAS boxes to fitness apps, boiled down to advice.', backdrop='shelf',
+        cards=[('server', 'NAS boxes', None), ('house', 'Home hubs', None), ('wifi', 'Routers', None),
+               ('leaf', 'Health apps', None), ('magnifier', 'Findings', None)],
+        links=[(0, 4, 'arc'), (1, 4, 'arc'), (2, 4, 'arc'), (3, 4, 'side')],
+        used=['docs/design/research-brief.md']),
+    'roadmap': dict(chapter='Design', title='The road, phase by phase',
+        sub='Each phase ships something an owner can feel. Recovery lands before any gate.', backdrop='hills',
+        cards=[('check', 'Setup', '1'), ('key', 'Access', '2'), ('eye', 'Home', '3'),
+               ('disk', 'Storage', '4'), ('play', 'Downloads', '5'), ('brain', 'Assistant', '8')],
+        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side'), (4, 5, 'side')],
+        used=['docs/design/roadmap.md']),
+    'commissioning': dict(chapter='Design', title='The first five minutes',
+        sub='A fresh box becomes a working Ark in a browser: no files, flags or jargon.', backdrop='city',
+        cards=[('wifi', 'Find it', None), ('disk', 'Storage', None), ('shield', 'Who can use', None),
+               ('book', 'Topics', None), ('check', 'Ready', None)],
+        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side')],
+        used=['docs/design/commissioning.md']),
+    'access-identity': dict(chapter='Design', title='Who can come in',
+        sub='One Admin, a choosable Use Mode, and the box itself is always trusted.', backdrop='vault',
+        cards=[('house', 'Localhost', None), ('lock', 'Admin', None), ('globe', 'Open', None),
+               ('key', 'Passworded', None), ('chat', 'Accounts', None)],
+        links=[(0, 1, 'side'), (1, 2, 'arc'), (1, 3, 'arc'), (1, 4, 'arc')],
+        used=['docs/design/access-identity.md']),
+    'admin-console': dict(chapter='Design', title='Home screen and console',
+        sub='A calm summary for everyone; settings and system for the Admin.', backdrop='city',
+        cards=[('eye', 'Is it well?', None), ('disk', 'Storage', None), ('play', 'Activity', None),
+               ('gear', 'Settings', None), ('wrench', 'Repair', None)],
+        links=[(0, 1, 'side'), (1, 2, 'side'), (3, 4, 'side')],
+        used=['docs/design/admin-console.md']),
+    'storage': dict(chapter='Design', title='Add and remove drives',
+        sub='A small fixed brain plus a content pool that grows and shrinks.', backdrop='shelf',
+        cards=[('chip', 'Brain', None), ('disk', 'Primary', None), ('disk', 'USB drive', None),
+               ('disk', 'Another', None), ('check', 'Keeps going', None)],
+        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side')],
+        used=['docs/design/storage.md']),
+    'deployment': dict(chapter='Design', title='Shipping it safely',
+        sub='Native or Docker, locked down and reliable, still offline and self-copying.', backdrop='city',
+        cards=[('terminal', 'Native', None), ('cube', 'Docker', None), ('shield', 'Hardened', None),
+               ('ark', 'Self-copy', None), ('check', 'Reliable', None)],
+        links=[(0, 2, 'arc'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side')],
+        used=['docs/design/deployment.md']),
+    'downloads-monitoring': dict(chapter='Design', title='Pick what matters',
+        sub='Plain-language profiles sized to the disk, and downloads you can watch.', backdrop='hills',
+        cards=[('book', 'Wikipedia', None), ('wrench', 'How-to', None), ('brain', 'AI helper', None),
+               ('disk', 'Fits disk', None), ('play', 'Progress', None)],
+        links=[(0, 3, 'arc'), (1, 3, 'arc'), (2, 3, 'side'), (3, 4, 'side')],
+        used=['docs/design/downloads-monitoring.md']),
+    'errors-selfheal': dict(chapter='Design', title='One big easy button',
+        sub='The loop repairs itself every half hour; the rest is one tap in plain words.', backdrop='hills',
+        cards=[('eye', 'Notice', None), ('gear', 'Self-heal', None), ('check', 'Verify', None),
+               ('wrench', 'One tap', None)],
+        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 0, 'arc'), (2, 3, 'side')],
+        used=['docs/design/errors-selfheal.md']),
+    'recovery': dict(chapter='Design', title='Forgot the password?',
+        sub='At the box, or on localhost, you are the Admin. Nobody stays locked out.', backdrop='vault',
+        cards=[('lock', 'Locked out', None), ('house', 'At the box', None), ('paste', 'Paper code', None),
+               ('key', 'New passcode', None)],
+        links=[(0, 1, 'side'), (0, 2, 'arc'), (1, 3, 'arc'), (2, 3, 'side')],
+        used=['docs/design/recovery.md']),
+    'safety-moderation': dict(chapter='Design', title='Keeping shared files safe',
+        sub='On-device checks that fail closed: a doubtful file waits for review.', backdrop='vault',
+        cards=[('paste', 'Upload', None), ('chip', 'On-box AI', None), ('shield', 'Fail closed', None),
+               ('eye', 'Review', None), ('check', 'Shared', None)],
+        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side')],
+        used=['docs/design/safety-moderation.md']),
+    # ---- knowledge base (docs/knowledge/)
+    'decisions': dict(chapter='Knowledge', title='Why it is this way',
+        sub='Each big call: the context, the decision and the reason. Newest first.', backdrop='shelf',
+        cards=[('magnifier', 'Context', None), ('map', 'Decision', None), ('book', 'Why', None)],
+        links=[(0, 1, 'side'), (1, 2, 'side')],
+        used=['docs/knowledge/decisions.md']),
+    'gotchas': dict(chapter='Knowledge', title='Hard-won fixes',
+        sub='Symptom, cause, fix: the traps that cost real time, so nobody falls in twice.', backdrop='shelf',
+        cards=[('eye', 'Symptom', None), ('magnifier', 'Cause', None), ('wrench', 'Fix', None)],
+        links=[(0, 1, 'side'), (1, 2, 'side')],
+        used=['docs/knowledge/gotchas.md']),
+    'workflow': dict(chapter='Knowledge', title='How work flows',
+        sub='Issue, branch off dev, PR, review, green tests, then main by release.', backdrop='hills',
+        cards=[('board', 'Issue', None), ('tree', 'Branch', None), ('check', 'Review', None),
+               ('flask', 'Tests', None), ('gear', 'dev', None), ('ark', 'main', None)],
+        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side'), (4, 5, 'side')],
+        used=['docs/knowledge/workflow.md']),
+    'governance': dict(chapter='Knowledge', title='Agents you can trust',
+        sub='Agents work issues and merge PRs, but strangers cannot steer the repo.', backdrop='vault',
+        cards=[('brain', 'Agents', None), ('board', 'Issues', None), ('shield', 'Trust gate', None),
+               ('flask', 'CI', None), ('check', 'Merge', None)],
+        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side')],
+        used=['docs/knowledge/governance.md']),
+    # ---- code guides and policies
+    'scripts': dict(chapter='Workshop', title='The scripts',
+        sub='Orchestration, curation and the server; all find the data through one file.', backdrop='city',
+        cards=[('key', 'valark-env', None), ('terminal', 'start.sh', None), ('disk', 'Librarian', None),
+               ('gear', 'loop.sh', None), ('server', 'server.js', None)],
+        links=[(0, 1, 'arc'), (0, 2, 'arc'), (0, 3, 'arc'), (0, 4, 'arc')],
+        used=['scripts/README.md']),
+    'tool-scripts': dict(chapter='Workshop', title='One script per tool',
+        sub='Each mirrors its tool for every platform, using shared download helpers.', backdrop='shelf',
+        cards=[('wrench', '_common.sh', None), ('cube', 'Linux x86', None), ('chip', 'Linux arm', None),
+               ('leaf', 'macOS', None), ('house', 'Windows', None)],
+        links=[(0, 1, 'arc'), (0, 2, 'arc'), (0, 3, 'arc'), (0, 4, 'arc')],
+        used=['scripts/tools/README.md']),
+    'web-ui': dict(chapter='Workshop', title='The web UI',
+        sub='One no-build page: open it in a browser, no npm and no bundler.', backdrop='city',
+        cards=[('globe', 'index.html', None), ('paste', 'styles.css', None), ('map', 'Router', None),
+               ('server', 'JSON API', None)],
+        links=[(0, 1, 'side'), (0, 2, 'arc'), (2, 3, 'side')],
+        used=['web-ui/README.md']),
+    'contributing': dict(chapter='Join in', title='Helping build the Ark',
+        sub='Read the workflow, open an issue, send a small PR with green tests.', backdrop='village',
+        cards=[('book', 'Read', None), ('board', 'Issue', None), ('wrench', 'Change', None),
+               ('flask', 'Test', None), ('check', 'PR', None)],
+        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side')],
+        used=['CONTRIBUTING.md']),
+    'security-policy': dict(chapter='Policy', title='Reporting a problem',
+        sub='A LAN appliance, never on the open internet. Report it privately, fixed in private.', backdrop='vault',
+        cards=[('magnifier', 'Found one', None), ('mail', 'Tell us', None), ('shield', 'Fix', None),
+               ('check', 'Release', None)],
+        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side')],
+        used=['SECURITY.md']),
 }
 
 # ---------------------------------------------------------------- drawing
+def sentence(title):
+    """A title as a sentence: 'Forgot the password?' stays, 'The scripts' gains a period."""
+    return title if title[-1] in '.?!' else title + '.'
+
 def esc(s):
     return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
 
@@ -291,7 +429,7 @@ def render(sid, spec, theme):
     rnd = random.Random(sid)
     xs, w = layout(len(spec['cards']))
     title = f"Val Ark: {spec['title']}"
-    desc = (f"Pop-up book scene for {spec['chapter']}: {spec['title']}. Paper cut-outs for "
+    desc = (f"Pop-up book scene for {spec['chapter']}: {sentence(spec['title'])} Paper cut-outs for "
             + ', '.join(c[1] for c in spec['cards'])
             + ' unfold from the spine of an open book, then fold flat and repeat. ' + spec['sub'])
     css = f"""
@@ -361,8 +499,161 @@ def render(sid, spec, theme):
     p.append('</svg>\n')
     return ''.join(p)
 
+# ---------------------------------------------------------------- the docs tree
+# A generated map of every human-facing doc, several levels deep: docs-tree-{light,dark}.svg.
+# Each node is (label, path-or-None, children). tree_missing() keeps it honest: a tracked
+# doc that is not on the tree fails --check (nested AGENTS.md guides, .github/ templates
+# and .agents/ skills are agent-only and stay off it).
+DOC_TREE = ('Val Ark', 'README.md', [
+    ('Docs map', 'docs/README.md', [
+        ('Guides', None, [
+            ('Static or dynamic serving', 'docs/SERVING.md', []),
+            ('The Librarian', 'docs/LIBRARIAN.md', []),
+            ('Tools catalog', 'docs/TOOLS.md', []),
+            ('AI models', 'docs/MODEL_INVENTORY.md', []),
+            ('Platforms', 'docs/PLATFORMS.md', []),
+            ('Offline and P2P', 'docs/OFFLINE.md', []),
+            ('Internet-off gaps', 'docs/OFFLINE-GAPS.md', []),
+            ('Community and comms', 'docs/COMMUNITY.md', []),
+            ('ARM64 NAS boxes', 'docs/ARM64-NAS.md', []),
+            ('Encryption and TLS', 'docs/ENCRYPTION.md', []),
+            ('Architecture', 'docs/ARCHITECTURE.md', []),
+            ('Security audit', 'docs/SECURITY-AUDIT.md', []),
+        ]),
+        ('Design', 'docs/design/README.md', [
+            ('Vision', 'docs/design/vision.md', []),
+            ('Current state', 'docs/design/current-state.md', []),
+            ('Research brief', 'docs/design/research-brief.md', []),
+            ('Roadmap', 'docs/design/roadmap.md', []),
+            ('First-boot setup', 'docs/design/commissioning.md', []),
+            ('Access and identity', 'docs/design/access-identity.md', []),
+            ('Recovery', 'docs/design/recovery.md', []),
+            ('Home and admin console', 'docs/design/admin-console.md', []),
+            ('Flexible storage', 'docs/design/storage.md', []),
+            ('Downloads and monitoring', 'docs/design/downloads-monitoring.md', []),
+            ('Errors and self-heal', 'docs/design/errors-selfheal.md', []),
+            ('Safety and moderation', 'docs/design/safety-moderation.md', []),
+            ('Deployment', 'docs/design/deployment.md', []),
+        ]),
+        ('Knowledge', 'docs/knowledge/README.md', [
+            ('Decisions', 'docs/knowledge/decisions.md', []),
+            ('Gotchas', 'docs/knowledge/gotchas.md', []),
+            ('Workflow', 'docs/knowledge/workflow.md', []),
+            ('Governance', 'docs/knowledge/governance.md', []),
+        ]),
+    ]),
+    ('Workshop', None, [
+        ('Scripts', 'scripts/README.md', [
+            ('Tool scripts', 'scripts/tools/README.md', []),
+        ]),
+        ('Web UI', 'web-ui/README.md', []),
+        ('Tests', 'tests/README.md', []),
+    ]),
+    ('Policies', None, [
+        ('Contributing', 'CONTRIBUTING.md', []),
+        ('Security policy', 'SECURITY.md', []),
+    ]),
+    ('For AI agents', None, [
+        ('Development guide', 'CLAUDE.md', []),
+        ('Agent manual', 'AGENTS.md', []),
+        ('Skills and pipeline', '.agents/README.md', []),
+    ]),
+])
+TREE_COLS = [(40, 128), (206, 150), (394, 176), (608, 236)]   # (x, width) per depth
+TREE_ROW, TREE_TOP = 25, 118
+
+def tree_paths(node=DOC_TREE):
+    label, path, kids = node
+    return ([path] if path else []) + [p for k in kids for p in tree_paths(k)]
+
+def tree_missing():
+    """Tracked human docs that are not on the tree, and tree paths that no longer exist."""
+    try:
+        tracked = subprocess.run(['git', 'ls-files', '*.md'], cwd=ROOT, capture_output=True,
+                                 text=True, check=True).stdout.split()
+    except (OSError, subprocess.CalledProcessError):
+        tracked = None   # not a git checkout (e.g. a release tarball)
+    have = set(tree_paths())
+    gone = sorted(p for p in have if not (ROOT / p).is_file())
+    if tracked is None:
+        # Without git we can't tell docs from other .md files on disk (model cards,
+        # tool READMEs when the data root is the repo), so only check the tree's own paths.
+        return [], gone
+    want = {p for p in tracked if not re.search(r'(^|/)AGENTS\.md$|^\.github/|^\.agents/(skills|knowledge)/', p)}
+    want.add('AGENTS.md')
+    return sorted(want - have), gone
+
+def render_tree(theme):
+    t = THEMES[theme]
+    nodes, links = [], []
+    rows = [0]
+
+    colours = iter(range(len(ACCENTS) * 4))
+
+    def place(node, depth, branch):
+        label, path, kids = node
+        # each top-level branch, and each big sub-branch (3+ pages), gets its own colour
+        own = [next(colours) if depth == 0 or len(k[2]) >= 3 else branch for k in kids]
+        ys = [place(k, depth + 1, c) for k, c in zip(kids, own)]
+        if kids:
+            y = (ys[0] + ys[-1]) / 2
+        else:
+            y = TREE_TOP + rows[0] * TREE_ROW
+            rows[0] += 1
+        nodes.append((depth, y, label, path, branch, bool(kids)))
+        links.extend((depth, y, ky, c) for ky, c in zip(ys, own))
+        return y
+
+    place(DOC_TREE, 0, 0)
+    h = TREE_TOP + rows[0] * TREE_ROW + 30
+    title = 'Val Ark: every page, as a tree'
+    desc = ('A map of every Val Ark guide as a branching tree, four levels deep: the README leads to '
+            'the docs map, the workshop guides, the policies and the AI-agent manuals; the docs map '
+            'branches into the guides, the design hierarchy and the knowledge base. Branches draw '
+            'in level by level.')
+    css = f"""
+.nd{{font:600 13px system-ui,-apple-system,'Segoe UI',sans-serif;fill:{t['ink']}}}
+.pa{{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;fill:{t['muted']}}}
+.ch{{font:700 12px system-ui,sans-serif;letter-spacing:.22em;fill:{t['tab']};text-transform:uppercase}}
+.tt{{font:italic 600 30px Georgia,'Times New Roman',serif;fill:{t['ink']}}}
+.st{{font:16px system-ui,sans-serif;fill:{t['muted']}}}
+.br{{fill:none;stroke-width:2;stroke-linecap:round;stroke-dasharray:1;animation:draw 0.7s ease-out both}}
+.pop{{transform-box:fill-box;transform-origin:0 50%;animation:pop .55s cubic-bezier(.3,1.4,.5,1) both}}
+@keyframes draw{{from{{stroke-dashoffset:1}}to{{stroke-dashoffset:0}}}}
+@keyframes pop{{from{{transform:scaleX(.05);opacity:0}}to{{transform:none;opacity:1}}}}
+@media (prefers-reduced-motion:reduce){{*{{animation:none!important}}}}
+"""
+    p = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {h}" width="{W}" height="{h}" role="img" '
+         f'aria-label="{esc(title)}"><title>{esc(title)}</title><desc>{esc(desc)}</desc>',
+         f'<defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{t["bg0"]}"/>'
+         f'<stop offset="1" stop-color="{t["bg1"]}"/></linearGradient></defs><style>{css}</style>',
+         f'<rect width="{W}" height="{h}" rx="18" fill="url(#bg)"/>',
+         f'<rect x="24" y="96" width="{W-48}" height="{h-112}" rx="14" fill="{t["page"]}" stroke="{t["edge"]}"/>',
+         f'<text x="64" y="44" class="ch">The Map</text><text x="64" y="80" class="tt">Every page, as a tree</text>'
+         f'<text x="{W-64}" y="44" class="st" text-anchor="end">Start at the left and follow a branch to any guide.</text>']
+    for depth, py, cy, b in links:
+        x0 = TREE_COLS[depth][0] + TREE_COLS[depth][1]
+        x1 = TREE_COLS[depth + 1][0]
+        mx = (x0 + x1) / 2
+        p.append(f'<path d="M{x0} {py:.1f}C{mx:.1f} {py:.1f} {mx:.1f} {cy:.1f} {x1} {cy:.1f}" pathLength="1" class="br" '
+                 f'stroke="{ACCENTS[b % len(ACCENTS)]}" style="animation-delay:{0.2 + depth * 0.45:.2f}s"/>')
+    for depth, y, label, path, b, inner in sorted(nodes, key=lambda n: (n[0], n[1])):
+        x, w = TREE_COLS[depth]
+        acc = t['tab'] if depth == 0 else ACCENTS[b % len(ACCENTS)]
+        fill = acc if inner else t['card']
+        ink = '#fff' if inner else t['ink']
+        body = (f'<rect x="{x}" y="{y-10:.1f}" width="{w}" height="20" rx="10" fill="{fill}" stroke="{acc}" stroke-width="1.5"/>'
+                f'<text x="{x+12}" y="{y+4.5:.1f}" class="nd" style="fill:{ink}">{esc(label)}</text>')
+        if path and not inner:
+            body += f'<text x="{x+w+14}" y="{y+4.5:.1f}" class="pa">{esc(path)}</text>'
+        p.append(f'<g class="pop" style="animation-delay:{0.1 + depth * 0.45 + (y / h) * 0.3:.2f}s">{body}</g>')
+    p.append('</svg>\n')
+    return ''.join(p)
+
 def build():
-    return {f'{sid}-{theme}.svg': render(sid, spec, theme) for sid, spec in SCENES.items() for theme in THEMES}
+    files = {f'{sid}-{theme}.svg': render(sid, spec, theme) for sid, spec in SCENES.items() for theme in THEMES}
+    files.update({f'docs-tree-{theme}.svg': render_tree(theme) for theme in THEMES})
+    return files
 
 def main(argv):
     files = build()
@@ -377,8 +668,18 @@ def main(argv):
             print(f'stale or missing: docs/img/popup/{n}')
         for n in extra:
             print(f'not produced by the generator: docs/img/popup/{n}')
+        unused = [(sid, md) for sid, spec in SCENES.items() for md in spec['used']
+                  if f'popup/{sid}-light.svg' not in ((ROOT / md).read_text(errors='replace') if (ROOT / md).is_file() else '')]
+        for sid, md in unused:
+            print(f'{md} is listed in used= for {sid} but does not embed it')
+        missing, gone = tree_missing()
+        for n in missing:
+            print(f'not on the docs tree (DOC_TREE in scripts/docs/popup_art.py): {n}')
+        for n in gone:
+            print(f'on the docs tree but missing: {n}')
         if bad or extra:
             print('run: python3 scripts/docs/popup_art.py')
+        if bad or extra or missing or gone or unused:
             return 1
         print(f'ok: {len(files)} pop-up SVGs match the generator')
         return 0

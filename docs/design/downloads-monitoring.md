@@ -72,6 +72,11 @@ bundle the librarian prioritizes (extending the value-weight mechanism already i
 
 ## 2. Watching downloads — the Downloads view
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/flow/request-dark.svg">
+  <img src="../img/flow/request-light.svg" width="100%" alt="Animated diagram: What happens when you tap Request. From one tap on any device to a file on the disk, with live progress on the way.">
+</picture>
+
 A calm, phone-friendly list. Home shows a summary card (**"⬇ 2 downloading · 61%"**); tapping
 opens:
 

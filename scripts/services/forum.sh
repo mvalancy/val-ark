@@ -210,10 +210,15 @@ pin_bind_address() {
 const fs = require("fs"); const [f, want, url] = process.argv.slice(1);
 const c = JSON.parse(fs.readFileSync(f, "utf8")); let changed = false;
 if (c.bind_address !== want) { c.bind_address = want; changed = true; }
-if (typeof c.url !== "string" || /^https?:\/\/0\.0\.0\.0([:/]|$)/.test(c.url)) { c.url = url; changed = true; }
+if (typeof c.url !== "string" || /^https?:\/\/(0\.0\.0\.0|\[::\]|::)([:/]|$)/i.test(c.url)) { c.url = url; changed = true; }
 if (!changed) { console.log("ok"); process.exit(0); }
-const mode = fs.statSync(f).mode & 0o777, tmp = f + ".tmp";
-fs.writeFileSync(tmp, JSON.stringify(c, null, 4) + "\n", { mode }); fs.renameSync(tmp, f); console.log("changed");
+const mode = fs.statSync(f).mode & 0o777, tmp = f + ".tmp." + process.pid;
+let fd;
+try {
+  fd = fs.openSync(tmp, "wx", 0o600);                        // unique name, never an existing file
+  fs.writeSync(fd, JSON.stringify(c, null, 4) + "\n"); fs.fchmodSync(fd, mode); fs.fsyncSync(fd);
+  fs.closeSync(fd); fd = undefined; fs.renameSync(tmp, f); console.log("changed");
+} catch (e) { if (fd !== undefined) fs.closeSync(fd); try { fs.unlinkSync(tmp); } catch (_) {} throw e; }
 ' "$CONFIG_FILE" "$BIND" "$want_url" 2>/dev/null)"
     elif [ -n "$py" ]; then
         res="$("$py" -I -c '
@@ -222,15 +227,20 @@ f, want, url = sys.argv[1], sys.argv[2], sys.argv[3]
 c = json.load(open(f)); changed = False
 if c.get("bind_address") != want:
     c["bind_address"] = want; changed = True
-if not isinstance(c.get("url"), str) or re.match(r"^https?://0\.0\.0\.0([:/]|$)", c["url"]):
+if not isinstance(c.get("url"), str) or re.match(r"^https?://(0\.0\.0\.0|\[::\]|::)([:/]|$)", c["url"], re.I):
     c["url"] = url; changed = True
 if not changed:
     print("ok"); sys.exit(0)
-mode = os.stat(f).st_mode & 0o777; tmp = f + ".tmp"
-fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-with os.fdopen(fd, "w") as fh:
-    fh.write(json.dumps(c, indent=4) + "\n")
-os.replace(tmp, f); print("changed")
+mode = os.stat(f).st_mode & 0o777; tmp = f + ".tmp." + str(os.getpid())
+fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)   # unique name, never an existing file
+try:
+    with os.fdopen(fd, "w") as fh:
+        fh.write(json.dumps(c, indent=4) + "\n"); fh.flush(); os.fchmod(fh.fileno(), mode); os.fsync(fh.fileno())
+    os.replace(tmp, f); print("changed")
+except BaseException:
+    try: os.unlink(tmp)
+    except OSError: pass
+    raise
 ' "$CONFIG_FILE" "$BIND" "$want_url" 2>/dev/null)"
     fi
     case "$res" in

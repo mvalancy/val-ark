@@ -105,5 +105,40 @@ printf '%s' "$RESP" | grep -qE '"ok" ?: ?true' && pass || fail "recover with the
 printf '%s' "$RESP" | grep -q '"recovery"' && pass || fail "recover returns a fresh (rotated) recovery code"
 [ "$(jpost -d "{\"code\":\"$RCODE\",\"password\":\"another99\"}" "$B/api/auth/recover")" = "401" ] && pass || fail "old recovery code must be single-use (dead after use)"
 
+# 12. Library reads stay on the local network (#297). Even in Open mode, a peer that
+#     isn't LAN, tailnet or localhost can't read the library; the shell, health, auth
+#     and setup stay reachable. VALARK_TEST_FORCE_PUBLIC=1 simulates that peer (fail-safe:
+#     it only takes access away).
+stop_pids "$SRV_PID"; SRV_PID=""
+mkdir -p "$T/open"
+"$NODE" -e 'const a=require(process.argv[1]);const d=process.argv[2];a.setPassword("testpass","admin",d);a.setUseMode("open",d);' \
+    "$ROOT/scripts/lib/auth.js" "$T/open"
+start_open() {   # $1 = extra env assignment (or empty)
+    PORT=$(free_port); B="http://127.0.0.1:$PORT"
+    env $1 VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" \
+      VALARK_STATE_DIR="$T/open" VALARK_CONTENT_DIR="$T/content" VALARK_MODELS_DIR="$T/models" \
+      "$NODE" "$ROOT/scripts/server.js" "$PORT" >"$T/srv-open.log" 2>&1 &
+    SRV_PID=$!
+    for i in $(seq 1 24); do sleep 0.5; curl -s -o /dev/null --max-time 2 "$B/api/health" && return 0; done
+    return 1
+}
+if start_open VALARK_TEST_FORCE_PUBLIC=1; then
+    for p in api/status/disk api/catalog/content api/packages content/ models/ kiwix/; do
+        c=$(gcode "$B/$p"); [ "$c" = "403" ] && pass || fail "Open mode: public peer reading /$p must be 403 (got $c)"
+    done
+    for p in "" api/health api/auth/status styles.css; do
+        c=$(gcode "$B/$p"); [ "$c" = "200" ] && pass || fail "Open mode: /$p must stay reachable for a public peer (got $c)"
+    done
+    c=$(jpost -d '{"kind":"content","id":"x"}' "$B/api/request"); [ "$c" = "403" ] && pass || fail "public peer POST must stay 403 (got $c)"
+else
+    fail "open-mode server (public peer) did not start"
+fi
+stop_pids "$SRV_PID"; SRV_PID=""
+if start_open VALARK_TEST_FORCE_REMOTE=1; then
+    c=$(gcode "$B/api/status/disk"); [ "$c" = "200" ] && pass || fail "Open mode: a LAN peer can still read (got $c)"
+else
+    fail "open-mode server (LAN peer) did not start"
+fi
+
 echo "access: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

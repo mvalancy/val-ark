@@ -26,6 +26,7 @@ positives were removed.
 - [Verified Good (confirmed working)](#verified-good-confirmed-working)
 - [Completeness Critic — What the sweep did NOT cover](#completeness-critic--what-the-sweep-did-not-cover)
 - [Addendum — 2026-07-10 (status update)](#addendum--2026-07-10-status-update-the-report-above-is-the-unedited-record)
+- [Addendum — 2026-11-25: library reads stay on the local network](#addendum--2026-11-25-library-reads-stay-on-the-local-network-297)
 
 ---
 
@@ -290,3 +291,18 @@ and remain as reported until re-probed.
 
 These deltas have not had the adversarial live-probe treatment of the original sweep;
 a follow-up pass should exercise them.
+
+## Addendum — 2026-11-25: library reads stay on the local network (#297)
+
+Until this change, `isLanOrTailnet` gated only POSTs. In **Open** mode `readAllowed`
+returned true for any peer, and the server binds `0.0.0.0` by default. So an Ark whose
+port was reachable from the internet (a port forward, a cloud VM) served the library,
+catalog, `/api/archive/`, `/kiwix/` and the raw data trees to anyone. Passworded and
+Accounts modes were not affected, because a login can only be POSTed from the LAN.
+
+**Fixed:** `server.js` now refuses a gated read (`isReadGated`) from a peer that is not
+LAN, tailnet or localhost with `403`, whatever the Use Mode. The web-UI shell, `/api/health`,
+auth and setup stay reachable. `tests/test-access.sh` §12 covers both sides: a simulated
+public peer (`VALARK_TEST_FORCE_PUBLIC=1`, fail-safe) gets 403 on six gated reads and on a
+request, while a LAN peer still reads in Open mode. Keeping the port off the internet is
+still the rule ([SECURITY.md](../SECURITY.md)); this is defence in depth.

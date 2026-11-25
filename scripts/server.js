@@ -1022,6 +1022,7 @@ function isLocalhost(req) {
     // Test hook: simulate a remote (LAN) client so the access gate can be exercised.
     // Fail-SAFE — it only REMOVES the localhost admin bypass, never grants access.
     if (process.env.VALARK_TEST_FORCE_REMOTE === '1') return false;
+    if (process.env.VALARK_TEST_FORCE_PUBLIC === '1') return false;
     const addr = req.socket?.remoteAddress || '';
     // IPv4 localhost
     if (addr === '127.0.0.1' || addr === '::1') return true;
@@ -1131,6 +1132,9 @@ function clientIp(req) {
 // peers. Every trigger is still guarded (allowlist targets, footprint-cap eviction,
 // single-flight fill lock, per-IP rate limit); public/unknown peers are refused.
 function isLanOrTailnet(req) {
+    // Test hook: simulate a public-internet peer. Fail-SAFE like VALARK_TEST_FORCE_REMOTE:
+    // it only takes access away, never grants it.
+    if (process.env.VALARK_TEST_FORCE_PUBLIC === '1') return false;
     if (isLocalhost(req)) return true;
     const a = clientIp(req);
     if (!a) return true;                       // unix socket
@@ -2936,6 +2940,12 @@ function handleRequest(req, res) {
     // library, catalog, downloads or apps — they get a 401 and the SPA shows a login
     // wall. The shell/auth/setup/health/CA above are always reachable so the wall can
     // render and you can sign in; localhost/console is always in.
+    // The library is for the local network: whatever the Use Mode, a peer that isn't on
+    // the LAN, the tailnet or the box itself can't read it (#297). Open mode means open to
+    // people here, not to the internet. The shell, health, setup and auth stay reachable.
+    if (isReadGated(urlPath) && !isLanOrTailnet(req)) {
+        return sendJSON(res, req, { error: 'This Val Ark shares its library only on the local network.' }, 403);
+    }
     if (isReadGated(urlPath) && !readAllowed(req)) {
         return sendJSON(res, req, { error: 'Sign in to view this Val Ark.', needsAuth: true }, 401);
     }

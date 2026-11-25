@@ -74,6 +74,7 @@ _ld_config(){
     LD_EARLY_SECS="${VALARK_LINK_DHCP_EARLY_SECS:-600}"
     LD_PROBE_SECS="${VALARK_LINK_DHCP_PROBE_SECS:-4}"
     LD_CONFIRM_SECS="${VALARK_LINK_DHCP_CONFIRM_SECS:-30}"
+    LD_CONFIRM_MAX_SECS="${VALARK_LINK_DHCP_CONFIRM_MAX_SECS:-300}"   # 2nd probe must follow within this
     LD_WATCH_SECS="${VALARK_LINK_DHCP_WATCH_SECS:-2}"
     LD_RECHECK_SECS="${VALARK_LINK_DHCP_RECHECK_SECS:-60}"
     LD_LOCK_WAIT="${VALARK_LINK_DHCP_LOCK_WAIT:-60}"
@@ -107,9 +108,12 @@ _ld_config(){
         [[ $v =~ ^[0-9]+[mh]?$ ]] || LD_CFG_ERR="${LD_CFG_ERR:-lease '${v}' must match [0-9]+[mh]?}"
     done
     case "$LD_DNS" in forward|local|off) ;; *) LD_CFG_ERR="${LD_CFG_ERR:-VALARK_LINK_DHCP_DNS must be forward, local or off}" ;; esac
-    for v in "$LD_EARLY_SECS" "$LD_CONFIRM_SECS" "$LD_RECHECK_SECS" "$LD_LOCK_WAIT"; do
+    for v in "$LD_EARLY_SECS" "$LD_CONFIRM_SECS" "$LD_CONFIRM_MAX_SECS" "$LD_RECHECK_SECS" "$LD_LOCK_WAIT"; do
         _int "$v" || LD_CFG_ERR="${LD_CFG_ERR:-timer value '${v}' must be a whole number of seconds}"
     done
+    if _int "$LD_CONFIRM_SECS" && _int "$LD_CONFIRM_MAX_SECS" && [ "$LD_CONFIRM_MAX_SECS" -lt "$LD_CONFIRM_SECS" ]; then
+        LD_CFG_ERR="${LD_CFG_ERR:-VALARK_LINK_DHCP_CONFIRM_MAX_SECS must be >= CONFIRM_SECS}"
+    fi
     for v in "$LD_PROBE_SECS" "$LD_WATCH_SECS"; do
         _num "$v" || LD_CFG_ERR="${LD_CFG_ERR:-timer value '${v}' must be a number of seconds}"
     done
@@ -189,15 +193,20 @@ _run_dir(){
 # Ours = argv carries --conf-file=/dev/null AND our --pid-file (a reused pid
 # after a reboot is never ours; we must never kill a stranger). Pidfile first,
 # then a cmdline scan in case the pidfile is gone.
+# /proc reads go through the privilege wrapper: with /proc mounted hidepid=1/2 an
+# unprivileged user can't see (or read the argv of) root's dnsmasq.
+_pcmdline(){ "${PRIV[@]}" cat "/proc/$1/cmdline" 2>/dev/null; }
+_palive(){ "${PRIV[@]}" kill -0 "$1" 2>/dev/null || [ -d "/proc/$1" ]; }
 _is_ours(){
-    local c; c=$({ tr '\0' '\n' < "/proc/$1/cmdline"; } 2>/dev/null) || return 1
+    local c; c=$(_pcmdline "$1" | tr '\0' '\n') || return 1
+    [ -n "$c" ] || return 1
     grep -qxF -- "--pid-file=${LD_PIDFILE}" <<<"$c" && grep -qxF -- "--conf-file=/dev/null" <<<"$c"
 }
 _serving_pid(){
     local pid f
     pid=$({ tr -dc 0-9 < "$LD_PIDFILE"; } 2>/dev/null)
     if [ -n "$pid" ] && _is_ours "$pid"; then echo "$pid"; return 0; fi
-    for f in $(grep -lzF -- "--pid-file=${LD_PIDFILE}" /proc/[0-9]*/cmdline 2>/dev/null); do
+    for f in $("${PRIV[@]}" sh -c 'grep -lzF -- "$1" /proc/[0-9]*/cmdline 2>/dev/null' sh "--pid-file=${LD_PIDFILE}"); do
         pid=${f#/proc/}; pid=${pid%/cmdline}
         [ "$pid" != "$$" ] && _is_ours "$pid" && { echo "$pid"; return 0; }
     done
@@ -253,9 +262,9 @@ _dnsmasq_kill(){   # stop our dnsmasq if running; rc 0 if one was stopped
     local pid i=0
     pid=$(_serving_pid) || return 1
     "${PRIV[@]}" kill "$pid" 2>/dev/null
-    while [ $i -lt 30 ] && [ -d "/proc/$pid" ]; do sleep 0.1; i=$((i+1)); done
-    [ -d "/proc/$pid" ] && "${PRIV[@]}" kill -9 "$pid" 2>/dev/null && sleep 0.2
-    if [ -d "/proc/$pid" ] && _is_ours "$pid"; then
+    while [ $i -lt 30 ] && _palive "$pid"; do sleep 0.1; i=$((i+1)); done
+    _palive "$pid" && "${PRIV[@]}" kill -9 "$pid" 2>/dev/null && sleep 0.2
+    if _palive "$pid" && _is_ours "$pid"; then
         log "could not stop dnsmasq (pid ${pid}) — needs root or passwordless sudo"; return 1
     fi
     rm -f "$LD_PIDFILE" 2>/dev/null
@@ -344,6 +353,7 @@ ld_start(){   # iface lease
 # DETAIL and LD_IFC. Serving is the ONLY outcome the caller leaves running.
 _decide(){
     local r out rc now ce ct serving=0 ep
+    if [ -f "${STATE_DIR}/STOP" ]; then rm -f "$LD_CONFIRM"; MODE=idle; DETAIL="STOP flag"; return; fi
     [ -n "$LD_CFG_ERR" ] && { MODE=error; DETAIL="$LD_CFG_ERR"; return; }
     r=$(_iface) || { MODE=error; DETAIL="${r#ERR:}"; return; }
     LD_IFC="$r"
@@ -393,9 +403,19 @@ _decide(){
         echo "$ep $now" > "$LD_CONFIRM"
         MODE=probing; DETAIL="no DHCP server answered; confirming in ${LD_CONFIRM_SECS}s"; return
     fi
+    if [ $(( now - ct )) -gt "$LD_CONFIRM_MAX_SECS" ]; then   # first probe too old: start over
+        echo "$ep $now" > "$LD_CONFIRM"
+        MODE=probing; DETAIL="earlier empty probe is stale; confirming again in ${LD_CONFIRM_SECS}s"; return
+    fi
     if [ $(( now - ct )) -lt "$LD_CONFIRM_SECS" ]; then
         MODE=probing; DETAIL="no DHCP server answered; confirming in $(( LD_CONFIRM_SECS - now + ct ))s"; return
     fi
+    # The probe took seconds: re-read .env and re-check the knob + config just
+    # before actually serving, so a just-disabled or just-broken config never starts.
+    _reload
+    _enabled || { rm -f "$LD_CONFIRM"; MODE=off; DETAIL="VALARK_LINK_DHCP is not 1"; return; }
+    [ -n "$LD_CFG_ERR" ] && { MODE=error; DETAIL="$LD_CFG_ERR"; return; }
+    if [ -f "${STATE_DIR}/STOP" ]; then rm -f "$LD_CONFIRM"; MODE=idle; DETAIL="STOP flag"; return; fi
     if ld_start "$LD_IFC" "$LD_EARLY_LEASE"; then
         rm -f "$LD_CONFIRM"; MODE=serving; DETAIL="no other DHCP server on the link"
     else
@@ -416,7 +436,9 @@ ld_check(){
     MODE=""; DETAIL=""; LD_IFC=""
     if ! _enabled; then
         _priv || true
-        [ -d "$LD_RUN" ] && { exec 6>>"$LD_CHECK_LOCK"; flock -w 10 6 2>/dev/null; }   # stopping is safe either way
+        # Wait for an in-flight check (it may be about to start dnsmasq), then stop;
+        # stopping is safe either way, so a lock timeout still proceeds.
+        [ -d "$LD_RUN" ] && { exec 6>>"$LD_CHECK_LOCK"; flock -w "$LD_LOCK_WAIT" 6 2>/dev/null; }
         ld_stop "VALARK_LINK_DHCP is off"
         MODE=off; DETAIL="VALARK_LINK_DHCP is not 1"; _finish; exec 6>&-; return 0
     fi
@@ -455,10 +477,14 @@ ld_watch(){
     echo $$ > "$LD_WATCH_PID"
     trap '_watch_exit' EXIT
     trap 'exit 0' TERM INT HUP
-    local last="" ep ifc now due=0
+    local last="" ep ifc now due=0 ccwarn=""
     while :; do
         if [ -f "${STATE_DIR}/STOP" ]; then log "STOP flag — watcher exiting"; break; fi
         ifc=$(_iface 2>/dev/null) || ifc=""
+        if [ -n "$ifc" ] && [ ! -r "${LD_SYSFS}/${ifc}/carrier_changes" ] && [ "$ccwarn" != "$ifc" ]; then
+            log "${ifc} has no carrier_changes counter — polling carrier only (a flap faster than ${LD_WATCH_SECS}s may be missed)"
+            ccwarn="$ifc"
+        fi
         ep=$(_epoch "$ifc"); now=$(date +%s)
         if [ "$ep" != "$last" ] || [ "$now" -ge "$due" ]; then
             [ -n "$last" ] && [ "$ep" != "$last" ] && log "link change on ${ifc:-?} (${ep})"
@@ -501,6 +527,10 @@ ld_ensure(){
     fi
     _start_watch
 }
+
+# A: the caller's environment may carry a stale exported VALARK_LINK_DHCP*
+# (`loop.sh run` sourced .env hours ago with set -a). Decide from .env as it is NOW.
+_reload
 
 case "${1:-}" in
     check)  ld_check ;;

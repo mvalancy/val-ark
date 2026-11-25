@@ -248,7 +248,8 @@ is safe; it stops the moment a real server appears. Needs root or passwordless s
 and `dnsmasq`. Its DNS answers the Ark's own names and, by default
 (`VALARK_LINK_DHCP_DNS=forward`), passes other lookups to the Ark's own upstream
 resolvers. A laptop that also has Wi-Fi keeps its internet while the Ark is online;
-when the Ark is offline, non-local lookups fail fast. `local` (Ark names only) and
+when the Ark is offline, non-local lookups fail fast. In that mode the laptop's lookups
+go out through the Ark's upstream resolvers (a privacy consideration). `local` (Ark names only) and
 `off` (no DNS) are the alternatives. Details and the hardware checklist:
 [ARM64-NAS.md](ARM64-NAS.md#direct-connect-laptop-dhcp--dns-on-the-wired-port).
 

@@ -47,6 +47,7 @@ case "\$(cat "$T/probe-mode")" in
   server) echo 192.0.2.1; exit 0 ;;
   self)   echo $SELF_IP; exit 0 ;;
   fail)   exit 2 ;;
+  disable) sed -i 's/^VALARK_LINK_DHCP=1\$/VALARK_LINK_DHCP=0/' "$T/env.conf"; exit 0 ;;   # knob flipped mid-probe
 esac
 STUB
 # dnsmasq stub: records argv; then like the daemon: a background process whose
@@ -75,10 +76,11 @@ case "\$*" in
 esac
 exit 0
 STUB
-cat > "$T/bin/sudo-ok" <<'STUB'
+cat > "$T/bin/sudo-ok" <<STUB
 #!/bin/bash
-[ "$1" = -n ] && shift
-exec "$@"
+[ "\$1" = -n ] && shift
+echo "\$*" >> "$T/sudo.calls"
+exec "\$@"
 STUB
 printf '#!/bin/bash\nexit 1\n' > "$T/bin/sudo-no"
 cat > "$T/bin/id" <<STUB
@@ -263,10 +265,10 @@ check 'alive' "a plain default route via Wi-Fi must not block serving"
 
 # --- 15. finding 11: names are sanitised, never globbed -----------------------------------------
 reset; mkdir -p "$T/cwd"; touch "$T/cwd/GLOBBED"
-EXTRA='VALARK_LINK_DHCP_NAMES="* a,6.6.6.6 good-name"' conf 1; echo none > "$T/probe-mode"
+EXTRA='VALARK_LINK_DHCP_NAMES="* a,198.51.100.6 good-name"' conf 1; echo none > "$T/probe-mode"
 ( cd "$T/cwd" && bash "$LD" check >/dev/null 2>&1 && bash "$LD" check > "$T/out" 2>&1 )
 check 'arg "--host-record=good-name,good-name.home.arpa,$SELF_IP"' "valid extra name kept"
-check '! grep -q "6.6.6.6\|GLOBBED\|^--host-record=\*" "$T/dnsmasq.args"' "globs and comma injections must be dropped"
+check '! grep -q "198.51.100.6\|GLOBBED\|^--host-record=\*" "$T/dnsmasq.args"' "globs and comma injections must be dropped"
 
 # --- 16. finding 12/13: re-add a removed address; failed start cleans up --------------------------
 reset; serve_now; : > "$T/addrs"; run check
@@ -352,6 +354,42 @@ check '! ls -l "/proc/$(stubpid)/fd" 2>/dev/null | grep -q "watch\.lock"' "dnsma
 ( exec 9>>"$T/loop.lock"; flock -w 5 9 ) && pass || fail "loop.lock must be free after ensure returns (no inherited fd)"
 conf 0; run ensure
 check 'waitfor "[ ! -d /proc/$w1 ]" 50 && ! alive && ! has_addr' "ensure with the knob off must stop the watcher and dnsmasq"
+
+# --- 21a. re-review A/B/C + nits ----------------------------------------------------------------
+# A: a stale EXPORTED knob (loop.sh run sourced .env long ago) must not serve once .env drops it
+reset; conf none; echo none > "$T/probe-mode"
+VALARK_LINK_DHCP=1 bash "$LD" check >/dev/null 2>&1; VALARK_LINK_DHCP=1 bash "$LD" check > "$T/out" 2>&1
+check '[ "$(mode)" = off ] && [ "$(runs)" = 0 ]' "stale exported VALARK_LINK_DHCP=1 must not override .env (got $(mode))"
+# B: STOP flag -> idle, never serves; stops a running server
+reset; conf 1; echo none > "$T/probe-mode"; touch "$T/state/STOP"; run check; run check
+check '[ "$(mode)" = idle ] && [ "$(runs)" = 0 ] && grep -q "STOP flag" "$T/out"' "STOP flag must keep check idle (got $(mode))"
+rm -f "$T/state/STOP"; serve_now; touch "$T/state/STOP"; run check
+check '! alive && ! has_addr && [ "$(mode)" = idle ]' "STOP flag must stop a running server"
+rm -f "$T/state/STOP"
+# C: knob turned off DURING the probe -> re-checked right before ld_start, never serves
+reset; conf 1; echo none > "$T/probe-mode"; run check; echo disable > "$T/probe-mode"; run check
+check '[ "$(runs)" = 0 ] && [ "$(mode)" = off ]' "knob flipped off mid-probe must not start dnsmasq (got $(mode))"
+# C: knob-off waits for an in-flight check (lock) instead of racing it, then stops
+reset; serve_now
+( exec 9>>"$RUN/check.lock"; flock 9; sleep 2 ) & holder=$!
+sleep 0.3; EXTRA="VALARK_LINK_DHCP_LOCK_WAIT=10" conf 0; t0=$(date +%s); run check; t1=$(date +%s)
+check '[ $((t1 - t0)) -ge 1 ] && ! alive && [ "$(mode)" = off ]' "knob-off must wait for the check lock, then stop"
+wait $holder 2>/dev/null
+# nit: confirmation probes at most CONFIRM_MAX_SECS apart
+reset; conf 1; echo none > "$T/probe-mode"
+echo "eth0:$(cat "$T/sys/eth0/carrier_changes"):1 $(( $(date +%s) - 1000 ))" > "$RUN/confirm"; run check
+check '[ "$(mode)" = probing ] && [ "$(runs)" = 0 ] && grep -q stale "$T/out"' "a first empty probe older than CONFIRM_MAX_SECS must restart confirmation"
+run check; check '[ "$(mode)" = serving ]' "a fresh second probe then serves"
+reset; EXTRA="VALARK_LINK_DHCP_CONFIRM_MAX_SECS=10" CONFIRM=20 conf 1; echo none > "$T/probe-mode"; run check
+check '[ "$(mode)" = error ]' "CONFIRM_MAX_SECS < CONFIRM_SECS must be a config error"
+# nit: /proc reads go through the privilege wrapper (hidepid)
+reset; serve_now; rm -f "$T/sudo.calls"; echo server > "$T/probe-mode"; run check
+check 'grep -q "^cat /proc/[0-9]*/cmdline" "$T/sudo.calls" && ! alive' "dnsmasq's cmdline must be read via the privilege wrapper"
+# nit: missing carrier_changes is logged once by the watcher
+reset; conf 1; echo server > "$T/probe-mode"; mv "$T/sys/eth0/carrier_changes" "$T/cc.bak"
+bash "$LD" watch > "$T/watch.out" 2>&1 & wpid=$!
+sleep 1.5; kill $wpid 2>/dev/null; wait $wpid 2>/dev/null; mv "$T/cc.bak" "$T/sys/eth0/carrier_changes"
+check '[ "$(grep -c "no carrier_changes counter" "$T/watch.out")" = 1 ]' "missing carrier_changes must be logged exactly once"
 
 # --- 21. wiring, docs, probe hardening --------------------------------------------------------
 check 'grep -q "lib/link-dhcp.sh\"" "$ROOT/scripts/loop.sh" && grep -q "bash \"\$sh\" ensure" "$ROOT/scripts/loop.sh" && grep -qE "^ *step \"2f\\..*ensure_link_dhcp" "$ROOT/scripts/loop.sh"' "loop.sh must run link-dhcp.sh ensure each cycle (step 2f)"

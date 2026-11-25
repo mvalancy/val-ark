@@ -155,7 +155,7 @@ real router:
    by packet type and source MAC, so a second Ark on the same link still counts as a
    server. A BOOTP reply without a DHCP message type also counts (fail closed). Serving
    starts only after **two** empty probes at least `VALARK_LINK_DHCP_CONFIRM_SECS` (30)
-   apart on the same link epoch. A link change or any answer in between restarts that.
+   and at most `VALARK_LINK_DHCP_CONFIRM_MAX_SECS` (300) apart on the same link epoch. A link change or any answer in between restarts that.
 2. **Serve on one interface.** It adds `10.254.77.1/24` (prefix: `VALARK_LINK_DHCP_NET`,
    which must be private and not already routed or addressed on another interface) and
    starts dnsmasq with `--conf-file=/dev/null --interface=<iface> --bind-interfaces
@@ -173,7 +173,9 @@ real router:
      our whole `/24`, `0.0.0.0`/`::` and anything that isn't an IP literal removed, so
      it can't forward to itself in a loop. If nothing usable is left (the Ark is
      offline, or only lists itself), it behaves like `local`. A `resolv.conf` change
-     while serving restarts dnsmasq with the new list.
+     while serving restarts dnsmasq with the new list. **Privacy:** in this mode the
+     laptop's lookups leave through the Ark's upstream resolvers (whoever the Ark uses
+     can see them), not through the laptop's own network.
    - `local` answers only the box's names and REFUSES everything else, which fails
      fast.
    - `off` hands out no DNS (`--port=0`); use `http://10.254.77.1/`.

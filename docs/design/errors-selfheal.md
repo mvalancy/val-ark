@@ -13,6 +13,11 @@ auto-fix, a one-tap repair in plain words.** Never a stack trace.
 
 ## The model: self-heal first → surface only what's left → always show what was healed
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/flow/heal-loop-dark.svg">
+  <img src="../img/flow/heal-loop-light.svg" width="100%" alt="Animated diagram: The self-healing loop. Every 30 minutes, and after a reboot, the Ark checks itself and fixes what it can.">
+</picture>
+
 1. **Fix it automatically** where the loop safely can (already happening).
 2. **Show what was healed**, calmly — self-healing you can't see doesn't build trust:
    *"Web server was down — restarted it automatically. Nothing to do."* *"Re-linked 3 files."*

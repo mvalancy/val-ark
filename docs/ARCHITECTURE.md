@@ -26,6 +26,14 @@ and `.env` config see the same doc's "Where data lives" section.
 
 ## Architecture Overview
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/system-dark.svg">
+  <img src="img/flow/system-light.svg" width="100%" alt="Animated diagram: How an Ark works, end to end. Fetch once from the internet, keep it healthy on one disk, share it on the LAN.">
+</picture>
+
+<details>
+<summary>The detailed component diagram</summary>
+
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
   'primaryColor': '#1a2230',
@@ -105,6 +113,8 @@ graph TB
     VERIFY -.-> STATE
 ```
 
+</details>
+
 ## Fill Priority Flow
 
 The Librarian fills the data root in curation order from **live** catalogs. There is
@@ -113,6 +123,14 @@ reserve (`max(VALARK_RESERVE_PCT%, VALARK_RESERVE_MIN_GB)`) and, if set, the
 `VALARK_MAX_GB` footprint cap (bounds Val Ark's own data on a shared disk;
 `VALARK_MODEL_MAX_GB` additionally skips oversized single models). See
 [LIBRARIAN.md](LIBRARIAN.md) for the full model.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/fill-dark.svg">
+  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Four passes, most important first, until the disk reaches its reserve.">
+</picture>
+
+<details>
+<summary>The detailed fill flow</summary>
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -151,10 +169,9 @@ flowchart TD
         D3["Big flagships by value<br/>full Wikipedia, large quants, ISOs"]
     end
 
-    P3 --> P4
-    subgraph P4["4. Evict for better"]
+    subgraph P4["Trade up (on request, not during fill)"]
         style P4 fill:#1a2230,stroke:#fb923c
-        D4["Disk full + better small item<br/>drop lowest value/byte<br/>never a sole category rep"]
+        D4["evict or a request that must fit the cap<br/>drop lowest value/byte, unpinned<br/>never a sole category rep"]
     end
 
     P1 --> DL{Headroom<br/>above reserve?}
@@ -165,6 +182,8 @@ flowchart TD
     DL -->|Yes| GET["download_one<br/>aria2 -x8 (curl fallback)<br/>resume, retry, size-verify,<br/>atomic rename, flock"]
     GET --> DONE
 ```
+
+</details>
 
 ## Self-Healing Loop
 
@@ -185,6 +204,14 @@ run repeatedly and concurrently with a standalone fill (the fill flock prevents
 double-downloading) and never aborts on a single failure. TLS certs persist under
 `~/.config/val-ark/tls` and the server re-bootstraps them on first boot, so HTTPS
 comes back automatically too (see [`ENCRYPTION.md`](ENCRYPTION.md)).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/heal-loop-dark.svg">
+  <img src="img/flow/heal-loop-light.svg" width="100%" alt="Animated diagram: The self-healing loop. Every 30 minutes, and after a reboot, the Ark checks itself and fixes what it can.">
+</picture>
+
+<details>
+<summary>The detailed loop diagram</summary>
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -216,13 +243,23 @@ flowchart TD
     SNAP --> DONE([cycle complete])
 ```
 
+</details>
+
 ## Mesh Topology
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/fleet-dark.svg">
+  <img src="img/flow/fleet-light.svg" width="100%" alt="Animated diagram: One Ark, many machines. Share one Ark across the LAN, or set up new ones from it, without the internet.">
+</picture>
 
 The data root is **NFS-exportable**: fleet nodes mount the single shared mirror and
 run GPU inference on served models over the network. Syncthing additionally offers
 opportunistic P2P replication to peers. `verify.sh fleet` SSHes to each host in
 `VALARK_FLEET` (set in `.env`), confirms it mounts the shared disk, and runs a real
 inference check. Nothing host-specific is committed — see `.env.example`.
+
+<details>
+<summary>The detailed mesh diagram</summary>
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -265,7 +302,14 @@ graph TB
     SYNC <-.->|"Syncthing P2P"| RT
 ```
 
+</details>
+
 ## Web Server
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/request-dark.svg">
+  <img src="img/flow/request-light.svg" width="100%" alt="Animated diagram: What happens when you tap Request. From one tap on any device to a file on the disk, with live progress on the way.">
+</picture>
 
 This is the **dynamic** way to serve an Ark. The **static** way needs no server: the
 pages written by `librarian.sh site` work from any file share. [SERVING.md](SERVING.md) compares
@@ -288,6 +332,9 @@ fronts the internal kiwix-serve, and `/app/<id>/` fronts each community service
 through this proxy, so the whole hub lives on one origin under the persistent Val Ark
 header. See [COMMUNITY.md](COMMUNITY.md) for the community/comms layer and its
 LAN-only, no-federation security model.
+
+<details>
+<summary>The detailed server diagram</summary>
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -319,6 +366,8 @@ sequenceDiagram
     server.js-->>Browser: SSE completion event
 ```
 
+</details>
+
 ## Content Serving
 
 On startup (and again whenever the loop heals it), `server.js` scans `content/zim/`
@@ -328,6 +377,9 @@ library. The web UI polls `/api/status`, sees kiwix is running, and shows a
 "Browse Wikipedia" banner linking to the offline encyclopedia. The ZIM
 catalog is fetched **live** from the Kiwix OPDS feed, so download dates are never
 stale.
+
+<details>
+<summary>The detailed content-serving diagram</summary>
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -359,6 +411,8 @@ sequenceDiagram
     kiwix-serve-->>server.js: article (HTML)
     server.js-->>Browser: article (HTML)
 ```
+
+</details>
 
 ## Platforms
 

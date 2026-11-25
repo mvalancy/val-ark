@@ -838,9 +838,31 @@ def tool_key(name):
         name = new
 
 
+# The build-from-source / install-instructions file write_install_hint drops in a platform
+# folder that has no upstream binary (tools/<platform>/<tool>/INSTALL.txt) — exactly that name.
+INSTALL_HINT = 'INSTALL.txt'
+
+
+def hint_only(s, e, plat, name):
+    """A tool's platform folder whose only content is its install hint -> the hint's file name.
+    Never when the walk ran out of budget (s.truncated): the rest of the folder may be unseen."""
+    # A truncated walk deliberately drops EVERY build-from-source label in the section (the safe side).
+    if s.truncated or (plat, name) in e.real:
+        return None
+    return e.hints.get((plat, name))
+
+
+def hint_platforms(s, e):
+    """(platforms with something to download, platforms that only carry the install hint)."""
+    built, hinted = [], []
+    for p in sorted(e.platforms):
+        (hinted if all(hint_only(s, e, p, n) for n in e.platforms[p]) else built).append(p)
+    return built, hinted
+
+
 class Entry:
     __slots__ = ('key', 'is_dir', 'bytes', 'files', 'mtime', 'top', 'pending_bytes', 'pending_files',
-                 'readme', 'license', 'names', 'platforms', 'formats')
+                 'readme', 'license', 'names', 'platforms', 'formats', 'hints', 'real')
 
     def __init__(self, key, is_dir):
         self.key, self.is_dir = key, is_dir
@@ -851,6 +873,8 @@ class Entry:
         self.names = set()      # small set of file names inside (README image lookup)
         self.platforms = {}     # tools: platform -> {real top-level name: (bytes, is_dir)}
         self.formats = set()    # model formats seen inside (.gguf / .onnx / .safetensors / config.json)
+        self.hints = {}         # tools: (platform, name) -> its install-hint file (write_install_hint)
+        self.real = set()       # tools: (platform, name) holding anything besides that hint
 
 
 class Section:
@@ -896,6 +920,11 @@ class Section:
             names = e.platforms.setdefault(plat, {})
             b, isdir = names.get(top, (0, False))
             names[top] = (b + size, isdir or rel.count('/') >= 2)
+            parts = rel.split('/')
+            if len(parts) == 3 and parts[2] == INSTALL_HINT:
+                e.hints[(plat, top)] = parts[2]
+            else:
+                e.real.add((plat, top))
         low = inner.lower()
         for ext in ('.gguf', '.onnx', '.safetensors'):
             if low.endswith(ext):
@@ -1293,9 +1322,16 @@ class Builder:
                 return f'{nice}: an offline archive ({size}) — open it in Kiwix (desktop, Android or kiwix-serve).'
             return f'Offline reading material: {title.replace("-", " ").replace("_", " ")} ({size}).'
         if s.name == 'tools':
-            plats = ', '.join(PLATFORMS.get(p, p) for p in sorted(e.platforms)) or 'the platforms mirrored here'
+            built, hinted = hint_platforms(s, e)
             blurb = self.cur.tool_scripts.get(e.key) or self.cur.tool_scripts.get(parts[-1])
-            return blurb or f'{title}: portable builds for {plats} ({size}), ready to copy and run offline.'
+            if blurb:
+                return blurb
+            src = ', '.join(PLATFORMS.get(p, p) for p in hinted)
+            if hinted and not built:
+                return f'{title}: build-from-source instructions (INSTALL.txt) for {src} ({size}).'
+            plats = ', '.join(PLATFORMS.get(p, p) for p in built) or 'the platforms mirrored here'
+            return (f'{title}: portable builds for {plats} ({size}), ready to copy and run offline.' +
+                    (f' {src}: build from source (INSTALL.txt).' if hinted else ''))
         if s.name == 'installers':
             cat = parts[0].replace('-', ' ')
             where = ' / '.join(p for p in parts[1:-1]) if len(parts) > 2 else ''
@@ -1403,7 +1439,9 @@ class Builder:
                 if p:
                     info['shots'].append(p)
         info['group'] = ''
-        info['chips'] += [PLATFORMS.get(p, p) for p in sorted(e.platforms)]
+        built, hinted = hint_platforms(s, e)
+        info['chips'] += [PLATFORMS.get(p, p) + (' (build from source)' if p in hinted else '')
+                          for p in sorted(e.platforms)]
 
     def d_installers(self, s, e, info, rcard, abs_dir):
         fn = e.key.rsplit('/', 1)[-1]
@@ -1588,7 +1626,12 @@ class Builder:
         if e.pending_files:
             facts.append(('Still queued', queued_text(e.pending_files, e.pending_bytes)))
         facts += info['facts']
-        facts.append(('Location', os.path.relpath(abs_t, self.root).replace(os.sep, '/')))
+        if sum(len(n) for n in e.platforms.values()) > 1:   # one card, several folders: list each
+            locs = [os.path.relpath(os.path.join(s.path, p_, n), self.root).replace(os.sep, '/')
+                    for p_, names in sorted(e.platforms.items()) for n in sorted(names)]
+            facts.append(('Location', ', '.join(locs)))
+        else:
+            facts.append(('Location', os.path.relpath(abs_t, self.root).replace(os.sep, '/')))
         facts_html = '<dl class="facts">' + ''.join(f'<dt>{esc(k)}</dt><dd>{esc(v)}</dd>' for k, v in facts) + '</dl>'
         links = []
         if e.files:
@@ -1603,6 +1646,11 @@ class Builder:
             for p_, names in sorted(e.platforms.items()):
                 for name, (b, isdir) in sorted(names.items()):
                     label = PLATFORMS.get(p_, p_) + ('' if len(names) == 1 else f' · {name}')
+                    hint = hint_only(s, e, p_, name)
+                    if hint:              # no binary for this platform: say so, link the instructions
+                        parts.append(f'<a href="{href(self.rel(os.path.join(s.path, p_, name, hint), d))}">'
+                                     f'{esc(label)}: build from source ({esc(hint)})</a> ')
+                        continue
                     parts.append(f'<a href="{href(self.rel(os.path.join(s.path, p_, name), d))}{"/" if isdir else ""}">'
                                  f'{esc(label)}</a><span class="muted">{human(b)}</span> ')
             plat = '<h3>Downloads by platform</h3><p class="plat">' + ''.join(parts) + '</p>'

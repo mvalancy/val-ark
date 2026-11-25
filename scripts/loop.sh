@@ -298,8 +298,9 @@ ui_smoke() {
 TAILSCALE_JSON="${STATE_DIR}/tailscale.json"
 TAILSCALE_STATE=""
 tailscale_check() {
-    local out
-    out=$(timeout 30 bash "${_DIR}/lib/tailscale-mode.sh" write "$TAILSCALE_JSON" 2>/dev/null)
+    local out to=()
+    command -v timeout >/dev/null 2>&1 && to=(timeout 30)   # no timeout(1) on stock macOS
+    out=$("${to[@]}" bash "${_DIR}/lib/tailscale-mode.sh" write "$TAILSCALE_JSON" 2>/dev/null)
     TAILSCALE_STATE=$(printf '%s' "$out" | grep -oE '"state":"[a-z]+"' | head -1 | cut -d'"' -f4)
     case "$TAILSCALE_STATE" in
         userspace) log "${RED}Tailscale is in userspace-networking mode${NC}: every tailnet peer reaches the web server as 127.0.0.1 (the Admin). Run tailscaled with a kernel TUN, or stop it on this box." ;;

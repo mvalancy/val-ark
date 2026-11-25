@@ -4597,6 +4597,9 @@ function computeComponents() {
     if (ts && ts.userspace) comps.push({ key: 'tailscale', icon: '🔓', label: 'Tailnet access', level: 'bad', state: 'Everyone is Admin',
         detail: 'Tailscale on this box runs in userspace-networking mode, so every device on your tailnet reaches Val Ark as if it were the box itself, and the box is always the Admin. Run tailscaled with a kernel TUN interface (drop --tun=userspace-networking), or stop Tailscale on this box.',
         fault: 'config', repair: null });
+    else if (ts && ts.state === 'unknown' && ts.evidence && ts.evidence.length) comps.push({ key: 'tailscale', icon: '🔒', label: 'Tailnet access', level: 'warn', state: 'Could not check',
+        detail: 'A Tailscale daemon is running that this box could not inspect (for example in a container). Make sure it uses a kernel TUN interface, not userspace networking, or every tailnet device would be the Admin.',
+        fault: 'config', repair: null });
 
     // 2) Storage.
     let diskPct = null;

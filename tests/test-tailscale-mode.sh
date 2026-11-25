@@ -14,6 +14,8 @@
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/tests/lib/ports.sh"
+. "$ROOT/tests/lib/require-cmd.sh"
+require_python3 "tailscale-mode"
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 DET="$ROOT/scripts/lib/tailscale-mode.sh"
@@ -25,26 +27,36 @@ trap_signals
 bash -n "$DET" && pass || fail "tailscale-mode.sh must be valid bash"
 
 # --- fixtures -----------------------------------------------------------------
-# fake_proc DIR ARG...  -> DIR/<pid>/cmdline holding ARG... NUL-separated (plus an
-# unrelated process so the scan has something to skip).
-fake_proc() {
-    local d="$1"; shift
-    mkdir -p "$d/1" "$d/4242"
-    printf '/sbin/init\0splash\0' > "$d/1/cmdline"
-    [ "$#" -gt 0 ] && printf '%s\0' "$@" > "$d/4242/cmdline"
-    return 0
+# A fake /proc: self/ns/net + self/cgroup describe "us" (the host netns by default),
+# and an unrelated process so the scan has something to skip.
+mk_proc() {  # DIR [SELF_CGROUP]
+    mkdir -p "$1/self/ns" "$1/1"
+    ln -sfn 'net:[4026531840]' "$1/self/ns/net"
+    printf '%s\n' "${2:-0::/user.slice/user-1000.slice/session-1.scope}" > "$1/self/cgroup"
+    printf '/sbin/init\0splash\0' > "$1/1/cmdline"
 }
+# add_daemon DIR PID NS CGROUP ARG...   NS/CGROUP "-" = unreadable (absent file)
+add_daemon() {
+    local d="$1/$2" ns="$3" cg="$4"; shift 4
+    mkdir -p "$d/ns"
+    printf '%s\0' "$@" > "$d/cmdline"
+    [ "$ns" = - ] || ln -sfn "$ns" "$d/ns/net"
+    [ "$cg" = - ] || printf '%s\n' "$cg" > "$d/cgroup"
+}
+HOSTNS='net:[4026531840]'; CTNS='net:[4026532999]'
+HOSTCG='0::/system.slice/tailscaled.service'
+DOCKERCG='0::/system.slice/docker-0123abcd.scope'
 # fake_net DIR IFACE...  -> DIR/<iface> entries
 fake_net() { local d="$1"; shift; mkdir -p "$d"; local i; for i in "$@"; do mkdir -p "$d/$i"; done; }
-# stub CLI that answers `status --json` with a given TUN flag (or fails)
-mk_stub() {  # $1=path $2=true|false|fail
+# stub CLI that answers `status --json` with a TUN flag + BackendState (or fails)
+mk_stub() {  # $1=path $2=true|false|fail [$3=BackendState]
     case "$2" in
         fail) printf '#!/bin/bash\necho "failed to connect to local tailscaled" >&2; exit 1\n' > "$1" ;;
         *) cat > "$1" <<EOF
 #!/bin/bash
 # Read-only stub: only "status --json" is answered; anything else is refused.
 [ "\$1" = status ] && [ "\$2" = --json ] || { echo "stub: refused \$*" >&2; exit 2; }
-printf '{\n  "Version": "1.0.0-stub",\n  "TUN": $2,\n  "BackendState": "Running"\n}\n'
+printf '{\n  "Version": "1.0.0-stub",\n  "TUN": $2,\n  "BackendState": "${3:-Running}"\n}\n'
 EOF
         ;;
     esac
@@ -53,18 +65,37 @@ EOF
 mk_stub "$T/ts-kernel" true
 mk_stub "$T/ts-user" false
 mk_stub "$T/ts-fail" fail
+mk_stub "$T/ts-stopped" false Stopped
 
-fake_proc "$T/p-none"
-fake_proc "$T/p-kernel" /usr/sbin/tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock
-fake_proc "$T/p-user"   /usr/sbin/tailscaled --tun=userspace-networking --socks5-server=localhost:1055
-fake_proc "$T/p-split"  tailscaled -tun userspace-networking
-fake_proc "$T/p-custom" /usr/sbin/tailscaled --tun=ts9
-fake_proc "$T/p-child"  /usr/sbin/tailscaled be-child ssh --tun=userspace-networking
+U=(/usr/sbin/tailscaled --tun=userspace-networking --socks5-server=localhost:1055)
+K=(/usr/sbin/tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock)
+mk_proc "$T/p-none"
+mk_proc "$T/p-kernel";  add_daemon "$T/p-kernel" 4242 "$HOSTNS" "$HOSTCG" "${K[@]}"
+mk_proc "$T/p-user";    add_daemon "$T/p-user" 4242 "$HOSTNS" "$HOSTCG" "${U[@]}"
+mk_proc "$T/p-split";   add_daemon "$T/p-split" 4242 "$HOSTNS" "$HOSTCG" tailscaled -tun userspace-networking
+mk_proc "$T/p-custom";  add_daemon "$T/p-custom" 4242 "$HOSTNS" "$HOSTCG" /usr/sbin/tailscaled --tun=ts9
+mk_proc "$T/p-child";   add_daemon "$T/p-child" 4242 "$HOSTNS" "$HOSTCG" /usr/sbin/tailscaled be-child ssh --tun=userspace-networking
+# host kernel daemon + a userspace container in its own netns (readable)
+mk_proc "$T/p-host-ct"; add_daemon "$T/p-host-ct" 4242 "$HOSTNS" "$HOSTCG" "${K[@]}"
+                        add_daemon "$T/p-host-ct" 5151 "$CTNS" "$DOCKERCG" tailscaled --tun=userspace-networking
+# the same, but the namespaces can't be read (the server isn't root): cgroup decides
+mk_proc "$T/p-host-ct2"; add_daemon "$T/p-host-ct2" 4242 - "$HOSTCG" "${K[@]}"
+                         add_daemon "$T/p-host-ct2" 5151 - "$DOCKERCG" tailscaled --tun=userspace-networking
+# container only, namespace unreadable -> unknown (a warning)
+mk_proc "$T/p-ct";      add_daemon "$T/p-ct" 5151 - "$DOCKERCG" tailscaled --tun=userspace-networking
+# container only, in another (readable) netns -> not ours
+mk_proc "$T/p-ctns";    add_daemon "$T/p-ctns" 5151 "$CTNS" "$DOCKERCG" tailscaled --tun=userspace-networking
+# a userspace daemon in another netns, not a container at all -> not flagged
+mk_proc "$T/p-otherns"; add_daemon "$T/p-otherns" 4242 "$CTNS" "$HOSTCG" "${U[@]}"
+# Val Ark itself runs in the same container as a userspace tailscaled -> flagged
+mk_proc "$T/p-samect" "$DOCKERCG"; add_daemon "$T/p-samect" 5151 - "$DOCKERCG" tailscaled --tun=userspace-networking
+# a control character in --tun=NAME must not reach the JSON
+mk_proc "$T/p-cntrl";   add_daemon "$T/p-cntrl" 4242 "$HOSTNS" "$HOSTCG" tailscaled "--tun=ts$(printf '\001\033')x"
 fake_net "$T/n-ts" lo eth0 tailscale0
 fake_net "$T/n-plain" lo eth0
 fake_net "$T/n-custom" lo eth0 ts9
 
-# det CMD PROC NET -> state
+# det CMD PROC NET -> JSON
 det() {
     VALARK_TAILSCALE_CMD="$1" VALARK_TAILSCALE_PROC="$2" VALARK_TAILSCALE_SYSNET="$3" bash "$DET" check 2>/dev/null
 }
@@ -91,12 +122,38 @@ J="$(det "$T/ts-fail" "$T/p-kernel" "$T/n-plain")"; expect "daemon running, no t
 echo "$J" | grep -q 'no tailscale0 interface' && pass || fail "interface evidence must be recorded ($J)"
 J="$(det none "$T/p-custom" "$T/n-custom")";    expect "custom --tun=ts9 present" kernel "$J"
 J="$(det none "$T/p-child" "$T/n-plain")";      expect "be-child helper alone is not a daemon" absent "$J"
-# The daemon's own word wins over a missing interface name we guessed.
+# The daemon's own word wins over a missing interface name we guessed...
 J="$(det "$T/ts-kernel" "$T/p-kernel" "$T/n-plain")"; expect "status TUN true beats a missing tailscale0" kernel "$J"
+# ...and over any argv (a container's userspace daemon shows up in host /proc).
+J="$(det "$T/ts-kernel" "$T/p-user" "$T/n-ts")"; expect "status TUN true beats a userspace argv" kernel "$J"
+# Only BackendState Running counts as running.
+J="$(det "$T/ts-stopped" "$T/p-user" "$T/n-plain")"; expect "BackendState Stopped is not running" absent "$J"
+echo "$J" | grep -q '"running":false' && pass || fail "a Stopped daemon must report running=false ($J)"
+# Containers on the same host (the official image defaults to userspace networking).
+J="$(det none "$T/p-host-ct" "$T/n-ts")";       expect "host kernel daemon + userspace container (own netns)" kernel "$J"
+J="$(det none "$T/p-host-ct2" "$T/n-ts")";      expect "host kernel daemon + userspace container (netns unreadable)" kernel "$J"
+J="$(det none "$T/p-ct" "$T/n-plain")";         expect "container-only daemon, netns unreadable" unknown "$J"
+echo "$J" | grep -q '"userspace":false' && echo "$J" | grep -q 'container' \
+    && pass || fail "a container we can't check must be unknown with evidence, never userspace ($J)"
+J="$(det none "$T/p-ctns" "$T/n-plain")";       expect "container-only daemon in its own netns" absent "$J"
+J="$(det none "$T/p-otherns" "$T/n-plain")";    expect "userspace daemon in another netns is not flagged" absent "$J"
+J="$(det none "$T/p-samect" "$T/n-plain")";     expect "userspace daemon in our own container" userspace "$J"
+# Control characters never reach the JSON.
+J="$(det none "$T/p-cntrl" "$T/n-plain")";      expect "odd --tun name with no interface" userspace "$J"
+printf '%s' "$J" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if all(c.isprintable() for e in d["evidence"] for c in e) else 1)' \
+    && pass || fail "evidence must be stripped of control characters ($J)"
 # Never a non-zero exit for a detection result; valid JSON every time.
 VALARK_TAILSCALE_CMD="$T/does-not-exist" VALARK_TAILSCALE_PROC="$T/nope" VALARK_TAILSCALE_SYSNET="$T/nope" \
     bash "$DET" check >"$T/o.json" 2>/dev/null && pass || fail "detector must exit 0 when its sources are missing"
 python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$T/o.json" && pass || fail "detector must print valid JSON"
+# Works without timeout(1) (stock macOS): a PATH with everything it needs but timeout.
+mkdir -p "$T/bin"
+for c in bash readlink cat tr sed grep awk date uname mkdir mv rm dirname head; do
+    p="$(command -v "$c")" && ln -sf "$p" "$T/bin/$c"
+done
+J="$(PATH="$T/bin" VALARK_TAILSCALE_CMD="$T/ts-user" VALARK_TAILSCALE_PROC="$T/p-none" VALARK_TAILSCALE_SYSNET="$T/n-plain" \
+    "$T/bin/bash" "$DET" check 2>/dev/null)"
+expect "no timeout(1) on PATH" userspace "$J"
 # write FILE: atomic, valid JSON on disk.
 mkdir -p "$T/w"
 VALARK_TAILSCALE_CMD="$T/ts-user" VALARK_TAILSCALE_PROC="$T/p-none" VALARK_TAILSCALE_SYSNET="$T/n-plain" \
@@ -132,7 +189,7 @@ python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d["ta
 
 # --- 3. server: critical notification + Health detail --------------------------
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
-if [ -z "$NODE" ]; then echo "SKIP: no node runtime (server checks)" >&2
+if [ -z "$NODE" ]; then if ci_is_set; then fail "server checks need node, missing under CI"; else echo "SKIP: no node runtime (server checks)" >&2; fi
 else
 mkdir -p "$T/content/zim" "$T/models"
 start_srv() {  # $1=state dir, rest = extra env assignments
@@ -173,6 +230,18 @@ printf '{"ts":"2026-11-01T00:00:00Z","state":"kernel","userspace":false,"running
 if start_srv "$T/s-kern"; then
     curl -s --max-time 6 "$B/api/status/notifications" | has_ts_item && fail "kernel mode must not raise the tailscale notification" || pass
 else fail "server (kernel seed) did not start"; fi
+stop_pids "$SRV_PID"; SRV_PID=""
+
+# 3b2. a container we couldn't check -> a warning, never the critical alarm
+mkdir -p "$T/s-unk"
+printf '{"ts":"2026-11-01T00:00:00Z","state":"unknown","userspace":false,"running":false,"evidence":["a tailscaled runs in a container whose network could not be checked"]}\n' > "$T/s-unk/tailscale.json"
+if start_srv "$T/s-unk"; then
+    N="$(curl -s --max-time 6 "$B/api/status/notifications")"
+    echo "$N" | has_ts_item && fail "unknown must not raise the critical tailscale notification" || pass
+    echo "$N" | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const it=JSON.parse(s).items||[];
+        const n=it.find(x=>x.id==="cond-tailscale-unknown"); process.exit(n&&n.severity==="warning"?0:1)})' \
+        && pass || fail "a container we couldn't check must raise a warning ($N)"
+else fail "server (unknown seed) did not start"; fi
 stop_pids "$SRV_PID"; SRV_PID=""
 
 # 3c. no state file (tailscale absent / never checked) -> no item, no error

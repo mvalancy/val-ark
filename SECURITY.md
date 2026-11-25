@@ -16,10 +16,11 @@ visitor would then look like the box itself, which is the Admin. Security model,
 are in [`docs/SECURITY-AUDIT.md`](docs/SECURITY-AUDIT.md); LAN HTTPS (the offline local CA) is described in
 [`docs/ENCRYPTION.md`](docs/ENCRYPTION.md).
 
-Tailscale in userspace-networking mode has the same effect (tailscaled connects onward from
-127.0.0.1, so every tailnet peer looks like the box). The box checks for it every loop cycle and
-at server startup (`scripts/lib/tailscale-mode.sh`, read-only) and raises a critical notification
-on the Health page until tailscaled runs with a kernel TUN interface or is stopped (#311).
+The box checks for Tailscale in userspace-networking mode (tailscaled connects onward from
+127.0.0.1, so every tailnet peer looks like the box) every loop cycle and at server startup
+(`scripts/lib/tailscale-mode.sh`, read-only) and raises a critical notification on the Health
+page until tailscaled runs with a kernel TUN interface or is stopped (#311). A tailscaled in a
+container on the same host is only a warning when its network namespace can't be checked.
 
 ## Reporting a vulnerability
 

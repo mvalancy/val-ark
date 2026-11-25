@@ -2018,6 +2018,13 @@ function getNotifications() {
                 'Fix: run tailscaled with a kernel TUN interface (drop --tun=userspace-networking; in a container give it /dev/net/tun and NET_ADMIN), or stop Tailscale on this box.' +
                 (ts.evidence.length ? ' Detected: ' + ts.evidence.join('; ') + '.' : ''),
         source: 'security' });
+    // A tailscaled the detector found but couldn't check (in a container whose network
+    // namespace it can't read): a warning to look, never the critical alarm.
+    else if (ts && ts.state === 'unknown' && ts.evidence.length) items.push({ id: 'cond-tailscale-unknown', ts: ts.ts || condTs(), severity: 'warning',
+        title: 'Could not check how Tailscale is set up',
+        detail: 'A Tailscale daemon is running that this box could not inspect (' + ts.evidence.join('; ') + '). ' +
+                'If it shares this box\'s network and runs in userspace-networking mode, every tailnet device would reach Val Ark as the Admin. Make sure it uses a kernel TUN interface.',
+        source: 'security' });
     // Disk almost full — same thresholds the Health page uses (>=97 act now, >=90 filling up).
     let diskPct = null;
     try { const d = getDiskStatus(); if (d && d.total) diskPct = d.used / d.total * 100; } catch (_) {}

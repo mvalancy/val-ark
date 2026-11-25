@@ -89,7 +89,9 @@ share the data disk and open the static `val-ark/index.html`. Both work offline;
 `scripts/loop.sh` keeps an offline mirror healthy without supervision: it ensures the
 disk is writable, repairs symlinks, keeps the web server and enabled community services
 up, mirrors its own source for LAN self-replication, optionally serves DHCP + DNS to a
-laptop plugged straight into the wired port ([below](#direct-connect-laptop-no-router)), refreshes the live catalog (content
+laptop plugged straight into the wired port ([below](#direct-connect-laptop-no-router)), checks that Tailscale isn't in
+userspace-networking mode (which would make every tailnet peer the Admin; a critical notification
+if it is, #311), refreshes the live catalog (content
 links self-heal — no stale dates), checks & repairs links, verifies integrity, re-fills
 pinned requests, tops up the fill, refreshes mirrored tools weekly (latest upstream
 versions), runs functional verification and a UI smoke, and sweeps uploads through the

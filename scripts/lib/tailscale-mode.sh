@@ -12,12 +12,23 @@
 # `tailscale status --json` (a query, never a change). Any error degrades to
 # "unknown" or "absent"; it never exits non-zero for a detection result.
 #
-# Signals, strongest first:
-#   1. `tailscale status --json` reports "TUN": false   (the daemon's own word)
-#   2. tailscaled's argv has --tun=userspace-networking (also -tun, and a split value)
-#   3. tailscaled is running but its interface (tailscale0, or the --tun=NAME it
-#      was given) is not in /sys/class/net (Linux only)
-# "kernel" needs the daemon to say TUN true, or the interface to exist.
+# Decision, in order:
+#   1. `tailscale status --json` answers with BackendState "Running": its "TUN"
+#      decides. true = kernel (whatever any argv says), false = userspace.
+#      A BackendState other than Running = not connected = absent.
+#   2. No answer from the CLI: every tailscaled in /proc (be-child helpers skipped)
+#      is classified:
+#        - its /proc/<pid>/ns/net differs from /proc/self/ns/net (both readable):
+#          another network namespace (a container with its own network), so its
+#          127.0.0.1 isn't ours: skipped;
+#        - namespace unreadable and /proc/<pid>/cgroup names docker, containerd,
+#          kubepods, libpod or lxc (and isn't our own cgroup): a container we can't
+#          check -> "unknown" with evidence (a warning, never critical);
+#        - otherwise a local daemon: --tun=userspace-networking in its argv, or no
+#          tailscale0 / --tun=NAME interface in /sys/class/net (Linux) -> userspace;
+#          the interface present -> kernel.
+#      Any local userspace daemon wins; then kernel; then a container we couldn't
+#      check (unknown); then nothing (absent).
 #
 # Output (one JSON object):
 #   {"ts":"…","state":"absent|kernel|userspace|unknown","userspace":true|false,
@@ -26,7 +37,8 @@
 # Test seams (all optional):
 #   VALARK_TAILSCALE_CMD     the tailscale CLI to query (a stub in tests);
 #                            "none" = behave as if it isn't installed
-#   VALARK_TAILSCALE_PROC    stands in for /proc       (fixture dir of <pid>/cmdline)
+#   VALARK_TAILSCALE_PROC    stands in for /proc (fixture: <pid>/cmdline, <pid>/ns/net
+#                            symlink, <pid>/cgroup, self/ns/net, self/cgroup)
 #   VALARK_TAILSCALE_SYSNET  stands in for /sys/class/net (fixture dir of iface names)
 #
 # Usage:
@@ -37,6 +49,7 @@ set -u
 
 PROC="${VALARK_TAILSCALE_PROC:-/proc}"
 SYSNET="${VALARK_TAILSCALE_SYSNET:-/sys/class/net}"
+CONTAINER_RE='docker|containerd|kubepods|libpod|lxc'
 
 ts_cli() {
     local c="${VALARK_TAILSCALE_CMD:-}"
@@ -46,27 +59,10 @@ ts_cli() {
     [ -n "$c" ] && printf '%s' "$c"
 }
 
-# tailscaled's argv, one arg per line (the main daemon, not its be-child helpers).
-# Prints nothing when no tailscaled is running. Reads cmdline files directly, so
-# no `pgrep -f` pattern can match its own argv (see gotchas.md, tailscale-ssh).
-daemon_argv() {
-    local f args a0
-    if [ -d "$PROC" ]; then
-        for f in "$PROC"/[0-9]*/cmdline; do
-            [ -r "$f" ] || continue
-            # argv[0] with a bash builtin (no fork per process); only a match is parsed.
-            a0=""; IFS= read -r -d '' a0 < "$f" 2>/dev/null
-            case "${a0##*/}" in
-                tailscaled) ;;
-                *) continue ;;
-            esac
-            args="$(tr '\0' '\n' < "$f" 2>/dev/null)" || continue
-            printf '%s\n' "$args" | sed -n 2p | grep -qx 'be-child' && continue
-            printf '%s\n' "$args"
-            return 0
-        done
-    fi
-    return 0
+# run with a time limit when `timeout` exists (it doesn't on stock macOS).
+with_timeout() {  # SECS CMD...
+    local s="$1"; shift
+    if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi
 }
 
 # The --tun value from an argv (one arg per line); empty when not given.
@@ -78,48 +74,97 @@ tun_arg() {
     '
 }
 
-detect() {
-    local running=false state=unknown evidence=() argv tun="" cli st="" tunflag=""
-    argv="$(daemon_argv)"
-    if [ -n "$argv" ]; then
-        running=true
-        tun="$(printf '%s\n' "$argv" | tun_arg)"
-    fi
+# Can we look at interfaces? Linux sysfs, or a test fixture.
+sysnet_ok() {
+    [ -d "$SYSNET" ] || return 1
+    [ -n "${VALARK_TAILSCALE_SYSNET:-}" ] && return 0
+    [ "$(uname -s 2>/dev/null)" = Linux ]
+}
 
+EVIDENCE=()
+LOCAL_USER=0; LOCAL_KERNEL=0; LOCAL_SEEN=0; CONTAINER_SEEN=0
+
+# Classify every tailscaled in $PROC (see the header). Reads cmdline files directly,
+# so no `pgrep -f` pattern can match its own argv (gotchas.md, tailscale-ssh).
+scan_daemons() {
+    local f d pid a0 args tun ifname ns_self ns_pid cg_self cg_pid
+    [ -d "$PROC" ] || return 0
+    ns_self="$(readlink "$PROC/self/ns/net" 2>/dev/null)" || ns_self=""
+    cg_self="$(cat "$PROC/self/cgroup" 2>/dev/null)" || cg_self=""
+    for f in "$PROC"/[0-9]*/cmdline; do
+        [ -r "$f" ] || continue
+        # argv[0] with a bash builtin (no fork per process); only a match is parsed.
+        a0=""; IFS= read -r -d '' a0 < "$f" 2>/dev/null
+        case "${a0##*/}" in tailscaled) ;; *) continue ;; esac
+        args="$(tr '\0' '\n' < "$f" 2>/dev/null)" || continue
+        printf '%s\n' "$args" | sed -n 2p | grep -qx 'be-child' && continue
+        d="${f%/cmdline}"; pid="${d##*/}"
+
+        ns_pid="$(readlink "$d/ns/net" 2>/dev/null)" || ns_pid=""
+        if [ -n "$ns_self" ] && [ -n "$ns_pid" ]; then
+            [ "$ns_pid" = "$ns_self" ] || continue          # its own network: not our 127.0.0.1
+        else
+            cg_pid="$(cat "$d/cgroup" 2>/dev/null)" || cg_pid=""
+            if printf '%s' "$cg_pid" | grep -qE "$CONTAINER_RE" && [ "$cg_pid" != "$cg_self" ]; then
+                CONTAINER_SEEN=1; continue
+            fi
+        fi
+
+        LOCAL_SEEN=1
+        tun="$(printf '%s\n' "$args" | tun_arg)"
+        if [ "$tun" = "userspace-networking" ]; then
+            LOCAL_USER=1; EVIDENCE+=("tailscaled (pid ${pid}) was started with --tun=userspace-networking")
+            continue
+        fi
+        ifname="${tun:-tailscale0}"
+        if sysnet_ok; then
+            case "$ifname" in */*|.|..) ifname="tailscale0" ;; esac
+            if [ -e "$SYSNET/$ifname" ]; then LOCAL_KERNEL=1
+            else LOCAL_USER=1; EVIDENCE+=("tailscaled (pid ${pid}) is running but there is no ${ifname} interface"); fi
+        fi
+    done
+    return 0
+}
+
+detect() {
+    local running=false state="" cli st="" tunflag="" backend=""
     if cli="$(ts_cli)"; then
-        # A read-only query. timeout keeps a wedged daemon from stalling the loop.
-        st="$(timeout 8 "$cli" status --json 2>/dev/null)" || st=""
+        # A read-only query; the time limit keeps a wedged daemon from stalling the loop.
+        st="$(with_timeout 8 "$cli" status --json 2>/dev/null)" || st=""
         if [ -n "$st" ]; then
+            backend="$(printf '%s' "$st" | grep -oE '"BackendState"[[:space:]]*:[[:space:]]*"[A-Za-z]*"' | head -1 | sed -E 's/.*"([A-Za-z]*)"$/\1/')"
             if printf '%s' "$st" | grep -qE '"TUN"[[:space:]]*:[[:space:]]*false'; then tunflag=false
             elif printf '%s' "$st" | grep -qE '"TUN"[[:space:]]*:[[:space:]]*true'; then tunflag=true
             fi
-            # A status answer means a daemon is there, even if /proc hid it from us.
-            printf '%s' "$st" | grep -qE '"BackendState"' && running=true
         fi
     fi
 
-    if [ "$running" != true ]; then
-        state=absent
-    else
-        [ "$tunflag" = false ] && evidence+=("tailscale status reports no TUN interface")
-        [ "$tun" = "userspace-networking" ] && evidence+=("tailscaled was started with --tun=userspace-networking")
-        local ifname="${tun:-tailscale0}" ifstate=""
-        if [ "$ifname" != "userspace-networking" ] && [ -d "$SYSNET" ] && [ "$(uname -s 2>/dev/null)" = Linux -o -n "${VALARK_TAILSCALE_SYSNET:-}" ]; then
-            if [ -e "$SYSNET/$ifname" ]; then ifstate=present; else ifstate=missing; fi
+    if [ "$backend" = Running ]; then
+        running=true
+        if [ "$tunflag" = true ]; then state=kernel
+        elif [ "$tunflag" = false ]; then state=userspace; EVIDENCE+=("tailscale status reports no TUN interface")
         fi
-        if [ "${#evidence[@]}" -gt 0 ]; then
-            state=userspace
-        elif [ "$tunflag" = true ] || [ "$ifstate" = present ]; then
-            state=kernel
-        elif [ "$ifstate" = missing ]; then
-            state=userspace
-            evidence+=("tailscaled is running but there is no ${ifname} interface")
+    elif [ -n "$backend" ]; then
+        state=absent       # the daemon answered, but it isn't connected to a tailnet
+    fi
+
+    if [ -z "$state" ]; then
+        scan_daemons
+        [ "$LOCAL_SEEN" = 1 ] && running=true
+        if [ "$LOCAL_USER" = 1 ]; then state=userspace
+        elif [ "$LOCAL_KERNEL" = 1 ]; then state=kernel
+        elif [ "$LOCAL_SEEN" = 1 ]; then state=unknown
+        elif [ "$CONTAINER_SEEN" = 1 ]; then
+            state=unknown
+            EVIDENCE+=("a tailscaled runs in a container whose network could not be checked")
+        elif [ "$running" = true ]; then state=unknown
+        else state=absent
         fi
     fi
 
     local ev="" e first=1
-    for e in "${evidence[@]+"${evidence[@]}"}"; do
-        e=${e//\\/\\\\}; e=${e//\"/\\\"}
+    for e in "${EVIDENCE[@]+"${EVIDENCE[@]}"}"; do
+        e=${e//[[:cntrl:]]/}; e=${e//\\/\\\\}; e=${e//\"/\\\"}
         [ "$first" = 1 ] && first=0 || ev="${ev},"
         ev="${ev}\"${e}\""
     done

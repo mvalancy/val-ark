@@ -185,6 +185,7 @@ const ok = [
 ];
 process.exit(ok.every(Boolean) ? 0 : (console.error(ok), 1));
 ' "$ROOT/scripts/server.js" && pass || fail "tailnet (tailscale0/utun) and on-link IPv6 detection (#300)"
+stop_pids "$SRV_PID"; SRV_PID=""   # §12's LAN server; don't leave it running
 if start_open VALARK_TEST_FORCE_REMOTE=1; then
     for p in content/%2e./docs/ content/.%2e/docs/ content/../docs/ kiwix/a/..%5cb kiwix/a/%5c%2e%2e%5cb kiwix/a/%2e%2e%5cb; do
         c=$(gcode --path-as-is "$B/$p"); [ "$c" = "404" ] && pass || fail "a '..' segment behind encoded dots (/$p) must be 404 (got $c)"

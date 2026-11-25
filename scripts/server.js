@@ -985,7 +985,11 @@ function sameOriginPost(req) {
         if (origin === 'null') return false;
         try {
             // URL() can't parse an IPv6 zone id ([fe80::1%eth0]); drop it on both sides first.
+            // Zones must match when both sides carry one (fe80::1%eth0 is not fe80::1%wlan0).
+            const zoneOf = v => { const m = String(v).match(/%(?:25)?([0-9a-z]+)\]/i); return m ? m[1].toLowerCase() : ''; };
             const unzone = v => String(v).replace(/%(25)?[0-9a-z]+\]/i, ']');
+            const zo = zoneOf(origin), zh = zoneOf(req.headers.host || '');
+            if (zo && zh && zo !== zh) return false;
             const o = new URL(unzone(origin)), h = new URL(scheme + '//' + unzone(req.headers.host || ''));
             return o.protocol === scheme && o.host === h.host;   // URL() drops default ports, canonicalizes IPv6
         } catch (_) { return false; }
@@ -1011,8 +1015,13 @@ function hostAllowed(req) {
     if (/^\[.*\]$/.test(name) || /^\d{1,3}(\.\d{1,3}){3}$/.test(name)) return true;   // IP literal
     if (name === 'localhost' || !name.includes('.')) return true;
     if (/\.(local|lan|home|home\.arpa|internal|localdomain|ts\.net|fritz\.box)$/.test(name)) return true;
-    const tls = String(process.env.VALARK_TLS_DOMAIN || 'valark.lan').trim().toLowerCase();
-    if (name === tls || name.endsWith('.' + tls)) return true;   // the local CA's cert covers *.<tls>
+    const tls = String(process.env.VALARK_TLS_DOMAIN || 'valark.lan').trim().toLowerCase().replace(/^\.+|\.+$/g, '');
+    if (tls.includes('.') && name === tls) return true;
+    // One label under the TLS domain, as the local CA's *.<tls> cert covers, and only when the
+    // TLS domain itself is a private name: a real domain (or a public suffix) is never trusted
+    // wholesale, since anyone controlling one of its subdomains' DNS could rebind it here.
+    if (/\.(local|lan|home|home\.arpa|internal|localdomain)$/.test(tls) && name.endsWith('.' + tls)
+        && /^[a-z0-9-]+$/.test(name.slice(0, -tls.length - 1))) return true;
     const extra = [require('os').hostname(), ...String(process.env.VALARK_ALLOWED_HOSTS || '').split(',')]
         .map(x => String(x).trim().toLowerCase()).filter(Boolean);
     return extra.includes(name);

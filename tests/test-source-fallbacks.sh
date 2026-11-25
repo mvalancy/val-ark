@@ -17,7 +17,7 @@ PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
-command -v python3 >/dev/null 2>&1 || { echo "SKIP: no python3" >&2; exit 0; }
+. "$ROOT/tests/lib/require-python3.sh"; require_python3 "source-fallbacks"
 . "$ROOT/tests/lib/ports.sh"
 T="$(mktemp -d)"; SRV_PID=""
 trap 'stop_pids $SRV_PID; rm -rf "${T:?}"' EXIT; trap_signals

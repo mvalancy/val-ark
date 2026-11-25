@@ -24,7 +24,7 @@ pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 SH="$ROOT/scripts/tools/cad-agent.sh"
 OCI="$ROOT/scripts/lib/oci_pull.py"
-command -v python3 >/dev/null 2>&1 || { echo "SKIP: no python3" >&2; exit 0; }
+. "$ROOT/tests/lib/require-python3.sh"; require_python3 "cad-agent"
 
 T="$(mktemp -d)"; REG_PID=""
 trap 'rm -rf "${T:?}"; [ -n "$REG_PID" ] && kill "$REG_PID" 2>/dev/null' EXIT

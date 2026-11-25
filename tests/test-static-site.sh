@@ -22,7 +22,7 @@ pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 check() { if eval "$2"; then pass; else fail "$1"; fi; }
 PY="$ROOT/scripts/lib/static_site.py"
-command -v python3 >/dev/null 2>&1 || { echo "SKIP: no python3" >&2; exit 0; }
+. "$ROOT/tests/lib/require-python3.sh"; require_python3 "static-site"
 
 T="$(mktemp -d)"
 trap 'rm -rf "${T:?}"' EXIT

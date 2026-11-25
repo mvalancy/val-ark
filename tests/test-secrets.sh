@@ -11,9 +11,8 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "SKIP: python3 not found — secret scan needs it (CI has python3)"
-    exit 0
-fi
+# Skips locally without python3; fails under CI so the gate can't switch itself off (#255).
+. "${SCRIPT_DIR}/lib/require-python3.sh"
+require_python3 "secret scan"
 
 python3 "${SCRIPT_DIR}/lib/secret_scan.py" "${PROJECT_ROOT}"

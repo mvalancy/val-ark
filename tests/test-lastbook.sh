@@ -45,7 +45,7 @@ check() { if eval "$2"; then pass; else fail "$1"; fi; }
 PY="$ROOT/scripts/lib/lastbook_mirror.py"
 SH="$ROOT/scripts/tools/lastbook.sh"
 FIX="$ROOT/tests/fixtures/lastbook"
-command -v python3 >/dev/null 2>&1 || { echo "SKIP: no python3" >&2; exit 0; }
+. "$ROOT/tests/lib/require-python3.sh"; require_python3 "lastbook"
 
 . "$ROOT/tests/lib/ports.sh"
 T="$(mktemp -d)"; SRV_PID=""; NPID=""

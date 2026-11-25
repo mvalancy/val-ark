@@ -11,11 +11,8 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 
-if ! command -v python3 >/dev/null 2>&1; then
-    # Match the suite's degrade-gracefully posture (cf. run-all.sh node fallback):
-    # skip locally without python3, but CI always has it, so the gate holds there.
-    echo "SKIP: python3 not found — internal-link check needs it (CI has python3)"
-    exit 0
-fi
+# Skips locally without python3; fails under CI so the gate can't switch itself off (#255).
+. "${SCRIPT_DIR}/lib/require-python3.sh"
+require_python3 "internal-link check"
 
 python3 "${SCRIPT_DIR}/lib/md_link_check.py" "${PROJECT_ROOT}"

@@ -90,6 +90,9 @@ c=$(gcode -b "$T/cj" "$B/api/status/disk"); [ "$c" = "200" ] && pass || fail "au
 for p in content models tools sources assets docs; do
     [ "$(gcode "$B/$p/")" = "401" ] && pass || fail "unauthed /$p/ must be 401 (data-tree read-wall)"
 done
+for p in %2fcontent/ %2Fdocs/ ./docs/; do   # #297: no encoded / doubled slash or dot-segment bypass
+    [ "$(gcode "$B/$p")" = "401" ] && pass || fail "unauthed /$p must be 401 (normalized before the read-wall)"
+done
 c=$(gcode -b "$T/cj" "$B/content/"); [ "$c" != "401" ] && pass || fail "authed data-tree read must be allowed (got $c)"
 # the UI shell + its assets stay open so the login wall can render
 [ "$(gcode "$B/styles.css")" = "200" ] && pass || fail "/styles.css must stay open for the wall"
@@ -123,9 +126,15 @@ start_open() {   # $1 = extra env assignment (or empty)
     return 1
 }
 if start_open VALARK_TEST_FORCE_PUBLIC=1; then
-    for p in api/status/disk api/catalog/content api/packages content/ models/ kiwix/; do
+    for p in api/status/disk api/catalog/content api/packages api/archive/content/x api/downloads/stream \
+             content/ models/ tools/ sources/ docs/ DOCS/ kiwix/ app/chat/ \
+             %2fdocs/ %2Fcontent/ ./docs/ api/status/disk/; do
         c=$(gcode "$B/$p"); [ "$c" = "403" ] && pass || fail "Open mode: public peer reading /$p must be 403 (got $c)"
     done
+    c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -I "$B/docs/"); [ "$c" = "403" ] && pass || fail "Open mode: public HEAD /docs/ must be 403 (got $c)"
+    # "//docs/…" is read as a protocol-relative URL (host "docs"), so it serves the shell: no doc leaks
+    curl -s "$B//docs/ARCHITECTURE.md" | grep -q 'Val Ark - Architecture' && fail "public //docs/ must not leak a doc" || pass
+    curl -s "$B/api/auth/status" | grep -q '"localOnly":true' && pass || fail "auth/status must tell a public peer localOnly:true (UI wall)"
     for p in "" api/health api/auth/status styles.css; do
         c=$(gcode "$B/$p"); [ "$c" = "200" ] && pass || fail "Open mode: /$p must stay reachable for a public peer (got $c)"
     done
@@ -136,6 +145,7 @@ fi
 stop_pids "$SRV_PID"; SRV_PID=""
 if start_open VALARK_TEST_FORCE_REMOTE=1; then
     c=$(gcode "$B/api/status/disk"); [ "$c" = "200" ] && pass || fail "Open mode: a LAN peer can still read (got $c)"
+    curl -s "$B/api/auth/status" | grep -q '"localOnly":false' && pass || fail "auth/status must tell a LAN peer localOnly:false"
 else
     fail "open-mode server (LAN peer) did not start"
 fi

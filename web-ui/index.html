@@ -7629,6 +7629,16 @@ function isNeedsAuth(resp, data) { return resp && resp.status === 401 && data &&
 
 // Read-wall: on a Passworded/Accounts box, an un-authed LAN visitor sees a full-page
 // sign-in wall instead of the library (the server also 401s the content endpoints).
+function renderLocalOnlyWall() {
+    const app = document.getElementById('app-root'); if (!app) return;
+    app.innerHTML = `${_SETUP_CSS}<div class="setup-wrap"><div class="setup-card" id="local-only-card">
+        <div class="setup-brand"><span class="setup-logo">&#x259A;</span> Val Ark</div>
+        <div class="setup-stepbody">
+            <h1>Only on the local network</h1>
+            <p class="setup-lead">This Val Ark shares its library with devices on its own network (or its tailnet). Connect to that network and open this page again.</p>
+        </div>
+    </div></div>`;
+}
 function renderAccessWall() {
     const app = document.getElementById('app-root'); if (!app) return;
     const mode = (_authState && _authState.useMode) || 'passworded';
@@ -7660,6 +7670,7 @@ async function checkAccess() {
     if (!_authState) await refreshAuthState();
     const s = _authState;
     if (!s) return true;   // static preview / no server → never wall
+    if (s.localOnly) { renderLocalOnlyWall(); return false; }   // not on this network (#297)
     const gated = (s.useMode === 'passworded' || s.useMode === 'accounts') && !s.authed && !s.trusted;
     if (gated) { renderAccessWall(); return false; }
     return true;

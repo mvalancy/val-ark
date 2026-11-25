@@ -1028,8 +1028,8 @@ function isLocalhost(req) {
     if (addr === '127.0.0.1' || addr === '::1') return true;
     // IPv6 localhost
     if (addr === '::ffff:127.0.0.1') return true;
-    // Socket file (always local)
-    if (!addr) return true;
+    // No address: the server only listens on TCP, and Node reports no address once a
+    // socket is gone, so this is NOT a local peer (it used to count as admin).
     return false;
 }
 
@@ -1058,7 +1058,8 @@ function isSecureReq(req) {
 
 // Read-wall: content/data paths that reveal what's on the box. The UI shell, auth,
 // setup, health and the CA are NOT gated (so the login wall can render + you can sign
-// in). Gated paths are refused for un-authed LAN visitors in Passworded/Accounts mode.
+// in). Gated paths are refused for un-authed LAN visitors in Passworded/Accounts mode,
+// and for any peer that isn't LAN, tailnet or localhost in every mode (#297).
 function isReadGated(urlPath) {
     if (urlPath.startsWith('/api/auth/') || urlPath.startsWith('/api/setup/')) return false;
     if (urlPath === '/api/health' || urlPath === '/api/status/tls') return false;
@@ -1137,7 +1138,7 @@ function isLanOrTailnet(req) {
     if (process.env.VALARK_TEST_FORCE_PUBLIC === '1') return false;
     if (isLocalhost(req)) return true;
     const a = clientIp(req);
-    if (!a) return true;                       // unix socket
+    if (!a) return false;                      // no address (socket gone): not local
     const m = a.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
     if (m) {
         const o = m.slice(1, 5).map(Number);
@@ -1146,7 +1147,13 @@ function isLanOrTailnet(req) {
         if (o[0] === 10) return true;                                  // 10.0.0.0/8
         if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true;     // 172.16.0.0/12
         if (o[0] === 192 && o[1] === 168) return true;                 // 192.168.0.0/16
-        if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return true;    // 100.64.0.0/10 CGNAT (tailnet)
+        // 100.64.0.0/10 is the tailnet only when the request arrived on the box's own
+        // tailnet address; on a carrier-CGNAT uplink the same range is other subscribers.
+        if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) {
+            const la = (req.socket?.localAddress || '').replace(/^::ffff:/, '');
+            const lm = la.match(/^100\.(\d+)\./);
+            return !!(lm && Number(lm[1]) >= 64 && Number(lm[1]) <= 127);
+        }
         if (o[0] === 169 && o[1] === 254) return true;                 // link-local
         return false;
     }
@@ -1278,7 +1285,7 @@ function handleAPI(req, res, urlPath) {
                 // Read-only: is an admin set, which Use Mode, is this caller the
                 // trusted box/localhost (`trusted`) and are they an authenticated
                 // admin right now (`authed` = localhost or a valid session).
-                return sendJSON(res, req, { ...auth.status(STATE_DIR), trusted: isLocalhost(req), authed: isAdmin(req) });
+                return sendJSON(res, req, { ...auth.status(STATE_DIR), trusted: isLocalhost(req), authed: isAdmin(req), localOnly: !isLanOrTailnet(req) });
             case '/api/setup/state': {
                 // First-boot state for the wizard. Never leaks the claim token; only
                 // whether one is needed (LAN) or bypassed (this box/localhost).
@@ -2905,7 +2912,13 @@ function handleRequest(req, res) {
     }
 
     const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
-    let urlPath = decodeURIComponent(parsedUrl.pathname);
+    let urlPath;
+    try { urlPath = decodeURIComponent(parsedUrl.pathname); } catch (_) { return send404(res); }
+    // One canonical path for every check and route below. Without this, an encoded or
+    // doubled slash or a dot segment (/%2fdocs, //docs, /./docs) slips past the
+    // read-wall's prefix match and is then normalized straight back into a gated tree
+    // by the file server (#297). '..' is already refused above.
+    urlPath = path.posix.normalize(urlPath);
 
     // The CA trust anchor must be fetchable over BOTH http and https (you can't
     // require trusted HTTPS to download the cert that establishes that trust).
@@ -2944,7 +2957,7 @@ function handleRequest(req, res) {
     // the LAN, the tailnet or the box itself can't read it (#297). Open mode means open to
     // people here, not to the internet. The shell, health, setup and auth stay reachable.
     if (isReadGated(urlPath) && !isLanOrTailnet(req)) {
-        return sendJSON(res, req, { error: 'This Val Ark shares its library only on the local network.' }, 403);
+        return sendJSON(res, req, { error: 'This Val Ark shares its library only on the local network.', localOnly: true }, 403);
     }
     if (isReadGated(urlPath) && !readAllowed(req)) {
         return sendJSON(res, req, { error: 'Sign in to view this Val Ark.', needsAuth: true }, 401);

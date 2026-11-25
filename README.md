@@ -17,7 +17,7 @@ healthy around the clock.
 
 | Software | Library |
 |---|---|
-| ![Software catalog](docs/screenshots/web-ui/software-page.png) | ![Wikipedia, StackExchange and more](docs/screenshots/web-ui/wikipedia-page.png) |
+| ![Software catalog](docs/screenshots/web-ui/software-page.png) | ![Wikipedia, StackExchange and more](docs/screenshots/web-ui/library-page.png) |
 | **Models** | **A tool's page** |
 | ![AI model families](docs/screenshots/web-ui/model-cards.png) | ![Tool detail](docs/screenshots/web-ui/tool-detail.png) |
 
@@ -26,7 +26,7 @@ healthy around the clock.
 - **Reference content:** Wikipedia, StackExchange, wikis, courses and survival guides (ZIM files
   read through Kiwix), chosen from the live Kiwix catalog. Also [Lastbook](https://lastbook.org),
   an offline survival library.
-- **Apps and tools:** 50+ apps for Linux (x86_64 and arm64), macOS and Windows, from Blender and
+- **Apps and tools** for Linux (x86_64 and arm64), macOS and Windows, from Blender and
   Inkscape to llama.cpp. See the [tools catalog](docs/TOOLS.md). Mirrors you can run by hand add
   a developer stack, offline APT repos and source archives
   ([details](docs/LIBRARIAN.md#standalone-mirrors-run-by-hand-not-part-of-fill--the-loop)).
@@ -37,6 +37,17 @@ healthy around the clock.
 
 The [Librarian](docs/LIBRARIAN.md) decides what fits: grid-down essentials first, then one of each
 kind, then the most value per byte, trading up as better items appear.
+
+## How it works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/flow/system-dark.svg">
+  <img src="docs/img/flow/system-light.svg" width="100%" alt="Animated diagram: How an Ark works, end to end. Fetch once from the internet, keep it healthy on one disk, share it on the LAN.">
+</picture>
+
+The Librarian fetches from live catalogs and plans what fits. The loop checks and repairs
+everything every 30 minutes. The disk is then shared two ways: a live web server, or static pages
+on any file share. [Architecture](docs/ARCHITECTURE.md) has the detail.
 
 ## Get started
 

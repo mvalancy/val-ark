@@ -228,7 +228,9 @@ ensure_services() {
 # was serving). Needs root/passwordless sudo + dnsmasq; fails soft otherwise.
 ensure_link_dhcp() {
     local sh="${_DIR}/lib/link-dhcp.sh" out
-    if [ "${VALARK_LINK_DHCP:-0}" != "1" ] && [ ! -s "${STATE_DIR}/link-dhcp/dnsmasq.pid" ]; then
+    # Fast path: off and nothing of ours running (runtime files live on tmpfs).
+    if [ "${VALARK_LINK_DHCP:-0}" != "1" ] && [ ! -s "${VALARK_LINK_DHCP_RUN:-/run/valark-link-dhcp}/dnsmasq.pid" ] \
+       && [ ! -s "${VALARK_LINK_DHCP_RUN:-/run/valark-link-dhcp}/watch.pid" ]; then
         log "link DHCP off (VALARK_LINK_DHCP=1 serves a direct-connect laptop)"; return 0
     fi
     # 8>&- : the watcher it spawns must not inherit loop.lock (see ensure_services).

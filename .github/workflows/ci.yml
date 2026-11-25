@@ -26,7 +26,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # Cheap, offline guards run FIRST (need only python3, preinstalled) so a
+      # Pin CPython 3.12 (with venv): the cad-agent wheels are cp312, and
+      # test-cad-agent.sh's verify_cad_agent case FAILS under CI without it (#315).
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      # Cheap, offline guards run FIRST (need only python3, pinned above) so a
       # broken doc link or a leaked host/secret fails in seconds — before the
       # multi-minute Playwright browser install. Re-run inside run-all.sh too,
       # so the HTML report still records them; the duplication is ~free. (#130)

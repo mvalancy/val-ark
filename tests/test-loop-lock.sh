@@ -160,7 +160,7 @@ kill "$DPID" 2>/dev/null
 SVCROOT="$T/svcroot"; mkdir -p "$SVCROOT/services"
 cat > "$SVCROOT/services/chat.sh" <<EOF
 #!/bin/bash
-[ "\$1" = "start" ] || exit 0
+if [ "\$1" != "start" ]; then exit 0; fi
 # spawn a detached, long-lived daemon that keeps whatever fds it inherits open
 setsid bash -c 'echo \$\$ > "$T/svc.pid"; exec sleep 30' </dev/null >/dev/null 2>&1 &
 disown 2>/dev/null || true

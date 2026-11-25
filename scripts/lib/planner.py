@@ -34,8 +34,11 @@ All), so at most one pack is ever planned: a later phase may UPGRADE the planned
 pack to a larger one (the smaller one's bytes are refunded), and a pack held and
 verified on disk satisfies every pack at most its size. Maps, the model and the
 installers need a pack (held or planned). Presence comes from the mirror's own
-records (.lastbook-verified.json); the fetch and every prune stay with the
-mirror, so these rows are never in the librarian's manifest or evicted.
+records (.lastbook-verified.json); a Lastbook row is charged (and emitted with)
+only the bytes it still has to fetch (held files 0, a .part credited). A phase-0
+essential pack (survival: Small) stays planned beside a later, larger pick. The
+fetch and every prune stay with the mirror, so these rows are never in the
+librarian's manifest or evicted.
 
 The same scoring also drives EVICTION (--evict-need BYTES): pick the lowest
 value-per-byte MANAGED items that are NOT the sole on-disk representative of
@@ -114,16 +117,66 @@ def lb_on_disk(root, rel, size=0):
     return not size or size == s["size"]
 
 
-def lb_held_top(root):
-    """Recorded bytes of the largest pack FILE held and verified (listed in this release or not)."""
-    best = 0
+_LB_FILEPACK = {}   # (root, packs/<name>) -> pack id, from this run's candidate rows (lb_prepare)
+
+
+def lb_part_bytes(root, rel, size):
+    """Bytes of a resumable <rel>.part (a regular file no larger than the listed size), else 0."""
+    p = os.path.join(root, rel + ".part")
+    try:
+        if os.path.islink(p) or not os.path.isfile(p):
+            return 0
+        n = os.path.getsize(p)
+    except OSError:
+        return 0
+    return n if 0 < n <= size else 0
+
+
+def lb_need(c):
+    """Bytes a Lastbook row still has to fetch: files held at their listed size cost 0, a
+    resumable .part is credited (#203 review: a Medium .part must not be stranded)."""
+    need = 0
+    for rel, n in lb_parse(c)[2]:
+        if not lb_on_disk(c["dest"], rel, n):
+            need += n - lb_part_bytes(c["dest"], rel, n)
+    return need
+
+
+def lb_prepare(cands):
+    """Once per run: index each pack file of the candidate rows by its pack id, and charge every
+    Lastbook row only the bytes it still has to fetch (`total` keeps its full size)."""
+    for c in cands:
+        if c["source"] != "lastbook" or "total" in c:
+            continue
+        kind, _needs, files = lb_parse(c)
+        if kind == "pack":
+            pid = c["id"].rsplit(":", 1)[-1]
+            for rel, _n in files:
+                if rel.startswith("packs/"):
+                    _LB_FILEPACK[(c["dest"], rel)] = pid
+        c["total"] = c["bytes"]
+        c["bytes"] = lb_need(c)
+
+
+def lb_held_packs(root):
+    """{pack id: recorded bytes held and verified on disk} for the pack files under root, grouped
+    per pack (the id the mirror recorded, else the candidate row that lists the file, else the
+    file itself), listed in this release or not."""
+    out = {}
     for k, v in lb_stamps(root).items():
         if k.startswith("packs/") and "/" not in k[6:] and isinstance(v, dict) and lb_on_disk(root, k):
-            best = max(best, v["size"])
-    return best
+            pid = v.get("pack") or _LB_FILEPACK.get((root, k)) or ("file:" + k)
+            out[pid] = out.get(pid, 0) + v["size"]
+    return out
+
+
+def lb_held_top(root):
+    """Recorded bytes of the largest pack held and verified (per pack, not per file)."""
+    return max(lb_held_packs(root).values(), default=0)
 
 
 def lb_pack_bytes(c):
+    """Full size of a pack row's own pack files (not the base maps, not what is left to fetch)."""
     return sum(n for rel, n in lb_parse(c)[2] if rel.startswith("packs/"))
 
 
@@ -256,12 +309,17 @@ def lb_satisfied(c):
     if marker_present(c):
         return True
     if is_lb_pack(c):
-        top = lb_held_top(c["dest"])
-        return top > 0 and lb_pack_bytes(c) <= top
+        held = lb_held_packs(c["dest"])
+        top = max(held.values(), default=0)
+        # The held pack's OWN id is not satisfied by the ladder when its listed files are not all
+        # held (a re-release under a new name, a missing base map): that refresh costs bytes, so
+        # it is planned and charged like any other row (#203 review).
+        return top > 0 and lb_pack_bytes(c) <= top and c["id"].rsplit(":", 1)[-1] not in held
     return False
 
 
 def plan(cands, budget, small_max, essentials=(), flavours=None):
+    lb_prepare(list(cands) + list(flavours or []))
     present_cats = set()
     present_keys = set()
     pool = []
@@ -279,6 +337,9 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
     selected = []
     budget_left = budget
     lb_pack = {}      # Lastbook dir -> the ONE pack planned for it (packs nest: never two)
+    lb_ess = {}       # Lastbook dir -> a phase-0 ESSENTIAL pack (survival: Small first), kept even
+                      # when a later phase plans a larger one; the mirror's nested prune drops it
+                      # once the larger pack is verified. The only case with two packs planned.
 
     def lb_ok(c):
         """Lastbook: a map / the model / the installers need a pack, held or planned."""
@@ -295,16 +356,18 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
         cur = lb_pack.get(c["dest"])
         if cur is None:
             return True, 0
-        if cur["bytes"] >= c["bytes"]:
+        if lb_pack_bytes(cur) >= lb_pack_bytes(c):   # ranked by full size, not what is left to fetch
             return False, 0
+        if cur is lb_ess.get(c["dest"]):
+            return True, 0   # the essential stays planned (and charged) beside the upgrade
         return True, cur["bytes"]
 
-    def lb_commit(c):
+    def lb_commit(c, phase=None):
         nonlocal budget_left
         if not is_lb_pack(c):
             return
         cur = lb_pack.get(c["dest"])
-        if cur is not None:
+        if cur is not None and cur is not lb_ess.get(c["dest"]):
             for i, (x, _ph) in enumerate(selected):
                 if x is cur:
                     del selected[i]
@@ -312,6 +375,8 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
             planned_ids.discard(cur["id"])
             budget_left += cur["bytes"]
         lb_pack[c["dest"]] = c
+        if phase == 0:
+            lb_ess[c["dest"]] = c
     # Phase 0: essentials. `flavours` is the uncollapsed stream so the SMALLEST
     # variant (mini/nopic) of an essential ZIM is reachable. An entry already on
     # disk in any variant is satisfied. Picks do not reserve the content key, so
@@ -328,7 +393,7 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
             if c["id"] in planned_ids or c["bytes"] > budget_left + refund or lb_satisfied(c) \
                     or not ok or not lb_ok(c):
                 continue
-            lb_commit(c)
+            lb_commit(c, 0)
             planned_ids.add(c["id"])
             budget_left -= c["bytes"]
             selected.append((c, 0))
@@ -370,7 +435,10 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
             continue
         # Scouted rows (hf_scout.py, ids model:scout-*) never take a diversity slot: they
         # are guesses from popularity, and the smallest one would jump the curated work.
-        for c in sorted((x for x in by_cat[cat] if not is_scouted(x)), key=lambda x: x["bytes"]):
+        # The Lastbook model (17 GB) never takes a diversity slot either: it competes by value.
+        for c in sorted((x for x in by_cat[cat] if not is_scouted(x)
+                         and not (x["source"] == "lastbook" and lb_parse(x)[0] == "model")),
+                        key=lambda x: x["bytes"]):
             if take(c, 1):
                 break
 

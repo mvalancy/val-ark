@@ -233,34 +233,55 @@ catalog_installer_candidates() {
 # validation as a mirror run; one bad entry fails it) and prints one row per pack, state map (with
 # its address index), the model and the installers. The planner decides what fits next to the
 # ZIMs, models and installers; scripts/tools/lastbook.sh fetches the planned rows through the
-# mirror's own guards. Cached daily like the ZIM catalog: only a complete run replaces the cache,
-# a failed one is not retried for VALARK_LASTBOOK_RETRY (default 1 day), bounded by
-# VALARK_LASTBOOK_TIMEOUT. The planner is the default sizing; it is OFF (no rows: lastbook.sh
-# sizes itself as before) when the operator chose the selection: VALARK_LASTBOOK_PACK other than
-# auto (every = the server opt-in, or one pack), an explicit VALARK_LASTBOOK_BUDGET, the deprecated
-# VALARK_LASTBOOK_BUDGET_PCT, or VALARK_LASTBOOK_PLAN=0.
+# mirror's own guards. The cache holds the FULL offer (every map, the model, the installers;
+# header format=2, an older cache is stale) and is refreshed daily like the ZIM catalog: only a
+# complete run replaces it, a failed one is not retried for VALARK_LASTBOOK_RETRY (default 1 day),
+# bounded by VALARK_LASTBOOK_TIMEOUT. VALARK_LASTBOOK_MAPS / _ADDRESSES / _MODEL / _APPS are applied
+# when the rows are read (catalog_lastbook_candidates), so an opt-out takes effect at once, even
+# offline with a day-old cache.
 LASTBOOK_PY="${PROJECT_ROOT}/scripts/lib/lastbook_mirror.py"
 LASTBOOK_CACHE="${CATALOG_DIR}/lastbook.tsv"
 catalog_lastbook_dir() { echo "${VALARK_LASTBOOK_DIR:-${CONTENT_DIR:-${VALARK_HOME:-$PROJECT_ROOT}/content}/lastbook}"; }
-catalog_lastbook_planned() {
-    [ "${VALARK_LASTBOOK_PLAN:-1}" != "0" ] || return 1
-    case "$(printf '%s' "${VALARK_LASTBOOK_PACK:-auto}" | tr 'A-Z' 'a-z')" in auto) ;; *) return 1 ;; esac
-    [ -z "${VALARK_LASTBOOK_BUDGET:-}" ] && [ -z "${VALARK_LASTBOOK_BUDGET_PCT:-}" ]
+_lb_dev() {   # device id of PATH's nearest existing ancestor
+    local p="$1"
+    while [ -n "$p" ] && [ ! -e "$p" ] && [ "$p" != / ]; do p=$(dirname "$p"); done
+    stat -c %d "${p:-/}" 2>/dev/null
 }
+# Why the operator's own selection (lastbook.sh's share mode) applies, else nothing = the planner
+# sizes Lastbook. Share mode: VALARK_LASTBOOK_PACK other than auto (every = the server opt-in, or
+# one pack), an explicit VALARK_LASTBOOK_BUDGET, the deprecated VALARK_LASTBOOK_BUDGET_PCT,
+# VALARK_LASTBOOK_PLAN=0, VALARK_LASTBOOK_ADDRESSES other than follow|none (the planner folds an
+# address index into its state map, so `all` / a code list keeps the share mode rather than be
+# quietly reduced to follow), or a Lastbook dir on another filesystem than DATA_ROOT (the planner's
+# budget is DATA_ROOT's; there is no per-destination budget yet).
+catalog_lastbook_manual_reason() {
+    [ "${VALARK_LASTBOOK_PLAN:-1}" = "0" ] && { echo "VALARK_LASTBOOK_PLAN=0"; return; }
+    case "$(printf '%s' "${VALARK_LASTBOOK_PACK:-auto}" | tr 'A-Z' 'a-z')" in
+        auto) ;; *) echo "VALARK_LASTBOOK_PACK=${VALARK_LASTBOOK_PACK}"; return ;;
+    esac
+    [ -n "${VALARK_LASTBOOK_BUDGET:-}" ] && { echo "VALARK_LASTBOOK_BUDGET"; return; }
+    [ -n "${VALARK_LASTBOOK_BUDGET_PCT:-}" ] && { echo "VALARK_LASTBOOK_BUDGET_PCT (deprecated)"; return; }
+    case "$(printf '%s' "${VALARK_LASTBOOK_ADDRESSES:-follow}" | tr 'A-Z' 'a-z')" in
+        follow|none) ;; *) echo "VALARK_LASTBOOK_ADDRESSES=${VALARK_LASTBOOK_ADDRESSES}"; return ;;
+    esac
+    local a b; a=$(_lb_dev "$(catalog_lastbook_dir)"); b=$(_lb_dev "${DATA_ROOT:-${VAL_ARK_DATA:-/}}")
+    if [ -n "$a" ] && [ -n "$b" ] && [ "$a" != "$b" ]; then
+        echo "a Lastbook dir on another filesystem than the data root"; return
+    fi
+}
+catalog_lastbook_planned() { [ -z "$(catalog_lastbook_manual_reason)" ]; }
 catalog_refresh_lastbook() {
     catalog_lastbook_planned || return 0
     mkdir -p "$CATALOG_DIR" 2>/dev/null || true
     local now; now=$(date +%s)
-    if [ "$1" != "--force" ]; then
-        [ -s "$LASTBOOK_CACHE" ] && [ "$(_scout_age "$LASTBOOK_CACHE" "$now")" -lt "${ZIM_CACHE_TTL}" ] && return 0
+    if [ "$1" != "--force" ] && head -1 "$LASTBOOK_CACHE" 2>/dev/null | grep -q ' format=2 '; then
+        [ "$(_scout_age "$LASTBOOK_CACHE" "$now")" -lt "${ZIM_CACHE_TTL}" ] && return 0
         [ "$(_scout_age "${LASTBOOK_CACHE}.attempt" "$now")" -lt "${VALARK_LASTBOOK_RETRY:-86400}" ] && return 0
     fi
     local tmp="${LASTBOOK_CACHE}.tmp.$$" rc=0
     timeout "${VALARK_LASTBOOK_TIMEOUT:-300}" python3 "$LASTBOOK_PY" candidates --dest "$(catalog_lastbook_dir)" \
-        --maps "${VALARK_LASTBOOK_MAPS:-auto}" --addresses "${VALARK_LASTBOOK_ADDRESSES:-follow}" \
-        --model "${VALARK_LASTBOOK_MODEL:-auto}" --apps "${VALARK_LASTBOOK_APPS:-current}" \
-        > "$tmp" 2>"${LASTBOOK_CACHE}.err" || rc=$?
-    if [ "$rc" -eq 0 ] && grep -q '^# lastbook candidates' "$tmp" 2>/dev/null; then
+        --maps all --addresses follow --model auto --apps current > "$tmp" 2>"${LASTBOOK_CACHE}.err" || rc=$?
+    if [ "$rc" -eq 0 ] && head -1 "$tmp" 2>/dev/null | grep -q '^# lastbook candidates format=2 '; then
         mv -f "$tmp" "$LASTBOOK_CACHE"; rm -f "${LASTBOOK_CACHE}.attempt" 2>/dev/null
         return 0
     fi
@@ -269,14 +290,38 @@ catalog_refresh_lastbook() {
     return 1
 }
 # Rows from the cache, re-pointed at the CURRENT Lastbook dir (VALARK_LASTBOOK_DIR may have moved
-# since the cache was written) and weighted by the owner profile like every other bucket.
+# since the cache was written), filtered by the CURRENT VALARK_LASTBOOK_MAPS (none | auto | all |
+# CA,TX), _ADDRESSES (none strips the address index from each map row), _MODEL (no) and _APPS
+# (none), and weighted by the owner profile like every other bucket. A cache of another format is
+# ignored (it was written with an older selection baked in).
 catalog_lastbook_candidates() {
     catalog_lastbook_planned || return 0
-    [ -s "$LASTBOOK_CACHE" ] || return 0
+    head -1 "$LASTBOOK_CACHE" 2>/dev/null | grep -q '^# lastbook candidates format=2 ' || return 0
     awk -F'\t' -v OFS='\t' -v d="$(catalog_lastbook_dir)" \
-        -v wc="$(_valark_profile_weight content)" -v wm="$(_valark_profile_weight models)" '
+        -v wc="$(_valark_profile_weight content)" -v wm="$(_valark_profile_weight models)" \
+        -v maps="$(printf '%s' "${VALARK_LASTBOOK_MAPS:-auto}" | tr 'a-z' 'A-Z')" \
+        -v addr="$(printf '%s' "${VALARK_LASTBOOK_ADDRESSES:-follow}" | tr 'A-Z' 'a-z')" \
+        -v model="$(printf '%s' "${VALARK_LASTBOOK_MODEL:-auto}" | tr 'A-Z' 'a-z')" \
+        -v apps="$(printf '%s' "${VALARK_LASTBOOK_APPS:-current}" | tr 'A-Z' 'a-z')" '
+    BEGIN { n = split(maps, mm, ","); for (i = 1; i <= n; i++) { gsub(/ /, "", mm[i]); want[mm[i]] = 1 } }
     /^#/ {next}
     NF >= 9 && $6 == "lastbook" {
+        split($9, ex, "|"); kind = ex[1]
+        if (kind == "model" && model == "no") next
+        if (kind == "app" && apps == "none") next
+        if (kind == "map") {
+            code = $1; sub(/^lastbook:map:/, "", code); code = toupper(code)
+            if (maps == "NONE") next
+            if (maps != "AUTO" && maps != "ALL" && !(code in want)) next
+            if (addr == "none") {   # drop the address index: rebuild the file list and the size
+                nf = split(ex[3], fl, ","); keep = ""; tot = 0
+                for (i = 1; i <= nf; i++) {
+                    if (fl[i] ~ /^addresses\//) continue
+                    keep = keep (keep == "" ? "" : ",") fl[i]; m = split(fl[i], kv, "="); tot += kv[m]
+                }
+                $9 = ex[1] "|" ex[2] "|" keep; $5 = sprintf("%.0f", tot)
+            }
+        }
         w = ($2 == "models") ? wm : wc; $4 = int(($4 + 0) * (w + 0 > 0 ? w : 1)); $8 = d; print
     }' "$LASTBOOK_CACHE"
 }

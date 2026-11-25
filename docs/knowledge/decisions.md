@@ -238,24 +238,52 @@ later). See [README](README.md).
     left out (#230). `catalog.sh` caches these rows daily, points them at the current Lastbook
     dir and applies the profile weights. `planner.py` then places them with everything else.
   - *Nesting.* The planner plans at most one pack per Lastbook dir. A later phase may replace the
-    planned pack with a larger one (its bytes are refunded), and a pack held and verified at its
-    recorded size satisfies every pack no larger than it. Maps, the model and the installers
-    need a pack, held or planned. The survival profile lists `pack:small` and `app:*` in
-    `essentials.tsv` (new kind `lastbook`).
-  - *Fetch and prune stay in the mirror.* `librarian.sh fill` passes all the planned Lastbook rows
-    to `lastbook.sh --plan-file` in one run (prune needs the whole selection at once). That run is
-    `--pack auto --pack-limit <planned id>` plus the planned maps, model and installers, and
-    `--plus-held`. So the auto guards (step up never down, HEAD confirmation, keep the held pack,
-    nested prune after a verified larger pack) and the #182/#194 prune rules all still apply. The
-    files never enter `manifest.tsv`, so `verify` and `evict` never delete them. Run alone (the
-    weekly refresh or the Mirror button), `lastbook.sh` asks `librarian.sh lastbook-plan` first.
-    A flock keeps the two from running at once.
-  - *Opt-outs.* `VALARK_LASTBOOK_PACK=every` stays the server opt-in, and it, an explicit pack, an
-    explicit `VALARK_LASTBOOK_BUDGET`, `VALARK_LASTBOOK_PLAN=0` or CLI selection options keep the
-    planner out (no rows), using the share as before. `VALARK_LASTBOOK_BUDGET_PCT` is kept as a
-    **deprecated** fallback: set on its own it selects the old share mode and logs a warning.
-  - *Known limit.* A `VALARK_LASTBOOK_DIR` on another disk is planned against the librarian's
-    budget for the data root. At fetch time the mirror still stops at that disk's own reserve.
+    planned pack with a larger one, and its bytes are refunded. A pack held and verified at its
+    recorded size, summed per pack, satisfies every pack no larger than it. The held pack's own
+    id is still charged when its listed files are not all there (a re-release under a new name,
+    a missing base map). Maps, the model and the installers need a pack, held or planned. The
+    survival profile lists `pack:small` and `app:*` in `essentials.tsv` (new kind `lastbook`).
+    That phase-0 essential is the one exception to "one pack": it stays planned beside a later,
+    larger pick. It is fetched first, and the nested prune drops it once the larger pack is
+    verified.
+  - *Charged what is left (review of PR #288).* Each Lastbook row costs only the bytes it still has
+    to fetch: held files cost 0 and a `.part` is credited, so a half-fetched Medium is not
+    stranded behind a fresh Small. The mirror's budget is the sum of the planned rows' remaining
+    bytes, not unlimited, so a held-item refresh is budgeted too. There is no "plus held"
+    re-enable path, so `MODEL=no` and `APPS=none` hold.
+  - *Fetch and prune stay in the mirror.*
+    - `librarian.sh fill` passes the planned Lastbook rows to `lastbook.sh --plan-file`. The
+      phase-0 essentials go in their own batch, then every planned row. Each batch is checked
+      against free space as a whole, bounded by the remaining `--time`, and counted only by the
+      bytes the mirror really added. A busy lock (75) is a skip.
+    - The mirror run is `--pack auto --pack-limit <planned id>`, meaning that pack or a smaller
+      one, so a planned All that is broken upstream falls back down the ladder, never below the
+      held pack. When no pack will be held, the planned maps, model and installers wait too.
+    - The auto guards (step up never down, HEAD confirmation, keep the held pack, nested prune
+      after a verified larger pack) and the #182/#194 prune rules all still apply.
+    - The reserve and the STOP flag are re-checked every 256 MiB inside a download.
+    - The files never enter `manifest.tsv`, so `verify` and `evict` never delete them. `request`
+      and `catalog` never resolve a Lastbook row, and `request` refuses any source `download_one`
+      cannot fetch before it pins or evicts anything.
+    - Run alone (the weekly refresh or the Mirror button), `lastbook.sh` asks
+      `librarian.sh lastbook-plan` first.
+    - A flock on `state/lastbook.lock` serialises Lastbook mirror runs only. The fill's own
+      `fill.lock` is separate, so other librarian downloads are not serialised against it.
+  - *Opt-outs.*
+    - The candidate cache holds the full offer (header `format=2`; an older cache is ignored).
+      MAPS, ADDRESSES=none, MODEL=no and APPS=none are applied when the rows are read, so an
+      opt-out holds at once, even offline.
+    - Share mode, with no planner rows and the share as before, applies with:
+      `VALARK_LASTBOOK_PACK=every` (the server opt-in) or an explicit pack, an explicit
+      `VALARK_LASTBOOK_BUDGET`, `VALARK_LASTBOOK_PLAN=0`, `VALARK_LASTBOOK_ADDRESSES=all` or a
+      code list (the planner folds addresses into a map, and would otherwise quietly reduce
+      these to `follow`), CLI selection options, or a `VALARK_LASTBOOK_DIR` on another
+      filesystem than the data root (`stat -c %d`). The last one stays until there is a
+      per-destination budget.
+    - `VALARK_LASTBOOK_BUDGET_PCT` is kept as a **deprecated** fallback: set on its own it
+      selects share mode and logs a warning.
+  - *Model category.* The Lastbook GGUF is `lastbook:model`, not `model:assistant`. It must not take
+    or cover the curated assistants' diversity slot, and it never takes a diversity slot itself.
 
 ## 2026‑11 — cad-agent references: a private, content-addressed archive of every cited source (cad-agent#323)
 - **Context:** cad-agent keeps a reference knowledge base of ~760 sources (≈330 GitHub repos, ≈350

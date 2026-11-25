@@ -87,38 +87,74 @@ The big LLM/STT/TTS/VLM/image catalog is still managed by `download-models.sh`.
 ### Lastbook: planned like any other content
 
 [Lastbook](https://lastbook.org) is sized by this planner, not by a fixed share of the disk (#203).
-`catalog.sh` turns its live release (`lastbook_mirror.py candidates`: same URL allow-list and
-validation as a mirror run, cached daily, kept on a failed refresh) into rows: one per **pack**
-(with the base maps, which ride with any pack), one per **state map** (with its address index),
-the **model** (bucket `models`, so `VALARK_MODEL_MAX_GB` applies) and the **installers**.
-They carry a value and a size like every other row, and the owner profile weights them.
+`catalog.sh` turns its live release into rows. It uses `lastbook_mirror.py candidates`, which
+applies the same URL allow-list and validation as a mirror run. The rows are cached daily, and
+a failed refresh keeps the old cache. There is one row per **pack** (with the base maps, which
+ride with any pack), one per **state map** (with its address index), one for the **model**
+(category `lastbook:model`, bucket `models`, so `VALARK_MODEL_MAX_GB` applies) and one for the
+**installers**. An entry with no size is left out, so it can never look free. The rows carry a
+value and a size like every other row, and the owner profile weights them.
 
-- **The packs nest** (Small ⊂ Medium ⊂ All), so the planner plans at most **one**. Diversity takes
-  the Small pack; a later phase may **upgrade** the planned pack to a larger one that fits (the
-  smaller pick's bytes come back). A pack held and verified on disk (the mirror's
-  `.lastbook-verified.json`, at its recorded size; a `.part` or a symlink does not count)
-  satisfies every pack at most its size, while a larger one is still an upgrade.
-- **Maps, the model and the installers need a pack**, held or planned.
+- **Bytes still to fetch.** A Lastbook row is charged only what it still has to download. Files
+  held at their listed size cost 0, and a resumable `.part` is credited, so a half-fetched
+  Medium is finished rather than stranded behind a fresh Small. The plan's size column for
+  these rows is that remainder.
+- **The packs nest** (Small ⊂ Medium ⊂ All), so the planner plans at most **one** pack.
+  - Diversity takes the Small pack. A later phase may **upgrade** the planned pack to a larger
+    one that fits, and the smaller pick's bytes come back.
+  - A pack held and verified on disk satisfies every pack up to its size. Held means recorded
+    in the mirror's `.lastbook-verified.json`, at its recorded size, summed per pack. A `.part`,
+    a symlink or a wrong size does not count. A larger pack is still an upgrade.
+  - The held pack's **own** id is still planned and charged when its listed files are not all
+    there. That covers a re-release under a new name and a missing base map, so a refresh is
+    budgeted too.
+  - **One exception:** a phase-0 essential pack (the survival profile's Small) stays planned
+    beside a later, larger pick. `fill` fetches the essentials first, then the rest, and the
+    mirror's nested prune removes the Small once the larger pack is verified.
+- **Maps, the model and the installers need a pack**, held or planned. The model never takes a
+  diversity slot, and a held Lastbook GGUF does not cover the curated `model:assistant`
+  category.
 - **Survival profile:** `data/essentials.tsv` lists the Small pack and the installers (kind
-  `lastbook`), so they are planned in phase 0 and a held Medium/All satisfies them.
-- **The fetch stays with the mirror.** `fill` hands every planned Lastbook row to
-  `scripts/tools/lastbook.sh --plan-file` in **one** run at the first row's turn.
-  `lastbook_mirror.py` then runs `--pack auto --pack-limit <planned>`, so every auto guard
-  still holds: step up never down, HEAD-confirmed upgrades, keep the held pack. It also gets
-  the planned maps, model and installers plus `--plus-held`, so whatever is held keeps
-  refreshing. The prune rules from #182/#194 are unchanged: only recorded files go, nested
-  packs only after a larger one is verified, nothing goes when the release looks truncated.
-  These files never enter `state/manifest.tsv`, so `verify` / `evict` never touch them, and
-  the web catalog (`catalog`) does not list them (the Lastbook card mirrors the release).
+  `lastbook`). They are planned in phase 0, and a held Medium or All satisfies them.
+- **The fetch stays with the mirror.**
+  - `fill` hands the planned Lastbook rows to `scripts/tools/lastbook.sh --plan-file`. The
+    phase-0 rows go in their own batch at their turn, and every planned row goes at the first
+    later row's turn.
+  - Each batch is checked against free space as a whole and bounded by the fill's remaining
+    `--time`. The `.part` files resume next cycle. Only bytes the mirror reports as added are
+    counted. A busy Lastbook lock (exit 75) is a skip, not a failure.
+  - `lastbook_mirror.py` then runs `--pack auto --pack-limit <planned>`. That means the planned
+    pack or a smaller one, so a planned All that is broken upstream falls back down the ladder,
+    never below the held pack. It gets the planned maps, model and installers, with a budget of
+    the planned bytes still to fetch.
+  - Every auto guard still holds: step up never down, HEAD-confirmed upgrades, keep the held
+    pack. When no pack will be held after all, the planned maps, model and installers wait too.
+  - Downloads stop at the reserve, which is re-checked every 256 MiB, and at the STOP flag.
+  - The prune rules from #182/#194 are unchanged: only recorded files go, nested packs go only
+    after a larger one is verified, and nothing goes when the release looks truncated.
+  - These files never enter `state/manifest.tsv`, so `verify` and `evict` never touch them.
+    `catalog` and `request` never offer them, because there is no per-item path; the Lastbook
+    card mirrors the release.
 - Run on its own (the weekly tool refresh, the Mirror button), `lastbook.sh` first asks
-  `librarian.sh lastbook-plan` for the same rows.
-- **The operator's choice keeps the planner out:** `VALARK_LASTBOOK_PACK=every` (the
-  server / NAS opt-in) or one explicit pack, an explicit `VALARK_LASTBOOK_BUDGET`,
-  `VALARK_LASTBOOK_PLAN=0`, or a selection option on `lastbook.sh`'s command line size Lastbook
-  by its own share as before. `VALARK_LASTBOOK_BUDGET_PCT` is **deprecated**: set on its own it
-  also does this, and logs a warning.
-- A `VALARK_LASTBOOK_DIR` on another disk is planned against the librarian's budget. At fetch
-  time the mirror still stops at that disk's own reserve.
+  `librarian.sh lastbook-plan` for the same rows. A lock lets only one Lastbook mirror run go
+  at a time.
+- **Opt-outs apply at once.** The cache always holds the full offer. `VALARK_LASTBOOK_MAPS`
+  (`none`, or a code list), `VALARK_LASTBOOK_ADDRESSES=none`, `VALARK_LASTBOOK_MODEL=no` and
+  `VALARK_LASTBOOK_APPS=none` filter the rows when they are read, so a `no` holds even with a
+  day-old or offline cache. In planner mode, `MAPS=all` / `MODEL=yes` only mean "offered", and
+  the planner still decides whether they fit.
+- **The operator's choice keeps the planner out.** In these cases Lastbook is sized by its own
+  share as before:
+  - `VALARK_LASTBOOK_PACK=every` (the server / NAS opt-in) or one explicit pack;
+  - an explicit `VALARK_LASTBOOK_BUDGET`, or `VALARK_LASTBOOK_PLAN=0`;
+  - `VALARK_LASTBOOK_ADDRESSES=all` or a code list (the planner only folds an address index
+    into its map, and would otherwise quietly reduce these to `follow`);
+  - a `VALARK_LASTBOOK_DIR` on **another filesystem** than the data root (the planner's budget
+    is the data root's, and there is no per-destination budget yet);
+  - a selection option on `lastbook.sh`'s command line.
+
+  `VALARK_LASTBOOK_BUDGET_PCT` is **deprecated**: set on its own it also selects share mode,
+  and logs a warning.
 
 ### Model scout (`hf_scout.py`)
 

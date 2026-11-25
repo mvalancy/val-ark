@@ -753,7 +753,7 @@ check "lastbook.sh: a Lastbook dir outside the data trees gets --share but no --
 VALARK_LASTBOOK_REWRITE="$REAL" python3 "$PY" candidates --dest /lb > "$T/cand.out" 2>"$T/cand.err"; rc=$?
 cid() { grep -v '^#' "$T/cand.out" | cut -f1 | sort | tr '\n' ' ' | sed 's/ $//'; }
 cfield() { awk -F'\t' -v i="$1" -v c="$2" '$1==i {print $c}' "$T/cand.out"; }
-check "candidates: exit 0 + header" '[ "$rc" = 0 ] && head -1 "$T/cand.out" | grep -q "^# lastbook candidates manifest=2026-11-13 app=1.1.11 rows=8"'
+check "candidates: exit 0 + header" '[ "$rc" = 0 ] && head -1 "$T/cand.out" | grep -q "^# lastbook candidates format=2 manifest=2026-11-13 app=1.1.11 maps=auto addresses=follow model=auto apps=current rows=8"'
 check "candidates: 3 packs, 3 state maps, the model, the installers" '[ "$(cid)" = "lastbook:app:1.1.11 lastbook:map:AK lastbook:map:CA lastbook:map:TX lastbook:model:gemma-4-26b-a4b lastbook:pack:all lastbook:pack:medium lastbook:pack:small" ]'
 check "candidates: 9 planner columns, source lastbook, dest = --dest" '[ -z "$(grep -v "^#" "$T/cand.out" | awk -F"\t" "NF!=9 || \$6!=\"lastbook\" || \$8!=\"/lb\"")" ]'
 check "candidates: a pack row = its file + the base map" '[ "$(cfield lastbook:pack:small 5)" = $((7691528852 + 1100000000)) ] && cfield lastbook:pack:small 9 | grep -q "^pack|-|packs/Lastbook-Small-20261113.zip=7691528852,maps/Lastbook-Map-base.zip=1100000000$"'
@@ -780,23 +780,30 @@ VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" plan --dest "$D40" --pack-limit sm
 check "--pack-limit small with All held: the held All stays chosen (step up, never down)" '[ "$(got get pack)" = all ]'
 mir --dest "$D40" --pack-limit "" --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
 check "--pack-limit empty with All held: keeps All, prunes the nested Small/Medium" '[ "$rc" = 0 ] && [ -s "$D40/packs/Lastbook-All.zip" ] && [ ! -e "$D40/packs/Lastbook-Medium.zip" ] && grep -q "pruned packs/Lastbook-Medium.zip (nested" "$T/err"'
-# --plus-held: what is held keeps refreshing on top of the planned selection
-VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" plan --dest "$D" --pack-limit "" --maps none --model no --apps none --plus-held --budget -1 > "$T/plan.out" 2>&1
-check "--plus-held: the held pack, map, address index, model and installers stay selected" \
-    '[ "$(got get pack)" = small ] && [ "$(got get map)" = "CA base" ] && [ "$(got get address)" = CA ] && [ -n "$(got get model)" ] && [ "$(got get app)" = 1.1.11 ]'
-VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" plan --dest "$D" --pack-limit "" --maps TX --model no --apps none --plus-held --budget -1 > "$T/plan.out" 2>&1
-check "--plus-held + planned TX: both maps" '[ "$(got get map)" = "CA TX base" ]'
-
+# --pack-limit X = X or a smaller pack: a planned All that is broken upstream falls back down the ladder
+variant smallbroken 'P={p["id"]: p for p in m["packs"]}; P["small"]["files"][0]["size"]=1; P["small"]["installed_bytes"]=1'
+vplan() { local v=$1; shift; VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/$v/dl/ https://lastbook.org/=$B/$v/site/ https://huggingface.co/=$B/$v/hf/" \
+    python3 "$PY" plan "$@" > "$T/plan.out" 2>&1; }
+variant allbig 'a=[p for p in m["packs"] if p["id"]=="all"][0]; a["files"][0]["size"]*=10; a["installed_bytes"]=a["files"][0]["size"]'
+vplan allbig --dest "$T/plim-fresh1" --pack-limit all --budget -1; rc=$?
+check "--pack-limit all, All broken upstream (HEAD size differs): falls back to Medium, exit 3" '[ "$(got get pack)" = medium ] && [ "$rc" = 3 ] || { { echo "rc=$rc"; cat "$T/plan.out"; } >&2; false; }'
+vplan smallbroken --dest "$T/plim-fresh2" --pack-limit small --maps CA --model yes --apps current --budget -1; rc=$?
+check "--pack-limit small, Small broken, nothing held: no pack, so no maps / model / installers either" \
+    '[ -z "$(got get pack)$(got get map)$(got get model)$(got get app)$(got get address)" ] && grep -q "no Lastbook pack will be held this run" "$T/plan.out" && [ "$rc" = 3 ]'
+check "--plus-held is gone: a 'no' stays no (no held-item re-enable path)" '! grep -q -- "--plus-held" "$PY" "$SH"'
 # lastbook.sh fetches what the planner chose (--plan-file = librarian.sh fill's rows)
 LBD="$T/planned/lastbook"
-printf 'lastbook:pack:small\tcontent\tlastbook:pack\t820\t1\tlastbook\tu\t%s\tpack|-|x=1\t1\nlastbook:map:TX\tcontent\tlastbook:maps\t640\t1\tlastbook\tu\t%s\tmap|pack|x=1\t2\n' "$LBD" "$LBD" > "$T/lbplan.tsv"
+# plan rows = the candidates for a fresh dir (bytes still to fetch = full size) + a phase column
+VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" candidates --dest "$LBD" 2>/dev/null \
+    | awk -F'\t' -v OFS='\t' '$1=="lastbook:pack:small" || $1=="lastbook:map:TX" {print $0, 3}' > "$T/lbplan.tsv"
+LBBUD=$(awk -F'\t' '{s+=$5} END {print s}' "$T/lbplan.tsv")
 : > "$T/py.args"
 PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD" VALARK_DL_RETRY_DELAY=0 \
     bash "$SH" --plan-file "$T/lbplan.tsv" > "$T/sh.out" 2>&1; rc=$?
 check "lastbook.sh --plan-file: exit 0, the planned pack + map, no model / installers" \
     '[ "$rc" = 0 ] && [ -s "$LBD/packs/Lastbook-Small-20261113.zip" ] && [ -s "$LBD/maps/Lastbook-Map-TX.zip" ] && [ -s "$LBD/addresses/Lastbook-Addresses-TX.zip" ] && [ ! -e "$LBD/models" ] && [ ! -e "$LBD/app" ] || { cat "$T/sh.out" >&2; false; }'
-check "lastbook.sh --plan-file: auto limited to the planned pack, plus held, no share budget" \
-    'grep -q -- "--pack auto --pack-limit small --maps TX --addresses follow --model no --apps none --plus-held --budget -1" "$T/py.args" && ! grep -q -- "--share" "$T/py.args"'
+check "lastbook.sh --plan-file: auto limited to the planned pack, budget = the planned bytes, no share" \
+    'grep -q -- "--pack auto --pack-limit small --maps TX --addresses follow --model no --apps none --budget $LBBUD " "$T/py.args" && ! grep -q -- "--share" "$T/py.args"'
 check "lastbook.sh --plan-file: says the planner sized it" 'grep -q "sized by the librarian.s planner: pack:small map:TX" "$T/sh.out"'
 printf '' > "$T/lbempty.tsv"
 VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD" bash "$SH" --plan-file "$T/lbempty.tsv" > "$T/sh.out" 2>&1; rc=$?
@@ -816,6 +823,40 @@ check "lastbook.sh alone: the planner sizes it (unlimited tiny disk -> All, one 
 check "lastbook.sh alone: the candidates cache was written by the librarian" 'grep -q "^lastbook:pack:all	" "$D2/val-ark/state/catalog/lastbook.tsv"'
 check "lastbook.sh alone: installers + maps planned too" '[ -d "$D2/val-ark/content/lastbook/app/1.1.11" ] && [ -s "$D2/val-ark/content/lastbook/maps/Lastbook-Map-CA.zip" ]'
 check "lastbook.sh: one mirror run at a time (flock)" 'grep -q "flock -n 8" "$SH"'
+check "lastbook.sh alone: the cache holds the full offer (format=2 header)" 'head -1 "$D2/val-ark/state/catalog/lastbook.tsv" | grep -q "^# lastbook candidates format=2 .* maps=all addresses=follow model=auto apps=current "'
+# a real concurrent run: another process holds lastbook.lock -> skip (75 under --plan-file, nothing fetched)
+LOCKF="$VAL_ARK_DATA/val-ark/state/lastbook.lock"; mkdir -p "$(dirname "$LOCKF")"
+( exec 9>"$LOCKF"; flock 9; exec sleep 30 ) & LOCKPID=$!
+for _ in $(seq 1 50); do flock -n "$LOCKF" true 2>/dev/null || break; sleep 0.1; done
+LBD2="$T/locked/lastbook"
+VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD2" bash "$SH" --plan-file "$T/lbplan.tsv" > "$T/sh.out" 2>&1; rc=$?
+check "lock held elsewhere, --plan-file: exit 75, nothing fetched" '[ "$rc" = 75 ] && [ ! -e "$LBD2/packs" ] && grep -q "another Lastbook mirror run is active" "$T/sh.out"'
+VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD2" bash "$SH" --pack small > "$T/sh.out" 2>&1; rc=$?
+check "lock held elsewhere, run on its own: skipped, exit 0" '[ "$rc" = 0 ] && [ ! -e "$LBD2/packs" ] && grep -q "another Lastbook mirror run is active" "$T/sh.out"'
+kill "$LOCKPID" 2>/dev/null; wait "$LOCKPID" 2>/dev/null
+# the STOP flag: the mirror starts no download (deferred, exit 3 -> lastbook.sh "incomplete")
+LBD3="$T/stopped/lastbook"; : > "$T/STOP"
+VALARK_STOP_FLAG="$T/STOP" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD3" bash "$SH" --plan-file "$T/lbplan.tsv" > "$T/sh.out" 2>&1; rc=$?
+check "STOP flag: no file is started, reported incomplete" '[ "$rc" = 0 ] && [ -z "$(ls "$LBD3/packs" 2>/dev/null)" ] && grep -q "the STOP flag is set" "$T/sh.out" && grep -q "incomplete" "$T/sh.out"'
+rm -f "$T/STOP"
+check "the reserve / STOP are re-checked inside a long download" 'grep -q "RECHECK_BYTES" "$PY" && grep -q "raise Deferred(why)" "$PY"'
+# a survival plan: the phase-0 essential Small plus a larger pick -> Small first, then All, then Small pruned
+LBD4="$T/survival/lastbook"
+VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" candidates --dest "$LBD4" 2>/dev/null \
+    | awk -F'\t' -v OFS='\t' '$1=="lastbook:pack:small" {print $0, 0} $1=="lastbook:app:1.1.11" {print $0, 0} $1=="lastbook:pack:all" {print $0, 3}' > "$T/survplan.tsv"
+: > "$T/py.args"
+PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD4" VALARK_DL_RETRY_DELAY=0 \
+    bash "$SH" --plan-file "$T/survplan.tsv" > "$T/sh.out" 2>&1; rc=$?
+check "survival plan (Small essential + All): two mirror steps, Small first" \
+    '[ "$(grep -c " mirror " "$T/py.args")" = 2 ] && head -1 "$T/py.args" | grep -q -- "--pack-limit small " && sed -n 2p "$T/py.args" | grep -q -- "--pack-limit all "'
+check "survival plan: All verified, then the nested Small pruned" '[ "$rc" = 0 ] && [ -s "$LBD4/packs/Lastbook-All.zip" ] && [ ! -e "$LBD4/packs/Lastbook-Small-20261113.zip" ] && grep -q "pruned packs/Lastbook-Small-20261113.zip (nested" "$T/sh.out" || { cat "$T/sh.out" >&2; false; }'
+# candidates: an installer with no size (manifest or HEAD) is left out of the app row
+rm -rf "$T/www/appnohead"; cp -r "$T/www/tiny" "$T/www/appnohead"; : > "$T/www/appnohead/dl/Lastbook_1.1.11_ubuntu26.04_amd64.deb.nohead"
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/appnohead/dl/ https://lastbook.org/=$B/appnohead/site/ https://huggingface.co/=$B/appnohead/hf/" \
+    python3 "$PY" candidates --dest /lb > "$T/cand.out" 2>&1
+check "candidates: an unsized installer is left out (never counted as 0 bytes), and says so" \
+    '! cfield lastbook:app:1.1.11 9 | grep -q ubuntu26.04 && cfield lastbook:app:1.1.11 9 | grep -q "Lastbook-1.1.11-mac.dmg=" && grep -q "^# skipped app:1.1.11 Lastbook_1.1.11_ubuntu26.04_amd64.deb" "$T/cand.out"'
+check "candidates: the model has its own category (not model:assistant)" 'VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" candidates --dest /lb 2>/dev/null | awk -F"\t" "\$1 ~ /^lastbook:model:/ {print \$3}" | grep -qx "lastbook:model"'
 
 # server.js reports a VALARK_LASTBOOK_DIR outside content/ under lastbook/, flagged external (not served)
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"

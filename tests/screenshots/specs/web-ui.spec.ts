@@ -1648,6 +1648,8 @@ test.describe('Val Ark - First-boot Commissioning Wizard', () => {
     await expect(pw).toBeEnabled();
     await pw.click();
     await expect(page.locator('#setup-usemode [data-usemode="passworded"]')).toHaveClass(/\bon\b/);
+    await expect(page.locator('#setup-usemode [data-usemode="passworded"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#setup-usemode [data-usemode="open"]')).toHaveAttribute('aria-pressed', 'false');
     await page.locator('.setup-btn:has-text("Continue")').click();      // → focus
     await page.locator('.setup-btn:has-text("Continue")').click();      // → review
     await expect(page.locator('.setup-review')).toContainText('Passworded');

@@ -269,6 +269,28 @@ else
     fail "usemode server (no passcode) did not start"
 fi
 stop_pids "$SRV_PID"; SRV_PID=""
+# 14d. Safe Mode: a corrupt auth.json must never be overwritten by a mode change (it would
+#      be read as defaults and written back, erasing the admin passcode) — not from
+#      Settings on the box itself, and not from `valark usemode` (auth.js setmode).
+mkdir -p "$T/um-corrupt"
+printf '{corrupt' > "$T/um-corrupt/auth.json"; cp "$T/um-corrupt/auth.json" "$T/auth-corrupt.orig"
+if start_um "$T/um-corrupt" ""; then
+    c=$(curl -s -o "$T/um-corrupt.out" -w '%{http_code}' --max-time 6 -X POST -H 'Content-Type: application/json' -d '{"mode":"open"}' "$B/api/setup/usemode")
+    [ "$c" = "409" ] && pass || fail "Safe Mode: usemode from localhost must be 409 (got $c)"
+    grep -qi 'safe mode' "$T/um-corrupt.out" && pass || fail "Safe Mode: the refusal must say Safe Mode ($(cat "$T/um-corrupt.out"))"
+    cmp -s "$T/um-corrupt/auth.json" "$T/auth-corrupt.orig" && pass || fail "Safe Mode: Settings must leave the corrupt auth.json untouched"
+else
+    fail "usemode server (corrupt auth.json) did not start"
+fi
+stop_pids "$SRV_PID"; SRV_PID=""
+VALARK_STATE_DIR="$T/um-corrupt" "$NODE" "$ROOT/scripts/lib/auth.js" setmode open >"$T/cli-corrupt.out" 2>&1 \
+  && fail "Safe Mode: valark usemode must fail on a corrupt auth.json" || pass
+grep -q 'corrupt' "$T/cli-corrupt.out" && pass || fail "Safe Mode: valark usemode must say auth.json is corrupt"
+cmp -s "$T/um-corrupt/auth.json" "$T/auth-corrupt.orig" && pass || fail "Safe Mode: valark usemode must leave the corrupt auth.json untouched"
+# 14e. `valark usemode` logs the change the same way Settings does (stderr line).
+VALARK_STATE_DIR="$T/um" "$NODE" "$ROOT/scripts/lib/auth.js" setmode passworded >"$T/cli-um.out" 2>"$T/cli-um.err" \
+  && grep -q '\[access\] Use Mode changed: open -> passworded (by valark usemode' "$T/cli-um.err" \
+  && pass || fail "valark usemode must log the change on stderr"
 
 echo "access: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

@@ -1577,11 +1577,10 @@ function handleAPI(req, res, urlPath) {
                     if (mode !== 'open' && !before.adminSet) {
                         return sendJSON(res, req, { error: 'Set an admin passcode first — otherwise nobody on your network could sign in.', needsPasscode: true }, 409);
                     }
-                    try { auth.setUseMode(mode, STATE_DIR); }
+                    // setUseMode logs "[access] Use Mode changed …" (stderr → the server log)
+                    // and refuses a corrupt auth.json even if the Safe Mode cache is stale.
+                    try { auth.setUseMode(mode, STATE_DIR, isLocalhost(req) ? 'this box in Settings' : 'a signed-in admin in Settings'); }
                     catch (e) { return sendJSON(res, req, { error: e.message }, 409); }
-                    if (before.useMode !== mode) {
-                        console.log(`[access] Use Mode changed: ${before.useMode} -> ${mode} (by ${isLocalhost(req) ? 'this box' : 'a signed-in admin on the network'}) at ${new Date().toISOString()}`);
-                    }
                     result = { ok: true, useMode: mode, previous: before.useMode };
                     break;
                 }

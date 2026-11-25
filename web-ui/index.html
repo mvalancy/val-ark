@@ -5012,7 +5012,7 @@ function renderUseModeSection() {
                 <span class="setup-profile-tx"><strong>${esc(m.name)}: ${esc(m.label)}</strong><span class="setup-profile-desc">${esc(m.desc)}</span></span>
             </button>`; }).join('')}</div>
         ${adminSet ? '' : `<p id="usemode-needs-pass" style="color:var(--text-muted);font-size:.9em">Set an admin passcode first (<code>scripts/valark setpassword</code> on the box). Without one nobody on your network could sign in, so Passworded and Accounts stay off.</p>`}
-        <p style="color:var(--text-muted);font-size:.9em">Changing this needs the admin, and each change is written to the server log.</p></div>`;
+        <p style="color:var(--text-muted);font-size:.9em">Changing this needs the admin. Each change made here is written to the server log.</p></div>`;
 }
 async function setUseMode(mode) {
     try {
@@ -7496,7 +7496,7 @@ function _renderSetupStep(key) {
                 <p class="setup-lead">Pick who on your network can browse the library. Change it any time in Settings.</p>
                 <div class="setup-profiles" id="setup-usemode">${_USE_MODES.map(m => {
                     const locked = m.id !== 'open' && !havePass;
-                    return `<button class="setup-profile${_setupData.useMode === m.id ? ' on' : ''}" data-usemode="${escAttr(m.id)}"${locked ? ' disabled' : ''} onclick="_setupPickUseMode(this.dataset.usemode)">
+                    return `<button class="setup-profile${_setupData.useMode === m.id ? ' on' : ''}" data-usemode="${escAttr(m.id)}" aria-pressed="${_setupData.useMode === m.id}"${locked ? ' disabled' : ''} onclick="_setupPickUseMode(this.dataset.usemode)">
                         <span class="setup-profile-ic">${m.icon}</span>
                         <span class="setup-profile-tx"><strong>${esc(m.name)}: ${esc(m.label)}</strong><span class="setup-profile-desc">${esc(m.desc)}</span></span>
                     </button>`; }).join('')}</div>

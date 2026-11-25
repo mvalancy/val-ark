@@ -92,12 +92,26 @@ function listAdmins(dir) {
 // Passworded/Accounts gate reads behind a sign-in, and today the only sign-in is the
 // admin passcode (member accounts aren't built yet). Without one, nobody on the LAN
 // could get in, so a gated mode is refused until an admin passcode exists (#303).
-function setUseMode(mode, dir) {
+// A present-but-unparseable auth.json (Safe Mode) is refused too: readStore would
+// read it as defaults, and writing those back would erase the admin passcode.
+// `by` (who changed it) turns on the "[access] Use Mode changed" line on stderr, so a
+// change from Settings lands in the server log and `valark usemode` prints it.
+function setUseMode(mode, dir, by) {
   if (!['open', 'passworded', 'accounts'].includes(mode)) throw new Error('mode must be open|passworded|accounts');
+  let raw = null;
+  try { raw = fs.readFileSync(storePath(dir), 'utf8'); }
+  catch (e) { if (e.code !== 'ENOENT') throw new Error('auth.json is unreadable (Safe Mode): recover the admin passcode first'); }
+  if (raw !== null) {
+    try { JSON.parse(raw); } catch (_) { throw new Error('auth.json is corrupt (Safe Mode): recover the admin passcode first'); }
+  }
   const s = readStore(dir);
   if (mode !== 'open' && !(s.admin && s.admin.hash)) throw new Error('set an admin passcode before choosing ' + mode);
+  const before = s.useMode || 'open';
   s.useMode = mode;
   writeStore(s, dir);
+  if (by && before !== mode) {
+    process.stderr.write(`[access] Use Mode changed: ${before} -> ${mode} (by ${by}) at ${new Date().toISOString()}\n`);
+  }
   return mode;
 }
 
@@ -169,7 +183,7 @@ if (require.main === module) {
       case 'verify':      process.exit(verify(process.env.VALARK_PW) ? 0 : 1); break;
       case 'status':      emit(status()); break;
       case 'list':        emit({ admins: listAdmins() }); break;
-      case 'setmode':     emit({ ok: true, useMode: setUseMode(rest[0]) }); break;
+      case 'setmode':     emit({ ok: true, useMode: setUseMode(rest[0], undefined, 'valark usemode on the box') }); break;
       case 'reset-tier1': resetTier1(); emit({ ok: true, reset: 'tier1' }); break;
       default:            process.stderr.write('unknown auth command: ' + cmd + '\n'); process.exit(2);
     }

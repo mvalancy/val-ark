@@ -585,10 +585,12 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   refused (409) until an admin passcode exists, because that passcode is the only sign-in today
   (`auth.setUseMode` throws too, so the CLI and the wizard's `commission` can't do it either);
   (2) it's refused in **Safe Mode**: `readStore` swallows a corrupt `auth.json` into defaults, so
-  writing the mode there would overwrite the file and drop the admin; (3) sessions are **not**
-  rotated: every session is an admin session and the mode doesn't change who the admin is, so a
-  rotation would only sign out the admin making the change. Each change is logged as
-  `[access] Use Mode changed: <old> -> <new>` in the server log.
+  writing the mode there would overwrite the file and drop the admin. The raw-parse check lives in
+  `auth.setUseMode` itself, so `valark usemode` is refused too, not just the endpoint; (3) sessions
+  are **not** rotated: every session is an admin session and the mode doesn't change who the admin
+  is, so a rotation would only sign out the admin making the change. `setUseMode(mode, dir, by)`
+  writes `[access] Use Mode changed: <old> -> <new> (by …)` to stderr when `by` is given: the
+  server's stderr is the server log, and the CLI shows it in the terminal.
 - **Testing the LAN gate:** localhost always bypasses, so set `VALARK_TEST_FORCE_REMOTE=1` to make
   the server treat the client as remote and actually exercise the gate. It's **fail-safe** — it only
   REMOVES the localhost admin bypass, never grants access (safe even if set in prod).

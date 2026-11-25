@@ -170,8 +170,10 @@ holds `.env`. Don't share that checkout; use a data disk (`VAL_ARK_DATA`) for an
    the server prints when it starts and `scripts/valark claim` shows again. A new box starts in
    **Open** mode. Set an admin passcode, then choose the **Use Mode** in **Settings → Who can use
    Val Ark?** (the setup wizard offers the same choice, defaulting to Open). Only the admin can change
-   it, and each change is written to the server log. On the box, `scripts/valark usemode <mode>`
-   does the same. Passworded and Accounts are refused until an admin passcode is set.
+   it. On the box, `scripts/valark usemode <mode>` does the same. Either way the change is logged:
+   a change in Settings goes to the server log (`<data>/val-ark/state/logs/server.out`), and the CLI prints the
+   same line. Passworded and Accounts are refused until an admin passcode is set, and no mode
+   change is allowed in Safe Mode.
    - **Open** (default): anyone on the LAN can browse and request downloads. A request may evict
      unpinned content to make room.
    - **Passworded** and **Accounts**: browsing, downloads and requests need a sign-in. Today that is

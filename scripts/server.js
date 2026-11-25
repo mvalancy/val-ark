@@ -1496,9 +1496,9 @@ function handleAPI(req, res, urlPath) {
                     result = commission.setProfile(STATE_DIR, body.profile);
                     break;
                 case '/api/moderation/review':
-                    // Act on a held item (remove / restore / dismiss). Admin-only
-                    // (ADMIN_ONLY_POSTS). The id is a bare quarantine basename — confined to
-                    // the quarantine dir; restore never overwrites and only into an existing dir.
+                    // Act on a held item (remove / dismiss). Admin-only (ADMIN_ONLY_POSTS).
+                    // The id is a bare quarantine basename, confined to the quarantine dir.
+                    // There is no restore over the web (a file-write risk); see reviewModerationItem.
                     result = reviewModerationItem(body);
                     break;
                 case '/api/setup/moderation':

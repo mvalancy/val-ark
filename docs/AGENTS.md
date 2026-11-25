@@ -19,6 +19,7 @@ Each file is either a **reference** (describes what the code *is* — keep it ma
 | [COMMUNITY.md](COMMUNITY.md) | Both | Offline community services (chat, mail, boards, file drop) — reference for the services + guide to running them. **Canonical** for comms. |
 | [ENCRYPTION.md](ENCRYPTION.md) | Guide | The local CA + TLS for the offline LAN. **Canonical** for TLS/HTTPS (link here, don't re-explain). |
 | [PLATFORMS.md](PLATFORMS.md) | Guide | Per-platform setup + acceleration; the OpenWRT subset. **Canonical** for the CUDA/Metal source build. |
+| [HOW-IT-WORKS.md](HOW-IT-WORKS.md) | Guide | The picture book: every flow diagram in reading order, with a short caption each. It links out and doesn't restate the guides; a new diagram should be added here too. |
 | [SERVING.md](SERVING.md) | Guide | Static (any file share) vs dynamic (`server.js`) serving: choosing, setup for each, screenshots. **Canonical** for that choice. |
 | [OFFLINE.md](OFFLINE.md) | Guide | Offline operation, P2P sync, and the NFS-shared mesh. |
 | [ARM64-NAS.md](ARM64-NAS.md) | Guide | ARM64 NAS appliances (chips such as the Rockchip RK3588): setup notes + gotchas. |
@@ -52,7 +53,7 @@ One fact, one home. Change it in the owning doc; from any other doc, link — ne
 | Fact / concept | Canonical owner | Notes |
 |----------------|-----------------|-------|
 | Data root + `.env` layout | [LIBRARIAN.md](LIBRARIAN.md) | "Where data lives" section. |
-| Curation priority model | [LIBRARIAN.md](LIBRARIAN.md) | essentials → diversity → small-valuable → fill; `evict` / `request` trade up (fill never deletes). |
+| Curation priority model | [LIBRARIAN.md](LIBRARIAN.md) | essentials → diversity → small-valuable → fill; `evict` / `request` trade up (fill never evicts; it only drops a smaller copy once a fuller version of the same item is on disk). |
 | 24/7 loop steps + `state/selfheal.json` / `state/heal-events.jsonl` | [LIBRARIAN.md](LIBRARIAN.md) | Keep [ARCHITECTURE.md](ARCHITECTURE.md)'s Self-Healing Loop diagram **in sync** with it. |
 | CUDA / Metal source build | [PLATFORMS.md](PLATFORMS.md) | GPU llama.cpp / whisper.cpp / sd.cpp on aarch64. |
 | Tool catalog | [TOOLS.md](TOOLS.md) | Backed by `scripts/tools/*.sh`. |

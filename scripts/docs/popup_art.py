@@ -192,6 +192,12 @@ SCENES = {
                ('check', 'Report', None)],
         links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side')],
         used=['tests/README.md']),
+    'how-it-works': dict(chapter='The Picture Book', title='How it works, in pictures',
+        sub='Ten moving diagrams, in reading order, from one disk to a whole network.', backdrop='hills',
+        cards=[('disk', 'Fill', None), ('gear', 'Heal', None), ('globe', 'Serve', None),
+               ('lock', 'Protect', None), ('chat', 'Gather', None), ('ark', 'Spread', None)],
+        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side'), (4, 5, 'side')],
+        used=['docs/HOW-IT-WORKS.md']),
     # ---- design hierarchy (docs/design/)
     'vision': dict(chapter='Design', title='What the Ark is for',
         sub='A knowledge-and-comms appliance for when the internet is not there.', backdrop='village',
@@ -507,6 +513,7 @@ def render(sid, spec, theme):
 DOC_TREE = ('Val Ark', 'README.md', [
     ('Docs map', 'docs/README.md', [
         ('Guides', None, [
+            ('How it works, in pictures', 'docs/HOW-IT-WORKS.md', []),
             ('Static or dynamic serving', 'docs/SERVING.md', []),
             ('The Librarian', 'docs/LIBRARIAN.md', []),
             ('Tools catalog', 'docs/TOOLS.md', []),

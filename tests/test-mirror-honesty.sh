@@ -29,7 +29,7 @@ fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 . "$ROOT/tests/lib/require-cmd.sh"; require_python3 "mirror-honesty"
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
 [ -n "$NODE" ] || missing_cmd node "mirror-honesty"
-command -v flock >/dev/null 2>&1 || { echo "SKIP: no flock" >&2; exit 0; }
+require_cmd flock "mirror-honesty"
 
 T="$(mktemp -d)"; SRV_PID=""
 cleanup() { stop_pids "$SRV_PID"; rm -rf "${T:?}" 2>/dev/null; }

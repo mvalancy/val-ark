@@ -31,7 +31,7 @@ check() { if eval "$2"; then pass; else fail "$1"; fi; }
 PY="$ROOT/scripts/lib/references_mirror.py"
 SH="$ROOT/scripts/tools/cad-agent-references.sh"
 . "$ROOT/tests/lib/require-cmd.sh"; require_python3 "cad-agent-references"
-command -v git >/dev/null 2>&1 || { echo "SKIP: no git" >&2; exit 0; }
+require_cmd git "cad-agent-references"
 
 T="$(mktemp -d)"; SRV_PID=""
 NPID=""

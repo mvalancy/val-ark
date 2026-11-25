@@ -14,6 +14,7 @@
 ###############################################################################
 
 TEST_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$TEST_DIR/lib/require-cmd.sh"
 TPASS=0
 TFAIL=0
 
@@ -28,7 +29,7 @@ cp "$TEST_DIR/lib/results.sh" "$SANDBOX/tests/lib/results.sh"
 # PATH shim WITHOUT node (python3 also omitted — results.sh has a sed/tr
 # fallback), so the nested runner exercises the no-node report path.
 for c in bash date mkdir rm basename dirname sed grep curl tr tail cat; do
-    src="$(command -v "$c")" || { echo "SKIP: '$c' unavailable" >&2; exit 0; }
+    require_cmd "$c" "run-all exit-code sandbox"; src="$(command -v "$c")"
     ln -s "$src" "$SANDBOX/bin/$c"
 done
 

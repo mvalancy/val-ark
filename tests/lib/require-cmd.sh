@@ -15,11 +15,8 @@
 # CI counts as set unless it is empty or (any case) false / 0 / no / off.
 ###############################################################################
 ci_is_set() {
-    case "${CI:-}" in
-        '') return 1 ;;
-    esac
-    case "${CI,,}" in
-        false|0|no|off) return 1 ;;
+    case "${CI:-}" in   # bash-3 safe (no ${CI,,}): spell each case-insensitive word out
+        ''|0|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]|[Oo][Ff][Ff]) return 1 ;;
     esac
     return 0
 }

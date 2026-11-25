@@ -4,6 +4,7 @@
 set -o pipefail
 TEST_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$TEST_DIR/lib/require-cmd.sh"; require_cmd node "browser-report regression"
+require_python3 "browser-report regression"   # the fixture setup + result checks below run python3
 NODE="$(command -v node)"
 T="$(mktemp -d)" || exit 1
 trap 'rm -rf "$T"' EXIT

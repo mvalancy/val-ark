@@ -28,6 +28,7 @@
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib/require-cmd.sh"; require_python3 "catalog-cache"
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 
@@ -194,7 +195,6 @@ if [ -n "$NODE" ]; then
     ' "$ROOT/scripts/lib/catalog-parse.js" "$T/browse.tsv" 2>"$T/node.err"
     [ $? -eq 0 ] && pass || fail "parseCatalogTSV language filter: $(cat "$T/node.err" 2>/dev/null)"
 else
-    . "$ROOT/tests/lib/require-cmd.sh"
     if ci_is_set; then fail "parseCatalogTSV filter case needs node, which is missing under CI"
     else echo "SKIP: no node runtime — parseCatalogTSV filter case skipped" >&2; fi
 fi

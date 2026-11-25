@@ -11,6 +11,11 @@ accounts? Are there real access controls? What's admin vs. user?* (See
 
 ## The core idea: one Admin, a choosable "who can use it," and localhost is always trusted
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/flow/access-dark.svg">
+  <img src="../img/flow/access-light.svg" width="100%" alt="Animated diagram: Who can do what. The box is always the Admin; the LAN gets what the Use Mode allows; the internet can change nothing.">
+</picture>
+
 Three independent layers, from bottom to top:
 
 ```
@@ -72,7 +77,7 @@ Jordan sees this as one plain-language screen: **"Who can use Val Ark?"** → *E
 
 - Use Mode: **Open (household)**.
 - Admin: **created at first boot** (with a friendly "you can skip and set it later; until then, only this box/localhost can change settings").
-- Public internet: **denied**; LAN + tailnet: **allowed**; localhost/console: **admin**.
+- Public internet: **denied** for every change and request (and for reads in Passworded / Accounts); LAN + tailnet: **allowed**; localhost/console: **admin**. In Open mode, reads aren't yet limited to the LAN, so keep the port off the internet (#297).
 
 > Design note: reconcile with research patterns (Synology's per-user + admin-group model,
 > Home Assistant's owner + users, Umbrel's single-password model, routers' admin-password +

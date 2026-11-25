@@ -173,6 +173,11 @@ holds `.env`. Don't share that checkout; use a data disk (`VAL_ARK_DATA`) for an
    own console (`localhost`) is always admin. See [access-identity.md](design/access-identity.md)
    for the design. For HTTPS on the LAN, see [ENCRYPTION.md](ENCRYPTION.md).
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/access-dark.svg">
+  <img src="img/flow/access-light.svg" width="100%" alt="Animated diagram: Who can do what. The box is always the Admin; the LAN gets what the Use Mode allows; the internet can change nothing.">
+</picture>
+
 4. **Turn on community services (optional).** For example, `VALARK_SERVICES="chat mail forum paste"`
    in `.env`. The loop starts each service, and the **Community** page shows its status with a
    one-click Start. See [COMMUNITY.md](COMMUNITY.md).

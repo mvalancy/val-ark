@@ -379,6 +379,20 @@ themselves (alps sandboxes its `/proxy` responses).
   is cross-site to the box, so Lax keeps the cookie off its requests.
 - The proxy now follows the sub-app port overrides the service scripts read
   (`VALARK_CHAT_WEB_PORT`, `VALARK_MAIL_WEB_PORT`, `VALARK_FORUM_PORT`, `PASTE_PORT`).
+- **Web UIs always bind loopback** (`internal-ui-not-forced-localhost-1` above, now live).
+  `paste.sh` passed `MICROBIN_BIND=$VALARK_BIND` and `forum.sh` wrote NodeBB's
+  `bind_address` from it. Owners set `VALARK_BIND=0.0.0.0` for mail's IMAP, which also put
+  MicroBin (:8085) and NodeBB (:4567) on the LAN directly, past the sandbox, the read-wall
+  and the internet-peer refusal. Both now bind `127.0.0.1` unconditionally (The Lounge and
+  alps already did), and `forum.sh` repairs `bind_address` in an existing config on every
+  start (NodeBB binds every interface when the key is missing). `VALARK_BIND` now covers
+  only the protocol ports (mail IMAP/submission, IRC). `tests/test-service-binds.sh`
+  launches a stub MicroBin and generates/repairs NodeBB's config under
+  `VALARK_BIND=0.0.0.0`.
+
+`tests/services/run.sh` (the e2e against a live box) checks the real apps where they run:
+the sandbox CSP on MicroBin `/file/{id}?preview=true`, NodeBB `/assets/uploads/…` and The
+Lounge `/uploads/…`, and no `frame-ancestors` / `X-Frame-Options` on each app's index.
 
 `tests/test-subapp-isolation.sh` runs stub upstreams on each sub-app port: HTML on the
 upload routes (including encoded and upper-case spellings) comes back sandboxed and still
@@ -389,4 +403,9 @@ served, the app pages and assets come back unsandboxed, the upstream CSP survive
 **Still open:** an XSS bug in a sub-app's own pages (not an upload) still runs as the Val
 Ark origin and could drive the UI. Only serving each app from its own origin (a separate
 port, framed) closes that. It is a bigger change (ports, TLS names, the frame, the app base
-URLs), left for a follow-up.
+URLs), tracked under #327.
+
+**Also not sandboxed: Kiwix.** `/kiwix/` pages are ZIM HTML (and any scripts in it) served
+same-origin with the UI. Only the defence-in-depth Referer check above applies to them. ZIMs
+come from the curated Kiwix catalog, not from users, but a ZIM that carries hostile script
+could still drive the UI. Tracked under #327 with the sub-app origin split.

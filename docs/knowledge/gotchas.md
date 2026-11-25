@@ -521,6 +521,9 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   there** (match the decoded path, case-insensitive) and a case in
   `tests/test-subapp-isolation.sh`. Don't strip a sub-app's whole CSP either: only
   `frame-ancestors` blocks the frame, and the rest can be the app's own upload sandbox.
+  And a sub-app's **web** port binds `127.0.0.1`, never `VALARK_BIND`: that knob is for
+  protocol ports (mail, IRC), and owners set it to `0.0.0.0` for IMAP, which would put the
+  web UI on the LAN around the proxy (`tests/test-service-binds.sh`).
 - **Minting a login is an admin action → `POST /api/service/adduser` is admin‑gated.** LAN
   users self‑register on the forum, join chat with just a nickname, or ask the host; only the
   operator (localhost/admin) provisions **mail** logins. The UI hides the create form off‑admin

@@ -21,6 +21,11 @@ both at the same time.
 
 ## Which one should I use?
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/serving-dark.svg">
+  <img src="img/flow/serving-light.svg" width="100%" alt="Animated diagram: Two ways to open an Ark. Static pages on any file share, or the live web server. Both work fully offline.">
+</picture>
+
 | | **Static: browse from a file share** | **Dynamic: run the web server** |
 |---|---|---|
 | **What runs** | No Val Ark process; any file server you already have (SMB, NFS, a USB disk, `python3 -m http.server`, nginx) | `./start.sh serve` (zero-dependency Node.js), kept up by the 24/7 loop |
@@ -162,8 +167,9 @@ holds `.env`. Don't share that checkout; use a data disk (`VAL_ARK_DATA`) for an
 
 3. **Finish setup and choose who can get in.** Open the web UI. From the box itself
    (`localhost`) the setup wizard just starts. From another device it asks for the claim code, which
-   the server prints when it starts and `scripts/valark claim` shows again. The wizard sets the
-   **Use Mode**:
+   the server prints when it starts and `scripts/valark claim` shows again. A new box starts in
+   **Open** mode; change the **Use Mode** on the box with `scripts/valark usemode <mode>` (set an
+   admin passcode first). A Settings control for it is tracked in #303.
    - **Open** (default): anyone on the LAN can browse and request downloads. A request may evict
      unpinned content to make room.
    - **Passworded** and **Accounts**: browsing, downloads and requests need a sign-in. Today that is

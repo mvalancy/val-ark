@@ -21,6 +21,11 @@ A new box must be *findable* without knowing an IP:
 
 ## The wizard — screens
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/flow/setup-dark.svg">
+  <img src="../img/flow/setup-light.svg" width="100%" alt="Animated diagram: Setting up a new box. A few screens in a browser. Then the Librarian starts filling the disk on its own.">
+</picture>
+
 Each screen: one question, a smart default already filled, a big **Continue**, and an
 optional **"Advanced"** disclosure. Progress dots at the top ("Step 2 of 6").
 

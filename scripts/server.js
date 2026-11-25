@@ -1142,7 +1142,8 @@ function netIfaces() {
 }
 // Linux names it tailscale0; macOS uses a utunN carrying Tailscale's 100.64/10 address AND
 // its fd7a:115c:a1e0::/48 IPv6 (other VPNs, e.g. WARP, also use 100.x on a utun).
-// (Tailscale's userspace-networking mode has no interface, so its peers aren't trusted.)
+// Tailscale's userspace-networking mode has no interface: tailscaled connects onward from
+// 127.0.0.1, so its peers look like the box itself (Admin). Use the kernel interface.
 function arrivedOnTailnet(req, ifaces = netIfaces()) {
     const la = (req.socket?.localAddress || '').replace(/^::ffff:/, '');
     if (!la) return false;
@@ -2980,7 +2981,7 @@ function handleRequest(req, res) {
     // URL and the path we checked name the same thing.
     const rawPath = req.url.split(/[?#]/)[0];
     const proxyPathOk = (prefix) => {
-        try { return decodeURIComponent(rawPath) === urlPath && rawPath.startsWith(prefix); } catch (_) { return false; }
+        try { return decodeURIComponent(rawPath) === urlPath && (rawPath === prefix || rawPath.startsWith(prefix + '/')); } catch (_) { return false; }
     };
 
     // The CA trust anchor must be fetchable over BOTH http and https (you can't

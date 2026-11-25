@@ -197,7 +197,7 @@ if start_open VALARK_TEST_FORCE_REMOTE=1; then
     done
     # the proxies forward the raw URL, so a path that only looks like /kiwix or /app after
     # decoding or cleaning is refused (0.1.31 Gate-2 follow-up)
-    for p in "kiwix/./a" "kiwix//a" "%6biwix/a" "app/chat/./x" "%61pp/chat/x"; do
+    for p in "kiwix/./a" "kiwix//a" "%6biwix/a" "app/chat/./x" "%61pp/chat/x" "kiwix%2Fa" "app/chat%2Fx"; do
         c=$(gcode --path-as-is "$B/$p"); [ "$c" = "404" ] && pass || fail "/$p must be 404 before the proxy (got $c)"
     done
 else

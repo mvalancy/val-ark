@@ -83,7 +83,9 @@ Jordan sees this as one plain-language screen: **"Who can use Val Ark?"** → *E
   global address on a /64 (or longer) of an interface that also has a private IPv4 (a home LAN,
   not a cloud uplink). **Tailnet:** 100.64/10 only when the request arrived on Tailscale's own
   interface (`tailscale0`, or a macOS `utun` with Tailscale's `fd7a:115c:a1e0::/48` address);
-  userspace networking isn't trusted. Everything else is the internet.
+  everything else is the internet. **Don't run Tailscale in userspace-networking mode on an
+  Ark** (common in containers and on some NAS boxes): with no interface, tailscaled connects
+  onward from 127.0.0.1, so every tailnet peer looks like the box itself, the Admin.
 
 > Design note: reconcile with research patterns (Synology's per-user + admin-group model,
 > Home Assistant's owner + users, Umbrel's single-password model, routers' admin-password +

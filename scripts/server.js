@@ -1151,7 +1151,7 @@ function sessionCookie(token, maxAgeSec, secure) {
 // POSTs that CHANGE the box's config/accounts — always admin (localhost or a
 // logged-in admin), regardless of Use Mode. "Use" actions (downloads/requests/
 // service starts) are gated per Use Mode instead (Open = anyone on the LAN).
-const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser', '/api/setup/profile', '/api/maintenance/repair', '/api/setup/moderation', '/api/moderation/review']);
+const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser', '/api/setup/profile', '/api/maintenance/repair', '/api/setup/moderation', '/api/moderation/review', '/api/setup/usemode']);
 const AUTH_EXEMPT_POSTS = new Set(['/api/auth/login', '/api/auth/logout', '/api/auth/recover', '/api/setup/commission']);
 
 // Peer IP, normalized (node reports LAN/tailnet IPv4 peers as IPv4-mapped IPv6).
@@ -1593,6 +1593,34 @@ function handleAPI(req, res, urlPath) {
                     });
                     if (result && result.ok && result.moderation.enabled) ensureModerationModel();
                     break;
+                case '/api/setup/usemode': {
+                    // Choose who can use the box: Open / Passworded / Accounts (#303).
+                    // Admin-only (ADMIN_ONLY_POSTS). Gated modes need an admin passcode
+                    // first (auth.setUseMode refuses otherwise): it's the only sign-in
+                    // today, so "Accounts" behaves like Passworded until member accounts
+                    // exist. Refused in Safe Mode: auth.json is unreadable there, and
+                    // writing the mode would overwrite it with defaults (dropping the admin).
+                    // Sessions are NOT rotated: every session is an admin session and the
+                    // mode doesn't change who the admin is, so rotating would only sign out
+                    // the admin making the change.
+                    const mode = body.mode;
+                    if (!['open', 'passworded', 'accounts'].includes(mode)) {
+                        return sendJSON(res, req, { error: 'Use Mode must be open, passworded or accounts.' }, 400);
+                    }
+                    if (safeModeState().safeMode) {
+                        return sendJSON(res, req, { error: 'Val Ark is in Safe Mode — recover the admin passcode first.' }, 409);
+                    }
+                    const before = auth.status(STATE_DIR);
+                    if (mode !== 'open' && !before.adminSet) {
+                        return sendJSON(res, req, { error: 'Set an admin passcode first — otherwise nobody on your network could sign in.', needsPasscode: true }, 409);
+                    }
+                    // setUseMode logs "[access] Use Mode changed …" (stderr → the server log)
+                    // and refuses a corrupt auth.json even if the Safe Mode cache is stale.
+                    try { auth.setUseMode(mode, STATE_DIR, isLocalhost(req) ? 'this box in Settings' : 'a signed-in admin in Settings'); }
+                    catch (e) { return sendJSON(res, req, { error: e.message }, 409); }
+                    result = { ok: true, useMode: mode, previous: before.useMode };
+                    break;
+                }
                 case '/api/service/start':
                     // Bring up an enabled + mirrored community service (chat/mail/forum/paste).
                     result = startService(body.id);

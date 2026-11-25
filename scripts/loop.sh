@@ -5,7 +5,8 @@
 # One cycle (run by `/loop`, cron, or systemd) does, in order:
 #   1. ensure the data disk is writable (self-heal NTFS/ro reverts)
 #   2. repair the repo<->disk symlink layout (2b-2d web server, public port, community
-#      services, 2e self-mirror of Val Ark's own source, 2f direct-connect link DHCP)
+#      services, 2e self-mirror of Val Ark's own source, 2f direct-connect link DHCP,
+#      2g Tailscale userspace-networking check)
 #   3. refresh the live catalog  -> ZIM/content links self-heal (no stale dates)
 #   4. link check + repair        -> tool/installer URLs, web-ui assets, symlinks
 #   5. integrity verify           -> requeue corrupt/short downloads (5b re-fill pinned requests)
@@ -289,6 +290,25 @@ ui_smoke() {
     fi
 }
 
+# --- step 2g: is Tailscale in userspace-networking mode? (#311) ---------------
+# With no TUN interface, tailscaled connects onward from 127.0.0.1, so every tailnet
+# peer looks like the box's own console (the Admin). Detection is read-only and
+# fail-soft (scripts/lib/tailscale-mode.sh); the result lands in state/tailscale.json,
+# which server.js reads for the Health page + a critical notification.
+TAILSCALE_JSON="${STATE_DIR}/tailscale.json"
+TAILSCALE_STATE=""
+tailscale_check() {
+    local out
+    out=$(timeout 30 bash "${_DIR}/lib/tailscale-mode.sh" write "$TAILSCALE_JSON" 2>/dev/null)
+    TAILSCALE_STATE=$(printf '%s' "$out" | grep -oE '"state":"[a-z]+"' | head -1 | cut -d'"' -f4)
+    case "$TAILSCALE_STATE" in
+        userspace) log "${RED}Tailscale is in userspace-networking mode${NC}: every tailnet peer reaches the web server as 127.0.0.1 (the Admin). Run tailscaled with a kernel TUN, or stop it on this box." ;;
+        kernel) log "tailscale: kernel interface (ok)" ;;
+        absent) log "tailscale: not running" ;;
+        *) TAILSCALE_STATE=unknown; log "${YELLOW}tailscale: mode unknown${NC}" ;;
+    esac
+}
+
 # --- step 8b: write the self-heal snapshot the Health page reads --------------
 # selfheal.json = latest cycle summary (space, verify tallies, link/asset counts,
 # what was repaired this cycle). heal-events.jsonl = the append-only, capped feed
@@ -310,7 +330,7 @@ write_health() {
     # upstream links are an internet transient the catalog re-resolves, not a box
     # fault, so they don't flip overall — the UI frames them as "recovering".
     local overall="good"
-    { [ "$vf" -gt 0 ] || [ "$miss" -gt 0 ]; } && overall="attention"
+    { [ "$vf" -gt 0 ] || [ "$miss" -gt 0 ] || [ "$TAILSCALE_STATE" = userspace ]; } && overall="attention"
     local ts; ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     local reps="" e kind detail first=1
     for e in "${HEAL_EVENTS[@]}"; do
@@ -328,6 +348,7 @@ write_health() {
         printf '  "deadLinks": %d, "missingAssets": %d,\n' "$dead" "$miss"
         printf '  "fillable": %s,\n' "$(_hj_str "$(valark_human "$(valark_fillable_bytes 2>/dev/null)" 2>/dev/null)")"
         printf '  "verify": { "pass": %d, "fail": %d, "skip": %d },\n' "$vp" "$vf" "$vs"
+        printf '  "tailscale": %s,\n' "$(_hj_str "${TAILSCALE_STATE:-unknown}")"
         printf '  "repairs": [%s\n  ] }\n' "$reps"
     } > "$tmp" && mv -f "$tmp" "$HEALTH_JSON"
     log "health written: ${HEALTH_JSON} (overall=$overall, ${#HEAL_EVENTS[@]} repair(s) this cycle)"
@@ -350,6 +371,8 @@ loop_once() {
     FORCE_COLOR=0 bash "${_DIR}/mirror-self.sh" 2>&1 | tail -1 | sed 's/^/    /'
 
     step "2f. link DHCP + DNS for a direct-connect laptop (VALARK_LINK_DHCP)"; ensure_link_dhcp
+
+    step "2g. tailscale mode (userspace networking makes tailnet peers look like the Admin, #311)"; tailscale_check
 
     step "3. refresh live catalog (heals stale content links)"
     bash "$LIBRARIAN" refresh >/dev/null 2>&1 && log "catalog refreshed" || log "${YELLOW}catalog refresh failed (cache retained)${NC}"

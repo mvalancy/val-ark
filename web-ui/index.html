@@ -4592,6 +4592,12 @@ function computeComponents() {
         detail: 'The box booted into recovery because its settings are unreadable. Your content is safe. Recover to set a new passcode and clear it.',
         fault: 'config', repair: { label: 'Recover', act: 'recover' } });
 
+    // 1b) Tailscale in userspace-networking mode (#311): every tailnet peer is the Admin.
+    const ts = _healthData && _healthData.tailscale;
+    if (ts && ts.userspace) comps.push({ key: 'tailscale', icon: '🔓', label: 'Tailnet access', level: 'bad', state: 'Everyone is Admin',
+        detail: 'Tailscale on this box runs in userspace-networking mode, so every device on your tailnet reaches Val Ark as if it were the box itself, and the box is always the Admin. Run tailscaled with a kernel TUN interface (drop --tun=userspace-networking), or stop Tailscale on this box.',
+        fault: 'config', repair: null });
+
     // 2) Storage.
     let diskPct = null;
     if (_diskData && _diskData.total) diskPct = _diskData.used / _diskData.total * 100;

@@ -1901,7 +1901,44 @@ function getHealthDetail() {
                              .filter(Boolean).reverse();
     } catch (_) {}
     const sm = safeModeState();
-    return { verify, heal, events, safeMode: sm.safeMode, safeModeReasons: sm.reasons, repairRunning: repairInFlight() };
+    return { verify, heal, events, safeMode: sm.safeMode, safeModeReasons: sm.reasons, repairRunning: repairInFlight(),
+             tailscale: tailscaleMode() };
+}
+
+// ---- Tailscale userspace-networking check (#311) ----------------------------
+// In userspace-networking mode tailscaled has no interface and connects onward from
+// 127.0.0.1, so isLocalhost() sees every tailnet peer as the box's own console: the
+// Admin. lib/tailscale-mode.sh detects it (read-only, fail-soft) and writes
+// <state>/tailscale.json; the loop runs it every cycle (step 2g) and the server runs
+// it at startup and every TAILSCALE_CHECK_MS so the Health page doesn't wait for the
+// next cycle. We do NOT stop trusting 127.0.0.1 when it fires: on the box both the
+// real console and tailscaled's proxied peers come from 127.0.0.1 with nothing in
+// the connection that tells them apart reliably (see access-identity.md), and
+// refusing all of them would take away the console's recovery path. The critical
+// notification tells the operator to fix the box instead.
+const TAILSCALE_CHECK_MS = 10 * 60 * 1000;
+let _tsCheckRunning = false;
+function tailscaleMode() {
+    const t = readStateJson('tailscale.json');
+    if (!t || typeof t !== 'object' || typeof t.state !== 'string') return null;
+    return { state: t.state, userspace: t.userspace === true || t.state === 'userspace',
+             evidence: Array.isArray(t.evidence) ? t.evidence.filter(e => typeof e === 'string').slice(0, 5) : [],
+             ts: typeof t.ts === 'string' ? t.ts : null };
+}
+function refreshTailscaleMode() {
+    // Tests spawn no helpers unless they hand the detector a stub tailscale CLI.
+    if (process.env.VALARK_TEST_NO_SPAWN === '1' && !process.env.VALARK_TAILSCALE_CMD) return;
+    if (_tsCheckRunning) return;
+    _tsCheckRunning = true;
+    // Fixed argv; no request data reaches it.
+    execFile('bash', [path.join(__dirname, 'lib', 'tailscale-mode.sh'), 'write', path.join(STATE_DIR, 'tailscale.json')],
+        { timeout: 30000 }, (err, stdout) => {
+            _tsCheckRunning = false;
+            if (!err && /"state":"userspace"/.test(stdout || '')) {
+                console.warn('[tailscale] userspace-networking mode: every tailnet peer reaches this server as 127.0.0.1 (the Admin). ' +
+                             'Run tailscaled with a kernel TUN, or stop it on this box.');
+            }
+        });
 }
 
 // ---- Notification center (issue #69 slice 1) --------------------------------
@@ -1972,6 +2009,14 @@ function getNotifications() {
         title: 'Val Ark is in recovery mode',
         detail: 'The box booted core-only because its settings could not be read. Your content is safe. Open Health to recover and set a new passcode.',
         source: 'config' });
+    // Tailscale in userspace-networking mode (#311): every tailnet peer is the Admin.
+    const ts = tailscaleMode();
+    if (ts && ts.userspace) items.push({ id: 'cond-tailscale-userspace', ts: ts.ts || condTs(), severity: 'critical',
+        title: 'Tailscale is giving every tailnet device admin rights',
+        detail: 'Tailscale on this box runs in userspace-networking mode, so everyone on your tailnet reaches Val Ark as if they were sitting at the box, and the box is always the Admin. ' +
+                'Fix: run tailscaled with a kernel TUN interface (drop --tun=userspace-networking; in a container give it /dev/net/tun and NET_ADMIN), or stop Tailscale on this box.' +
+                (ts.evidence.length ? ' Detected: ' + ts.evidence.join('; ') + '.' : ''),
+        source: 'security' });
     // Disk almost full — same thresholds the Health page uses (>=97 act now, >=90 filling up).
     let diskPct = null;
     try { const d = getDiskStatus(); if (d && d.total) diskPct = d.used / d.total * 100; } catch (_) {}
@@ -3345,6 +3390,9 @@ function onFirstBind() {
     const _sampleMs = Math.max(10000, Number(cfg('VALARK_METRICS_SAMPLE_MS', '30000')) || 30000);
     setInterval(sampleMetricsToRing, _sampleMs);
     setTimeout(sampleMetricsToRing, 2000);   // seed a baseline shortly after boot
+    // Tailscale userspace-networking check (#311): once at boot, then periodically.
+    refreshTailscaleMode();
+    setInterval(refreshTailscaleMode, TAILSCALE_CHECK_MS).unref();
 }
 
 let boundPorts = 0;

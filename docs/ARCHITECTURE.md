@@ -249,7 +249,7 @@ flowchart TD
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/flow/fleet-dark.svg">
-  <img src="img/flow/fleet-light.svg" width="100%" alt="Animated diagram: One Ark, many machines. Share one Ark across the LAN, or grow new ones from it, with no internet at all.">
+  <img src="img/flow/fleet-light.svg" width="100%" alt="Animated diagram: One Ark, many machines. Share one Ark across the LAN, or set up new ones from it, without the internet.">
 </picture>
 
 The data root is **NFS-exportable**: fleet nodes mount the single shared mirror and

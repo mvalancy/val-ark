@@ -194,8 +194,10 @@ CIYML="$ROOT/.github/workflows/ci.yml"   # test-cad-agent.sh's CPython 3.12 case
 grep -qE '^[^#]*uses: actions/setup-python@[0-9a-f]{40}' "$CIYML" \
     && grep -qE "^[^#]*python-version: *['\"]?3\.12['\"]?" "$CIYML" && pass \
     || fail "ci.yml must pin python-version 3.12 with a SHA-pinned actions/setup-python (#315)"
-grep -qE "^[^#]*pip install .*pyyaml==[0-9]" "$CIYML" && pass \
-    || fail "ci.yml must install a pinned PyYAML (test-ci-artifacts.sh fails under CI without it)"
+grep -qE "^[^#]*pip install --require-hashes -r \.github/ci/requirements-ci\.txt" "$CIYML" \
+  && grep -qE "^pyyaml==[0-9]" "$ROOT/.github/ci/requirements-ci.txt" \
+  && grep -qE -- "--hash=sha256:[0-9a-f]{64}" "$ROOT/.github/ci/requirements-ci.txt" && pass \
+    || fail "ci.yml must install a version- and hash-pinned PyYAML (test-ci-artifacts.sh fails under CI without it)"
 
 # the lint must catch each bad form (fixtures), and accept the good ones
 mkdir -p "$T/lint/ok" "$T/lint/empty-why"

@@ -164,7 +164,7 @@ const ifs = {
   eth9: [{ address: "203.0.113.5", family: "IPv4" },                     // a cloud / WAN uplink with a shared /64
          { address: "2001:db8:9:9::5", family: "IPv6", cidr: "2001:db8:9:9::5/64" }],
   utun1: [{ address: "fe80::1", family: "IPv6", cidr: "fe80::1/64" }],
-  en0: [{ address: "192.168.1.20", family: "IPv4" },
+  en0: [{ address: "10.0.0.5", family: "IPv4" },
         { address: "2001:db8:1:2::10", family: "IPv6", cidr: "2001:db8:1:2::10/64" },
         { address: "2001:db8:ffff::1", family: "IPv6", cidr: "2001:db8:ffff::1/48" }],
 };

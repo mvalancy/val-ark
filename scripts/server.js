@@ -997,6 +997,27 @@ function sameOriginPost(req) {
     const site = req.headers['sec-fetch-site'];
     return site === undefined || site === 'same-origin' || site === 'none';
 }
+// Defence in depth for #317: a page under /app/<id>/ or /kiwix/ is same-origin with the
+// UI, so the Origin check above lets it through. The browser names the calling page in
+// Referer (Referrer-Policy keeps the full URL same-origin), so /api/* refuses a write from
+// one, and a script read (fetch/XHR: Sec-Fetch-Dest "empty"). A plain navigation or a
+// download link from a forum post to /api/archive/... still works. A script can hide or
+// change its Referer, so this is a second line, not the fix: user content is sandboxed
+// by the proxy (SUBAPP_USER_CONTENT).
+function fromProxiedPage(req) {
+    const ref = req.headers.referer;
+    if (!ref) return false;
+    let p;
+    try { p = decodeURIComponent(new URL(String(ref)).pathname); } catch (_) { return false; }
+    p = path.posix.normalize(p.replace(/\\/g, '/'));
+    return /^\/+(?:app|kiwix)(?:\/|$)/i.test(p);
+}
+function subAppApiCallRefused(req) {
+    if (!fromProxiedPage(req)) return false;
+    const m = req.method;
+    if (m !== 'GET' && m !== 'HEAD' && m !== 'OPTIONS') return true;
+    return req.headers['sec-fetch-dest'] === 'empty';
+}
 // DNS rebinding guard: a page on an attacker's domain that re-resolves to the box would send a
 // matching Host and Origin. Only names that can belong to this box are served: IP literals,
 // localhost, single-label names (no dot: a LAN hostname), *.local / *.lan / *.home / *.home.arpa /
@@ -1159,7 +1180,11 @@ function noteLoginFail(req) {
     else _loginGlobal.n++;
 }
 function sessionCookie(token, maxAgeSec, secure) {
-    // HttpOnly so JS can't read it; SameSite=Lax to resist CSRF; Path=/ site-wide;
+    // HttpOnly so JS can't read it (a sub-app's scripts included); SameSite=Lax to resist
+    // CSRF, and a sandboxed (opaque-origin) user upload counts as cross-site, so its
+    // requests carry no cookie. Path=/ because the read-wall checks it on /app/, /kiwix/
+    // and the data trees too (Path=/api would sign Passworded users out of those); the
+    // proxy strips it before forwarding to any sub-app (#317).
     // Secure ONLY when the request came over TLS (else the browser would drop it on HTTP).
     return `varksid=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSec}${secure ? '; Secure' : ''}`;
 }
@@ -1867,7 +1892,43 @@ function formatSize(bytes) {
 // screen as a "back to the ark" header; we strip embedding-blocker headers so
 // the service renders inside our in-page frame. No HTML rewriting — each service
 // already serves under its own base path (/kiwix/ or /app/<id>/).
-function pipeProxy(req, res, port, label, pathOverride) {
+// Community sub-apps are same-origin with the Val Ark UI, so a page they serve can call
+// /api/* with a valid Origin (#317). The routes below hand out what USERS uploaded or
+// wrote (a file, a raw paste, a mail part), not the app's own UI, so the proxy serves
+// them in a sandbox: an opaque origin with no access to the box's cookies, storage or
+// API, and nosniff so a text paste can't turn into a page. Matched against the decoded,
+// normalized path (the upstream decodes too) and case-insensitively (Express is).
+// Any sub-app response carrying Content-Disposition (a file download or preview) gets
+// the same treatment, which catches a route this list doesn't know about.
+const SUBAPP_SANDBOX_CSP = 'sandbox allow-scripts allow-forms allow-popups allow-downloads';
+const SUBAPP_USER_CONTENT = {
+    // MicroBin: /file/{id} (?preview=true serves the upload INLINE with a guessed type, so
+    // an .html upload renders as a page), /secure_file/{id}, /raw/{id}, /archive/{id}.
+    paste: /^\/app\/paste\/(?:file|secure_file|raw|archive)\//i,
+    // NodeBB (served under /app/forum): uploads live at /assets/uploads/; /uploads/ redirects.
+    forum: /^\/app\/forum\/(?:assets\/uploads|uploads)\//i,
+    // The Lounge: /uploads/{name}/{slug} (file uploads) and /storage/ (link-preview cache).
+    chat:  /^\/app\/chat\/(?:uploads|storage)\//i,
+    // alps: raw message parts, plus its remote-resource proxy and BIMI avatars.
+    mail:  /^\/app\/mail\/(?:(?:mailboxes|message)\/.+\/raw|proxy|bimi\/avatar)(?:\/|$)/i,
+};
+function isSubAppUserContent(id, urlPath) {
+    const re = SUBAPP_USER_CONTENT[id];
+    return !!(re && re.test(urlPath));
+}
+// Drop only the frame-ancestors directive (it would stop the in-page frame) and keep the
+// rest of the upstream's policy: a sub-app's own sandbox on its uploads must survive.
+function cspWithoutFrameAncestors(v) {
+    const one = (s) => String(s).split(';').map((d) => d.trim())
+        .filter((d) => d && !/^frame-ancestors(\s|$)/i.test(d)).join('; ');
+    const out = (Array.isArray(v) ? v : [v]).map(one).filter(Boolean);
+    return out.length ? out : undefined;
+}
+
+// opts.subApp: a community sub-app (keep its CSP minus frame-ancestors; sandbox user
+// content). Without it (Kiwix) the upstream CSP is dropped as before.
+function pipeProxy(req, res, port, label, pathOverride, opts) {
+    opts = opts || {};
     // Fresh upstream socket per request (agent:false) + drop hop-by-hop headers.
     // Reusing the default agent's keep-alive sockets races against backends that
     // close idle connections (e.g. NodeBB): a reused half-closed socket throws
@@ -1887,7 +1948,20 @@ function pipeProxy(req, res, port, label, pathOverride) {
     }, (proxyRes) => {
         const headers = { ...proxyRes.headers };
         delete headers['x-frame-options'];
-        delete headers['content-security-policy'];
+        if (opts.subApp) {
+            const kept = headers['content-security-policy'] !== undefined
+                ? cspWithoutFrameAncestors(headers['content-security-policy']) : undefined;
+            delete headers['content-security-policy'];
+            if (kept) headers['content-security-policy'] = kept;
+            if (opts.userContent || headers['content-disposition'] !== undefined) {
+                // A second policy is enforced alongside any upstream one (both must pass).
+                const list = headers['content-security-policy'] || [];
+                headers['content-security-policy'] = [...list, SUBAPP_SANDBOX_CSP];
+                headers['x-content-type-options'] = 'nosniff';
+            }
+        } else {
+            delete headers['content-security-policy'];
+        }
         res.writeHead(proxyRes.statusCode || 502, headers);
         proxyRes.pipe(res);
     });
@@ -1921,13 +1995,18 @@ function proxyKiwix(req, res) {
 // its routes at ROOT and only PREFIXES generated links (MicroBin), so we remove
 // the /app/<id> prefix before forwarding; false when the upstream genuinely
 // serves under that base path (NodeBB `url`, etc.) and needs the prefix intact.
+function envPort(k, d) {
+    const n = parseInt(cfg(k, ''), 10);
+    return n > 0 && n < 65536 ? n : d;
+}
 const APP_SERVICES = {
-    chat:  { port: 9000, strip: true },    // The Lounge (web client mounts at root)
-    mail:  { port: 1323, strip: true },    // alps webmail
-    forum: { port: 4567, strip: false },   // NodeBB serves under its configured url base
-    paste: { port: 8085, strip: true },    // MicroBin serves at root; PUBLIC_PATH only prefixes links
+    // Ports follow the same env overrides the service scripts read (default = the script's).
+    chat:  { port: envPort('VALARK_CHAT_WEB_PORT', 9000), strip: true },   // The Lounge (web client mounts at root)
+    mail:  { port: envPort('VALARK_MAIL_WEB_PORT', 1323), strip: true },   // alps webmail
+    forum: { port: envPort('VALARK_FORUM_PORT', 4567), strip: false },     // NodeBB serves under its configured url base
+    paste: { port: envPort('PASTE_PORT', 8085), strip: true },             // MicroBin serves at root; PUBLIC_PATH only prefixes links
 };
-function proxyAppService(req, res, id, name) {
+function proxyAppService(req, res, id, urlPath, name) {
     const svc = APP_SERVICES[id];
     if (!svc) return send404(res);
     let targetPath = req.url;
@@ -1935,7 +2014,8 @@ function proxyAppService(req, res, id, name) {
         targetPath = req.url.replace(new RegExp('^/app/' + id), '');
         if (!targetPath.startsWith('/')) targetPath = '/' + targetPath;
     }
-    pipeProxy(req, res, svc.port, name || id, targetPath);
+    pipeProxy(req, res, svc.port, name || id, targetPath,
+        { subApp: true, userContent: isSubAppUserContent(id, urlPath || '') });
 }
 
 // Liveness of each sub-app (so the UI offers "Launch" only when it's actually
@@ -3165,6 +3245,9 @@ function handleRequest(req, res) {
 
     // API routes
     if (urlPath.startsWith('/api/')) {
+        if (subAppApiCallRefused(req)) {
+            return sendJSON(res, req, { error: 'Community apps and the library cannot call the Val Ark API. Use the Val Ark web UI.' }, 403);
+        }
         return handleAPI(req, res, urlPath);
     }
 
@@ -3184,7 +3267,7 @@ function handleRequest(req, res) {
     const appMatch = urlPath.match(/^\/app\/([a-z0-9-]+)(?:\/|$)/);
     if (appMatch) {
         if (!proxyPathOk('/app/' + appMatch[1])) return send404(res);
-        return proxyAppService(req, res, appMatch[1]);
+        return proxyAppService(req, res, appMatch[1], urlPath);
     }
 
     // Static file serving with path traversal protection

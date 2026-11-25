@@ -513,6 +513,17 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   the dead parent → a wrong pidfile → the loop's per-cycle `start` spawned duplicate instances that
   fought over `:9000`. Use `nohup ... & echo $!` for the true pid, plus a **port-based liveness
   fallback** (`_lounge_up`) so a stale pidfile can never trigger a duplicate start.
+- **A sub-app is the Val Ark origin, so its user content must be sandboxed (#317).** `/app/<id>/`
+  shares the UI's origin and localhost is the Admin: an HTML file a user uploads (MicroBin
+  `/file/{id}?preview=true` serves it inline) could POST to `/api/*` with a valid Origin. The
+  proxy sandboxes the upload routes listed in `SUBAPP_USER_CONTENT` (plus any response with
+  `Content-Disposition`). **Adding a sub-app, or one gains an upload/raw route? Add its route
+  there** (match the decoded path, case-insensitive) and a case in
+  `tests/test-subapp-isolation.sh`. Don't strip a sub-app's whole CSP either: only
+  `frame-ancestors` blocks the frame, and the rest can be the app's own upload sandbox.
+  And a sub-app's **web** port binds `127.0.0.1`, never `VALARK_BIND`: that knob is for
+  protocol ports (mail, IRC), and owners set it to `0.0.0.0` for IMAP, which would put the
+  web UI on the LAN around the proxy (`tests/test-service-binds.sh`).
 - **Minting a login is an admin action → `POST /api/service/adduser` is admin‑gated.** LAN
   users self‑register on the forum, join chat with just a nickname, or ask the host; only the
   operator (localhost/admin) provisions **mail** logins. The UI hides the create form off‑admin
@@ -1083,12 +1094,21 @@ gate goes quietly green with nothing tested.
 **Fix:** guard with `tests/lib/require-cmd.sh`: `require_python3 "<what>"`,
 `require_cmd <cmd> "<what>"`, or `[ -n "$NODE" ] || missing_cmd node "<what>"` for a runtime you
 resolved yourself. Locally these skip; when `CI` is set (anything but empty / false / 0 / no / off,
-any case) they exit 1. A per-case skip puts `ci_is_set` on the `SKIP:` line or the one before:
-`if ci_is_set; then fail …; else echo "SKIP: …"; fi`. A skip that is right in CI too (no tools
-mirror on a fresh checkout, a CPython 3.12 the runner may not have) carries a `# ci-skip-ok: <why>`
-comment on the line before. `tests/test-require-cmd.sh` runs every guarded test with that command
-removed from PATH and lints every `SKIP:` line plus every test that calls python3 without
-`require_python3`, so a new bare guard fails CI.
+any case) they exit 1. A per-case skip puts `ci_is_set` in code (a comment naming it does not
+count) on the `SKIP:` line or the one before: `if ci_is_set; then fail …; else echo "SKIP: …"; fi`.
+A skip that is right in CI too (no tools mirror on a fresh checkout) carries a
+`# ci-skip-ok: <why>` comment with a non-empty reason on the line before, and is allowed only in a
+test listed in `SKIP_OK_FILES` in `tests/test-require-cmd.sh` (today just `test-tool-arch.sh`), so
+a new one is a reviewed diff. A runtime CI can provide is pinned in CI instead: `ci.yml` pins
+CPython 3.12 (`actions/setup-python`) so test-cad-agent.sh's cp312 case fails there rather than
+skipping (#315). `tests/test-require-cmd.sh` runs every guarded test with that command removed from
+PATH and lints every `echo "SKIP:` / `printf 'SKIP` / `|| exit 0` / `|| { …; exit 0; }` line plus
+every test that calls python3 without `require_python3`, so a new bare guard fails CI. Heredoc
+bodies (a stub script the test writes) are not linted: their `|| exit 0` doesn't skip the test.
+The same goes for PyYAML: `ci.yml` installs a pinned one, and test-ci-artifacts.sh's full YAML parse
+fails under CI without it. **The lint is a speed bump, not proof:** it matches text, so any code line
+that mentions `ci_is_set` on or just before a skip satisfies it, whether or not that code actually
+fails under CI. Reviewers still read the branch.
 
 <a id="browser-runner-failure-evidence"></a>
 ## Browser runner failure evidence

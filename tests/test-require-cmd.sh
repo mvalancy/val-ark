@@ -10,10 +10,11 @@
 #      when CI=true / CI=1.
 #   3. Per-case skips run in full without their command: test-catalog-cache.sh (node) and
 #      test-static-site.sh (zstd) pass with the case skipped locally and fail under CI.
-#   4. Lint, on the real tests and on fixtures that must be caught: every `SKIP:` line needs
-#      `ci_is_set` (or a `# ci-skip-ok: <why>` comment) on that line or the one before; a test
-#      that runs python3 calls require_python3; a test that resolves node guards it; no silent
-#      `command -v X || exit 0`.
+#   4. Lint, on the real tests and on fixtures that must be caught: every skip-shaped line
+#      (`echo "SKIP:`, `printf 'SKIP`, `|| exit 0`, `|| { …; exit 0; }`) needs `ci_is_set` in code
+#      (not a comment) on that line or the one before, or -- only in a test on SKIP_OK_FILES -- a
+#      `# ci-skip-ok: <non-empty why>` comment; a test that runs python3 calls require_python3; a
+#      test that resolves node guards it. ci.yml pins CPython 3.12 (test-cad-agent.sh needs it, #315).
 # Offline; bash + coreutils.
 ###############################################################################
 PASS=0; FAIL=0
@@ -133,16 +134,46 @@ case_run node test-catalog-cache.sh "SKIP: no node runtime — parseCatalogTSV" 
 case_run zstd test-static-site.sh "SKIP: zstd cluster case" "FAIL: ZIM: zstd cluster case needs the zstd CLI"
 
 # --- 4. lint --------------------------------------------------------------------------------
+# The ONLY tests allowed a `# ci-skip-ok: <why>` skip (a skip that is right in CI too). Adding a
+# file here is a reviewed, visible diff (#315), and every entry must still carry one.
+SKIP_OK_FILES=(test-tool-arch.sh)
 lint() {   # lint FILE... -> one offender per line
-    local f b
+    local f b x allow
     for f in "$@"; do
-        b="$(basename "$f")"
-        # every SKIP: line is tied to ci_is_set / a ci-skip-ok reason, on that line or the one before
-        awk -v b="$b" '
-            { ok = ($0 ~ /ci_is_set|# ci-skip-ok:/) || (prev ~ /ci_is_set|# ci-skip-ok:/) }
-            $0 !~ /^[ \t]*#/ && /echo[^#]*SKIP:/ && !ok { print b ":" NR ": SKIP: not tied to ci_is_set / # ci-skip-ok:" }
-            $0 !~ /^[ \t]*#/ && /command -v [^|]*\|\|[^#]*exit 0/ && !ok { print b ":" NR ": silent command -v ... || exit 0" }
-            { prev = $0 }' "$f"
+        b="$(basename "$f")"; allow=0
+        for x in "${SKIP_OK_FILES[@]}"; do [ "$b" = "$x" ] && allow=1; done
+        # Every skip-shaped line (echo/printf SKIP, `|| exit 0`, `|| { …; exit 0; }`) must be tied to
+        # ci_is_set in CODE (a comment does not count) on that line or the one before, or -- in a
+        # SKIP_OK_FILES test only -- to a `# ci-skip-ok: <reason>` on that line or the one before.
+        # Heredoc bodies (<<EOF / <<'EOF' / <<"EOF" / <<-EOF ... EOF) are skipped: a stub script
+        # written by the test, whose own `|| exit 0` does not skip the test. POSIX awk (CI may
+        # run mawk): the quote comes in as q, no gawk-only match() captures.
+        awk -v b="$b" -v allow="$allow" -v q="'" '
+            function code(s) { sub(/(^|[ \t])#.*/, "", s); return s }
+            BEGIN { hdre = "<<-?[ \t]*[" q "\"]?[A-Za-z_][A-Za-z0-9_]*" }
+            hd != "" {   # inside a heredoc body: only look for its terminator
+                t = $0; if (hdtab) sub(/^\t+/, "", t)
+                if (t == hd) hd = ""
+                prev = $0; prevc = ""; next
+            }
+            {
+                c = code($0)
+                why = ($0 ~ /# ci-skip-ok:[ \t]*[^ \t]/) || (prev ~ /# ci-skip-ok:[ \t]*[^ \t]/)
+                ok = (c ~ /ci_is_set/) || (prevc ~ /ci_is_set/) || (why && allow)
+            }
+            /# ci-skip-ok:/ && !allow { print b ":" NR ": # ci-skip-ok: in a test not on SKIP_OK_FILES" }
+            /# ci-skip-ok:/ && $0 !~ /# ci-skip-ok:[ \t]*[^ \t]/ { print b ":" NR ": # ci-skip-ok: needs a reason" }
+            c ~ /echo[^#]*SKIP:|printf[^#]*SKIP/ && !ok { print b ":" NR ": SKIP: not tied to ci_is_set / # ci-skip-ok:" }
+            c ~ /command -v [^|]*\|\|[^#]*exit 0/ && !ok { print b ":" NR ": silent command -v ... || exit 0" }
+            c ~ /\|\|[ \t]*(exit 0|\{[^}]*exit 0)/ && c !~ /command -v / && !ok { print b ":" NR ": silent || exit 0 not tied to ci_is_set" }
+            {
+                prev = $0; prevc = c
+                if (match(c, hdre) && (RSTART == 1 || substr(c, RSTART - 1, 1) != "<")) {   # not <<<
+                    w = substr(c, RSTART + 2, RLENGTH - 2)
+                    hdtab = (w ~ /^-/); sub(/^-/, "", w); gsub(/[ \t"]/, "", w); gsub(q, "", w)
+                    hd = w
+                }
+            }' "$f"
         if grep -qE '^[^#]*\bpython3\b' "$f" && ! grep -qE '^[^#]*(require_python3|require_cmd python3)' "$f"; then
             echo "$b: runs python3 without require_python3"
         fi
@@ -155,23 +186,54 @@ lint() {   # lint FILE... -> one offender per line
 real=(); for f in "$ROOT"/tests/test-*.sh; do [ "$f" = "$SELF" ] || real+=("$f"); done
 bare="$(lint "${real[@]}")"
 if [ -z "$bare" ]; then pass; else fail "bare runtime guards (use tests/lib/require-cmd.sh):"$'\n'"$bare"; fi
+for x in "${SKIP_OK_FILES[@]}"; do   # a stale allowlist entry is dropped, not left to cover a future skip
+    grep -qE '# ci-skip-ok:[[:space:]]*[^[:space:]]' "$ROOT/tests/$x" 2>/dev/null && pass \
+        || fail "SKIP_OK_FILES lists $x, which has no '# ci-skip-ok: <why>': drop it from the list"
+done
+CIYML="$ROOT/.github/workflows/ci.yml"   # test-cad-agent.sh's CPython 3.12 case fails under CI, so CI pins it
+grep -qE '^[^#]*uses: actions/setup-python@[0-9a-f]{40}' "$CIYML" \
+    && grep -qE "^[^#]*python-version: *['\"]?3\.12['\"]?" "$CIYML" && pass \
+    || fail "ci.yml must pin python-version 3.12 with a SHA-pinned actions/setup-python (#315)"
+grep -qE "^[^#]*pip install .*pyyaml==[0-9]" "$CIYML" && pass \
+    || fail "ci.yml must install a pinned PyYAML (test-ci-artifacts.sh fails under CI without it)"
 
 # the lint must catch each bad form (fixtures), and accept the good ones
-mkdir -p "$T/lint"
+mkdir -p "$T/lint/ok" "$T/lint/empty-why"
 { cat "$ROOT/tests/test-health.sh"; echo 'echo "SKIP: extra (no node)" >&2'; } > "$T/lint/appended.sh"
 printf '%s\n' 'if ! command -v python3 >/dev/null 2>&1; then' '    echo "SKIP: python3 not found"' '    exit 0' 'fi' \
     'python3 -c 1' > "$T/lint/multiline.sh"
 printf '%s\n' 'ROOT=.' 'python3 - <<EOF' 'print(1)' 'EOF' > "$T/lint/unguarded-py.sh"
 printf '%s\n' 'command -v zstd >/dev/null 2>&1 || exit 0' > "$T/lint/silent.sh"
 printf '%s\n' 'NODE="$(command -v node)"' '"$NODE" -e 1' > "$T/lint/node.sh"
-printf '%s\n' 'if ci_is_set; then fail "x"' 'else echo "SKIP: x (no zstd)" >&2; fi' \
-    '# ci-skip-ok: a fresh checkout has no mirror' '[ -d x ] || { echo "SKIP: no mirror" >&2; exit 0; }' > "$T/lint/good.sh"
-for fx in appended multiline unguarded-py silent node; do
+printf '%s\n' '# a comment naming ci_is_set does not tie the skip' 'echo "SKIP: x" >&2' > "$T/lint/comment-ci.sh"
+printf '%s\n' 'x=1   # nor does a trailing ci_is_set comment' 'echo "SKIP: x" >&2' > "$T/lint/trailing-ci.sh"
+printf '%s\n' '# ci-skip-ok: a reason, but this test is not on SKIP_OK_FILES' 'echo "SKIP: x" >&2' > "$T/lint/unlisted.sh"
+printf '%s\n' '[ -d x ] || exit 0' > "$T/lint/or-exit.sh"
+printf '%s\n' '[ -d x ] || { echo "no x" >&2; exit 0; }' > "$T/lint/or-brace-exit.sh"
+printf '%s\n' "printf 'SKIP: x\\n' >&2" > "$T/lint/printf-skip.sh"
+# a heredoc stub body is skipped, but the lint resumes after its terminator / never starts on <<<
+printf '%s\n' "cat > stub <<'EOF'" '[ "$1" = start ] || exit 0' 'echo "SKIP: in a stub"' 'EOF' \
+    'cat > stub2 <<-"END"' $'\t[ -d x ] || exit 0' $'\tEND' 'cat > stub3 <<EOF' 'x || exit 0' 'EOF' > "$T/lint/heredoc.sh"
+{ cat "$T/lint/heredoc.sh"; echo '[ -d x ] || exit 0'; } > "$T/lint/after-heredoc.sh"
+printf '%s\n' 'grep -q x <<<"$y"' '[ -d x ] || exit 0' > "$T/lint/herestring.sh"
+printf '%s\n' '# ci-skip-ok:   ' '[ -d x ] || { echo "SKIP: no mirror" >&2; exit 0; }' > "$T/lint/empty-why/test-tool-arch.sh"
+printf '%s\n' '[ "$rc" = 0 ] && pass || fail "must exit 0"' 'echo hi  # echo "SKIP: in a comment"' \
+    'if ci_is_set; then fail "x"' 'else echo "SKIP: x (no zstd)" >&2; fi' 'ci_is_set || exit 0' > "$T/lint/good.sh"
+printf '%s\n' '# ci-skip-ok: a fresh checkout has no mirror' '[ -d x ] || { echo "SKIP: no mirror" >&2; exit 0; }' \
+    > "$T/lint/ok/test-tool-arch.sh"
+for fx in appended multiline unguarded-py silent node comment-ci trailing-ci unlisted or-exit or-brace-exit \
+        printf-skip empty-why/test-tool-arch after-heredoc herestring; do
     [ -n "$(lint "$T/lint/$fx.sh")" ] && pass || fail "lint must flag the '$fx' fixture"
 done
 grep -q 'appended.sh:.*SKIP: not tied' <<<"$(lint "$T/lint/appended.sh")" && pass \
     || fail "lint must flag the appended bare SKIP line itself"
-[ -z "$(lint "$T/lint/good.sh")" ] && pass || fail "lint must accept ci_is_set / ci-skip-ok skips: $(lint "$T/lint/good.sh")"
+grep -q 'needs a reason' <<<"$(lint "$T/lint/empty-why/test-tool-arch.sh")" && pass \
+    || fail "lint must flag an empty '# ci-skip-ok:' reason"
+grep -q 'after-heredoc.sh:11:' <<<"$(lint "$T/lint/after-heredoc.sh")" && pass \
+    || fail "lint must resume after a heredoc terminator and flag line 11: $(lint "$T/lint/after-heredoc.sh")"
+for fx in good ok/test-tool-arch heredoc; do
+    [ -z "$(lint "$T/lint/$fx.sh")" ] && pass || fail "lint must accept the '$fx' fixture: $(lint "$T/lint/$fx.sh")"
+done
 
 echo "require-cmd: $PASS passed, $FAIL failed ($(for c in "${!seen[@]}"; do printf '%s:%s ' "$c" "${seen[$c]}"; done))"
 [ "$FAIL" -eq 0 ]

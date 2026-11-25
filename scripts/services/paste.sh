@@ -6,8 +6,9 @@
 # file-upload + URL-shortener to the LAN, reverse-proxied by server.js at
 # /app/paste/. Subcommands: start | stop | status | restart.
 #
-#   - LAN-only by intent. Binds VALARK_BIND (default 127.0.0.1 so only the
-#     local reverse proxy reaches it; set VALARK_BIND=0.0.0.0 to expose direct).
+#   - Always binds 127.0.0.1, whatever VALARK_BIND says (#317): the LAN reaches it
+#     only through the Val Ark proxy, which sandboxes uploads and applies the
+#     read-wall. VALARK_BIND is for protocol ports (mail, IRC), never a web UI.
 #   - Web UI listens on a FIXED localhost port (PASTE_PORT, default 8085) so the
 #     Val Ark web server can reverse-proxy it at /app/paste/.
 #   - NEVER enables internet relay/federation: MicroBin has none, and we also
@@ -33,7 +34,7 @@ STATE_DIR="${STATE_DIR:-${PROJECT_ROOT}/state}"
 
 # --- Configuration ------------------------------------------------------------
 PASTE_PORT="${PASTE_PORT:-8085}"           # fixed localhost port for reverse proxy
-VALARK_BIND="${VALARK_BIND:-127.0.0.1}"    # LAN-only intent; 0.0.0.0 to expose
+WEB_BIND="127.0.0.1"                       # web UI: loopback only, never VALARK_BIND (#317)
 PUBLIC_PATH="${PASTE_PUBLIC_PATH:-/app/paste/}"  # reverse-proxy mount point
 
 DATA_DIR="${PASTE_DATA_DIR:-${STATE_DIR}/services/paste}"
@@ -130,7 +131,7 @@ cmd_start() {
     mkdir -p "$DATA_DIR" 2>/dev/null || true
     _ensure_credentials
 
-    _log "starting MicroBin on ${VALARK_BIND}:${PASTE_PORT} (proxy ${PUBLIC_PATH})"
+    _log "starting MicroBin on ${WEB_BIND}:${PASTE_PORT} (proxy ${PUBLIC_PATH})"
 
     # MicroBin reads config from MICROBIN_* env vars. Run from DATA_DIR so the
     # SQLite DB + uploaded files live under the Val Ark data tree.
@@ -145,7 +146,7 @@ cmd_start() {
     (
         cd "$DATA_DIR" || exit 1
         MICROBIN_PORT="$PASTE_PORT" \
-        MICROBIN_BIND="$VALARK_BIND" \
+        MICROBIN_BIND="$WEB_BIND" \
         MICROBIN_PUBLIC_PATH="$PUBLIC_PATH" \
         MICROBIN_DATA_DIR="$DATA_DIR" \
         MICROBIN_PRIVATE="true" \
@@ -181,7 +182,7 @@ cmd_start() {
 
     if _is_running; then
         _log "started (pid $(cat "$PID_FILE"))"
-        _log "web UI:   http://${VALARK_BIND}:${PASTE_PORT}${PUBLIC_PATH}"
+        _log "web UI:   http://${WEB_BIND}:${PASTE_PORT}${PUBLIC_PATH} (LAN: /app/paste/ on the Val Ark web port)"
         _log "login:    user='${PASTE_AUTH_USER}'  (password in ${CRED_FILE})"
         _log "admin:    user='admin'  (password in ${CRED_FILE})"
         return 0
@@ -212,7 +213,7 @@ cmd_stop() {
 
 cmd_status() {
     if _is_running; then
-        echo "paste: running (pid $(cat "$PID_FILE")) on ${VALARK_BIND}:${PASTE_PORT}${PUBLIC_PATH}"
+        echo "paste: running (pid $(cat "$PID_FILE")) on ${WEB_BIND}:${PASTE_PORT}${PUBLIC_PATH}"
         echo "  data:        ${DATA_DIR}"
         echo "  credentials: ${CRED_FILE}"
         echo "  log:         ${LOG_FILE}"

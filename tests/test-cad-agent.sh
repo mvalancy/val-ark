@@ -347,10 +347,10 @@ for c in python3.12 python3; do
     command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys,venv; sys.exit(0 if sys.version_info[:2]==(3,12) else 1)' 2>/dev/null && { PY312="$(command -v "$c")"; break; }
 done
 if [ -z "$PY312" ] || ! "$PY312" -m venv "$T/probe" >/dev/null 2>&1; then
-    # The wheels are cp312 and ubuntu-latest's python3 is not pinned to 3.12 (it may also lack venv),
-    # so CI can legitimately miss it; the rest of this file still runs there.
-    # ci-skip-ok: no CPython 3.12 + venv on the runner is expected, not a broken guard
-    echo "  SKIP: verify_cad_agent (no CPython 3.12 with venv here)" >&2
+    # The wheels are cp312. ci.yml pins CPython 3.12 (actions/setup-python), so under CI a missing
+    # 3.12 + venv is a broken runner, not a reason to skip (#315); locally it skips.
+    if ci_is_set; then fail "verify_cad_agent needs CPython 3.12 with venv under CI (ci.yml pins it)"
+    else echo "  SKIP: verify_cad_agent (no CPython 3.12 with venv here)" >&2; fi
 else
     mkwheel() {  # $1 = wheelhouse, $2 = Requires-Dist line (optional)
         "$PY312" - "$1" "$2" <<'PY'

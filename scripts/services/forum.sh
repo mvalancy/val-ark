@@ -11,9 +11,10 @@
 #
 # SECURITY / OFFLINE POSTURE
 #   - The web UI binds to a FIXED localhost port (FORUM_PORT, default 4567) so
-#     Val Ark can same-origin reverse-proxy it. NodeBB itself listens on
-#     127.0.0.1 by default; set VALARK_BIND=0.0.0.0 to expose it directly on the
-#     LAN (the box is offline anyway). It NEVER reaches the internet at runtime.
+#     Val Ark can same-origin reverse-proxy it. NodeBB always listens on
+#     127.0.0.1, whatever VALARK_BIND says (#317): the LAN reaches it only through
+#     the proxy, which sandboxes uploads and applies the read-wall. VALARK_BIND is
+#     for protocol ports (mail, IRC). It NEVER reaches the internet at runtime.
 #   - Federation / ActivityPub / social login / outbound webhooks are left
 #     DISABLED -- this script writes a config that does not enable them.
 #   - Auth is mandatory: first run creates an admin account (interactive, or via
@@ -33,7 +34,7 @@ STATE_DIR="${STATE_DIR:-${PROJECT_ROOT}/state}"
 
 # --- Config -------------------------------------------------------------------
 FORUM_PORT="${VALARK_FORUM_PORT:-4567}"        # fixed localhost port (proxied at /app/forum/)
-BIND="${VALARK_BIND:-127.0.0.1}"               # LAN intent; 0.0.0.0 allowed, never relayed
+BIND="127.0.0.1"                               # web UI: loopback only, never VALARK_BIND (#317)
 REDIS_PORT="${VALARK_FORUM_REDIS_PORT:-6379}"
 REDIS_HOST="127.0.0.1"
 REDIS_DB="${VALARK_FORUM_REDIS_DB:-0}"
@@ -168,8 +169,7 @@ write_config() {
     mkdir -p "$FORUM_STATE"
     # Public URL is what users hit through the reverse proxy. Keep it relative-path
     # aware so NodeBB generates correct links under /app/forum/.
-    local public_url="http://${BIND}${URL_ROOT}"
-    [ "$BIND" = "127.0.0.1" ] && public_url="http://localhost${URL_ROOT}"
+    local public_url="http://localhost${URL_ROOT}"
     if [ ! -f "$CONFIG_FILE" ]; then
         cat > "$CONFIG_FILE" <<EOF
 {
@@ -191,6 +191,41 @@ write_config() {
 EOF
         log "Wrote offline config: $CONFIG_FILE (database=redis, federation=off)"
     fi
+    pin_bind_address
+}
+
+# An existing config may predate #317 (bind_address from VALARK_BIND, e.g. 0.0.0.0) or
+# lack the key, and NodeBB binds every interface when bind_address is missing. Pin it
+# to loopback on every start.
+pin_bind_address() {
+    [ -f "$CONFIG_FILE" ] || return 0
+    local nd py res=""
+    nd="$(valark_node_dir 2>/dev/null)" || nd=""
+    py="$(command -v python3 2>/dev/null)" || py=""
+    if [ -n "$nd" ]; then
+        res="$("${nd}/node" -e '
+const fs = require("fs"); const f = process.argv[1]; const want = process.argv[2];
+const c = JSON.parse(fs.readFileSync(f, "utf8"));
+if (c.bind_address === want) { console.log("ok"); process.exit(0); }
+c.bind_address = want; fs.writeFileSync(f, JSON.stringify(c, null, 4) + "\n"); console.log("changed");
+' "$CONFIG_FILE" "$BIND" 2>/dev/null)"
+    elif [ -n "$py" ]; then
+        res="$("$py" -I -c '
+import json, sys
+f, want = sys.argv[1], sys.argv[2]
+c = json.load(open(f))
+if c.get("bind_address") == want:
+    print("ok"); sys.exit(0)
+c["bind_address"] = want
+open(f, "w").write(json.dumps(c, indent=4) + "\n"); print("changed")
+' "$CONFIG_FILE" "$BIND" 2>/dev/null)"
+    fi
+    case "$res" in
+        ok) ;;
+        changed) log "Pinned NodeBB bind_address to ${BIND} in $CONFIG_FILE (#317)" ;;
+        *) err "Could not check bind_address in $CONFIG_FILE; make sure it is \"${BIND}\" (NodeBB binds every interface without it)." ;;
+    esac
+    return 0
 }
 
 # --- NodeBB lifecycle ---------------------------------------------------------
@@ -358,8 +393,9 @@ do_status() {
 
 case "${1:-}" in
     start)  do_start ;;
+    config) mkdir -p "$FORUM_STATE" && write_config && echo "$CONFIG_FILE" ;;   # write/repair config only
     stop)   do_stop ;;
     status) do_status ;;
     restart) do_stop; do_start ;;
-    *) echo "Usage: $0 {start|stop|status|restart}"; exit 2 ;;
+    *) echo "Usage: $0 {start|stop|status|restart|config}"; exit 2 ;;
 esac

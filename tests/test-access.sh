@@ -293,5 +293,34 @@ VALARK_STATE_DIR="$T/um" "$NODE" "$ROOT/scripts/lib/auth.js" setmode passworded 
   && grep -q '\[access\] Use Mode changed: open -> passworded (by valark usemode' "$T/cli-um.err" \
   && pass || fail "valark usemode must log the change on stderr"
 
+# 15. CSRF (#314): a web page elsewhere can't POST, even to the box's own localhost (which
+#     counts as Admin). Same-origin browser POSTs and header-less clients (curl, CLI) work.
+stop_pids "$SRV_PID"; SRV_PID=""
+if start_open ""; then
+    xpost() { curl -s -o /dev/null -w '%{http_code}' --max-time 6 -X POST "$@" "$B/api/maintenance/repair"; }
+    c=$(xpost -H 'Origin: http://evil.example' -H 'Content-Type: text/plain' --data '{}'); [ "$c" = "403" ] && pass || fail "cross-origin POST from localhost must be 403 (got $c)"
+    c=$(xpost -H 'Origin: null' --data '{}'); [ "$c" = "403" ] && pass || fail "Origin: null POST must be 403 (got $c)"
+    c=$(xpost -H "Origin: http://localhost:1" --data '{}'); [ "$c" = "403" ] && pass || fail "another local port is another origin: 403 (got $c)"
+    c=$(xpost -H 'Sec-Fetch-Site: cross-site' --data '{}'); [ "$c" = "403" ] && pass || fail "Sec-Fetch-Site: cross-site must be 403 (got $c)"
+    c=$(xpost -H 'Sec-Fetch-Site: same-site' --data '{}'); [ "$c" = "403" ] && pass || fail "Sec-Fetch-Site: same-site (another port) must be 403 (got $c)"
+    c=$(xpost -H "Origin: $B" -H 'Content-Type: application/json' --data '{}'); [ "$c" != "403" ] && pass || fail "same-origin POST must be accepted (got $c)"
+    c=$(xpost -H 'Sec-Fetch-Site: same-origin' -H 'Content-Type: application/json' --data '{}'); [ "$c" != "403" ] && pass || fail "Sec-Fetch-Site: same-origin must be accepted (got $c)"
+    c=$(xpost -H 'Content-Type: application/json' --data '{}'); [ "$c" != "403" ] && pass || fail "a header-less client (curl, CLI) must still work (got $c)"
+    # review of #316: no CORS for other localhost origins; DNS rebinding; scheme + port spelling
+    h=$(curl -s -D - -o /dev/null -H 'Origin: http://localhost:5173' "$B/api/setup/recovery-card" | tr -d '\r' | grep -i '^access-control-allow-origin' || true)
+    [ -z "$h" ] && pass || fail "another localhost origin must not get CORS access ($h)"
+    c=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: rebind.evil.example' "$B/api/health"); [ "$c" = "421" ] && pass || fail "a foreign Host name must be 421 (got $c)"
+    for hn in "evil.com@127.0.0.1" "evil.com%2elocal" "evil.com.local.attacker.com" "127.0.0.1.nip.io"; do
+        c=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $hn" "$B/api/health"); [ "$c" = "421" ] && pass || fail "Host $hn must be 421 (got $c)"
+    done
+    for hn in valark.local ark.lan myark x.ts.net "[::1]" valark.local. ark.fritz.box "[fe80::1%25eth0]"; do
+        c=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $hn" "$B/api/health"); [ "$c" = "200" ] && pass || fail "Host $hn must be served (got $c)"
+    done
+    c=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Host: valark.local:80' -H 'Origin: http://valark.local' -H 'Content-Type: application/json' --data '{}' "$B/api/maintenance/repair"); [ "$c" != "403" ] && pass || fail "Host with an explicit default port matches its Origin (got $c)"
+    c=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Host: valark.local' -H 'Origin: https://valark.local' --data '{}' "$B/api/maintenance/repair"); [ "$c" = "403" ] && pass || fail "an https Origin on a plain-http request must be 403 (got $c)"
+else
+    fail "open-mode server for the CSRF checks did not start"
+fi
+
 echo "access: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

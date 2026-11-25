@@ -154,6 +154,10 @@ holds `.env`. Don't share that checkout; use a data disk (`VAL_ARK_DATA`) for an
    ```
 
    Set `VALARK_WEB_PORT` in `.env` so the loop checks the same port.
+   The server answers only to names that can be the box's own (IP addresses, `localhost`,
+   single-label names, `.local`, `.lan`, `.home`, `.home.arpa`, `.internal`, `.localdomain`,
+   `.ts.net`, `.fritz.box`). If you reach it by another name, such as a split-horizon
+   `ark.example.org`, add it to `VALARK_ALLOWED_HOSTS` or you'll get a 421.
 
 2. **Keep it running.** The 24/7 loop restarts the server if it stops, and resumes after a reboot:
 

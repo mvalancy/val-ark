@@ -974,13 +974,52 @@ const SECURITY_HEADERS = {
     'Referrer-Policy': 'strict-origin-when-cross-origin',
 };
 
-function getCORSOrigin(req) {
-    const origin = req.headers.origin || '';
-    // Allow localhost on any port
-    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
-        return origin;
+// CSRF guard for every POST (#314). A browser always sends Origin on a cross-origin POST
+// (and Sec-Fetch-Site on modern ones), so a web page elsewhere, even one opened in a
+// browser on the box itself, where localhost counts as Admin, can't drive an admin or
+// "use" action. Requests with neither header (curl, the CLI, scripts) are unaffected.
+function sameOriginPost(req) {
+    const scheme = req.socket && req.socket.encrypted ? 'https:' : 'http:';
+    const origin = req.headers.origin;
+    if (origin !== undefined) {
+        if (origin === 'null') return false;
+        try {
+            const o = new URL(origin), h = new URL(scheme + '//' + String(req.headers.host || ''));
+            return o.protocol === scheme && o.host === h.host;   // URL() drops default ports, canonicalizes IPv6
+        } catch (_) { return false; }
     }
-    return '';
+    const site = req.headers['sec-fetch-site'];
+    return site === undefined || site === 'same-origin' || site === 'none';
+}
+// DNS rebinding guard: a page on an attacker's domain that re-resolves to the box would send a
+// matching Host and Origin. Only names that can belong to this box are served: IP literals,
+// localhost, single-label names (no dot: a LAN hostname), *.local / *.lan / *.home / *.home.arpa /
+// *.internal / *.localdomain / *.ts.net / *.fritz.box, the TLS domain, the box's own hostname, and VALARK_ALLOWED_HOSTS
+// (comma-separated). Anything else gets 421 (review of #316).
+function hostAllowed(req) {
+    let raw = String(req.headers.host || '').toLowerCase();
+    if (!raw) return true;   // HTTP/1.0 without Host: nothing for a rebinding page to forge
+    if (/^\[fe80:[0-9a-f:.]*%[0-9a-z]+\](:\d+)?$/.test(raw)) return true;   // link-local with a zone id
+    // Only the shapes a browser actually sends: a name or IPv4 (with one optional trailing dot)
+    // or a bracketed IPv6, plus a port. No userinfo, escapes or other junk reaches URL().
+    if (!/^([a-z0-9-]+(\.[a-z0-9-]+)*\.?|\[[0-9a-f:.]+\])(:\d+)?$/.test(raw)) return false;
+    raw = raw.replace(/\.(?=(:\d+)?$)/, '');   // 'valark.local.' is 'valark.local'
+    let name;
+    try { name = new URL('http://' + raw).hostname; } catch (_) { return false; }
+    if (/^\[.*\]$/.test(name) || /^\d{1,3}(\.\d{1,3}){3}$/.test(name)) return true;   // IP literal
+    if (name === 'localhost' || !name.includes('.')) return true;
+    if (/\.(local|lan|home|home\.arpa|internal|localdomain|ts\.net|fritz\.box)$/.test(name)) return true;
+    const extra = [process.env.VALARK_TLS_DOMAIN || 'valark.lan', require('os').hostname(),
+        ...String(process.env.VALARK_ALLOWED_HOSTS || '').split(',')]
+        .map(x => String(x).trim().toLowerCase()).filter(Boolean);
+    return extra.includes(name);
+}
+function getCORSOrigin(req) {
+    // The web UI is same-origin and needs no CORS. Reflecting localhost origins let any page on
+    // another localhost port read admin data (the recovery code) from a browser on the box
+    // (review of #316). VALARK_DEV_CORS_ORIGIN allows one exact origin for a dev server only.
+    const dev = process.env.VALARK_DEV_CORS_ORIGIN;
+    return dev && req.headers.origin === dev ? dev : '';
 }
 
 function sendJSON(res, req, data, status = 200, extraHeaders) {
@@ -1427,6 +1466,9 @@ function handleAPI(req, res, urlPath) {
             return sendJSON(res, req, {
                 error: 'Too many requests — please slow down and try again in a minute.'
             }, 429);
+        }
+        if (!sameOriginPost(req)) {
+            return sendJSON(res, req, { error: 'Cross-site requests are not accepted. Use the Val Ark web UI.' }, 403);
         }
         // An un-owned box serves the setup wizard, NOT the catalog: refuse every
         // mutating action (downloads, requests, service starts, account creation)
@@ -3037,6 +3079,10 @@ function serveTlsStatus(res) {
 // Server
 // =============================================================================
 function handleRequest(req, res) {
+    if (!hostAllowed(req)) {
+        res.writeHead(421, { 'Content-Type': 'text/plain' });
+        return res.end('Misdirected request: this Val Ark answers only to its own names (set VALARK_ALLOWED_HOSTS to add one).\n');
+    }
     // Block path traversal attempts early (before URL normalization resolves ..)
     // Any '..' segment in the raw path, plain or with encoded dots (%2e., .%2e, %2e%2e): the
     // URL parser would resolve it before we ever saw the path. Only whole segments count, so

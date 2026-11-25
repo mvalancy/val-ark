@@ -34,7 +34,7 @@ the web server and legacy scripts work unchanged. Resolution + disk math live in
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/flow/fill-dark.svg">
-  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Every item competes on value per byte, in five passes, until the disk is full.">
+  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Four passes, most important first, until the disk reaches its reserve.">
 </picture>
 
 The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
@@ -64,9 +64,10 @@ The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
    so a prolific category (devdocs, TED…) can't crowd out diversity.
 3. **Fill remaining space** — then the big flagships by intrinsic value (full
    Wikipedia, large model quants, distro ISOs) until a reserve is reached.
-4. **Cut back for better small items** — when the disk is full and a new small
-   high-value item appears, evict the *lowest value/byte* managed item (never the
-   sole representative of a category) to make room.
+4. **Trade up, on request** — `fill` itself never deletes anything. When room is needed
+   (`librarian.sh evict`, or a one-click `request` that has to fit under `VALARK_MAX_GB`),
+   the *lowest value/byte* managed, unpinned item goes first, never the sole
+   representative of a category.
 
 Everything scales from live `df` headroom (`avail − max(2%, 50GB)`); there are no
 hardcoded sizes. On a shared disk an optional footprint cap bounds Val Ark itself:

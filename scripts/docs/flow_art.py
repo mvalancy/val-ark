@@ -10,19 +10,17 @@ travel along the arrows so a reader can follow the data. Output: docs/img/flow/
   python3 scripts/docs/flow_art.py --check   # exit 1 if any SVG is stale (tests/test-doc-art.sh)
   python3 scripts/docs/flow_art.py --list    # which docs embed each diagram
 
-Each diagram rests fully drawn, so prefers-reduced-motion (and any renderer that won't
-animate) still shows the whole picture; only the travelling dots and pulses stop.
+Each diagram ends fully drawn and stays that way, so under prefers-reduced-motion (or in a
+renderer that ignores CSS animation) the whole picture shows; only the travelling dots and
+pulses stop. A renderer that snapshots at t=0 with animations on sees it mid-build.
 """
-import importlib.util
 import math
 import pathlib
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
-_spec = importlib.util.spec_from_file_location('popup_art', HERE / 'popup_art.py')
-_pa = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_pa)
-THEMES, ICONS, ACCENTS, esc = _pa.THEMES, _pa.ICONS, _pa.ACCENTS, _pa.esc
+sys.path.insert(0, str(HERE))   # share the palette and icons with the pop-up scenes
+from popup_art import ACCENTS, ICONS, THEMES, esc  # noqa: E402
 
 ROOT = HERE.parents[1]
 OUT = ROOT / 'docs' / 'img' / 'flow'
@@ -31,7 +29,7 @@ NW, NH = 150, 92          # node card size
 
 # ---------------------------------------------------------------- diagrams
 # zones: (x, y, w, h, title) shaded areas.  nodes: id -> (x, y, icon, label, caption, accent index)
-# edges: (from, to, label or '', bend) ; bend bows the arrow sideways (px, signed).
+# edges: (from, to, label or '', kind) ; kind 0 = straight, 'elbow' = down, across, down (snaking rows).
 # A 'ring' diagram instead lays its nodes on a circle and pulses them in turn.
 DIAGRAMS = {
     'system': dict(
@@ -43,61 +41,65 @@ DIAGRAMS = {
         nodes={
             'kiwix': (153, 200, 'book', 'Kiwix library', 'Wikipedia and more', 0),
             'hf': (153, 310, 'brain', 'Model hubs', 'AI models', 1),
-            'gh': (153, 420, 'cube', 'Releases', 'apps and tools', 2),
+            'gh': (153, 420, 'cube', 'Releases', 'OS images, apps', 2),
             'lib': (410, 200, 'disk', 'Librarian', 'plans what fits', 3),
             'loop': (410, 420, 'gear', 'Loop', 'heals every 30 min', 4),
             'disk': (600, 310, 'server', 'Data disk', 'tools, models, ZIMs', 5),
-            'srv': (790, 200, 'globe', 'Web server', 'live UI, chat, mail', 6),
+            'srv': (790, 200, 'globe', 'Web server', 'live UI, library, apps', 6),
             'site': (790, 420, 'paste', 'Static pages', 'written to the disk', 7),
             'people': (1045, 200, 'house', 'People', 'browsers, phones', 0),
             'share': (1045, 420, 'wifi', 'File share', 'SMB, NFS, USB', 1),
         },
-        edges=[('kiwix', 'lib', 'live catalogs', 0), ('hf', 'lib', '', 0), ('gh', 'lib', '', 0),
+        edges=[('kiwix', 'lib', 'catalogs', 0), ('hf', 'lib', '', 0), ('gh', 'lib', 'installers', 0),
+               ('gh', 'loop', 'weekly app refresh', 0),
                ('lib', 'disk', 'downloads', 0), ('loop', 'disk', 'repairs', 0), ('loop', 'lib', 'tops up', 0),
-               ('disk', 'srv', '', 0), ('disk', 'site', '', 0),
+               ('loop', 'site', 'rewrites', 0), ('disk', 'srv', '', 0),
                ('srv', 'people', 'web UI', 0), ('site', 'share', 'plain HTML', 0)],
         used=['docs/ARCHITECTURE.md', 'README.md']),
     'fill': dict(
         title='How the Librarian fills a disk',
-        sub='Every item competes on value per byte, in five passes, until the disk is full.',
+        sub='Four passes, most important first, until the disk reaches its reserve.',
         h=470,
-        zones=[(28, 104, 230, 340, 'Live catalogs'), (286, 104, 650, 340, 'The planner, in order'),
+        zones=[(28, 104, 230, 340, 'Catalogs'), (286, 104, 650, 340, 'The planner, in order'),
                (964, 104, 208, 340, 'The disk')],
         nodes={
-            'cat': (143, 200, 'globe', 'Catalogs', 'Kiwix, models, apps', 0),
+            'cat': (143, 200, 'globe', 'Catalogs', 'Kiwix, models, ISOs', 0),
             'cand': (143, 360, 'board', 'Candidates', 'size and value', 1),
             'p0': (390, 200, 'leaf', '0 Essentials', 'water, medicine', 2),
             'p1': (610, 200, 'map', '1 Diversity', 'one of each kind', 3),
-            'p2': (830, 200, 'spark', '2 Small', 'cheap and valuable', 4),
-            'p3': (390, 360, 'disk', '3 Fill', 'up to the reserve', 5),
-            'p4': (610, 360, 'wrench', '4 Trade up', 'swap for better', 6),
-            'dl': (830, 360, 'play', 'Download', 'resumable, checked', 7),
-            'disk': (1068, 280, 'server', 'Data disk', 'never past reserve', 0),
+            'p2': (830, 200, 'spark', '2 Small', 'value per byte', 4),
+            'p3': (390, 360, 'disk', '3 Fill', 'big flagships', 5),
+            'dl': (610, 360, 'play', 'Download', 'resumable, checked', 7),
+            'disk': (1068, 200, 'server', 'Data disk', 'stops at the reserve', 0),
+            'trade': (1068, 360, 'wrench', 'Trade up', 'on request, to fit', 6),
         },
         edges=[('cat', 'cand', '', 0), ('cand', 'p0', '', 0), ('p0', 'p1', '', 0), ('p1', 'p2', '', 0),
-               ('p2', 'p3', '', 'elbow'), ('p3', 'p4', '', 0), ('p4', 'dl', '', 0), ('dl', 'disk', '', 0)],
+               ('p2', 'p3', '', 'elbow'), ('p3', 'dl', '', 0), ('dl', 'disk', '', 0), ('trade', 'disk', 'evicts', 0)],
         used=['docs/LIBRARIAN.md', 'docs/ARCHITECTURE.md']),
     'heal-loop': dict(
         title='The self-healing loop',
         sub='Every 30 minutes, and after a reboot, the Ark checks itself and fixes what it can.',
-        h=540, ring=(600, 315, 180),
+        h=670, ring=(600, 382, 470, 232),
         nodes={
-            'links': (0, 0, 'wrench', 'Repair links', 'symlinks back', 0),
-            'web': (0, 0, 'globe', 'Web up', 'server, services', 1),
-            'catalog': (0, 0, 'map', 'Refresh', 'live catalogs', 2),
-            'verify': (0, 0, 'check', 'Verify files', 'sizes and hashes', 3),
-            'self': (0, 0, 'ark', 'Copy itself', 'for new nodes', 4),
-            'fill': (0, 0, 'disk', 'Top up', 'pins, then fill', 2),
-            'tools': (0, 0, 'cube', 'Update apps', 'weekly', 5),
-            'run': (0, 0, 'play', 'Does it run?', 'tools, LLM, API', 6),
-            'mod': (0, 0, 'shield', 'Safety sweep', 'new uploads', 7),
+            'disk': (0, 0, 'disk', 'Disk check', 'mounted, writable', 0),
+            'layout': (0, 0, 'wrench', 'Repair layout', 'folders, symlinks', 1),
+            'web': (0, 0, 'globe', 'Web up', 'server, services', 2),
+            'self': (0, 0, 'ark', 'Copy itself', 'for new nodes', 3),
+            'catalog': (0, 0, 'map', 'Refresh', 'live catalogs', 4),
+            'links': (0, 0, 'magnifier', 'Fix dead links', 'tool, installer URLs', 5),
+            'verify': (0, 0, 'check', 'Check files', 'sizes, re-fetch short', 6),
+            'fill': (0, 0, 'play', 'Top up', 'pins, then fill', 7),
+            'tools': (0, 0, 'cube', 'Update apps', 'weekly', 0),
+            'run': (0, 0, 'flask', 'Does it run?', 'tools, LLM, API, UI', 1),
+            'mod': (0, 0, 'shield', 'Safety sweep', 'new uploads', 2),
+            'report': (0, 0, 'eye', 'Report', 'Health page, events', 3),
         },
         centre=('gear', 'loop.sh', 'every 30 min'),
         used=['docs/ARCHITECTURE.md', 'docs/design/errors-selfheal.md']),
 }
 
 
-def edge_path(a, b, bend):
+def edge_path(a, b):
     ax, ay = a
     bx, by = b
     dx, dy = bx - ax, by - ay
@@ -108,16 +110,17 @@ def edge_path(a, b, bend):
         tx = (NW / 2 + 6) / abs(ux) if ux else 1e9
         ty = (NH / 2 + 6) / abs(uy) if uy else 1e9
         return min(tx, ty)
-    sa, sb = clip(ux, uy), clip(ux, uy)
-    sx, sy = ax + ux * sa, ay + uy * sa
-    ex, ey = bx - ux * sb, by - uy * sb
-    mx, my = (sx + ex) / 2 - uy * bend, (sy + ey) / 2 + ux * bend
+    c = clip(ux, uy)   # every card is the same size, so both ends clip alike
+    sx, sy = ax + ux * c, ay + uy * c
+    ex, ey = bx - ux * c, by - uy * c
+    mx, my = (sx + ex) / 2, (sy + ey) / 2
     return f'M{sx:.1f} {sy:.1f}Q{mx:.1f} {my:.1f} {ex:.1f} {ey:.1f}', (mx, my), (ex, ey, ex - mx, ey - my)
 
 
 def elbow_path(a, b):
     """Down out of a, across the gap between rows, down into b (for snaking rows)."""
     (ax, ay), (bx, by) = a, b
+    assert abs(ax - bx) > 20, 'elbow needs the cards apart horizontally'
     sy, ey = ay + NH / 2 + 6, by - NH / 2 - 6
     my = (sy + ey) / 2
     r = 10 if bx < ax else -10
@@ -132,7 +135,7 @@ def css(t):
 .t{{stroke-width:2}}.w{{stroke-width:6}}.f{{fill:var(--a)}}
 .lb{{font:600 15px system-ui,-apple-system,'Segoe UI',sans-serif;fill:{t['ink']};text-anchor:middle}}
 .cp{{font:12px system-ui,sans-serif;fill:{t['muted']};text-anchor:middle}}
-.el{{font:italic 12px system-ui,sans-serif;fill:{t['muted']}}}
+.el{{font:italic 12px system-ui,sans-serif;fill:{t['muted']};stroke:{t['page']};stroke-width:4px;paint-order:stroke;stroke-linejoin:round}}
 .zt{{font:700 11px system-ui,sans-serif;letter-spacing:.18em;fill:{t['muted']};text-transform:uppercase}}
 .ch{{font:700 12px system-ui,sans-serif;letter-spacing:.22em;fill:{t['tab']};text-transform:uppercase}}
 .tt{{font:italic 600 30px Georgia,'Times New Roman',serif;fill:{t['ink']}}}
@@ -150,6 +153,7 @@ def css(t):
 @keyframes pulse{{0%,14%,100%{{opacity:0}}4%,9%{{opacity:.95}}}}
 @keyframes spin{{to{{transform:rotate(360deg)}}}}
 @media (prefers-reduced-motion:reduce){{*{{animation:none!important}}.dot{{display:none}}}}
+@supports not (offset-path:path('M0 0')){{.dot{{display:none}}}}
 """
 
 
@@ -179,19 +183,30 @@ def render(did, spec, theme):
          f'<text x="{W - 64}" y="44" class="st" text-anchor="end">{esc(spec["sub"])}</text>']
     nodes = dict(spec['nodes'])
     if 'ring' in spec:
-        cx, cy, r = spec['ring']
+        cx, cy, rx, r = spec['ring']
         n = len(nodes)
         for i, k in enumerate(list(nodes)):
             a = -math.pi / 2 + i * 2 * math.pi / n
             _, _, *rest = nodes[k]
-            nodes[k] = (cx + r * 1.55 * math.cos(a), cy + r * math.sin(a), *rest)
-        p.append(f'<ellipse cx="{cx}" cy="{cy}" rx="{r*1.55:.0f}" ry="{r}" fill="none" stroke="{t["edge"]}" '
+            nodes[k] = (cx + rx * math.cos(a), cy + r * math.sin(a), *rest)
+        p.append(f'<ellipse cx="{cx}" cy="{cy}" rx="{rx:.0f}" ry="{r}" fill="none" stroke="{t["edge"]}" '
                  f'stroke-width="10" opacity=".7"/>')
-        # travelling dots around the ring, clockwise
-        ring = f'M{cx} {cy - r}A{r*1.55:.0f} {r} 0 1 1 {cx - .1} {cy - r}'
-        for k in range(3):
-            p.append(f'<circle r="6" class="dot" style="offset-path:path(\'{ring}\');animation-duration:8s;'
-                     f'animation-delay:{-k * 8 / 3:.2f}s"/>')
+        # chevrons halfway between steps show the direction (clockwise) even with motion off
+        for i in range(n):
+            a = -math.pi / 2 + (i + .5) * 2 * math.pi / n
+            px, py = cx + rx * math.cos(a), cy + r * math.sin(a)
+            ang = math.degrees(math.atan2(r * math.cos(a), -rx * math.sin(a)))
+            p.append(f'<path d="M-5-6 3 0-5 6" fill="none" stroke="{t["tab"]}" stroke-width="3" stroke-linecap="round" '
+                     f'stroke-linejoin="round" transform="translate({px:.1f} {py:.1f}) rotate({ang:.1f})"/>')
+        # arc length to each step, so a step pulses when the dots (constant speed) reach it
+        steps = 2000
+        pts = [(rx * math.cos(-math.pi / 2 + 2 * math.pi * k / steps), r * math.sin(-math.pi / 2 + 2 * math.pi * k / steps))
+               for k in range(steps + 1)]
+        cum = [0.0]
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            cum.append(cum[-1] + math.hypot(x1 - x0, y1 - y0))
+        frac = [cum[round(steps * i / n)] / cum[-1] for i in range(n)]
+        ring = f'M{cx} {cy - r}A{rx:.0f} {r} 0 1 1 {cx - .1} {cy - r}'
         ci, cl, cc = spec['centre']
         p.append(f'<g class="spin" style="--a:{t["tab"]}"><g transform="translate({cx} {cy - 14}) scale(1.6)">'
                  f'{ICONS[ci]}</g></g>'
@@ -201,16 +216,21 @@ def render(did, spec, theme):
             p.append(node_svg(x, y, icon, label, cap, acc, t, 0.2 + i * 0.12))
             # pulse each step as the dots pass it
             p.append(f'<rect x="{x - NW/2 - 5:.1f}" y="{y - NH/2 - 5:.1f}" width="{NW + 10}" height="{NH + 10}" rx="15" '
-                     f'class="pl" style="animation-delay:{i * 8 / n:.2f}s"/>')
+                     f'class="pl" style="animation-delay:{frac[i] * 8:.2f}s"/>')
+        # the travelling dots ride on top of the cards, so they stay visible all the way round
+        for k in range(3):
+            p.append(f'<circle r="6" class="dot" style="offset-path:path(\'{ring}\');animation-duration:8s;'
+                     f'animation-delay:{-k * 8 / 3:.2f}s"/>')
     else:
+        labels = []
         for (x, y, w, zh, ztitle) in spec['zones']:
             p.append(f'<rect x="{x}" y="{y}" width="{w}" height="{zh}" rx="14" fill="{t["page"]}" stroke="{t["edge"]}" '
                      f'stroke-dasharray="6 6"/><text x="{x + 16}" y="{y + 24}" class="zt">{esc(ztitle)}</text>')
-        for i, (a, b, label, bend) in enumerate(spec['edges']):
-            if bend == 'elbow':
+        for i, (a, b, label, kind) in enumerate(spec['edges']):
+            if kind == 'elbow':
                 d, (mx, my), (ex, ey, vx, vy) = elbow_path(nodes[a][:2], nodes[b][:2])
             else:
-                d, (mx, my), (ex, ey, vx, vy) = edge_path(nodes[a][:2], nodes[b][:2], bend)
+                d, (mx, my), (ex, ey, vx, vy) = edge_path(nodes[a][:2], nodes[b][:2])
             delay = 0.9 + i * 0.12
             ang = math.degrees(math.atan2(vy, vx))
             p.append(f'<path d="{d}" pathLength="1" class="ar" style="animation-delay:{delay:.2f}s"/>'
@@ -220,13 +240,14 @@ def render(did, spec, theme):
                 p.append(f'<circle r="4.5" class="dot" style="offset-path:path(\'{d}\');'
                          f'animation-delay:{delay + 1 + k * 1.6 + i * 0.37:.2f}s"/>')
             if label:
-                # steep arrows get the label beside them, flat ones above
+                # steep arrows get the label beside them, flat ones above; drawn last, with a halo
                 if abs(vy) > abs(vx) * 0.6:
-                    p.append(f'<text x="{mx + 10:.1f}" y="{my + 4:.1f}" class="el" text-anchor="start">{esc(label)}</text>')
+                    labels.append(f'<text x="{mx + 10:.1f}" y="{my + 4:.1f}" class="el" text-anchor="start">{esc(label)}</text>')
                 else:
-                    p.append(f'<text x="{mx:.1f}" y="{my - 8:.1f}" class="el" text-anchor="middle">{esc(label)}</text>')
+                    labels.append(f'<text x="{mx:.1f}" y="{my - 8:.1f}" class="el" text-anchor="middle">{esc(label)}</text>')
         for i, (x, y, icon, label, cap, ai) in enumerate(nodes.values()):
             p.append(node_svg(x, y, icon, label, cap, ACCENTS[ai % len(ACCENTS)], t, 0.2 + i * 0.08))
+        p.extend(labels)
     p.append('</svg>\n')
     return ''.join(p)
 
@@ -248,8 +269,13 @@ def main(argv):
             print(f'stale or missing: docs/img/flow/{n}')
         for n in extra:
             print(f'not produced by the generator: docs/img/flow/{n}')
+        unused = [(d, md) for d, spec in DIAGRAMS.items() for md in spec['used']
+                  if f'flow/{d}-light.svg' not in (ROOT / md).read_text(errors='replace')]
+        for d, md in unused:
+            print(f'{md} is listed in used= for {d} but does not embed it')
         if bad or extra:
             print('run: python3 scripts/docs/flow_art.py')
+        if bad or extra or unused:
             return 1
         print(f'ok: {len(files)} flow SVGs match the generator')
         return 0

@@ -126,7 +126,7 @@ reserve (`max(VALARK_RESERVE_PCT%, VALARK_RESERVE_MIN_GB)`) and, if set, the
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/flow/fill-dark.svg">
-  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Every item competes on value per byte, in five passes, until the disk is full.">
+  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Four passes, most important first, until the disk reaches its reserve.">
 </picture>
 
 <details>
@@ -169,10 +169,9 @@ flowchart TD
         D3["Big flagships by value<br/>full Wikipedia, large quants, ISOs"]
     end
 
-    P3 --> P4
-    subgraph P4["4. Evict for better"]
+    subgraph P4["Trade up (on request, not during fill)"]
         style P4 fill:#1a2230,stroke:#fb923c
-        D4["Disk full + better small item<br/>drop lowest value/byte<br/>never a sole category rep"]
+        D4["evict or a request that must fit the cap<br/>drop lowest value/byte, unpinned<br/>never a sole category rep"]
     end
 
     P1 --> DL{Headroom<br/>above reserve?}

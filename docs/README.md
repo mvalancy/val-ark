@@ -143,8 +143,8 @@ Each important folder carries local operating notes.
   repo's dirs are symlinked to it. Scales to any disk size. Logic in
   `scripts/lib/valark-env.sh`. See [LIBRARIAN.md](LIBRARIAN.md).
 - **Librarian engine** — `scripts/librarian.sh` fills a disk from live catalogs
-  in priority order (grid-down essentials → diversity → small-valuable → fill-remaining →
-  evict-for-better), using aria2 multi-connection downloads with curl fallback. It
+  in priority order (grid-down essentials → diversity → small-valuable → fill-remaining;
+  `evict` and `request` trade up when room is needed), using aria2 multi-connection downloads with curl fallback. It
   curates hundreds of catalog items — 50+ tool mirror scripts (`scripts/tools/*.sh`),
   models and the live Kiwix library. See [LIBRARIAN.md](LIBRARIAN.md).
 - **Offline build & survival kit** — `data/essentials.tsv` front-loads the grid-down

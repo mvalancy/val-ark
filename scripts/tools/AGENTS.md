@@ -15,7 +15,8 @@ One self-contained `download_<tool>()` script per mirrored app (~50 of them) plu
 
 **Content-mirror exception.** Two scripts mirror a content release, not an app, and write outside
 `${TOOLS_DIR}`: `lastbook.sh` → `content/lastbook/` (served; a Library ▸ Content card fed by the
-`/api/status/content` walk, not a TOOLS entry; in `all`, last) and `cad-agent-references.sh` →
+`/api/status/content` walk, not a TOOLS entry; in `all`, last; sized by the librarian's planner by
+default, #203) and `cad-agent-references.sh` →
 `private/cad-agent-references/` (never served, no card, opt-in: not one-click and not in the
 server's tool-target list). See [docs/TOOLS.md "Content mirrors"](../../docs/TOOLS.md#content-mirrors).
 

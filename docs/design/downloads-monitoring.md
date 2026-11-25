@@ -68,7 +68,7 @@ bundle the librarian prioritizes (extending the value-weight mechanism already i
 - A **live estimate**: *"~46 GB · fits easily in your space · ~25 min on a good connection · then works offline."*
 - **When to download**: *Now* / *When the box is idle* / *Only when plugged into power* (for laptops).
 - **Advanced** drawer: the full catalog browse + per-item request (already built) and raw curation weights.
-- Under the hood: picks set curation priorities; the librarian fills highest-value-per-byte first within the cap. The fill itself never evicts (it only drops an essential's small copy once the full one is on disk); a one-click request that needs room evicts the lowest-value unpinned content, which is the engine that's built.
+- Under the hood: picks set curation priorities; the librarian fills highest-value-per-byte first within the cap. The fill itself never evicts (it only drops a smaller copy once a fuller version of the same item is on disk); a one-click request that needs room evicts the lowest-value unpinned content, which is the engine that's built.
 
 ## 2. Watching downloads — the Downloads view
 

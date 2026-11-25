@@ -410,7 +410,7 @@ def main(argv):
                   if f'flow/{d}-light.svg' not in ((ROOT / md).read_text(errors='replace') if (ROOT / md).is_file() else '')]
         for d, md in unused:
             print(f'{md} is listed in used= for {d} but does not embed it')
-        if bad or extra:
+        if [n for n in bad if n.endswith('.svg')] or extra:
             print('run: python3 scripts/docs/flow_art.py')
         if bad or extra or unused:
             return 1

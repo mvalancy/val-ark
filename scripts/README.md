@@ -117,7 +117,7 @@ Shared library under `lib/` — sourced/required building blocks, not entry poin
 ## Librarian (`librarian.sh`)
 
 Fills a disk of **any size** from live catalogs in priority order:
-`grid-down essentials → diversity → small-valuable → fill-remaining` (`fill` never evicts; it only drops an essential's small copy once the full one is on disk; `evict` and `request` trade up when room is needed). Downloads prefer
+`grid-down essentials → diversity → small-valuable → fill-remaining` (`fill` never evicts; it only drops a smaller copy once a fuller version of the same item is on disk; `evict` and `request` trade up when room is needed). Downloads prefer
 **aria2** multi-connection (~3× faster on per-connection-throttled mirrors) with a
 curl fallback; both resume, retry, verify size, atomic-rename, and never abort on a
 single failure. A single `flock` prevents concurrent fills from racing.

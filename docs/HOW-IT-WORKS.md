@@ -28,7 +28,7 @@ An Ark is one computer with one big disk. It downloads things once while it has 
   <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Four passes, most important first, until the disk reaches its reserve.">
 </picture>
 
-The Librarian decides what fits. Grid-down essentials come first, then one of each kind, then the small and valuable, then big flagships until the disk reaches its reserve. Filling never evicts anything (it only drops an essential's small copy once the full one is on disk); making room for something else only happens when someone asks for it.
+The Librarian decides what fits. Grid-down essentials come first, then one of each kind, then the small and valuable, then big flagships until the disk reaches its reserve. Filling never evicts anything (it only drops a smaller copy once a fuller version of the same item is on disk); making room for something else only happens when someone asks for it.
 
 **More:** [The Librarian](LIBRARIAN.md)
 

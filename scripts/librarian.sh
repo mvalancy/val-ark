@@ -5,7 +5,7 @@
 # Fills a disk of ANY size from live catalogs (Kiwix ZIM, models, OS/router
 # installers) in priority order:
 #     essentials  ->  diversity  ->  small valuable  ->  fill remaining
-# (fill never evicts: it only drops an essential's small copy once the full one is on disk;
+# (fill never evicts: it only drops a smaller copy once a fuller version of the same item is on disk;
 #  evict / request trade up for better items when room is needed)
 # Rugged: resumable downloads, retries, size verification, atomic rename,
 # never aborts on a single failure, idempotent (skips what's already present).

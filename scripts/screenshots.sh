@@ -5,15 +5,15 @@
 # Usage: ./scripts/screenshots.sh [all|web|terminal]
 #
 # Generates:
-#   docs/screenshots/*.png    - Web UI screenshots (Playwright)
-#   docs/screenshots/*.svg    - Terminal recordings (asciinema + svg-term-cli)
+#   docs/screenshots/web-ui/*.png    - Web UI screenshots (Playwright)
+#   docs/screenshots/web-ui/*.svg    - Terminal recordings (asciinema + svg-term-cli)
 ###############################################################################
 
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-SCREENSHOT_DIR="${PROJECT_ROOT}/docs/screenshots"
+SCREENSHOT_DIR="${PROJECT_ROOT}/docs/screenshots/web-ui"
 TESTS_DIR="${PROJECT_ROOT}/tests/screenshots"
 
 RED='\033[0;31m'
@@ -46,7 +46,7 @@ capture_web() {
         local count
         count=$(find "$SCREENSHOT_DIR" -name '*.png' 2>/dev/null | wc -l)
         echo ""
-        echo -e "  ${GREEN}✓${NC} ${count} PNG screenshots in docs/screenshots/"
+        echo -e "  ${GREEN}✓${NC} ${count} PNG screenshots in docs/screenshots/web-ui/"
     else
         echo -e "  ${RED}✗${NC} Playwright not installed. Run: cd tests/screenshots && npm install"
     fi
@@ -106,7 +106,7 @@ capture_terminal() {
     echo ""
     local svg_count
     svg_count=$(find "$SCREENSHOT_DIR" -name '*.svg' 2>/dev/null | wc -l)
-    echo -e "  ${GREEN}✓${NC} ${svg_count} SVG recordings in docs/screenshots/"
+    echo -e "  ${GREEN}✓${NC} ${svg_count} SVG recordings in docs/screenshots/web-ui/"
 }
 
 ###############################################################################
@@ -121,7 +121,7 @@ case "${1:-all}" in
         echo ""
         capture_terminal
         echo ""
-        echo -e "${GREEN}Done.${NC} Screenshots in: docs/screenshots/"
+        echo -e "${GREEN}Done.${NC} Screenshots in: docs/screenshots/web-ui/"
         ;;
     *)
         echo "Usage: $0 [all|web|terminal]"

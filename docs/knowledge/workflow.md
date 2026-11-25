@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/workflow-dark.svg">
+  <img src="../img/popup/workflow-light.svg" width="100%" alt="Pop-up book scene: How work flows. Issue, branch off dev, PR, review, green tests, then main by release.">
+</picture>
+
 # Val Ark — Development Workflow & Git Strategy
 
 Part of the [knowledge base](README.md). The rules for how work flows through git so it stays

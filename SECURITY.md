@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/security-policy-dark.svg">
+  <img src="docs/img/popup/security-policy-light.svg" width="100%" alt="Pop-up book scene: Reporting a problem. A LAN appliance, never on the open internet. Report privately; we fix fast.">
+</picture>
+
 # Security Policy
 
 Val Ark is an offline, LAN/tailnet appliance — it is **not** meant to be exposed to the public

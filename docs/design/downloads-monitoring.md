@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/downloads-monitoring-dark.svg">
+  <img src="../img/popup/downloads-monitoring-light.svg" width="100%" alt="Pop-up book scene: Pick what matters. Plain-language profiles sized to the disk, and downloads you can watch.">
+</picture>
+
 # Val Ark — Priorities, Downloads & Monitoring
 
 Part of the [design hierarchy](README.md). How Jordan **picks what matters in plain

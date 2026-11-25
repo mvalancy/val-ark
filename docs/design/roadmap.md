@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/roadmap-dark.svg">
+  <img src="../img/popup/roadmap-light.svg" width="100%" alt="Pop-up book scene: The road, phase by phase. Each phase ships something an owner can feel. Recovery lands before any gate.">
+</picture>
+
 # Val Ark — Implementation Roadmap
 
 Part of the [design hierarchy](README.md). Turns the design into a phased build. Each phase

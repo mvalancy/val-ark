@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/commissioning-dark.svg">
+  <img src="../img/popup/commissioning-light.svg" width="100%" alt="Pop-up book scene: The first five minutes. A fresh box becomes a working Ark in a browser: no files, flags or jargon.">
+</picture>
+
 # Val Ark — First-Boot Commissioning
 
 Part of the [design hierarchy](README.md). The single most important experience: a fresh

@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/admin-console-dark.svg">
+  <img src="../img/popup/admin-console-light.svg" width="100%" alt="Pop-up book scene: Home screen and console. A calm summary for everyone; settings and system for the Admin.">
+</picture>
+
 # Val Ark — Home Screen & Admin Console
 
 Part of the [design hierarchy](README.md). Defines the two surfaces: the **Home screen**

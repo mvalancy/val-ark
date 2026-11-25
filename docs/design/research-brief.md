@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/research-brief-dark.svg">
+  <img src="../img/popup/research-brief-light.svg" width="100%" alt="Pop-up book scene: What we learned first. Eight research tracks, from NAS boxes to fitness apps, boiled down to advice.">
+</picture>
+
 # Val Ark — Consumer UX Research Brief
 
 > Evidence base for the [design hierarchy](README.md). Synthesis of 8 research tracks

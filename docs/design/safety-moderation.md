@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/safety-moderation-dark.svg">
+  <img src="../img/popup/safety-moderation-light.svg" width="100%" alt="Pop-up book scene: Keeping shared files safe. On-device checks that fail closed: a doubtful file waits for review.">
+</picture>
+
 # Val Ark — Safety & On-Device Content Moderation
 
 Part of the [design hierarchy](README.md). A household/community file-sharing box must keep

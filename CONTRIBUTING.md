@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/contributing-dark.svg">
+  <img src="docs/img/popup/contributing-light.svg" width="100%" alt="Pop-up book scene: Helping build the Ark. Read the workflow, open an issue, send a small PR with green tests.">
+</picture>
+
 # Contributing to Val Ark
 
 Thanks! The full, authoritative process lives in the knowledge base:

@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/storage-dark.svg">
+  <img src="../img/popup/storage-light.svg" width="100%" alt="Pop-up book scene: Add and remove drives. A small fixed brain plus a content pool that grows and shrinks.">
+</picture>
+
 # Val Ark — Flexible Storage (add & remove drives)
 
 Part of the [design hierarchy](README.md). Requirement: a **primary** location (e.g. a

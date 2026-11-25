@@ -7,508 +7,82 @@
 
 **Created by Matthew Valancy**
 
-A self-filling, online-optional mirror of 50+ dev/AI tools, AI models, and offline
-content (ZIM via Kiwix) — plus an offline **community hub** (chat, mail, message
-boards, file sharing) — all behind one web UI. Local-first, peer-to-peer,
-NFS-shareable, offline-capable — scales to a disk of any size.
+Val Ark turns a computer and a disk into an offline library for when the internet isn't there.
+It fills the disk by itself with Wikipedia and other reference content, apps and dev tools for
+every platform, and AI models. Then it shares all of it on the local network, with chat, mail
+and message boards for the people nearby. It works on a disk of any size, and it keeps itself
+healthy around the clock.
 
-![Val Ark Web UI](docs/screenshots/web-ui-full.png)
+![The Val Ark web UI](docs/screenshots/web-ui/web-ui-full.png)
 
-<details>
-<summary>More Screenshots</summary>
+| Software | Library |
+|---|---|
+| ![Software catalog](docs/screenshots/web-ui/software-page.png) | ![Wikipedia, StackExchange and more](docs/screenshots/web-ui/wikipedia-page.png) |
+| **Models** | **A tool's page** |
+| ![AI model families](docs/screenshots/web-ui/model-cards.png) | ![Tool detail](docs/screenshots/web-ui/tool-detail.png) |
 
-### Software Catalog
-![Software Page](docs/screenshots/software-page.png)
+## What's on an Ark
 
-### Model Families
-![Model Cards](docs/screenshots/model-cards.png)
+- **Reference content:** Wikipedia, StackExchange, wikis, courses and survival guides (ZIM files
+  read through Kiwix), chosen from the live Kiwix catalog. Also [Lastbook](https://lastbook.org),
+  an offline survival library.
+- **Apps and tools:** 50+ apps for Linux (x86_64 and arm64), macOS and Windows, from Blender and
+  Inkscape to llama.cpp, plus a developer stack, offline APT repos and source archives.
+  See the [tools catalog](docs/TOOLS.md).
+- **AI models:** language, speech, vision and image models, chosen for value per byte.
+  See the [model inventory](docs/MODEL_INVENTORY.md).
+- **Community:** chat, mail, message boards and file sharing on the LAN, with no internet.
+  See [community](docs/COMMUNITY.md).
 
-### Tool Detail
-![Tool Detail](docs/screenshots/tool-detail.png)
+The [Librarian](docs/LIBRARIAN.md) decides what fits: grid-down essentials first, then one of each
+kind, then the most value per byte, trading up as better items appear.
 
-### Library (Wikipedia, StackExchange, wikis, courses & more)
-![Library](docs/screenshots/wikipedia-page.png)
-
-### Light Mode
-![Light Mode](docs/screenshots/light-mode.png)
-
-</details>
-
-**Contents:** [Architecture](#architecture) · [Librarian](#self-filling-mirror-librarian) · [What's Included](#whats-included) · [Community](#community--comms) · [Platforms](#platforms) · [Quick Start](#quick-start) · [Offline & P2P](#offline--p2p) · [Static or Dynamic](#serving-static-or-dynamic) · [Project Structure](#project-structure) · [Documentation map](#documentation-map) · [Testing](#testing) · [Releases](#releases)
-
-## Architecture
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/architecture-dark.svg">
-  <img src="docs/img/popup/architecture-light.svg" width="100%" alt="Pop-up book scene: How the Ark is built. One config, two entry points, a librarian and a zero-dependency web server.">
-</picture>
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a2230',
-  'primaryBorderColor': '#2a3545',
-  'primaryTextColor': '#e8edf4',
-  'lineColor': '#4da6ff',
-  'secondaryColor': '#131921',
-  'tertiaryColor': '#0a0e14'
-}}}%%
-graph TB
-    subgraph Config["Config"]
-        style Config fill:#1a2230,stroke:#fbbf24
-        ENV["( .env / autodetect )<br/>VAL_ARK_DATA"]
-    end
-
-    subgraph Entry["Entry Points"]
-        style Entry fill:#1a2230,stroke:#4ade80
-        START["start.sh<br/>Interactive Menu + CLI"]
-        LOOP["loop.sh<br/>24/7 self-heal (cron)"]
-    end
-
-    subgraph Engine["Librarian Engine"]
-        style Engine fill:#1a2230,stroke:#4da6ff
-        LIB["librarian.sh<br/>fill / verify / evict"]
-        CAT["lib/catalog.sh + planner.py<br/>live catalogs, diversity-first"]
-        VER["verify.sh<br/>do apps actually run?"]
-    end
-
-    subgraph WebServer["Web Server (port 3000)"]
-        style WebServer fill:#1a2230,stroke:#fb923c
-        SERVER["server.js<br/>web UI + JSON API + SSE"]
-        KIWIX["kiwix-serve<br/>loopback :8888, proxied at /kiwix/"]
-    end
-
-    subgraph Storage["Data Root (any size, NFS-exportable)"]
-        style Storage fill:#1a2230,stroke:#a78bfa
-        TOOLS["tools/ — binaries + sources/"]
-        MODELS["models/ — AI Models"]
-        CONTENT["content/zim/ — Offline ZIMs"]
-    end
-
-    ENV --> START
-    ENV --> LOOP
-    START --> LIB
-    START --> SERVER
-    LOOP --> LIB
-    LOOP --> VER
-    LOOP --> SERVER
-    LIB --> CAT
-    CAT -->|aria2 multi-conn| TOOLS
-    CAT --> MODELS
-    CAT --> CONTENT
-    SERVER --> KIWIX
-    KIWIX --> CONTENT
-    VER -.->|SSH| MESH["Mesh nodes<br/>mount shared mirror,<br/>GPU inference over NFS"]
-    MODELS -.->|NFS export| MESH
-```
-
-## Self-Filling Mirror (Librarian)
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/librarian-dark.svg">
-  <img src="docs/img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Essentials first, then diversity, small and valuable, fill, then trade up.">
-</picture>
-
-Val Ark fills a disk of **any size** by itself and keeps it healthy. The
-**Librarian** pulls from **live** catalogs — the Kiwix OPDS ZIM library (no stale
-dates, ever), a diverse model set, and OS/router/netboot installers — and a
-planner scores candidates by value-per-byte, downloading in this curated order:
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a2230',
-  'primaryBorderColor': '#2a3545',
-  'primaryTextColor': '#e8edf4',
-  'lineColor': '#4da6ff',
-  'secondaryColor': '#131921',
-  'tertiaryColor': '#0a0e14'
-}}}%%
-flowchart TD
-    CAT["Live catalogs<br/>Kiwix OPDS + models + installers"] --> PLAN["planner.py<br/>score by value / byte"]
-    PLAN --> P0["0. Grid-down essentials<br/>smallest variant first"]
-    P0 --> P1["1. Diversity<br/>one of each kind first"]
-    P1 --> P2["2. Small valuable<br/>cheap high-value files"]
-    P2 --> P3["3. Fill remaining<br/>up to disk reserve"]
-    P3 --> P4["4. Evict for better<br/>swap low-value for higher"]
-    P4 --> FILL["aria2 download<br/>resumable, size-verified,<br/>atomic, never aborts"]
-```
-
-Downloads use **aria2** multi-connection transfers (~3x faster, curl fallback) —
-resumable, retried, size-verified, atomic-renamed, guarded by a single `flock`.
-Phase **0** front-loads the grid-down essentials in [`data/essentials.tsv`](data/essentials.tsv)
-(water, medicine, food, repair, radio, a tiny setup assistant — the smallest variant of
-each, plus extras for the owner's profile) before anything else is planned.
-
-A **24/7 loop** (`loop.sh`) repairs symlinks, keeps the web server and enabled community
-services up, refreshes catalogs (so content links never go stale), checks and repairs
-links, verifies file integrity, mirrors its own source for LAN self-replication, tops up
-the fill and re-fills pinned requests, refreshes mirrored tools weekly, runs
-**functional verification** (`verify.sh`) confirming tools, kiwix, a tiny LLM, and the
-web API actually run — locally and across SSH-reachable mesh nodes — and sweeps uploads
-through the on-device moderation check.
+## Get started
 
 ```bash
-cp .env.example .env            # set VAL_ARK_DATA=/your/disk (git-ignored)
-./scripts/librarian.sh plan     # preview the diversity-first fill plan
-./scripts/librarian.sh fill     # fill the disk (resumable, never aborts)
-./scripts/loop.sh install 30    # flock-guarded 24/7 self-healing cron (every 30 min)
+./start.sh setup                 # install what Val Ark needs
+./start.sh serve                 # open the web UI on port 3000
+./scripts/librarian.sh fill      # fill the disk from the live catalogs
+./scripts/loop.sh install 30     # keep it healthy every 30 minutes, and after a reboot
 ```
 
-Commands: `status | plan | fill | verify | evict | maintain | refresh | scout | catalog |
-request <content|model|tool> <id> | pin | unpin | pins [--refill] | site`.
-See **[docs/LIBRARIAN.md](docs/LIBRARIAN.md)** for the full design.
-
-## What's Included
-
-Val Ark mirrors **50+ apps and tools** across four platforms (`scripts/tools/*.sh`),
-plus a value-per-byte **AI model** set, offline **content** from the live Kiwix library,
-and an offline **build & server kit** — hundreds of catalog items in all, the apps and
-models browsable and one-click installable from the web UI. The headline tools, grouped
-as the web UI groups them:
-
-### AI Inference
-llama.cpp, whisper.cpp, stable-diffusion.cpp, BitNet.cpp, ONNX Runtime, Vosk, Piper TTS
-
-### AI Platforms
-Ollama, n8n, Milvus, ComfyUI, Open WebUI
-
-### Creative & Engineering
-Blender, FreeCAD, KiCad, Godot, GIMP, Inkscape, Kdenlive, Bambu Studio, cad-agent
-
-### Media
-FFmpeg, VLC, Audacity, yt-dlp, Calibre
-
-### Community Apps
-IRC Chat, Mail, Message Boards, Files & Pastebin (see [Community & Comms](#community--comms))
-
-### Infrastructure
-SeaweedFS, Syncthing, Coolify, Kiwix, Tailscale, Mosquitto, MQTT Explorer,
-Redis, PostgreSQL, InfluxDB, Grafana, Telegraf, SQLite
-
-### Dev Tools
-Helix, VSCodium, Miniforge, python-build-standalone, Claude Code, btop, tmux,
-Dev CLI Bundle (ripgrep, fd, bat, jq, fzf, lazygit)
-
-### Offline Build & Server Kit
-Mirrors for rebuilding and serving software with no internet. The first three are
-standalone CLIs you run (or schedule) yourself, outside the fill and the loop; the last
-two ride the tool mirrors:
-- **Developer + security stack** — the current release of 200+ projects (toolchains,
-  Python, compilers, decompilers, security tools, databases, containers/Kubernetes, S3
-  storage) for every platform, from [`data/dev-stack.tsv`](data/dev-stack.tsv) via
-  `scripts/lib/release_mirror.py` ([details](docs/LIBRARIAN.md#developer--security-stack-release_mirrorpy)).
-- **Offline APT repos** — dependency-complete `.deb` sets for any Ubuntu suite and
-  architecture, from [`data/apt-sets.tsv`](data/apt-sets.tsv) via `scripts/lib/apt_offline.py`,
-  served as a flat repo (`deb [trusted=yes] file:<dir> ./`).
-- **Source archive** — full-history git bundles of 200+ upstream repos from
-  [`data/source-repos.tsv`](data/source-repos.tsv) via `scripts/lib/git_bundle_mirror.py`
-  ([details](docs/TOOLS.md#content-mirrors)).
-- **Container images** — one platform of an image as a `docker load` tar, no Docker
-  needed on the mirror host (`scripts/lib/oci_pull.py`), pulled by `scripts/tools/cad-agent.sh`
-  as part of the default tool set and its weekly refresh.
-- **cad-agent references** — a private, content-addressed archive of cad-agent's
-  reference library (`scripts/lib/references_mirror.py`), via the opt-in
-  `scripts/tools/cad-agent-references.sh`.
-
-### Content Library
-Offline ZIM files (Wikipedia and much more) served via Kiwix, selected live from
-the Kiwix OPDS catalog by the Librarian — so titles and sizes are never stale.
-Plus [Lastbook](https://lastbook.org) (MIT), a free offline survival library: its
-largest content pack that fits, state maps, address search, its local AI model and the
-mac / Windows / Ubuntu installers, kept current by `scripts/tools/lastbook.sh` under
-`content/lastbook/` (servers can opt in to every pack; see [docs/TOOLS.md](docs/TOOLS.md#content-mirrors)).
-
-### AI Models
-A diverse model set spanning modalities, filled by value-per-byte. `download-models.sh`
-also exposes manual tiers:
-- **Tier 1 (Edge/Mobile):** Small fast models for phones, tablets, IoT (~15GB)
-- **Tier 2 (Workstation):** Balanced quality/speed models (~150GB)
-- **Tier 3 (Full):** Largest, highest quality models (~300GB+)
-
-## Community & Comms
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/community-dark.svg">
-  <img src="docs/img/popup/community-light.svg" width="100%" alt="Pop-up book scene: The village square. Chat, mail, message boards, pastes and shared files: no internet needed.">
-</picture>
-
-Val Ark is also an **offline community hub** — a place to message a friend, mail the
-group, post to a board, and share files, all on the LAN with no internet. Each service
-runs on the box and is framed inside the web UI (same origin, one port, with a
-persistent "back to Val Ark" header):
-
-- **IRC Chat** (`/app/chat/`) — ngIRCd + The Lounge web client
-- **Mail** (`/app/mail/`) — maddy SMTP/IMAP, local mailboxes (no internet relay)
-- **Message Boards** (`/app/forum/`) — NodeBB on the mirrored Redis
-- **Files & Pastebin** (`/app/paste/`) — MicroBin
-
-LAN-only, auth-required, no federation. Enable per service via `VALARK_SERVICES` in
-`.env`; the loop keeps them running. See [docs/COMMUNITY.md](docs/COMMUNITY.md) for the
-architecture and security model.
-
-## Platforms
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/platforms-dark.svg">
-  <img src="docs/img/popup/platforms-light.svg" width="100%" alt="Pop-up book scene: Every kind of machine. One mirror serves x86_64, arm64, Jetson, macOS, Windows and OpenWRT.">
-</picture>
-
-| Platform | Arch | Tools dir | Notes |
-|----------|------|-----------|-------|
-| Jetson Orin / Thor, GB10 Grace-Blackwell | aarch64 | `tools/linux-arm64` | All NVIDIA aarch64 boards share one artifact set; differ only by CUDA profile |
-| Linux | x86_64 | `tools/linux-x86_64` | Ubuntu/Debian, optional CUDA |
-| macOS | aarch64 | `tools/macos-arm64` | Apple Silicon, Metal acceleration |
-| Windows | x64 | `tools/windows-x64` | Prebuilt binaries |
-| OpenWRT routers | — | — | Content / sync / infra subset only |
-
-GPU-accelerated llama.cpp, whisper.cpp, and stable-diffusion.cpp need a CUDA
-**source build** on aarch64 (no upstream prebuilt binary). See
-[docs/PLATFORMS.md](docs/PLATFORMS.md).
-
-## Quick Start
+Val Ark finds your largest disk by itself. To choose one, copy `.env.example` to `.env` and set
+`VAL_ARK_DATA`. To add another machine with no internet, run this on it:
 
 ```bash
-cp .env.example .env              # optional: set VAL_ARK_DATA (else autodetected)
-./start.sh                        # Interactive menu
-./start.sh setup                  # Install dependencies
-./start.sh serve                  # Launch web UI server (default port 3000)
-./scripts/librarian.sh fill       # Self-fill the disk from live catalogs
-./start.sh download models tier1  # Edge/mobile models only
-./start.sh status                 # See what's installed
-./scripts/loop.sh install 30      # 24/7 self-healing loop (every 30 min)
+curl -fsSL http://<ark-host>:3000/bootstrap.sh | bash
 ```
 
-Once a node is up, anyone on the LAN can **browse and one-click download** what
-isn't mirrored yet — a specific ZIM (including all of Wikipedia), a model, or an
-app — from the web UI's **Library**, **Models**, and **Software** sections. Val Ark
-makes room automatically under its footprint cap (evicting lower-priority content
-first) and the self-healing loop keeps user-requested items filled.
+## Two ways to share it
 
-### Add another node — offline, from a trusted Ark
-
-Val Ark is offline-first, so it **self-replicates** without the internet: a running
-Ark serves its own source. On a new machine, no GitHub required:
-
-```bash
-curl -fsSL http://<ark-host>:3000/bootstrap.sh | bash   # clones + sets up from the LAN
-```
-
-The Getting Started page shows this one-liner pre-filled with the host's address.
-
-## Offline & P2P
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/offline-dark.svg">
-  <img src="docs/img/popup/offline-light.svg" width="100%" alt="Pop-up book scene: Off the grid, together. Pull everything once, then share it across the LAN with no internet.">
-</picture>
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a2230',
-  'primaryBorderColor': '#2a3545',
-  'primaryTextColor': '#e8edf4',
-  'lineColor': '#4da6ff',
-  'secondaryColor': '#131921',
-  'tertiaryColor': '#0a0e14'
-}}}%%
-graph TB
-    subgraph Internet["Internet (one-time)"]
-        style Internet fill:#1a2230,stroke:#fb923c
-        GH["GitHub"] & HF["HuggingFace"] & ZIM["Kiwix OPDS"]
-    end
-    subgraph Server["Val Ark Node (shared mirror)"]
-        style Server fill:#1a2230,stroke:#4ade80
-        STORE["Data Root<br/>tools / models / content"]
-        SYNC["Syncthing"]
-        NFS["NFS export"]
-    end
-    subgraph LAN["LAN / Fleet"]
-        style LAN fill:#1a2230,stroke:#a78bfa
-        P1["Peer<br/>Syncthing copy"]
-        N1["Mesh node<br/>mounts mirror,<br/>GPU inference over NFS"]
-    end
-    Internet -->|"download once"| STORE
-    STORE --- SYNC
-    STORE --- NFS
-    SYNC <-->|"P2P sync"| P1
-    NFS -->|"serve models"| N1
-```
-
-Download once from the internet, then share across your LAN. **Syncthing** gives
-peers a full P2P copy; the data disk is also **NFS-exportable**, so fleet nodes can
-mount one shared mirror and run GPU inference directly on the served models over the
-network. All tools and models work fully offline after the initial download.
-
-## Serving: static or dynamic
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/serving-dark.svg">
-  <img src="docs/img/popup/serving-light.svg" width="100%" alt="Pop-up book scene: Two ways to serve. Static pages on any file share, or a live server with chat, mail and requests.">
-</picture>
-
-There are two ways to open an Ark, and **both work fully offline**. Use either one, or both at once:
+Both work fully offline. Use either one, or both at once.
 
 | | Static | Dynamic |
 |---|---|---|
-| **Runs** | no Val Ark process: any file share (SMB, NFS, USB disk, `python3 -m http.server`) | `./start.sh serve` (zero-dependency Node.js) |
-| **Gives you** | a browsable catalog of every item, with pictures, descriptions and direct file links | the full web UI: live status, one-click requests, Wikipedia in the browser, the AI assistant, chat, mail, boards, file drop |
-| **Pick it for** | a simple, secure, read-only file server; a NAS that can't run code; a disk you hand to someone | a community hub on the LAN; an Ark you manage from a browser |
+| **Runs** | nothing extra: any file share (SMB, NFS, a USB disk) | the Val Ark web server |
+| **Gives you** | a catalog of every item, with pictures, descriptions and file links | the full web UI: live status, one-click requests, Wikipedia in the browser, the AI assistant, chat and mail |
+| **Pick it for** | a simple, read-only file server, or a NAS that can't run code | a community hub, or an Ark you manage from a browser |
 
-**[docs/SERVING.md](docs/SERVING.md)** is the guide: how to choose, how to set up each mode step by
-step, screenshots, and the security trade-offs.
+The [serving guide](docs/SERVING.md) walks through each one, with screenshots.
 
-| Static (any file share) | Dynamic (`./start.sh serve`) |
-|---|---|
-| ![Static catalog home page](docs/screenshots/serving/static-home.png) | ![Dynamic web UI home page (a freshly set-up box)](docs/screenshots/serving/dyn-home.png) |
-
-### Dynamic: the web server
-
-`./start.sh serve [port]` launches a **zero-dependency** Node.js server
-(`scripts/server.js`) serving the web UI with:
-
-- Live tool status and disk space info
-- SSE-based download progress streaming
-- Software catalog, model browser, and **Library** (Wikipedia + StackExchange + wikis + courses)
-- **Community** hub — start/launch the offline chat, mail, boards & file services
-- **One-click requests** — browse the live catalog and pull any not-yet-mirrored
-  ZIM / model / app (`/api/catalog/*`, `/api/request`); LAN + tailnet, cap-guarded
-- **Self-replication** — serves its own source + a host-aware `/bootstrap.sh` so a
-  new node clones the whole system over the LAN with no internet
-
-The port defaults to **3000** (override positionally, or set `VALARK_WEB_PORT` in
-`.env` so the loop knows which port to health-check). When complete `.zim` files
-exist in `content/zim/`, the server auto-launches kiwix-serve (loopback-only on
-internal port 8888) and proxies it same-origin at `/kiwix/` for offline Wikipedia
-browsing without internet access.
-
-### Static: browse from any file share
-
-A box or NAS reached only as a **plain file share** (SMB, NFS, a USB disk, `python3 -m
-http.server`) doesn't need `server.js` at all. `./scripts/librarian.sh site` (also run by every `maintain`)
-writes a static catalog at the archive root (`index.html`, a card grid per section and a detail
-page per item): plain HTML with relative links that works over `file://`. Every model, ZIM, tool,
-installer, dataset and source gets a picture (logo, ZIM illustration, model-card image or a badge),
-a description (web UI text, ZIM metadata, model card), its size and licence, and links straight to
-the files. Opening
-`web-ui/index.html` without a server now points there too. See
-[docs/SERVING.md](docs/SERVING.md) and
-[docs/LIBRARIAN.md](docs/LIBRARIAN.md#static-browse-pages).
-
-## Project Structure
-
-Data dirs (`tools/`, `models/`, `content/`, `sources/`, ...) are symlinked to the
-resolved data root, so the layout below works whether on one disk or a big mount.
-
-```
-val-ark/
-├── start.sh                  # Entry point: interactive menu + CLI
-├── bootstrap.sh              # Offline LAN installer handed out at /bootstrap.sh
-├── .env.example              # Config template -> copy to .env (gitignored)
-├── VERSION                   # Single source of truth for the release version
-├── scripts/
-│   ├── server.js             # Zero-dep web UI server + JSON API + SSE
-│   ├── valark                # Admin & recovery CLI (passcode, Use Mode, recovery)
-│   ├── librarian.sh          # Self-fill engine: status|plan|fill|verify|evict|maintain|
-│   │                         #   refresh|scout|catalog|request|pin|unpin|pins|site
-│   ├── loop.sh               # 24/7 self-healing + verification loop (cron)
-│   ├── verify.sh             # Functional "does it actually run?" checks (local + fleet)
-│   ├── mirror-self.sh        # Mirror Val Ark's own source for LAN self-replication
-│   ├── lib/                  # Shared building blocks (see scripts/README.md):
-│   │   ├── valark-env.sh     #   data-root resolution (.env / autodetect)
-│   │   ├── catalog.sh        #   unifies live catalog sources into candidates
-│   │   ├── kiwix_catalog.py  #   live Kiwix OPDS catalog
-│   │   ├── planner.py        #   essentials-first, value/byte fill planner
-│   │   ├── *_mirror.py, apt_offline.py, oci_pull.py
-│   │   │                     #   mirror CLIs: dev stack, APT, git bundles (run by hand);
-│   │   │                     #   Lastbook, references, container images (via tools/*.sh)
-│   │   ├── moderation.sh, mod-sweep.sh   # fail-closed on-device moderation
-│   │   ├── auth.js, commission.js        # admin identity + first-boot commissioning
-│   │   └── tls.sh            #   offline local CA for LAN HTTPS
-│   ├── services/             # Community services (chat, mail, forum, paste, SeaweedFS)
-│   ├── tools/                # Per-tool download scripts (50+)
-│   ├── docs/popup_art.py     # Generates the animated pop-up-book doc art
-│   ├── update.sh             # Ollama installers, logos/assets, new tool releases
-│   ├── download-tools.sh     # Download AI inference engines
-│   ├── download-models.sh    # Download AI models by tier
-│   ├── download-zims.sh      # Download ZIM content
-│   ├── setup.sh              # Install dependencies
-│   ├── status.sh             # Show installed inventory
-│   ├── monitor.sh            # Watch active downloads
-│   ├── audit-tools.sh        # What is mirrored vs needs attention
-│   ├── retry-failed.sh       # Retry failed model downloads
-│   ├── screenshots.sh        # Capture screenshots & recordings
-│   ├── optimize-images.py    # Resize/compress web-UI screenshots + logos
-│   ├── release.sh            # Create git release tags
-│   └── uninstall.sh          # Remove Val Ark config (keeps models + tools)
-├── data/                     # Catalogs (pipe-delimited TSV; schemas in data/AGENTS.md)
-│   ├── essentials.tsv        # Grid-down essentials, planned first (phase 0)
-│   ├── installers.tsv        # OS / router / netboot install media
-│   ├── models-extra.tsv      # Diversity-expansion model catalog
-│   ├── dev-stack.tsv         # Developer + security stack (release_mirror.py)
-│   ├── apt-sets.tsv          # Offline APT package sets (apt_offline.py)
-│   └── source-repos.tsv      # Upstream repos kept as git bundles (git_bundle_mirror.py)
-├── web-ui/                   # Web interface + assets
-├── tests/
-│   ├── run-all.sh            # One runner -> offline HTML report
-│   ├── test-*.sh             # Bash validators (50+)
-│   ├── lib/, fixtures/       # Shared test helpers + offline fixtures
-│   └── screenshots/          # Playwright suite (12 specs)
-└── docs/                     # Guides, design/, knowledge/, img/ (map: docs/README.md)
-```
-
-Downloaded `tools/`, `models/`, `content/`, `sources/`, and `assets/` live on the
-data root and are gitignored.
-
-## Documentation map
-
-**[docs/README.md](docs/README.md) is the full documentation index** — every tracked doc,
-grouped, with a graph and a "start here" triage. Begin there. The four knowledge hubs:
-
-- [docs/README.md](docs/README.md) — the canonical whole-repo doc map
-- [docs/design/README.md](docs/design/README.md) — consumer-appliance architecture (scope-first)
-- [docs/knowledge/README.md](docs/knowledge/README.md) — the git-tracked shared brain (decisions, gotchas, workflow, governance)
-- [.agents/README.md](.agents/README.md) — the AI-agent operating manual (skills + pipeline knowledge)
-
-Governance: [CLAUDE.md](CLAUDE.md) · [AGENTS.md](AGENTS.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md)
-
-## Testing
+## Find your way
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/tests-dark.svg">
-  <img src="docs/img/popup/tests-light.svg" width="100%" alt="Pop-up book scene: Proving it works. Validators, browser tests and fresh-VM installs, in one offline report.">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/docs-tree-dark.svg">
+  <img src="docs/img/popup/docs-tree-light.svg" width="100%" alt="The documentation tree: the README leads to the docs map, the workshop guides, the policies and the AI-agent manuals; the docs map branches into the guides, the design hierarchy and the knowledge base, each page with its file path.">
 </picture>
 
-One runner covers every layer and renders a **self-contained, offline HTML report**
-(`tests/results/report.html`) — bash validators, a Playwright suite (hundreds of tests; the per-tool specs scale with the catalog),
-community-services e2e, and fresh-Ubuntu (22.04/24.04/26.04) setup VMs. See
-[tests/README.md](tests/README.md).
+Every guide opens with its own pop-up scene. Good places to start:
 
-```bash
-./tests/run-all.sh                                   # all suites -> tests/results/report.html
-VALARK_URL=http://<ark-host>:3000 ./tests/run-all.sh   # + community-services e2e vs a live Ark
-VALARK_RUN_VM=1 ./tests/run-all.sh                   # + fresh-VM setup matrix (multipass + KVM)
-cd tests/results && python3 -m http.server 8099      # host the report offline
-```
+- [Docs map](docs/README.md): every doc, with a "start here" table
+- [Architecture](docs/ARCHITECTURE.md): how the pieces fit, and the project layout
+- [Platforms](docs/PLATFORMS.md): which machines it runs on and serves
+- [Offline and P2P](docs/OFFLINE.md): sharing one Ark across a LAN or a fleet
+- [Tests](tests/README.md): one runner, one offline report
 
-```bash
-export PATH="$HOME/.local/node/bin:$PATH"
-cd tests/screenshots && npx playwright test          # Playwright suite on its own
-```
+## Contributing and license
 
-## Releases
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and the [workflow](docs/knowledge/workflow.md). Report
+security issues privately, as described in [SECURITY.md](SECURITY.md).
 
-Releases are created by pushing version tags. The repo-root `VERSION` file is the single
-source of truth (served at `/api/health`); tags are unprefixed (`0.1.10`, matching the
-shipped series). Bump `VERSION` in the release commit, then on `main`'s tip:
-
-```bash
-./scripts/release.sh                # Create annotated tag from the VERSION file
-./scripts/release.sh --push         # Create and push (triggers the GitHub release)
-```
-
-The GitHub Actions workflow generates a changelog from commits and creates the release
-automatically, attaching the offline self-replication artifacts: `val-ark-<version>.bundle`
-(git bundle), the source `.tar.gz` and `SHA256SUMS`.
-
-## License
-
-GPL-3.0 - See [LICENSE](LICENSE)
+GPL-3.0. See [LICENSE](LICENSE).

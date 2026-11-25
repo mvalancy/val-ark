@@ -21,33 +21,16 @@ offline content (ZIM via Kiwix), with a zero-dependency web UI.
 | To **share an Ark**: static file share or live web server | [`SERVING.md`](SERVING.md) |
 | To **run the tests** | [`../tests/AGENTS.md`](../tests/AGENTS.md) |
 
-## The documentation graph
+## The documentation tree
 
-```mermaid
-graph TD
-    ROOT[README.md<br/>project front page] --> DOCS[docs/README.md<br/>THIS doc map]
-    ROOT --> CLAUDE[CLAUDE.md<br/>rules, auto-loaded]
-    ROOT --> AGENTS[AGENTS.md<br/>agent operating manual]
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/popup/docs-tree-dark.svg">
+  <img src="img/popup/docs-tree-light.svg" width="100%" alt="The documentation tree: the README leads to the docs map, the workshop guides, the policies and the AI-agent manuals; the docs map branches into the guides, the design hierarchy and the knowledge base, each page with its file path.">
+</picture>
 
-    DOCS --> GUIDES[Reference guides<br/>ARCHITECTURE · LIBRARIAN · PLATFORMS<br/>TOOLS · COMMUNITY · SERVING · OFFLINE · …]
-    DOCS --> DESIGN[docs/design/<br/>consumer-appliance architecture]
-    DOCS --> KNOW[docs/knowledge/<br/>the git-tracked shared brain]
-    AGENTS --> AG[.agents/<br/>skills + pipeline knowledge]
-
-    DESIGN --> D1[vision · commissioning<br/>admin-console · access-identity]
-    DESIGN --> D2[storage · downloads-monitoring<br/>errors-selfheal · safety-moderation]
-    DESIGN --> D3[recovery · deployment · roadmap<br/>research-brief · current-state]
-
-    KNOW --> K1[decisions.md · gotchas.md]
-    KNOW --> K2[workflow.md · governance.md]
-
-    AG --> S1[skills/: worker-protocol · review<br/>issue-discovery · release · recovery]
-    AG --> S2[knowledge/pipeline-insights.md]
-
-    KNOW -.->|"workflow + governance implemented by"| AG
-
-    CLAUDE --> FOLDERS[Per-folder AGENTS.md<br/>scripts · lib · services · tools · tests<br/>web-ui · data · docs · .github]
-```
+The tree is drawn by [`scripts/docs/popup_art.py`](../scripts/docs/popup_art.py) from its
+`DOC_TREE` list, and `tests/test-doc-art.sh` fails if a tracked doc is missing from it.
+Every guide on it opens with its own pop-up scene.
 
 Every important folder also carries its own `AGENTS.md` (local operating notes) and/or a
 `README.md`; they are inventoried below.
@@ -62,7 +45,7 @@ sync](#keeping-this-map-in-sync)).
 
 | File | Purpose |
 |------|---------|
-| [`../README.md`](../README.md) | Project front page: overview, architecture diagrams, quick start. |
+| [`../README.md`](../README.md) | Project front page: what an Ark is, screenshots, quick start, static vs dynamic, and the docs tree. |
 | [`../CLAUDE.md`](../CLAUDE.md) | Codebase guide + rules, **auto-loaded every session**; the "how to add a tool" checklist. |
 | [`../AGENTS.md`](../AGENTS.md) | AI-agent operating manual: prime directives, the delivery pipeline, definition of done. |
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Contributor entry point; points at the authoritative workflow + knowledge base. |
@@ -193,7 +176,9 @@ This is the **one canonical index** — keeping it current is part of the defini
 When you add, remove, or rename a tracked `.md`, update this file in the same change:
 
 1. Add/adjust its row in the matching group above.
-2. If it introduces a new folder, add the folder to the graph and the per-folder table.
+2. If it is a human-facing doc, add it to `DOC_TREE` in `scripts/docs/popup_art.py`, give it a
+   pop-up scene (`SCENES`), and run `python3 scripts/docs/popup_art.py`. A new folder also goes
+   in the per-folder table.
 3. Sanity-check with `git ls-files '*.md'` — every path it prints must appear here.
 
 ---

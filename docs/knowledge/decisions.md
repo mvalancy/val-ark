@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/decisions-dark.svg">
+  <img src="../img/popup/decisions-light.svg" width="100%" alt="Pop-up book scene: Why it is this way. Each big call: the context, the decision and the reason. Newest first.">
+</picture>
+
 # Val Ark — Decisions & Progress Log
 
 Architecturally significant decisions and notable progress, newest first. Format:

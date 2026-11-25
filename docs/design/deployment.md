@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/deployment-dark.svg">
+  <img src="../img/popup/deployment-light.svg" width="100%" alt="Pop-up book scene: Shipping it safely. Native or Docker, locked down and reliable, still offline and self-copying.">
+</picture>
+
 # Val Ark — Deployment, Security & Reliability
 
 Part of the [design hierarchy](README.md). "Wrap it all up: containerized with Docker,

@@ -7528,6 +7528,7 @@ function _setupNameAddr(name) {
 // What commissioning started (#306): the first fill, and whether the 24/7 loop runs.
 function _fillNote(f) {
     if (!f) return '';
+    if (f.pending && !f.started && !f.loopInstalled) return 'Starting the first fill now; the home screen shows its progress.';
     if (f.loopInstalled) return f.running ? 'Filling has started, and the 24/7 loop keeps it healthy.' : 'The 24/7 loop fills it on its next cycle and keeps it healthy.';
     const perm = 'To keep it filling and healthy 24/7, use <strong>Keep it healthy 24/7</strong> on the home screen, or run <code>./scripts/loop.sh install 30</code> on the box.';
     return (f.started ? 'Filling has started: one download cycle is running now. ' : 'Filling has not started yet. ') + perm;

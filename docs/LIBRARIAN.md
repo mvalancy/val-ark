@@ -32,6 +32,11 @@ the web server and legacy scripts work unchanged. Resolution + disk math live in
 
 ## The priority model
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/fill-dark.svg">
+  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Every item competes on value per byte, in five passes, until the disk is full.">
+</picture>
+
 The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
 
 0. **Grid-down essentials** — before anything else, the ranked list in

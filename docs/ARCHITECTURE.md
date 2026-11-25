@@ -26,6 +26,14 @@ and `.env` config see the same doc's "Where data lives" section.
 
 ## Architecture Overview
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/system-dark.svg">
+  <img src="img/flow/system-light.svg" width="100%" alt="Animated diagram: How an Ark works, end to end. Fetch once from the internet, keep it healthy on one disk, share it on the LAN.">
+</picture>
+
+<details>
+<summary>The detailed component diagram</summary>
+
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
   'primaryColor': '#1a2230',
@@ -105,6 +113,8 @@ graph TB
     VERIFY -.-> STATE
 ```
 
+</details>
+
 ## Fill Priority Flow
 
 The Librarian fills the data root in curation order from **live** catalogs. There is
@@ -113,6 +123,14 @@ reserve (`max(VALARK_RESERVE_PCT%, VALARK_RESERVE_MIN_GB)`) and, if set, the
 `VALARK_MAX_GB` footprint cap (bounds Val Ark's own data on a shared disk;
 `VALARK_MODEL_MAX_GB` additionally skips oversized single models). See
 [LIBRARIAN.md](LIBRARIAN.md) for the full model.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/fill-dark.svg">
+  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Every item competes on value per byte, in five passes, until the disk is full.">
+</picture>
+
+<details>
+<summary>The detailed fill flow</summary>
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -166,6 +184,8 @@ flowchart TD
     GET --> DONE
 ```
 
+</details>
+
 ## Self-Healing Loop
 
 `loop.sh once` runs one maintenance cycle; `loop.sh install [minutes]` registers a
@@ -185,6 +205,14 @@ run repeatedly and concurrently with a standalone fill (the fill flock prevents
 double-downloading) and never aborts on a single failure. TLS certs persist under
 `~/.config/val-ark/tls` and the server re-bootstraps them on first boot, so HTTPS
 comes back automatically too (see [`ENCRYPTION.md`](ENCRYPTION.md)).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/heal-loop-dark.svg">
+  <img src="img/flow/heal-loop-light.svg" width="100%" alt="Animated diagram: The self-healing loop. Every 30 minutes, and after a reboot, the Ark checks itself and fixes what it can.">
+</picture>
+
+<details>
+<summary>The detailed loop diagram</summary>
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -215,6 +243,8 @@ flowchart TD
     REPORT --> SNAP["8b. Self-heal snapshot<br/>state/selfheal.json + heal-events.jsonl"]
     SNAP --> DONE([cycle complete])
 ```
+
+</details>
 
 ## Mesh Topology
 

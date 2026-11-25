@@ -112,7 +112,7 @@ Each important folder carries local operating notes.
 |--------|------|
 | `scripts/` | [scripts/AGENTS.md](../scripts/AGENTS.md) · [scripts/README.md](../scripts/README.md) — orchestration, curation, server layer. |
 | `scripts/lib/` | [scripts/lib/AGENTS.md](../scripts/lib/AGENTS.md) — data-root resolution + catalog/planner internals, the mirror CLIs (release / APT / git-bundle, run by hand; Lastbook / references / OCI, driven by `scripts/tools/*.sh`), auth + commissioning, moderation, TLS. |
-| `scripts/docs/` | `popup_art.py` — generator for the animated pop-up-book doc art (see [Pop-up art](#pop-up-art)). |
+| `scripts/docs/` | `popup_art.py` (the pop-up scenes and the docs tree) and `flow_art.py` (the animated how-it-works diagrams); see [Pop-up art](AGENTS.md#pop-up-art-the-chapter-scenes). |
 | `scripts/services/` | [scripts/services/AGENTS.md](../scripts/services/AGENTS.md) — offline community service launchers (chat/mail/forum/paste/seaweedfs). |
 | `scripts/tools/` | [scripts/tools/AGENTS.md](../scripts/tools/AGENTS.md) · [scripts/tools/README.md](../scripts/tools/README.md) — per-tool mirror scripts + `_common.sh` helpers. |
 | `tests/` | [tests/AGENTS.md](../tests/AGENTS.md) · [tests/README.md](../tests/README.md) — one runner → offline HTML report. |

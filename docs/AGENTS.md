@@ -33,6 +33,7 @@ Every human-facing doc (guides, design, knowledge, the code READMEs, CONTRIBUTIN
 
 - Scenes, captions and the docs each scene belongs to live in `SCENES` in [`scripts/docs/popup_art.py`](../scripts/docs/popup_art.py) (stdlib only, deterministic). Run `python3 scripts/docs/popup_art.py` to rewrite them; `--list` shows where each scene is used.
 - `DOC_TREE` in the same file draws `docs-tree-{light,dark}.svg`, the whole docs hierarchy as a tree on the [doc map](README.md#the-documentation-tree) and the front page. Add a new doc to it, with its own scene.
+- **How-it-works diagrams** (`img/flow/`) come from `DIAGRAMS` in [`scripts/docs/flow_art.py`](../scripts/docs/flow_art.py): parts as cards, arrows with travelling dots, or a ring for a cycle. Run `python3 scripts/docs/flow_art.py`; the same test checks them. Prefer one of these over a mermaid chart for a reader-facing explanation, and keep the mermaid in a `<details>` block for the detail.
 - Embed a scene as a `<picture>` with a `prefers-color-scheme: dark` `<source>` (copy an existing one). The `alt` text is the scene's title and caption.
 - A caption is a claim about the doc. Keep it true, like any other line in a guide.
 - [`tests/test-doc-art.sh`](../tests/test-doc-art.sh) fails if:

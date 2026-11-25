@@ -28,13 +28,14 @@ fail=0
 
 echo "== generator check"
 python3 scripts/docs/popup_art.py --check || fail=1
+python3 scripts/docs/flow_art.py --check || fail=1
 
 echo "== SVG safety, accessibility and size"
 python3 - <<'PY' || fail=1
 import pathlib, re, sys, xml.dom.minidom
 BUDGET = 40_000
 bad = 0
-files = sorted(pathlib.Path('docs/img/popup').glob('*.svg'))
+files = sorted(pathlib.Path('docs/img/popup').glob('*.svg')) + sorted(pathlib.Path('docs/img/flow').glob('*.svg'))
 if not files:
     print('FAIL: no SVGs in docs/img/popup'); sys.exit(1)
 for f in files:
@@ -68,7 +69,7 @@ PY
 echo "== every scene is used as a light/dark <picture> pair, and every reference resolves"
 python3 - <<'PY' || fail=1
 import pathlib, re, subprocess, sys, os
-scenes = {p.name.rsplit('-', 1)[0] for p in pathlib.Path('docs/img/popup').glob('*.svg')}
+scenes = {f'{d}/' + p.name.rsplit('-', 1)[0] for d in ('popup', 'flow') for p in pathlib.Path(f'docs/img/{d}').glob('*.svg')}
 try:
     out = subprocess.run(['git', 'ls-files', '*.md'], capture_output=True, text=True, check=True).stdout.split()
 except Exception:
@@ -79,13 +80,13 @@ paired, bad = set(), 0
 PIC = re.compile(r'<picture>(.*?)</picture>', re.S)
 for md in mds:
     text = pathlib.Path(md).read_text(errors='replace')
-    for m in re.finditer(r'(?:src|srcset)="([^"]*popup/[a-z0-9-]+-(?:light|dark)\.svg)"', text):
+    for m in re.finditer(r'(?:src|srcset)="([^"]*(?:popup|flow)/[a-z0-9-]+-(?:light|dark)\.svg)"', text):
         path = os.path.normpath(os.path.join(os.path.dirname(md), m.group(1)))
         if not os.path.isfile(path):
             print(f'FAIL: {md}: {m.group(1)} does not exist'); bad += 1
     for block in PIC.findall(text):
-        dark = re.search(r'<source media="\(prefers-color-scheme: dark\)" srcset="[^"]*popup/([a-z0-9-]+)-dark\.svg"', block)
-        light = re.search(r'<img src="[^"]*popup/([a-z0-9-]+)-light\.svg"[^>]*\balt="([^"]+)"', block)
+        dark = re.search(r'<source media="\(prefers-color-scheme: dark\)" srcset="[^"]*((?:popup|flow)/[a-z0-9-]+)-dark\.svg"', block)
+        light = re.search(r'<img src="[^"]*((?:popup|flow)/[a-z0-9-]+)-light\.svg"[^>]*\balt="([^"]+)"', block)
         if not (dark or light):
             continue
         if not (dark and light and dark.group(1) == light.group(1)):

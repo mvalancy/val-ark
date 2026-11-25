@@ -431,26 +431,31 @@ shows a hint linking to the static catalog, since the dynamic UI needs its serve
    chat, mail, forum, paste),
 6. **self-mirror** — package Val Ark's own source under `<data>/sources/val-ark/`
    (`scripts/mirror-self.sh`) so a neighbour can bootstrap a node over the LAN,
-7. **refresh the live catalog** → content links self-heal (no stale dates),
-8. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
+7. **direct-connect link DHCP** (opt-in, `VALARK_LINK_DHCP=1`) — when nothing
+   else on the wired link hands out addresses, serve a tiny DHCP + DNS on that one
+   interface so a laptop plugged straight in can reach the Ark; never serves while
+   another DHCP server answers, and stops as soon as one appears
+   (`scripts/lib/link-dhcp.sh`, [ARM64-NAS.md](ARM64-NAS.md#direct-connect-laptop-dhcp--dns-on-the-wired-port)),
+8. **refresh the live catalog** → content links self-heal (no stale dates),
+9. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
    are transient, not dead), web-ui assets, symlinks → `state/linkcheck.txt`,
-9. **integrity verify** → requeue corrupt/short downloads,
-10. **re-fill pinned requests** — user-requested items that went missing come back
+10. **integrity verify** → requeue corrupt/short downloads,
+11. **re-fill pinned requests** — user-requested items that went missing come back
     before the generic fill,
-11. **top-up fill** (bounded; skipped if a fill already runs),
-12. **weekly tool refresh** — re-run the tool mirror so apps track their latest
+12. **top-up fill** (bounded; skipped if a fill already runs),
+13. **weekly tool refresh** — re-run the tool mirror so apps track their latest
     upstream versions (`VALARK_TOOL_REFRESH_DAYS`, default 7; a failed pass
     retries in a day),
-13. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
+14. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
     real ZIM, a tiny LLM infers, the web API answers, and each configured remote
     mesh node (`VALARK_FLEET` in `.env`) is reachable and sees the shared content,
-14. **UI smoke** — a Playwright pass over the dynamic controls (when installed),
-15. **moderation sweep** — screen plain-file community uploads on-device and
+15. **UI smoke** — a Playwright pass over the dynamic controls (when installed),
+16. **moderation sweep** — screen plain-file community uploads on-device and
     quarantine anything not cleanly allowed (`scripts/lib/mod-sweep.sh`, fail-closed),
-16. **report + coordination** — the librarian's `maintain` (writes
+17. **report + coordination** — the librarian's `maintain` (writes
     `state/health.json`: disk + per-category coverage) and a fleet coordination drop
     (`state/coordination/`),
-17. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
+18. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
     snapshot) and append any genuine repairs to `state/heal-events.jsonl` (the feed
     behind the Health page). This is **distinct from `state/health.json`**.
 

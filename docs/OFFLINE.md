@@ -88,7 +88,8 @@ share the data disk and open the static `val-ark/index.html`. Both work offline;
 
 `scripts/loop.sh` keeps an offline mirror healthy without supervision: it ensures the
 disk is writable, repairs symlinks, keeps the web server and enabled community services
-up, mirrors its own source for LAN self-replication, refreshes the live catalog (content
+up, mirrors its own source for LAN self-replication, optionally serves DHCP + DNS to a
+laptop plugged straight into the wired port ([below](#direct-connect-laptop-no-router)), refreshes the live catalog (content
 links self-heal — no stale dates), checks & repairs links, verifies integrity, re-fills
 pinned requests, tops up the fill, refreshes mirrored tools weekly (latest upstream
 versions), runs functional verification and a UI smoke, and sweeps uploads through the
@@ -236,6 +237,17 @@ starting points; see [MODEL_INVENTORY.md](MODEL_INVENTORY.md) for exact sizes.
 | Tier 1+2 | ~165 GB | Laptops, workstations, Jetson Orin/Thor |
 | All tiers + ZIM | ~500 GB+ | Servers, NAS, GB10, shared NFS mirror |
 
+## Direct-connect laptop (no router)
+
+Off-grid there may be no router: just a laptop and an ethernet cable into the Ark.
+Set `VALARK_LINK_DHCP=1` in `.env` and the loop hands that laptop an address and DNS
+over the wired port, so `http://valark/` (or the box's hostname) opens the web UI and
+the community apps with no router, internet or VPN. It probes for a DHCP server first
+and never serves while one answers, so plugging the Ark into a home or office network
+is safe; it stops the moment a real server appears. Needs root or passwordless sudo
+and `dnsmasq`. Details and the hardware checklist:
+[ARM64-NAS.md](ARM64-NAS.md#direct-connect-laptop-dhcp--dns-on-the-wired-port).
+
 ## Network Requirements
 
 | Operation | Internet required? |
@@ -245,4 +257,5 @@ starting points; see [MODEL_INVENTORY.md](MODEL_INVENTORY.md) for exact sizes.
 | Running models, content, web UI | No |
 | Integrity verify (`librarian.sh verify`) | No |
 | Syncthing / NFS over LAN | No (LAN only) |
+| Laptop direct to the Ark's ethernet (`VALARK_LINK_DHCP=1`) | No (no router either) |
 | Updates | Yes |

@@ -139,6 +139,46 @@ and the model filter drops oversized candidates).
    or install Playwright's ARM browsers + a virtual display if UI tests are needed
    on-device.
 
+## Direct-connect laptop: DHCP + DNS on the wired port
+
+Off-grid there may be no router at all: a laptop gets plugged straight into the
+NAS's ethernet port. With `VALARK_LINK_DHCP=1` in `.env`, the self-heal loop
+(step 2f, `scripts/lib/link-dhcp.sh`) makes that work, without ever fighting a
+real router:
+
+1. **Probe first.** It broadcasts one DHCPDISCOVER on the wired interface and listens
+   for offers for a short window (`VALARK_LINK_DHCP_PROBE_SECS`, default 4;
+   `scripts/lib/dhcp_probe.py`, stdlib, receives on a raw socket so it works while a
+   DHCP client holds port 68). It never sends a REQUEST, so no lease is taken.
+2. **Serve only if nobody answered.** It adds `10.254.77.1/24` (prefix:
+   `VALARK_LINK_DHCP_NET`) to the interface and starts dnsmasq bound to that one
+   interface (`--interface=<iface> --bind-interfaces --except-interface=lo`,
+   `--conf-file=/dev/null`). Leases come from `.10`–`.60`. No router option is handed
+   out, so the laptop keeps its own default route. DNS answers the box's hostname,
+   `valark` and `VALARK_LINK_DHCP_NAMES` with the link address (`--no-resolv`: no
+   upstream). The `VALARK_WEB_PUBLIC_PORT` NAT redirect already covers every real
+   interface, so `http://valark/` reaches the web UI.
+3. **Keep checking.** A small watcher (started by the loop, flock'd so there is only
+   one) re-probes on every carrier change and every `VALARK_LINK_DHCP_RECHECK_SECS`
+   (default 60). The moment another server answers, the link drops, the probe can't
+   run, or the knob is turned off, it stops dnsmasq and removes the address.
+4. **Fail soft.** Not root and no passwordless `sudo -n`? No `dnsmasq`? Two wired
+   ports and no `VALARK_LINK_DHCP_IFACE`? It logs one clear line, writes the reason to
+   `state/link-dhcp.json` and does nothing.
+
+State lives in `state/link-dhcp.json` (`mode`: `off` / `idle` / `present` / `serving` /
+`unavailable` / `error`) and `state/link-dhcp/` (pid, leases, dnsmasq + watcher logs).
+`scripts/lib/link-dhcp.sh status` prints it; `… stop` stops serving now.
+
+**Before turning it on, check on the unit:** `command -v dnsmasq` (Debian 11:
+`apt install dnsmasq-base`, which ships the binary without a system-wide service), and
+whether the vendor network manager owns the wired port. If NetworkManager manages it,
+it may remove an address it didn't add when it reconfigures the port; the watcher
+re-adds it on the next probe, but marking the port unmanaged or giving it a static
+profile is cleaner. If the port is administratively down (`ip link` shows no `UP`), the
+carrier is never seen; bring it up in the vendor UI first. Offline test:
+`tests/test-link-dhcp.sh`.
+
 ## Verified working on an RK3588-class unit
 
 - `./start.sh setup` → resolves the NVMe data root, bootstraps Node, creates layout.

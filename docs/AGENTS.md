@@ -33,6 +33,7 @@ Every human-facing doc (guides, design, knowledge, the code READMEs, CONTRIBUTIN
 
 - Scenes, captions and the docs each scene belongs to live in `SCENES` in [`scripts/docs/popup_art.py`](../scripts/docs/popup_art.py) (stdlib only, deterministic). Run `python3 scripts/docs/popup_art.py` to rewrite them; `--list` shows where each scene is used.
 - `DOC_TREE` in the same file draws `docs-tree-{light,dark}.svg`, the whole docs hierarchy as a tree on the [doc map](README.md#the-documentation-tree) and the front page. Add a new doc to it, with its own scene.
+- **How-it-works diagrams** (`img/flow/`) come from `DIAGRAMS` in [`scripts/docs/flow_art.py`](../scripts/docs/flow_art.py): parts as cards, arrows with travelling dots, or a ring for a cycle. Run `python3 scripts/docs/flow_art.py`; the same test checks them. Prefer one of these over a mermaid chart for a reader-facing explanation, and keep the mermaid in a `<details>` block for the detail.
 - Embed a scene as a `<picture>` with a `prefers-color-scheme: dark` `<source>` (copy an existing one). The `alt` text is the scene's title and caption.
 - A caption is a claim about the doc. Keep it true, like any other line in a guide.
 - [`tests/test-doc-art.sh`](../tests/test-doc-art.sh) fails if:
@@ -40,6 +41,7 @@ Every human-facing doc (guides, design, knowledge, the code READMEs, CONTRIBUTIN
   - an SVG has a script, an external reference, or no `<title>`/`<desc>`;
   - an SVG skips `prefers-reduced-motion`, or goes over 40 KB;
   - a scene isn't used as a light/dark pair;
+  - a doc listed in a scene's or diagram's `used=` doesn't embed it;
   - a tracked human-facing doc is missing from `DOC_TREE` (nested `AGENTS.md`, `.github/` and `.agents/` skills are exempt).
 - The resting state is the fully opened scene, so reduced motion (and any renderer that won't animate) shows the finished picture.
 
@@ -50,7 +52,7 @@ One fact, one home. Change it in the owning doc; from any other doc, link — ne
 | Fact / concept | Canonical owner | Notes |
 |----------------|-----------------|-------|
 | Data root + `.env` layout | [LIBRARIAN.md](LIBRARIAN.md) | "Where data lives" section. |
-| Curation priority model | [LIBRARIAN.md](LIBRARIAN.md) | diversity → small-valuable → fill → evict. |
+| Curation priority model | [LIBRARIAN.md](LIBRARIAN.md) | essentials → diversity → small-valuable → fill; `evict` / `request` trade up (fill never deletes). |
 | 24/7 loop steps + `state/selfheal.json` / `state/heal-events.jsonl` | [LIBRARIAN.md](LIBRARIAN.md) | Keep [ARCHITECTURE.md](ARCHITECTURE.md)'s Self-Healing Loop diagram **in sync** with it. |
 | CUDA / Metal source build | [PLATFORMS.md](PLATFORMS.md) | GPU llama.cpp / whisper.cpp / sd.cpp on aarch64. |
 | Tool catalog | [TOOLS.md](TOOLS.md) | Backed by `scripts/tools/*.sh`. |

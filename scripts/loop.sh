@@ -5,7 +5,7 @@
 # One cycle (run by `/loop`, cron, or systemd) does, in order:
 #   1. ensure the data disk is writable (self-heal NTFS/ro reverts)
 #   2. repair the repo<->disk symlink layout (2b-2d web server, public port, community
-#      services, 2e self-mirror of Val Ark's own source)
+#      services, 2e self-mirror of Val Ark's own source, 2f direct-connect link DHCP)
 #   3. refresh the live catalog  -> ZIM/content links self-heal (no stale dates)
 #   4. link check + repair        -> tool/installer URLs, web-ui assets, symlinks
 #   5. integrity verify           -> requeue corrupt/short downloads (5b re-fill pinned requests)
@@ -220,6 +220,29 @@ ensure_services() {
     done
 }
 
+# Direct-connect laptop support (issue #148): when VALARK_LINK_DHCP=1, serve a
+# tiny DHCP + DNS on ONE wired interface, but only while no other DHCP server
+# answers on that link. scripts/lib/link-dhcp.sh owns the decision (probe first,
+# never fight a router, stop when one appears) and keeps its own watcher up so
+# link changes are handled between cycles. Off = a quiet no-op (stops it if it
+# was serving). Needs root/passwordless sudo + dnsmasq; fails soft otherwise.
+ensure_link_dhcp() {
+    local sh="${_DIR}/lib/link-dhcp.sh" out
+    # Fast path: off and nothing of ours running (runtime files live on tmpfs).
+    if [ "${VALARK_LINK_DHCP:-0}" != "1" ] && [ ! -s "${VALARK_LINK_DHCP_RUN:-/run/valark-link-dhcp}/dnsmasq.pid" ] \
+       && [ ! -s "${VALARK_LINK_DHCP_RUN:-/run/valark-link-dhcp}/watch.pid" ]; then
+        log "link DHCP off (VALARK_LINK_DHCP=1 serves a direct-connect laptop)"; return 0
+    fi
+    # 8>&- : the watcher it spawns must not inherit loop.lock (see ensure_services).
+    out=$(timeout 120 bash "$sh" ensure 2>&1 8>&-)
+    printf '%s\n' "$out" | sed 's/^/    /'
+    case "$out" in
+        *"started serving"*) heal_event start "Serving DHCP + DNS on the wired port (no other DHCP server on the link)" ;;
+        *"stopped serving"*) heal_event stop "Stopped serving DHCP on the wired port ($(printf '%s' "$out" | grep -o 'stopped serving.*' | head -1 | sed 's/^[^:]*: //'))" ;;
+    esac
+    return 0
+}
+
 # Periodic tool refresh — keep the mirrored apps at their LATEST upstream
 # versions. Tool scripts resolve versions live (github_latest_tag etc.) and
 # skip anything already current, so an up-to-date pass is cheap; when upstream
@@ -325,6 +348,8 @@ loop_once() {
 
     step "2e. self-mirror (offline: serve our own code for LAN bootstrap)"
     FORCE_COLOR=0 bash "${_DIR}/mirror-self.sh" 2>&1 | tail -1 | sed 's/^/    /'
+
+    step "2f. link DHCP + DNS for a direct-connect laptop (VALARK_LINK_DHCP)"; ensure_link_dhcp
 
     step "3. refresh live catalog (heals stale content links)"
     bash "$LIBRARIAN" refresh >/dev/null 2>&1 && log "catalog refreshed" || log "${YELLOW}catalog refresh failed (cache retained)${NC}"

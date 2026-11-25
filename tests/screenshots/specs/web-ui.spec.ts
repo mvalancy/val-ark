@@ -71,6 +71,14 @@ test.describe('Val Ark Web UI - Navigation', () => {
     await page.screenshot({ path: path.join(OUTPUT_DIR, 'model-cards.png'), fullPage: true });
   });
 
+  test('navigate to the Offline Library via nav', async ({ page }) => {
+    // README image: keeps docs/screenshots/web-ui/library-page.png current.
+    await openLibrarySection(page, 'Offline Library');
+    await page.waitForTimeout(300);
+    await expect(page.locator('h1', { hasText: 'Offline Library' })).toBeVisible();
+    await page.screenshot({ path: path.join(OUTPUT_DIR, 'library-page.png') });
+  });
+
   test('navigate to Getting Started page via footer', async ({ page }) => {
     // Getting Started left the top bar (four-tab nav) but stays in the footer.
     await page.click('.site-footer a[href="#/quickstart"]');

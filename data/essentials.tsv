@@ -9,6 +9,8 @@
 #   kind   zim   -> fnmatch on the Kiwix ZIM base name (e.g. zimgit-water_en)
 #          model -> fnmatch on the data/models-extra.tsv id
 #          inst  -> fnmatch on the data/installers.tsv id
+#          lastbook -> fnmatch on a Lastbook row's <kind>:<id> (pack:small, app:*; scripts/lib/lastbook_mirror.py
+#                   candidates). A larger held pack satisfies pack:small (the packs nest).
 #   focus  all, or comma-separated owner profiles (balanced,knowledge,ai,tools,survival)
 #   note   why it matters
 #
@@ -24,6 +26,8 @@
 18|zim|survivors_en_all|all|Survival techniques
 19|zim|zimgit-post-disaster_en|all|Post-disaster recovery and rebuilding
 20|zim|medicalsciences.stackexchange.com_en_all|all|Medical Q&A
+21|lastbook|pack:small|survival|Lastbook Small pack (+ base map): survival manuals, videos and guides in one library (~9 GB)
+22|lastbook|app:*|survival|The Lastbook app installers (Mac, Windows, Ubuntu) that read the pack
 # --- a pocket encyclopedia + an assistant that can explain it ----------------
 30|zim|wikipedia_en_100|all|The 100 most important Wikipedia articles
 31|zim|wikipedia_en_top|all|Top Wikipedia articles (mini first)

@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/popup/librarian-dark.svg">
-  <img src="img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Essentials first, then diversity, small and valuable, fill, then trade up.">
+  <img src="img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Essentials first, then diversity, small and valuable, then fill the rest.">
 </picture>
 
 # Librarian — scalable disk-fill, curation & self-healing
@@ -32,6 +32,11 @@ the web server and legacy scripts work unchanged. Resolution + disk math live in
 
 ## The priority model
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/fill-dark.svg">
+  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Four passes, most important first, until the disk reaches its reserve.">
+</picture>
+
 The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
 
 0. **Grid-down essentials** — before anything else, the ranked list in
@@ -59,9 +64,10 @@ The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
    so a prolific category (devdocs, TED…) can't crowd out diversity.
 3. **Fill remaining space** — then the big flagships by intrinsic value (full
    Wikipedia, large model quants, distro ISOs) until a reserve is reached.
-4. **Cut back for better small items** — when the disk is full and a new small
-   high-value item appears, evict the *lowest value/byte* managed item (never the
-   sole representative of a category) to make room.
+4. **Trade up, on request** — `fill` itself never deletes anything. When room is needed
+   (`librarian.sh evict`, or a one-click `request` that has to fit under `VALARK_MAX_GB`),
+   the *lowest value/byte* managed, unpinned item goes first, never the sole
+   representative of a category.
 
 Everything scales from live `df` headroom (`avail − max(2%, 50GB)`); there are no
 hardcoded sizes. On a shared disk an optional footprint cap bounds Val Ark itself:
@@ -76,12 +82,111 @@ flavours (maxi/nopic/mini) collapse to the most complete one.
 | Kiwix ZIM library | live OPDS via `scripts/lib/kiwix_catalog.py` | **Always current** — ZIM dates never go stale. ~1700+ entries across 9 languages by default (`VALARK_ZIM_LANGS`). |
 | Models (diversity) | `data/models-extra.tsv` | Small high-value models across 18 categories (setup-assistant chat LLMs, small LLMs, code, embeddings, rerankers, tiny VLMs, OCR, depth, segmentation, detection, audio, time-series, safety). |
 | Models (scouted, weekly) | `<state>/catalog/models-scouted.tsv` | **New open models, found automatically** by `scripts/lib/hf_scout.py` — see [Model scout](#model-scout-hf_scoutpy). Planned after the curated rows on a small disk. |
+| Lastbook (survival library) | live release via `lastbook_mirror.py candidates`, cached daily in `<state>/catalog/lastbook.tsv` | See [Lastbook](#lastbook-planned-like-any-other-content). Each pack, state map (+ its address index), the model and the installers. |
 | OS / router / netboot / server source | `data/installers.tsv` | Distro ISOs (Alpine/Debian/Ubuntu/…), OpenWRT firmware, netboot.xyz, Jetson BSP — for PXE / mesh commissioning — plus `server-source`: upstream LAMP + LAN-infrastructure releases (httpd/APR, PHP, MariaDB, PostgreSQL, nginx, OpenSSL/OpenSSH, BIND, Kea, dnsmasq, Unbound, Samba, Dovecot, WordPress, Nextcloud, Gitea, …). |
 
 The grid-down list in `data/essentials.tsv` is not a source of its own: it names ZIMs, models and
 installers from the catalogs above, and the planner takes the matches first (phase 0).
 
 The big LLM/STT/TTS/VLM/image catalog is still managed by `download-models.sh`.
+
+### Lastbook: planned like any other content
+
+[Lastbook](https://lastbook.org) is sized by this planner, not by a fixed share of the disk (#203).
+`catalog.sh` turns its live release into rows. It uses `lastbook_mirror.py candidates`, which
+applies the same URL allow-list and validation as a mirror run. The rows are cached daily, and
+a failed refresh keeps the old cache. There is one row per **pack** (with the base maps, which
+ride with any pack), one per **state map** (with its address index), one for the **model**
+(category `lastbook:model`, bucket `models`, so `VALARK_MODEL_MAX_GB` applies) and one for the
+**installers**. An entry with no size is left out, so it can never look free. The rows carry a
+value and a size like every other row, and the owner profile weights them.
+
+- **Bytes still to fetch.** A Lastbook row is charged only what it still has to download. Files
+  held at their listed size cost 0, and a resumable `.part` is credited, so a half-fetched
+  Medium is finished rather than stranded behind a fresh Small. The plan's size column for
+  these rows is that remainder.
+- **The packs nest** (Small ⊂ Medium ⊂ All), so the planner plans at most **one** pack.
+  - Diversity takes the Small pack. A later phase may **upgrade** the planned pack to a larger
+    one that fits, and the smaller pick's bytes come back.
+  - A pack held and verified on disk satisfies every pack up to its size. Held means recorded
+    in the mirror's `.lastbook-verified.json`, at its recorded size, summed per pack. A `.part`,
+    a symlink or a wrong size does not count. A larger pack is still an upgrade.
+  - The held pack's **own** id is still planned and charged when its listed files are not all
+    there. That covers a re-release under a new name and a missing base map, so a refresh is
+    budgeted too.
+  - **One exception:** a phase-0 essential pack (the survival profile's Small) stays planned
+    beside a later, larger pick. `fill` fetches the essentials first, then the rest, and the
+    mirror's nested prune removes the Small once the larger pack is verified.
+- **Maps, the model and the installers need a pack**, held or planned. The model never takes a
+  diversity slot, and a held Lastbook GGUF does not cover the curated `model:assistant`
+  category.
+- **Survival profile:** `data/essentials.tsv` lists the Small pack and the installers (kind
+  `lastbook`). They are planned in phase 0, and a held Medium or All satisfies them.
+- **The fetch stays with the mirror.**
+  - `fill` hands the planned Lastbook rows to `scripts/tools/lastbook.sh --plan-file`. The
+    phase-0 rows go in their own batch at their turn, and every planned row goes at the first
+    later row's turn.
+  - Each batch is checked against free space as a whole and bounded by the fill's remaining
+    `--time`. The `.part` files resume next cycle. Only bytes the mirror reports as added are
+    counted. A busy Lastbook lock (exit 75) is a skip, not a failure.
+  - `lastbook_mirror.py` then runs `--pack auto --pack-limit <planned>`. That means the planned
+    pack or a smaller one, so a planned All that is broken upstream falls back down the ladder,
+    never below the held pack. It gets the planned maps, model and installers, with a budget of
+    the planned bytes still to fetch.
+  - Every auto guard still holds: step up never down, HEAD-confirmed upgrades, keep the held
+    pack. When no pack will be held after all, the planned maps, model and installers wait too.
+  - Downloads stop at the reserve, which is re-checked every 256 MiB, and at the STOP flag.
+  - The prune rules from #182/#194 are unchanged: only recorded files go, nested packs go only
+    after a larger one is verified, and nothing goes when the release looks truncated.
+  - **Nothing held is deleted before its replacement is verified.** That covers a held map,
+    address index, model or installer version that the release no longer names (a new app
+    version, a renamed map or model). Such a file stays until what replaces it is downloaded
+    and verified. Installers and the model are each **one slot**: an old installer or model
+    file waits for every current installer or model, even if upstream renamed the model to a
+    new id. A map or address index waits for the current entry with the same id. If the
+    planner had no room for the replacement, the old copy is kept, and the replacement stays
+    charged in later plans.
+  - Some files are kept rather than pruned, each with a log line saying why: a map or address
+    index whose entry cannot be told, and an address index that upstream marks
+    `available: false`. Only a map or address index entry the release dropped altogether goes,
+    and the truncation guards still apply to that.
+  - In planner mode a base-map refresh the planner did not charge is not wanted, and it is
+    taken **last**, after every planned row. It never uses up budget charged for other rows (a
+    box holding Medium whose plan is only the installers still gets the installers). It comes
+    along only when budget is left over, and is otherwise skipped, not deferred. A skipped base
+    map does not make the run incomplete or block the prune (such as the nested Small after All
+    verifies); a run can still exit 3 for other reasons. The old base map stays until its
+    replacement is verified.
+  - **Files kept indefinitely are logged, and only an operator removes them.** That covers an
+    entry upstream marks unavailable, an unknown entry, and an old model or installer version
+    kept under `MODEL=no` / `APPS=none`. Each run logs the file with the reason
+    (`lastbook: keeping <file>: <why>`), and Val Ark never deletes it on its own.
+  - The mirror records each file's entry id in its stamps, so the link survives once the kept
+    manifest moves on. Candidate rows carry each file's sha256, so a re-release under the same
+    name and size counts as not held and is charged.
+  - These files never enter `state/manifest.tsv`, so `verify` and `evict` never touch them.
+    `catalog` and `request` never offer them, because there is no per-item path; the Lastbook
+    card mirrors the release.
+- Run on its own (the weekly tool refresh, the Mirror button), `lastbook.sh` first asks
+  `librarian.sh lastbook-plan` for the same rows. A lock lets only one Lastbook mirror run go
+  at a time.
+- **Opt-outs apply at once.** The cache always holds the full offer. `VALARK_LASTBOOK_MAPS`
+  (`none`, or a code list), `VALARK_LASTBOOK_ADDRESSES=none`, `VALARK_LASTBOOK_MODEL=no` and
+  `VALARK_LASTBOOK_APPS=none` filter the rows when they are read, so a `no` holds even with a
+  day-old or offline cache. In planner mode, `MAPS=all` / `MODEL=yes` only mean "offered", and
+  the planner still decides whether they fit.
+- **The operator's choice keeps the planner out.** In these cases Lastbook is sized by its own
+  share as before:
+  - `VALARK_LASTBOOK_PACK=every` (the server / NAS opt-in) or one explicit pack;
+  - an explicit `VALARK_LASTBOOK_BUDGET`, or `VALARK_LASTBOOK_PLAN=0`;
+  - `VALARK_LASTBOOK_ADDRESSES=all` or a code list (the planner only folds an address index
+    into its map, and would otherwise quietly reduce these to `follow`);
+  - a `VALARK_LASTBOOK_DIR` on **another filesystem** than the data root (the planner's budget
+    is the data root's, and there is no per-destination budget yet);
+  - a selection option on `lastbook.sh`'s command line.
+
+  `VALARK_LASTBOOK_BUDGET_PCT` is **deprecated**: set on its own it also selects share mode,
+  and logs a warning.
 
 ### Model scout (`hf_scout.py`)
 
@@ -335,6 +440,7 @@ scripts/librarian.sh request model <id>   # pin + fetch ONE item now (content|mo
 scripts/librarian.sh pin content <id>     # keep an item: pins are never evicted
 scripts/librarian.sh unpin <id>    # files kept, but evictable again
 scripts/librarian.sh pins --refill # list pins (--refill re-fetches any that went missing)
+scripts/librarian.sh lastbook-plan # the Lastbook rows the planner picks (what lastbook.sh fetches)
 ```
 
 Downloads prefer **aria2** (8 connections, ~3x faster on per-connection-throttled
@@ -431,26 +537,31 @@ shows a hint linking to the static catalog, since the dynamic UI needs its serve
    chat, mail, forum, paste),
 6. **self-mirror** — package Val Ark's own source under `<data>/sources/val-ark/`
    (`scripts/mirror-self.sh`) so a neighbour can bootstrap a node over the LAN,
-7. **refresh the live catalog** → content links self-heal (no stale dates),
-8. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
+7. **direct-connect link DHCP** (opt-in, `VALARK_LINK_DHCP=1`) — when nothing
+   else on the wired link hands out addresses, serve a tiny DHCP + DNS on that one
+   interface so a laptop plugged straight in can reach the Ark; never serves while
+   another DHCP server answers, and stops as soon as one appears
+   (`scripts/lib/link-dhcp.sh`, [ARM64-NAS.md](ARM64-NAS.md#direct-connect-laptop-dhcp--dns-on-the-wired-port)),
+8. **refresh the live catalog** → content links self-heal (no stale dates),
+9. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
    are transient, not dead), web-ui assets, symlinks → `state/linkcheck.txt`,
-9. **integrity verify** → requeue corrupt/short downloads,
-10. **re-fill pinned requests** — user-requested items that went missing come back
+10. **integrity verify** → requeue corrupt/short downloads,
+11. **re-fill pinned requests** — user-requested items that went missing come back
     before the generic fill,
-11. **top-up fill** (bounded; skipped if a fill already runs),
-12. **weekly tool refresh** — re-run the tool mirror so apps track their latest
+12. **top-up fill** (bounded; skipped if a fill already runs),
+13. **weekly tool refresh** — re-run the tool mirror so apps track their latest
     upstream versions (`VALARK_TOOL_REFRESH_DAYS`, default 7; a failed pass
     retries in a day),
-13. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
+14. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
     real ZIM, a tiny LLM infers, the web API answers, and each configured remote
     mesh node (`VALARK_FLEET` in `.env`) is reachable and sees the shared content,
-14. **UI smoke** — a Playwright pass over the dynamic controls (when installed),
-15. **moderation sweep** — screen plain-file community uploads on-device and
+15. **UI smoke** — a Playwright pass over the dynamic controls (when installed),
+16. **moderation sweep** — screen plain-file community uploads on-device and
     quarantine anything not cleanly allowed (`scripts/lib/mod-sweep.sh`, fail-closed),
-16. **report + coordination** — the librarian's `maintain` (writes
+17. **report + coordination** — the librarian's `maintain` (writes
     `state/health.json`: disk + per-category coverage) and a fleet coordination drop
     (`state/coordination/`),
-17. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
+18. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
     snapshot) and append any genuine repairs to `state/heal-events.jsonl` (the feed
     behind the Health page). This is **distinct from `state/health.json`**.
 

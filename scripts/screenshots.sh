@@ -122,7 +122,7 @@ case "${1:-all}" in
         echo ""
         capture_terminal
         echo ""
-        echo -e "${GREEN}Done.${NC} Screenshots in: docs/screenshots/web-ui/"
+        echo -e "${GREEN}Done.${NC} Screenshots in: docs/screenshots/{web-ui,terminal}/"
         ;;
     *)
         echo "Usage: $0 [all|web|terminal]"

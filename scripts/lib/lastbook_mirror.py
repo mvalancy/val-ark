@@ -15,7 +15,10 @@ removed (--keep-old keeps them), and with --pack auto / one explicit pack the
 smaller packs nested in the verified one go too (ranked by recorded on-disk bytes;
 a missing or implausible manifest size never supersedes). A held pack goes only
 when this run verified a pack at least as large on disk, or the same pack id under
-a new name with at least half its bytes (a re-release replaces the old file). Unrecorded files are never
+a new name with at least half its bytes (a re-release replaces the old file). A held map, address
+index, model or installer the release no longer names goes only once its replacement (the current
+entry of the same id, recorded as `entry` in the stamps; all current installers for an old
+app/<version>/) is verified; an entry dropped upstream altogether still goes. Unrecorded files are never
 touched (except a stray <path>.part whose section/[version/]name path the current
 or previously kept manifests name), symlinked section dirs are never followed, and
 nothing is pruned when the release looks truncated (a section that held files
@@ -47,9 +50,19 @@ already held count as 0):
   --cap BYTES   (default budget only) upper bound on the headroom (lastbook.sh: VALARK_MAX_GB left)
   At fetch time a file is deferred (exit 3) when it would cut into the reserve, whatever --budget says.
 
+  --pack-limit IDS   (with --pack auto) consider only these pack ids, every pack smaller than the
+        largest of them (a broken planned pack falls back down the ladder, never below the held
+        one) and the packs held and verified on disk; every auto guard still applies. "" = no new
+        pack. With it, when no pack will be held, no maps / model / installers are fetched
+        either (#203: the librarian's planner chose the pack; scripts/tools/lastbook.sh passes it)
+
 Commands:
   plan   [--dest DIR] [selection]     TSV of what would be fetched + totals
   mirror  --dest DIR  [selection] [--dry-run] [--keep-old] [--tries N] [--retry-wait S]
+  candidates [--dest DIR] [--maps ..] [--addresses follow|none] [--model ..] [--apps ..]
+        planner rows (scripts/lib/planner.py's 9 TAB columns, source "lastbook") for the
+        current release: one per pack (+ base maps), state map (+ its address index), the
+        model and the installers; read by scripts/lib/catalog.sh (#203)
 
 Downloads resume from <name>.part (HTTP Range), are sha256-checked BEFORE the
 final rename (a mismatch deletes the .part and never finalizes), and a file
@@ -495,7 +508,9 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
         # A pack comes with the base maps and (by default) the installers, both wanted: reserve room
         # for them in the fit, or a budget just above a pack's size picks it and then defers the
         # base map, exiting 3 on every run so prune never runs (N5).
-        extras = sum(need(m) for m in rel["base_maps"])
+        # (planner mode, --pack-limit: the base maps are not wanted, so they are not reserved either;
+        # the planner's pack row already charged a base map that is missing)
+        extras = 0 if getattr(args, "pack_limit", None) is not None else sum(need(m) for m in rel["base_maps"])
         if args.apps == "current" and rel["apps"]:
             extras += need(dict(files=rel["apps"]))
         # Rank (R3): a pack held and verified on disk by its RECORDED bytes; any other by the bytes the
@@ -510,6 +525,18 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
             sizes = [f["size"] for f in p["files"]]
             return sum(sizes) if all(sizes) else pack_bytes(p)
         by_size = sorted(rel["packs"], key=rank, reverse=True)
+        limit = getattr(args, "pack_limit", None)
+        if limit is not None:
+            # #203: the librarian's planner chose the pack (--pack-limit). auto still runs every guard
+            # below (rank, step up never down, HEAD confirmation, keep the held pack), but only over
+            # the planned id(s), every pack SMALLER than the largest of them (so a planned All that
+            # fails its HEAD falls back down the ladder, never below the held pack: K1) and the packs
+            # already held and verified on disk.
+            allow = {c.strip().lower() for c in limit.split(",") if c.strip()}
+            top = max((rank(p) for p in by_size if p["id"].lower() in allow), default=None)
+            by_size = [p for p in by_size if p["id"].lower() in allow
+                       or (top is not None and rank(p) < top)
+                       or (dest and disk_bytes(dest, stamps, p) is not None)]
         held = [p for p in by_size if dest and disk_bytes(dest, stamps, p) is not None]
 
         # The largest pack file held and verified on disk, listed in this release or not (a renamed
@@ -593,6 +620,8 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
             incomplete = True
             notes.append(f"no Lastbook pack could be confirmed upstream ({', '.join(broken)}: the server's size differs "
                          "from the manifest); nothing downloaded (re-checked next run)")
+        elif not chosen and limit is not None and not by_size:
+            pass  # the planner chose no pack and none is held: nothing to fetch, not incomplete
         elif not chosen:
             incomplete = True
             # quote only packs whose size is known: a manifest entry with no size would read as "needs 0 B"
@@ -616,8 +645,22 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
     # A held, verified pack counts as "a pack" for what rides with one: when auto chooses none (step up,
     # never down; or upstream unconfirmed) the maps, addresses and model must not stop refreshing too.
     have_pack = bool(chosen) or frozen
+    if spec == "auto" and getattr(args, "pack_limit", None) is not None and not have_pack:
+        # Planner mode (#203): maps, the model and the installers were planned to go WITH a pack.
+        # When no pack will be held after all (upstream broken / unconfirmed, nothing held), fetch
+        # none of them this run.
+        if args.maps.lower() != "none" or args.model != "no" or args.apps != "none":
+            notes.append("no Lastbook pack will be held this run, so the planned maps, model and installers wait too")
+        args.maps, args.addresses, args.model, args.apps = "none", "none", "no", "none"
 
-    if have_pack:
+    # Planner mode (--pack-limit): the base maps are not wanted, and they are taken LAST, after
+    # every planned item, so an unplanned base-map refresh never spends budget the planner charged
+    # for other rows (e.g. a box holding Medium whose plan is only the installers). When the budget
+    # is left over (the planner's pack row charged them) they come along; otherwise they are skipped,
+    # not deferred, so they do not exit 3 and block every prune. The held base map is kept by
+    # replacement_verified until its replacement is verified (#203 reviews).
+    planned_mode = getattr(args, "pack_limit", None) is not None
+    if have_pack and not planned_mode:
         for m in rel["base_maps"]:
             take(m, True, f"map {m['id']}")
     if args.apps == "current" and rel["apps"]:
@@ -651,7 +694,72 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
     if not follow and aspec != "none":
         for c in (list(addrs) if aspec == "all" else codes(args.addresses, list(addrs), "address index", rel["unavailable"].get("address"), notes)):
             take(addrs[c], True, f"addresses {c}")
+    if have_pack and planned_mode:
+        for m in rel["base_maps"]:
+            if not take(m, False, f"map {m['id']}"):
+                notes.append(f"map {m['id']} ({human(need(m))}) was not planned: skipped this run")
     return rows, notes, incomplete, upstream_skip
+
+
+# --- the librarian's planner (#203) -------------------------------------------------------------
+
+CAND_VALUE = dict(pack=820, map=640, model=560, app=900)
+
+
+def print_candidates(rel, args, out=sys.stdout):
+    """Planner candidate rows (scripts/lib/planner.py, 9 TAB columns) for the current release:
+        id  bucket  category  value  bytes  source(=lastbook)  url  dest(=--dest)  extra
+    extra = kind|needs|rel=size,rel=size,...  (kind pack|map|model|app; needs '-' or 'pack')
+    A pack row carries its own files plus the base maps (they ride with any pack); a map row
+    carries its address index (--addresses follow). Entries with a missing size are left out: an
+    unknown size must never look free to the planner (#230). The planner decides what fits; the
+    fetch itself goes back through `mirror --pack auto --pack-limit` with every guard intact."""
+    dest = str(args.dest or "")
+    rows, skipped = [], []
+
+    def files_spec(files):
+        return ",".join(f"{rel_path(f)}={f['size'] or 0}@{f['sha256']}" for f in files)
+
+    def row(rid, bucket, cat, kind, needs, files, value):
+        if kind == "app":  # an installer whose size neither the manifest nor a HEAD gave is left out
+            for f in [f for f in files if not f["size"]]:
+                skipped.append(f"{kind}:{rid} {f['name']}")
+            files = [f for f in files if f["size"]]
+            if not files:
+                return
+        elif any(not f["size"] for f in files):
+            skipped.append(f"{kind}:{rid}")
+            return
+        rows.append([f"lastbook:{kind}:{rid}", bucket, cat, str(value), str(sum(f["size"] or 0 for f in files)),
+                     "lastbook", files[0]["url"], dest, f"{kind}|{needs}|{files_spec(files)}"])
+
+    base = [f for m in rel["base_maps"] for f in m["files"]]
+    sized = sorted(rel["packs"], key=lambda p: sum(f["size"] or 0 for f in p["files"]))
+    for i, p in enumerate(sized):  # a larger pack = a little more value, so the fill phase tries it first
+        row(p["id"], "content", "lastbook:pack", "pack", "-", p["files"] + base, CAND_VALUE["pack"] + 20 * i)
+    mspec = args.maps.lower()
+    if mspec != "none":
+        want = None if mspec in ("auto", "all") else {c.strip().lower() for c in args.maps.split(",") if c.strip()}
+        addrs = {a["id"]: a for a in rel["addresses"]}
+        for m in rel["maps"]:
+            if want is not None and m["id"].lower() not in want:
+                continue
+            files = list(m["files"])
+            if args.addresses.lower() != "none" and m["id"] in addrs:
+                files += addrs[m["id"]]["files"]
+            row(m["id"], "content", "lastbook:maps", "map", "pack", files, CAND_VALUE["map"])
+    if args.model != "no":
+        for mdl in rel["models"]:
+            # its own category: it must not take (or cover) the curated assistants' diversity slot
+            row(mdl["id"], "models", "lastbook:model", "model", "pack", mdl["files"], CAND_VALUE["model"])
+    if args.apps == "current" and rel["apps"]:
+        row(rel["app_version"], "content", "lastbook:app", "app", "pack", rel["apps"], CAND_VALUE["app"])
+    print(f"# lastbook candidates format=2 manifest={rel.get('published') or ''} app={rel['app_version']} "
+          f"maps={args.maps} addresses={args.addresses} model={args.model} apps={args.apps} rows={len(rows)}", file=out)
+    for r in rows:
+        print("\t".join(r), file=out)
+    for rid in skipped:
+        print(f"# skipped {rid}: no size in the manifest (or from the server)", file=out)
 
 
 # --- download -----------------------------------------------------------------------------------
@@ -662,6 +770,24 @@ def sha256_file(p, h=None):
         for b in iter(lambda: f.read(CHUNK), b""):
             h.update(b)
     return h
+
+
+class Deferred(Exception):
+    """Stop this download now, keep the .part (it resumes next run): the disk reached the reserve,
+    or the operator raised the STOP flag (VALARK_STOP_FLAG)."""
+
+
+def interrupted(path):
+    """Why a long download must pause now, else None."""
+    stop = os.environ.get("VALARK_STOP_FLAG")
+    if stop and os.path.exists(stop):
+        return "the STOP flag is set"
+    if headroom(path) <= 0:
+        return "the disk reached the Val Ark reserve"
+    return None
+
+
+RECHECK_BYTES = 256 * CHUNK  # re-check the reserve / STOP every 256 MiB written
 
 
 class GiveUp(Exception):
@@ -692,7 +818,12 @@ def fetch_file(net, it, dest, stamps, tries, wait, log):
     if size is not None and have > size:
         part.unlink()
         have = 0
+    stop = os.environ.get("VALARK_STOP_FLAG")
+    if stop and os.path.exists(stop):
+        log(f"{key}: the STOP flag is set; not starting it")
+        return "deferred"
     if size is not None and headroom(final.parent) < size - have:  # keeps the Val Ark reserve (N4)
+        log(f"{key}: not enough free space left above the reserve")
         return "deferred"
     if size is not None and it["section"] == "pack":
         n = net.head_size(it["url"])  # a pack that over- or under-claims its size: say so, fetch nothing (H2)
@@ -729,9 +860,16 @@ def fetch_file(net, it, dest, stamps, tries, wait, log):
                         raise RuntimeError(f"206 Content-Range {r.headers.get('Content-Range')!r} does not start "
                                            f"at byte {have}; restarting from 0")
                 with open(part, mode) as out:
+                    since = 0
                     for b in iter(lambda: r.read(CHUNK), b""):
                         out.write(b)
                         have += len(b)
+                        since += len(b)
+                        if since >= RECHECK_BYTES and (size is None or have < size):
+                            since = 0
+                            why = interrupted(final.parent)
+                            if why:
+                                raise Deferred(why)
                         if size is not None and have > size:
                             raise RuntimeError(f"server sent more than the expected {size} bytes")
             if size is None or have == size:
@@ -741,6 +879,9 @@ def fetch_file(net, it, dest, stamps, tries, wait, log):
         except GiveUp as e:
             err = e
             break
+        except Deferred as e:
+            log(f"{key}: {e}; pausing this download (the .part resumes next run)")
+            return "deferred"
         except Exception as e:
             err = e
             if size is not None and part.exists() and part.stat().st_size > size:
@@ -864,7 +1005,53 @@ def superseded(dest, rel, stamps, pack_id, kept_packs=None):
     return out
 
 
-def prune(dest, rel, stamps, log, verified_pack=None, names=(), run_packs=(), kept_packs=None):
+def entry_of_kept(kept):
+    """{section/[version/]name: (group, entry id)} for the files a kept release named (maps and base
+    maps are one group, as they share maps/)."""
+    out = {}
+    for g, grp in (("base_maps", "maps"), ("maps", "maps"), ("addresses", "addresses"), ("models", "models")):
+        for e in (kept or {}).get(g, []):
+            for f in e["files"]:
+                out[rel_path(f)] = (grp, e["id"])
+    return out
+
+
+def replacement_verified(dest, rel, stamps, key, sec, kept_entries):
+    """(may_go, why_kept) for a held map / address index / model / installer that the release no
+    longer names (#203 reviews). It may go only once what replaces it is on disk and verified:
+      - installers and the model are ONE slot each: an old app/<version>/ file or an old model
+        file waits until every current installer / every current model entry is verified, whatever
+        its id was (upstream renames the model, gemma-4 -> gemma-5, and the old one must stay);
+      - a map / address index waits for the current entry of the same id; an entry the release
+        dropped altogether may go (the truncation guards still apply); an entry upstream now marks
+        unavailable (available: false, e.g. a state whose address records were withdrawn) is kept;
+      - a map / address index whose entry cannot be told (no stamps entry, no kept manifest) is kept."""
+    def slot(files):
+        if not files:
+            return False, "the release lists none to replace it"
+        if all(stamped(dest, stamps, f) for f in files):
+            return True, None
+        return False, "its replacement in this release is not downloaded and verified yet"
+    if sec == "app":
+        return slot(rel["apps"])
+    if sec == "models":
+        return slot([f for e in rel["models"] for f in e["files"]])
+    if sec not in ("maps", "addresses"):
+        return True, None
+    eid = (stamps.get(key) or {}).get("entry") or (kept_entries.get(key) or (None, None))[1]
+    if eid is None:
+        return False, "its entry is unknown (no record of which map / address index it was)"
+    unavailable = rel.get("unavailable", {}).get("map" if sec == "maps" else "address", {})
+    if eid in unavailable:
+        return False, f"upstream marks {eid} unavailable ({unavailable[eid]}), so nothing replaces it"
+    groups = ("base_maps", "maps") if sec == "maps" else ("addresses",)
+    now = [e for g in groups for e in rel[g] if e["id"] == eid]
+    if not now:
+        return True, None  # dropped upstream, not replaced
+    return slot([f for e in now for f in e["files"]])
+
+
+def prune(dest, rel, stamps, log, verified_pack=None, names=(), run_packs=(), kept_packs=None, kept=None):
     """Drop files THIS tool recorded (in .lastbook-verified.json) that the current release no longer
     names, plus (verified_pack given) the smaller packs nested in that verified pack.
     Never touches an unrecorded file, except a stray `*.part` in a Lastbook section whose final path
@@ -915,6 +1102,14 @@ def prune(dest, rel, stamps, log, verified_pack=None, names=(), run_packs=(), ke
         if largest_run is None or (held[k].get("size") or 0) > largest_run:
             drop.remove(k)
             log(f"keeping {k}: no pack verified this run is at least as large (re-checked next run)")
+    # Never drop a held map / address index / model / installer before its replacement is verified:
+    # a new app version (or a renamed map) that did not fit, or was not planned, keeps the old copy.
+    kept_entries = entry_of_kept(kept)
+    for k in [k for k in drop if k in held and owned[k][1] in ("maps", "addresses", "models", "app")]:
+        ok, why = replacement_verified(dest, rel, stamps, k, owned[k][1], kept_entries)
+        if not ok:
+            drop.remove(k)
+            log(f"keeping {k}: {why}")
     drop_held = [k for k in drop if k in held]
     # Per-section guard: a manifest listing only a few states drops most maps but, on a box with
     # the 388 GB All pack, well under half the held bytes, so the whole-mirror check passes.
@@ -999,7 +1194,7 @@ def print_plan(rows, notes, budget, rel, out=sys.stdout):
 def main(argv=None):
     ap = Parser(prog="lastbook_mirror.py", description="Mirror the current Lastbook release.")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("plan", "mirror"):
+    for name in ("plan", "mirror", "candidates"):
         p = sub.add_parser(name)
         p.add_argument("--dest", required=(name == "mirror"))
         p.add_argument("--pack", default="auto")
@@ -1014,6 +1209,8 @@ def main(argv=None):
         p.add_argument("--app-url", default=APP_URL)
         p.add_argument("--sums-url", default=SUMS_URL)
         p.add_argument("--rewrite", action="append")
+        p.add_argument("--pack-limit", default=None,
+                       help="with --pack auto: consider only these pack ids, every smaller pack, and packs held")
         if name == "mirror":
             p.add_argument("--dry-run", action="store_true")
             p.add_argument("--keep-old", action="store_true")
@@ -1037,6 +1234,14 @@ def main(argv=None):
             if it["size"] is None:
                 it["size"] = net.head_size(it["url"])
         kept = kept_release(dest) if dest and dest.is_dir() else None  # read before this run replaces it
+        # Remember, in the stamps, which entry id each held map / address index / model file belongs
+        # to while the kept manifest still says so: a later run must know what replaces it (#203).
+        for k, (_grp, eid) in entry_of_kept(kept).items():
+            if isinstance(stamps.get(k), dict) and not stamps[k].get("part") and "entry" not in stamps[k]:
+                stamps[k]["entry"] = eid
+        if args.cmd == "candidates":
+            print_candidates(rel, args)
+            return EXIT_OK
         rows, notes, incomplete, upstream_skip = select(rel, args, budget, dest, stamps, probe=net.head_size,
                                                         kept_packs=pack_of_kept(kept))
     except Usage as e:
@@ -1070,12 +1275,14 @@ def main(argv=None):
             counts[st] += 1
             if r["section"] == "pack" and st in ("verified", "fetched") and rel_path(r) in stamps:
                 stamps[rel_path(r)]["pack"] = r["id"]  # so a later re-release under a new name is a replacement (R1)
+            if r["section"] in ("map", "address", "model") and st in ("verified", "fetched") and rel_path(r) in stamps:
+                stamps[rel_path(r)]["entry"] = r["id"]  # what replaces it later (#203 review)
             if st == "fetched":
                 added += r["size"] or 0
                 log(f"fetched + verified {rel_path(r)} ({human(r['size'])})")
             elif st == "deferred":
                 stopped = stopped or f"the disk filled before {rel_path(r)}"
-                log(f"{rel_path(r)}: not enough free space left on the disk: deferred")
+                log(f"{rel_path(r)}: deferred (resumes next run)")
         for name, data in raw.items():
             write_atomic(dest / name, data)
         rc = EXIT_FAIL if counts["failed"] else \
@@ -1087,7 +1294,7 @@ def main(argv=None):
                                      and not counts["deferred"] and not counts["failed"]
                                      and any(r["section"] == "pack" and r["status"] == "get" for r in rows))
         run_packs = {r["id"] for r in rows if r["section"] == "pack" and r["status"] == "get"}
-        pruned = prune(dest, rel, stamps, log, single_pack(args, rows), names, run_packs, pack_of_kept(kept)) \
+        pruned = prune(dest, rel, stamps, log, single_pack(args, rows), names, run_packs, pack_of_kept(kept), kept) \
             if prunable and not args.keep_old else 0
         save_stamps(dest, stamps)
     except OSError as e:

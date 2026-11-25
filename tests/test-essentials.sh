@@ -114,7 +114,7 @@ python3 "$P" --budget $((400*MB)) < "$T/cands.tsv" 2>/dev/null | cut -f10 | grep
 python3 - "$ROOT" <<'EOF' && pass || fail "data/essentials.tsv invalid"
 import sys, fnmatch
 root = sys.argv[1]
-ranks, kinds = set(), {"zim", "model", "inst"}
+ranks, kinds = set(), {"zim", "model", "inst", "lastbook"}
 focus_ok = {"all", "balanced", "knowledge", "ai", "tools", "survival"}
 models = [l.split("|")[1] for l in open(root + "/data/models-extra.tsv") if l[:1].isdigit()]
 insts = [l.split("|")[1] for l in open(root + "/data/installers.tsv") if l[:1].isdigit()]
@@ -134,6 +134,8 @@ for i, line in enumerate(open(root + "/data/essentials.tsv"), 1):
         assert any(fnmatch.fnmatchcase(m, pat) for m in models), f"line {i}: no models-extra id matches {pat}"
     if kind == "inst":
         assert any(fnmatch.fnmatchcase(m, pat) for m in insts), f"line {i}: no installers id matches {pat}"
+    if kind == "lastbook":  # lastbook_mirror.py candidates ids: lastbook:<pack|map|model|app>:<id>
+        assert pat.split(":", 1)[0] in ("pack", "map", "model", "app") and ":" in pat, f"line {i}: lastbook kind {pat}"
 assert n >= 20, "too few essentials"
 EOF
 # life-safety entries must be at the very top
@@ -196,7 +198,7 @@ done
 prune_superseded >/dev/null; [ "$(ids)" = "$KEEP" ] && ok_ || no_ "prune: second run must be a no-op"
 
 # The fill path: STOP mid-fill skips the prune; an un-halted fill prunes.
-catalog_refresh_zim() { :; }; valark_budget_bytes() { echo $((100*1024*MB)); }
+catalog_refresh_zim() { :; }; catalog_refresh_lastbook() { :; }; valark_budget_bytes() { echo $((100*1024*MB)); }
 valark_fillable_bytes() { echo $((100*1024*MB)); }
 build_plan() {   # two planned items, so a STOP raised by the first halts before the second
   for i in a b; do printf 'zim:%s\tcontent\tzim:other\t1\t0\tzim\tu\t%s\t-\t1\n' "$i" "$Z/$i"; done

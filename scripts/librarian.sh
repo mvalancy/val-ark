@@ -4,7 +4,8 @@
 #
 # Fills a disk of ANY size from live catalogs (Kiwix ZIM, models, OS/router
 # installers) in priority order:
-#     diversity  ->  small valuable  ->  fill remaining  ->  evict-for-better
+#     essentials  ->  diversity  ->  small valuable  ->  fill remaining
+# (fill never deletes; evict / request trade up for better items when room is needed)
 # Rugged: resumable downloads, retries, size verification, atomic rename,
 # never aborts on a single failure, idempotent (skips what's already present).
 #
@@ -22,6 +23,8 @@
 #   pin/unpin/pins         manage durable user requests (pins [--refill])
 #   site                   rewrite the static browse pages (index.html + browse/)
 #                          so the archive can be explored from a plain file server
+#   lastbook-plan [B]      the Lastbook rows the planner picks (scripts/tools/lastbook.sh
+#                          fetches them; #203)
 #
 # fill/maintain opts: --max-bytes B  --max-items N  --time SECONDS  --budget B
 #   KIND = content | model | tool   (request / pin)
@@ -136,6 +139,9 @@ pin_remove() {
     [ -f "$PINS" ] || return 0
     VA_ID="$1" awk -F'\t' '$2"" != ENVIRON["VA_ID"]""' "$PINS" > "${PINS}.tmp" 2>/dev/null && mv "${PINS}.tmp" "$PINS"
 }
+
+# Sources download_one can fetch (anything else must be refused BEFORE a pin or an eviction).
+fetchable_source() { case "$1" in zim|url|hf-file|hf-repo) return 0 ;; esac; return 1; }
 
 # Is a single resolved candidate (9-col fields) already fully on disk?
 # Mirrors planner.marker_present so `request`/`pins --refill` skip complete items.
@@ -273,10 +279,43 @@ download_one() {
 gen_candidates() { catalog_all_candidates; }
 
 build_plan() {
-    local budget="$1"
+    local budget="$1" summary="${2:-${TMPDIR_VA}/plan.summary}"
     gen_candidates | python3 "$PLANNER" --budget "$budget" \
         --essentials "${DATA_DIR:-${PROJECT_ROOT}/data}/essentials.tsv" --profile "$(_valark_profile)" \
-        --model-max-bytes "$(valark_model_max_bytes)" 2> "${TMPDIR_VA}/plan.summary"
+        --model-max-bytes "$(valark_model_max_bytes)" 2> "$summary"
+}
+
+# --- Lastbook rows of the plan (#203) ----------------------------------------
+# The planner sizes Lastbook like any other content; the fetch goes through
+# scripts/tools/lastbook.sh --plan-file, i.e. lastbook_mirror.py with all of its
+# guards (sha256 before rename, HEAD-confirmed pack upgrades, prune only what it
+# recorded, truncation guards, nested-pack cleanup). Its files never enter the
+# librarian's manifest, so verify/evict never touch them.
+LASTBOOK_SH="${PROJECT_ROOT}/scripts/tools/lastbook.sh"
+# lastbook_fill PLAN-ROWS-FILE [SECONDS] -> lastbook.sh's exit status (75 = another Lastbook run
+# holds its lock, nothing fetched; 124 = the time budget ran out, the .parts resume next cycle).
+# Bounded by the fill's remaining --time; the mirror also pauses at the STOP flag. The bytes a
+# run really added land in ${TMPDIR_VA}/lastbook-added (one number).
+lastbook_fill() {   # SECONDS: empty = no --time budget (unbounded); a number = the remaining budget
+    local secs="${2:-}"; rm -f "${TMPDIR_VA}/lastbook-added"
+    local t=()
+    if [ -n "$secs" ]; then
+        case "$secs" in *[!0-9-]*|'') secs=0 ;; esac
+        # no time left: do not start (never fall through to an unbounded run)
+        [ "$secs" -ge 1 ] 2>/dev/null || { warn "lastbook: no time left in the fill budget; not starting the batch"; return 124; }
+        t=(timeout --kill-after=60 "$secs")
+    fi
+    VALARK_STOP_FLAG="$STOP_FLAG" VALARK_LASTBOOK_SUMMARY="${TMPDIR_VA}/lastbook-added" \
+        "${t[@]}" bash "$LASTBOOK_SH" --plan-file "$1" </dev/null >&2
+}
+# `librarian.sh lastbook-plan [BUDGET]`: the Lastbook rows the planner picks at this
+# budget (what lastbook.sh fetches when run on its own, e.g. by the weekly refresh).
+cmd_lastbook_plan() {
+    local budget="${1:-$(valark_budget_bytes)}"
+    ensure_state
+    catalog_refresh_zim >/dev/null 2>&1 || true
+    catalog_refresh_lastbook >/dev/null 2>&1 || warn "Lastbook catalog refresh failed; using cache if any" >&2
+    build_plan "$budget" "${TMPDIR_VA}/plan-lastbook.summary" | awk -F'\t' '$6=="lastbook"'
 }
 
 # --- commands --------------------------------------------------------------
@@ -307,6 +346,7 @@ cmd_plan() {
     local budget="${1:-$(valark_budget_bytes)}"
     ensure_state
     catalog_refresh_zim >/dev/null 2>&1 || warn "ZIM catalog refresh failed; using cache if any"
+    catalog_refresh_lastbook >/dev/null 2>&1 || warn "Lastbook catalog refresh failed; using cache if any"
     build_plan "$budget" > "${TMPDIR_VA}/plan.tsv"
     cat "${TMPDIR_VA}/plan.summary" >&2
     echo -e "${CYAN}Planned downloads (id | category | size | phase):${NC}"
@@ -333,20 +373,69 @@ cmd_fill() {
     if ! flock -n 9; then warn "another fill is already running; skipping"; return 0; fi
     [ -z "$budget" ] && budget="$(valark_budget_bytes)"
     catalog_refresh_zim >/dev/null 2>&1 || warn "ZIM catalog refresh failed; using cache"
+    catalog_refresh_lastbook >/dev/null 2>&1 || warn "Lastbook catalog refresh failed; using cache"
     build_plan "$budget" > "${TMPDIR_VA}/plan.tsv"
     cat "${TMPDIR_VA}/plan.summary" >&2
     local start; start=$(date +%s)
-    local n_ok=0 n_fail=0 bytes_done=0 items=0
+    local n_ok=0 n_fail=0 bytes_done=0 items=0 lb_done=0 lb_done0=0
     log "fill: starting (budget $(human "$budget"), $(wc -l < "${TMPDIR_VA}/plan.tsv") planned)"
     while IFS=$'\t' read -r id bucket cat value bytes source url dest extra phase; do
         [ -f "$STOP_FLAG" ] && { warn "STOP flag; halting fill"; break; }
+        # Lastbook rows go in (at most) two batches: the phase-0 essentials at their turn, then
+        # everything planned at the first later row's turn (see below).
+        if [ "$source" = lastbook ]; then
+            [ "$lb_done" = 1 ] && continue
+            [ "$phase" = 0 ] && [ "$lb_done0" = 1 ] && continue
+        fi
         [ "$max_items" -gt 0 ] && [ "$items" -ge "$max_items" ] && break
         [ "$max_bytes" -gt 0 ] && [ "$bytes_done" -ge "$max_bytes" ] && break
         if [ "$time_budget" -gt 0 ]; then
             local elapsed=$(( $(date +%s) - start )); [ "$elapsed" -ge "$time_budget" ] && { log "time budget reached"; break; }
         fi
+        local fillable
+        if [ "$source" = lastbook ]; then
+            # The mirror prunes only after a complete run, so it must see the whole planned
+            # selection at once: batch 0 = the phase-0 essential rows (a survival box gets the
+            # Small pack first), batch 1 = every planned Lastbook row, at the first later row's
+            # turn (the essential pack then only re-verifies, and the mirror's nested prune
+            # drops it once a larger pack is verified).
+            local lb_plan="${TMPDIR_VA}/plan-lastbook.tsv"
+            if [ "$phase" = 0 ]; then
+                lb_done0=1
+                awk -F'\t' '$6=="lastbook" && $10=="0"' "${TMPDIR_VA}/plan.tsv" > "$lb_plan"
+            else
+                lb_done=1
+                awk -F'\t' '$6=="lastbook"' "${TMPDIR_VA}/plan.tsv" > "$lb_plan"
+            fi
+            local lb_bytes; lb_bytes=$(awk -F'\t' '{s+=$5} END{printf "%.0f", s+0}' "$lb_plan")
+            # Headroom against the whole batch (column 5 = bytes still to fetch), not one row; a
+            # batch that does not fit is skipped, smaller items after it may still fit.
+            fillable=$(valark_fillable_bytes)
+            if [ "$lb_bytes" -gt 0 ] && [ "$fillable" -lt $(( lb_bytes + 1073741824 )) ]; then
+                warn "low headroom ($(human "$fillable")) for the Lastbook batch ($(human "$lb_bytes")); skipping it this cycle"
+                continue
+            fi
+            local lb_secs=""
+            if [ "$time_budget" -gt 0 ]; then
+                lb_secs=$(( time_budget - ( $(date +%s) - start ) ))
+                [ "$lb_secs" -ge 1 ] || { log "time budget reached"; break; }
+            fi
+            items=$(( items + 1 ))
+            log "[$items] Lastbook: $(cut -f1 "$lb_plan" | sed 's/^lastbook://' | paste -sd' ' -) ($(human "$lb_bytes") to fetch, p${phase})"
+            local lrc=0; lastbook_fill "$lb_plan" "$lb_secs" || lrc=$?
+            local lb_added; lb_added=$(cat "${TMPDIR_VA}/lastbook-added" 2>/dev/null); case "$lb_added" in ''|*[!0-9]*) lb_added=0 ;; esac
+            case "$lrc" in
+                0)   ok "lastbook ($(human "$lb_added") added)"; n_ok=$(( n_ok + 1 )); bytes_done=$(( bytes_done + lb_added )) ;;
+                75)  warn "lastbook: another Lastbook mirror run is active; nothing fetched (next cycle)" ;;
+                124|137) warn "lastbook: the fill's time budget ran out ($(human "$lb_added") added); the .parts resume next cycle"
+                     bytes_done=$(( bytes_done + lb_added )) ;;
+                *)   err "lastbook (exit ${lrc}; resumes next cycle)"; n_fail=$(( n_fail + 1 ))
+                     bytes_done=$(( bytes_done + lb_added )) ;;
+            esac
+            continue
+        fi
         # Always re-check real headroom (respects concurrent growth / reserve).
-        local fillable; fillable=$(valark_fillable_bytes)
+        fillable=$(valark_fillable_bytes)
         if [ "$bytes" -gt 0 ] && [ "$fillable" -lt $(( bytes + 1073741824 )) ]; then
             warn "low headroom ($(human "$fillable")); stopping before $id"; break
         fi
@@ -488,8 +577,12 @@ resolve_candidate() {
     esac
     tok="${want#"$pfx"}"                     # bare token (prefix stripped) for substring match
     [ "$bucket" = "content" ] && { catalog_refresh_zim >/dev/null 2>&1 || true; }
+    # Only sources download_one can fetch: a Lastbook row (source lastbook) has no per-item
+    # request path (the planner + lastbook.sh size the whole release), so `request model gemma`
+    # must never resolve to the 17 GB Lastbook GGUF and evict content for it (#203 review).
     gen_candidates | awk -F'\t' -v b="$bucket" -v id="$want" -v pid="${pfx}${want}" -v tok="$tok" '
         $2!=b { next }
+        $6!="zim" && $6!="url" && $6!="hf-file" && $6!="hf-repo" { next }
         {
             exact = ($1==id || $1==pid || $9==id || $9==tok) ? 0 : -1;
             if (exact==0) { print "0\t" $0; next }
@@ -523,6 +616,11 @@ cmd_request() {
     local line; line="$(resolve_candidate "$kind" "$id")"
     [ -n "$line" ] || { err "no catalog match for ${kind} '${id}'"; return 1; }
     IFS=$'\t' read -r c_id c_bucket c_cat c_value c_bytes c_source c_url c_dest c_extra <<< "$line"
+    # Refuse what download_one cannot fetch before pinning or evicting anything for it.
+    if ! fetchable_source "$c_source"; then
+        err "${c_id}: source '${c_source}' has no per-item request path (not pinned, nothing evicted)"
+        return 1
+    fi
 
     # Pin by the CANONICAL id so eviction-skip + refill match the manifest exactly.
     pin_add "$kind" "$c_id"
@@ -668,6 +766,7 @@ case "${1:-status}" in
     verify)   cmd_verify ;;
     evict)    shift; cmd_evict "$@" ;;
     maintain) cmd_maintain ;;
+    lastbook-plan) shift; cmd_lastbook_plan "$@" ;;
     refresh)  catalog_refresh_zim --force && ok "catalog cached: $ZIM_CACHE ($(wc -l < "$ZIM_CACHE") entries)" ;;
     scout)    catalog_refresh_scout --force; rc=$?
               [ "${VALARK_SCOUT:-1}" = "0" ] && { warn "VALARK_SCOUT=0: scout disabled"; exit 0; }
@@ -680,5 +779,5 @@ case "${1:-status}" in
     unpin)    shift; cmd_unpin "$1" ;;
     pins)     shift; [ "$1" = "--refill" ] && cmd_pins_refill || cmd_pins ;;
     site)     shift; cmd_site "$@" ;;
-    *) echo "usage: librarian.sh {status|plan|fill|verify|evict|maintain|refresh|scout|catalog|request|pin|unpin|pins|site}"; exit 1 ;;
+    *) echo "usage: librarian.sh {status|plan|fill|verify|evict|maintain|refresh|scout|catalog|request|pin|unpin|pins|site|lastbook-plan}"; exit 1 ;;
 esac

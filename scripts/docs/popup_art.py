@@ -572,13 +572,16 @@ def tree_missing():
         tracked = subprocess.run(['git', 'ls-files', '*.md'], cwd=ROOT, capture_output=True,
                                  text=True, check=True).stdout.split()
     except (OSError, subprocess.CalledProcessError):
-        # not a git checkout (e.g. a release tarball): walk the tree instead
-        tracked = [str(f.relative_to(ROOT)) for f in ROOT.rglob('*.md')
-                   if not {'.git', 'node_modules'} & set(f.relative_to(ROOT).parts)]
+        tracked = None   # not a git checkout (e.g. a release tarball)
+    have = set(tree_paths())
+    gone = sorted(p for p in have if not (ROOT / p).is_file())
+    if tracked is None:
+        # Without git we can't tell docs from other .md files on disk (model cards,
+        # tool READMEs when the data root is the repo), so only check the tree's own paths.
+        return [], gone
     want = {p for p in tracked if not re.search(r'(^|/)AGENTS\.md$|^\.github/|^\.agents/(skills|knowledge)/', p)}
     want.add('AGENTS.md')
-    have = set(tree_paths())
-    return sorted(want - have), sorted(p for p in have if not (ROOT / p).is_file())
+    return sorted(want - have), gone
 
 def render_tree(theme):
     t = THEMES[theme]

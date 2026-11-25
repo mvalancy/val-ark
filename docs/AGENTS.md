@@ -27,7 +27,7 @@ The hub that indexes these is [README.md](README.md) (owned elsewhere — link i
 
 ## Pop-up art (the chapter scenes)
 
-Screenshots live in [`screenshots/<topic>/`](screenshots/) (`web-ui/`, `serving/`, `mirror-honesty/`); drawn art lives in [`img/`](img/).
+Screenshots live in [`screenshots/<topic>/`](screenshots/) (`web-ui/`, `serving/`, `mirror-honesty/`, and `terminal/` once `scripts/screenshots.sh` records one); drawn art lives in [`img/`](img/).
 
 Every human-facing doc (guides, design, knowledge, the code READMEs, CONTRIBUTING and SECURITY) opens with an animated pop-up-book scene, with a light and a dark version under [`img/popup/`](img/popup/). They are **generated**, so never hand-edit an SVG there:
 

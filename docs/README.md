@@ -121,7 +121,7 @@ Each important folder carries local operating notes.
 | `web-ui/` | [web-ui/AGENTS.md](../web-ui/AGENTS.md) · [web-ui/README.md](../web-ui/README.md) — zero-dep SPA (TOOLS array, TOOL_META, logos, screenshots). |
 | `data/` | [data/AGENTS.md](../data/AGENTS.md) — the six catalog TSVs (installers, models-extra, essentials, dev-stack, apt-sets, source-repos) and their schemas. |
 | `docs/` | [docs/AGENTS.md](AGENTS.md) — the reference guides (this folder). |
-| `docs/screenshots/` | Screenshots by topic: `web-ui/`, `serving/`, `mirror-honesty/`, `terminal/`. |
+| `docs/screenshots/` | Screenshots by topic: `web-ui/`, `serving/`, `mirror-honesty/`, and `terminal/` once `scripts/screenshots.sh` records one. |
 | `docs/img/` | Drawn art: `hero/` and the generated `popup/` scenes and docs tree. |
 | `docs/design/` | [docs/design/AGENTS.md](design/AGENTS.md) — the scope-first design set. |
 | `docs/knowledge/` | [docs/knowledge/AGENTS.md](knowledge/AGENTS.md) — the shared brain. |

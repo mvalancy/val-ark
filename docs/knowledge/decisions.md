@@ -16,6 +16,7 @@ later). See [README](README.md).
 
 | Date | Decision | Issue / Phase |
 |------|----------|---------------|
+| 2026‑11 | [Setup keeps its promises: a .local name when avahi can, a first fill, the cron is the admin's call](#202611--setup-keeps-its-promises-a-local-name-when-avahi-can-a-first-fill-the-cron-is-the-admins-call-306) | #306 |
 | 2026‑11 | [Docs as a picture book: a short README and a generated docs tree](#202611--docs-as-a-picture-book-a-short-readme-and-a-generated-docs-tree-282) | #282 |
 | 2026‑11 | [Grid-down essentials tier + survival profile](#202611--grid-down-essentials-tier--survival-profile) | |
 | 2026‑11 | [Static browse pages for server-less archives](#202611--static-browse-pages-for-server-less-archives-257) | #257 |
@@ -47,6 +48,23 @@ later). See [README](README.md).
 | — | [Earlier project facts (fleet, curation)](#earlier-project-facts-fleet-curation) | — |
 
 ---
+
+## 2026‑11 — Setup keeps its promises: a .local name when avahi can, a first fill, the cron is the admin's call (#306)
+
+**Context.** The wizard said "You'll open it at http://<name>.local/" and the recovery card printed
+that address, but nothing published an mDNS name; the design said commissioning started the fill,
+but it only saved settings. **Decision.** `scripts/lib/mdns.sh` publishes the name after setup and
+every loop cycle (step 2h) with what the box already has: the hostname (avahi/macOS answer for
+it) or one kept-up `avahi-publish -a -R` child (D-Bus, no root). It never installs packages and
+never edits `/etc/avahi` (that needs root and outlives Val Ark). `server.js boxAddress()` is the
+single decision of which address to show (wizard, recovery card, Health): `.local` only when it
+answers, else the LAN IP plus the reason. Commissioning starts ONE bounded `loop.sh once` when no
+`val-ark-loop` cron entry exists. Installing the cron is NOT automatic: it writes the user's
+crontab, so it is an explicit admin action (Home's admin-only **Keep it healthy 24/7**,
+`POST /api/setup/loop-install`, fixed argv `loop.sh install 30`) or the printed command.
+**Why.** An appliance must not promise an address that doesn't resolve; showing the real IP is
+honest and always works. A one-off cycle starts filling right away without silently changing
+the system's scheduler.
 
 ## 2026‑11 — Docs as a picture book: a short README and a generated docs tree (#282)
 

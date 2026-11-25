@@ -3754,6 +3754,47 @@ function renderHomeStatus() {
     </div>`;
 }
 
+// Home's filling card (#306). Shown once setup has recorded a first fill
+// (/api/setup/state .fill.startedAt) and until the 24/7 loop is installed: says filling
+// has started, and offers the admin "Keep it healthy 24/7" (POST /api/setup/loop-install,
+// admin-only: it runs loop.sh install 30, which writes this box's crontab) or the command.
+function renderFillCard() {
+    const f = _setupState && _setupState.commissioned !== false && _setupState.fill;
+    if (!f || !f.startedAt || f.loopInstalled) return '';
+    const admin = !!(_authState && _authState.authed);
+    const head = f.running ? 'Filling has started' : (f.started ? 'The first fill cycle ran' : 'Filling hasn’t started yet');
+    const sub = f.running
+        ? 'One download cycle is running now. Watch it under Activity.'
+        : `It ran once after setup (${esc(_ago(f.startedAt))}). Val Ark only keeps filling and repairing itself once the 24/7 loop is installed.`;
+    const btn = admin && f.cronAvailable !== false
+        ? `<button class="dl-action-btn" id="fill-keep-btn" onclick="keepHealthy247(this)">Keep it healthy 24/7</button>` : '';
+    return `<section class="fill-card" role="status" style="margin:0 0 1rem;padding:1rem 1.1rem;border:1px solid var(--border,#2a2d34);border-radius:12px;background:var(--bg-card,transparent)">
+        <div style="display:flex;gap:.8rem;align-items:flex-start;flex-wrap:wrap">
+            <span aria-hidden="true" style="font-size:1.4rem">${f.running ? '⬇' : '⏸'}</span>
+            <div style="flex:1;min-width:14rem">
+                <strong class="fill-card-h">${head}</strong>
+                <p style="margin:.25rem 0 .4rem;color:var(--text-muted,#8a8f98)">${sub}</p>
+                <p style="margin:0;font-size:.88em;color:var(--text-muted,#8a8f98)">To make it permanent, ${btn ? 'press the button or ' : ''}run <code>./scripts/loop.sh install 30</code> on the box (an @reboot + every-30-minutes cron entry).</p>
+            </div>
+            ${btn}
+        </div>
+    </section>`;
+}
+async function keepHealthy247(btn) {
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Installing…'; }
+    try {
+        const r = await fetch('/api/setup/loop-install', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        const d = await r.json().catch(() => ({}));
+        if (isNeedsAuth(r, d)) { signIn('Sign in to install the 24/7 loop.'); }
+        else if (d.ok && d.loopInstalled) {
+            if (_setupState && _setupState.fill) _setupState.fill.loopInstalled = true;
+            uiToast('Installed: Val Ark now checks, fills and repairs itself every 30 minutes and after a reboot.', 'success');
+            scheduleRender(); return;
+        } else if (d.error) uiToast(d.error, 'error');
+    } catch (e) { uiToast('Could not reach the Ark: ' + e.message, 'error'); }
+    if (btn) { btn.disabled = false; btn.textContent = 'Keep it healthy 24/7'; }
+}
+
 // "Ask Val Ark" — the on-box assistant affordance (Phase 8, slice 1). A single input
 // that POSTs to /api/ask and streams the box's own AI answer back (offline). Starts
 // disabled; initAskCard() enables it once /api/status/ask reports a runtime + model,
@@ -4773,6 +4814,13 @@ function renderHealth() {
         <button class="hp-fix-all" onclick="runSelfHeal(this)" ${running ? 'disabled' : ''} title="Run the self-heal cycle now">${running ? '<span class="spinner"></span> Repairing…' : '↻ Run self-heal'}</button>
     </div>`;
 
+    // How to reach the box: boxAddress()'s pick, the same one the wizard and the recovery
+    // card show (#306): <name>.local only when it answers, else the LAN IP + why.
+    const acc = _healthData.access;
+    if (acc && acc.url) {
+        html += `<p class="hp-note hp-addr">Open this box at <strong>${esc(acc.url)}</strong>${acc.altUrl ? ` or <strong>${esc(acc.altUrl)}</strong>` : ''}.${acc.mdns ? '' : ` ${esc(acc.host || '')} is unavailable on this box (${esc(acc.reason || 'no mDNS')}).`}${_healthData.fill && _healthData.fill.loopInstalled === false ? ' The 24/7 loop is not installed: run <code>./scripts/loop.sh install 30</code> on the box.' : ''}</p>`;
+    }
+
     // Live System tiles — friendly gauges, not a raw dashboard. Rendered only once the
     // metrics land; degrades field-by-field (a tile is skipped when its value is null).
     html += _renderSystemTiles();
@@ -5131,6 +5179,9 @@ function renderHome() {
     // Consumer shell: a calm "is it well?" status summary + big area/utility cards,
     // shown first (a health-app glance), with the full catalog below to explore.
     html += renderHomeStatus();
+
+    // After setup: "filling has started" + how to make the 24/7 loop permanent (#306).
+    html += renderFillCard();
 
     // "Ask Val Ark": one input to ask the box's own offline AI (Phase 8, slice 1).
     html += renderAskCard();
@@ -7442,6 +7493,7 @@ async function cancelDownload(id) {
 // off-localhost (the server tells us via needsClaim); on the box you skip it.
 let _setupState = null;
 let _setupStep = 0;
+let _setupCard = null;   // the recovery card shown right after setup
 const _setupData = { token: '', name: 'valark', password: '', useMode: 'open', profile: 'balanced' };
 
 const _PROFILES = [
@@ -7451,6 +7503,35 @@ const _PROFILES = [
     { id: 'tools',     icon: '🛠️', label: 'Software & tools', desc: 'Offline installers and dev/creative apps for every platform.' },
     { id: 'survival',  icon: '🏕️', label: 'Grid-down survival', desc: 'Medicine, water, food, repair, power and radio first; maps and manuals over big AI models.' },
 ];
+
+// The box name as a DNS label: same rule as commission.js mdnsLabel() / lib/mdns.sh.
+function _mdnsLabel(name) {
+    const l = String(name || '').toLowerCase().replace(/[ _]/g, '-').replace(/[^a-z0-9-]/g, '')
+        .replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63).replace(/-+$/, '');
+    return l || 'valark';
+}
+// The name step's address line (#306). The server's boxAddress() (in /api/setup/state
+// .access) says whether this box can publish <name>.local; if it can't, promise the
+// real LAN address instead and say why .local is unavailable.
+function _setupNameAddr(name) {
+    const a = _setupState && _setupState.access;
+    const label = _mdnsLabel(name);
+    if (!a) return `Its name on your network. Setup shows the address to open it at when it finishes.`;
+    const pm = String(a.localUrl || '').match(/^(https?):\/\/[^/]*?(:\d+)?\/$/) || [];
+    const local = `${pm[1] || 'http'}://${label}.local${pm[2] || ''}/`;
+    if (a.canPublish || (a.hostLabel && a.hostLabel === label)) {
+        return `You'll open it at <code>${esc(local)}</code>${a.ipUrl ? ` (or <code>${esc(a.ipUrl)}</code>)` : ''}.`;
+    }
+    const at = a.ipUrl ? `<code>${esc(a.ipUrl)}</code>` : 'this box\'s address';
+    return `You'll open it at ${at}. <span class="setup-hint" style="display:block">A <code>.local</code> name is unavailable on this box (${esc(a.reason || 'no mDNS')}).</span>`;
+}
+// What commissioning started (#306): the first fill, and whether the 24/7 loop runs.
+function _fillNote(f) {
+    if (!f) return '';
+    if (f.loopInstalled) return f.running ? 'Filling has started, and the 24/7 loop keeps it healthy.' : 'The 24/7 loop fills it on its next cycle and keeps it healthy.';
+    const perm = 'To keep it filling and healthy 24/7, use <strong>Keep it healthy 24/7</strong> on the home screen, or run <code>./scripts/loop.sh install 30</code> on the box.';
+    return (f.started ? 'Filling has started: one download cycle is running now. ' : 'Filling has not started yet. ') + perm;
+}
 
 function _setupSteps() {
     const steps = ['welcome'];
@@ -7487,8 +7568,8 @@ function _renderSetupStep(key) {
                 <div class="setup-nav">${back}<button class="setup-btn" onclick="setupNext()">Continue &rarr;</button></div>`;
         case 'name':
             return `<h1>Name this box</h1>
-                <p class="setup-lead">You'll open it at <code>http://<span id="setup-name-echo">${esc(_setupData.name || 'valark')}</span>.local/</code></p>
-                <input id="setup-name" class="setup-input" value="${esc(_setupData.name || 'valark')}" oninput="var e=document.getElementById('setup-name-echo');if(e)e.textContent=(this.value||'valark')" maxlength="40" autocomplete="off">
+                <p class="setup-lead" id="setup-addr">${_setupNameAddr(_setupData.name)}</p>
+                <input id="setup-name" class="setup-input" value="${esc(_setupData.name || 'valark')}" oninput="var e=document.getElementById('setup-addr');if(e)e.innerHTML=_setupNameAddr(this.value)" maxlength="40" autocomplete="off">
                 <div class="setup-nav">${back}<button class="setup-btn" onclick="setupNext()">Continue &rarr;</button></div>`;
         case 'admin':
             return `<h1>Set an admin passcode</h1>
@@ -7572,16 +7653,23 @@ async function setupFinish() {
         const r = await fetch('/api/setup/commission', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const d = await r.json().catch(() => ({}));
         if (r.ok && d.ok) {
-            _setupState = { commissioned: true };
+            _setupState = { commissioned: true, access: d.access, fill: d.fill };
+            const a = d.access || {};
+            // The ONE address decision is the server's (boxAddress): <name>.local only when
+            // it really answers, else the LAN IP with the reason.
+            _setupCard = { name: d.name || _setupData.name || 'valark', recovery: d.recovery, address: a.url || '', addressAlt: a.altUrl || '',
+                           mdnsNote: a.url && !a.mdns ? `${a.host || ''} is unavailable on this box (${a.reason || 'no mDNS'})` : '' };
             // Show the recovery card now — the ONE moment the code is displayed. Print/save it.
             const rec = d.recovery ? `<div class="setup-reccard"><div class="src-hd">🔑 Save your recovery card</div>
                 <p class="src-sub">This is how you get back in if you forget your passcode. Print it or write it down — you won't see this code again.</p>
                 <div class="src-code">${esc(d.recovery)}</div>
-                <button class="setup-btn ghost" style="margin-top:.6rem" onclick="showRecoveryCard({name:${JSON.stringify(_setupData.name || 'valark')},recovery:${JSON.stringify(d.recovery)},address:'http://'+${JSON.stringify((_setupData.name||'valark').toLowerCase())}+'.local/'})">Print recovery card</button></div>` : '';
+                <button class="setup-btn ghost" style="margin-top:.6rem" onclick="showRecoveryCard(_setupCard)">Print recovery card</button></div>` : '';
+            const addr = a.url ? `<p class="setup-lead">Open it at <code>${esc(a.url)}</code>${a.altUrl ? ` or <code>${esc(a.altUrl)}</code>` : ''}.${a.mdns ? '' : ` <span class="setup-hint" style="display:block">${esc(_setupCard.mdnsNote)}</span>`}</p>` : '';
             const root = document.getElementById('app-root');
             if (root) root.innerHTML = `${_SETUP_CSS}${_REC_CSS}<div class="setup-wrap"><div class="setup-card"><div class="setup-stepbody">
                 <div class="setup-done-ic">&#x2713;</div><h1>All set!</h1>
-                <p class="setup-lead">${esc(_setupData.name || 'Val Ark')} is ready. It'll start filling with content in the background and keeps working even offline.</p>
+                <p class="setup-lead">${esc(_setupData.name || 'Val Ark')} is ready and keeps working even offline. ${_fillNote(d.fill)}</p>
+                ${addr}
                 ${rec}
                 <div class="setup-nav"><span></span><a class="setup-btn" href="#/" onclick="setTimeout(function(){location.reload();},60)">Open Val Ark &rarr;</a></div>
             </div></div></div>`;
@@ -7763,6 +7851,7 @@ function recoveryCardHtml(d) {
         <p class="rec-sub">Keep this somewhere safe — it's how you get back in if you forget your passcode.</p>
         <div class="rec-row"><span>Open it at</span><strong>${esc(d.address || 'http://valark.local/')}</strong></div>
         ${d.addressAlt ? `<div class="rec-row"><span>or</span><strong>${esc(d.addressAlt)}</strong></div>` : ''}
+        ${d.mdnsNote ? `<p class="rec-steps">${esc(d.mdnsNote)}</p>` : ''}
         <div class="rec-row"><span>Box name</span><strong>${esc(d.name || 'valark')}</strong></div>
         <div class="rec-code">Recovery code<br><code>${esc(d.recovery || '')}</code></div>
         <p class="rec-steps">Forgot your passcode? Open the address above, choose <strong>Forgot passcode?</strong> and enter this code to set a new one. On the box's own screen you can reset with no code.</p>

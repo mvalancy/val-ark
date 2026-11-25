@@ -562,6 +562,16 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   claim token; from the box/localhost you commission without one (physical possession = ownership,
   which also keeps recovery possible). The token is single-use (consumed on commission) and never
   crosses `/api/setup/state` — only `needsClaim`/`hasClaim` booleans do.
+- **Never promise `<name>.local` or a fill the box didn't start (#306).** The wizard used to say
+  "You'll open it at http://<name>.local/" while nothing published the name, and the design said
+  commissioning started the fill when it only saved settings. Now `lib/mdns.sh` publishes the
+  name when avahi can (never installing anything), and `server.js boxAddress()` is the ONLY place
+  that picks the address to show: `.local` only when `state/mdns.json` says it answers (and, for
+  `published`, our publisher pid is alive), else the LAN IP with the reason. Add a new surface that
+  shows the address → call `boxAddress(req)`, don't rebuild `http://${name}.local/`. Commissioning
+  starts one `loop.sh once` only when no `val-ark-loop` cron entry exists; any test that
+  commissions through a real server must set `VALARK_TEST_NO_SPAWN=1` (or point
+  `VALARK_TEST_LOOP_SH` at a stub), or it runs a real maintenance cycle.
 - **The wizard is a `file://`-safe SPA takeover.** `#/setup` renders with inline CSS and no
   server, so Playwright previews it offline; `checkSetup()` only redirects when it can reach
   `/api/setup/state` and the box is un-commissioned.

@@ -6,7 +6,7 @@
 #   1. ensure the data disk is writable (self-heal NTFS/ro reverts)
 #   2. repair the repo<->disk symlink layout (2b-2d web server, public port, community
 #      services, 2e self-mirror of Val Ark's own source, 2f direct-connect link DHCP,
-#      2g Tailscale userspace-networking check)
+#      2g Tailscale userspace-networking check, 2h <name>.local over mDNS)
 #   3. refresh the live catalog  -> ZIM/content links self-heal (no stale dates)
 #   4. link check + repair        -> tool/installer URLs, web-ui assets, symlinks
 #   5. integrity verify           -> requeue corrupt/short downloads (5b re-fill pinned requests)
@@ -310,6 +310,23 @@ tailscale_check() {
     esac
 }
 
+# --- step 2h: publish <name>.local over mDNS when the box can (#306) ----------
+# lib/mdns.sh: native (hostname = name), or ONE kept-up `avahi-publish -a -R` child, or
+# "unavailable" with a reason (no avahi, daemon stopped, ...) in state/mdns.json, which
+# server.js reads to show the LAN IP instead. Never installs anything.
+# 8>&- : the publisher it spawns must not inherit loop.lock (see ensure_services).
+ensure_mdns() {
+    local out st reason to=()
+    command -v timeout >/dev/null 2>&1 && to=(timeout 30)
+    out=$("${to[@]}" bash "${_DIR}/lib/mdns.sh" ensure "$STATE_DIR" 2>/dev/null 8>&-)
+    st=$(printf '%s' "$out" | grep -oE '"state":"[a-z]+"' | head -1 | cut -d'"' -f4)
+    reason=$(printf '%s' "$out" | grep -oE '"reason":"[^"]*"' | head -1 | cut -d'"' -f4)
+    case "$st" in
+        published|native) log "mdns: $(printf '%s' "$out" | grep -oE '"host":"[^"]*"' | cut -d'"' -f4) ($st)" ;;
+        *) log "${YELLOW}mdns: .local unavailable${NC} (${reason:-unknown}); the web UI shows the LAN IP instead" ;;
+    esac
+}
+
 # --- step 8b: write the self-heal snapshot the Health page reads --------------
 # selfheal.json = latest cycle summary (space, verify tallies, link/asset counts,
 # what was repaired this cycle). heal-events.jsonl = the append-only, capped feed
@@ -374,6 +391,8 @@ loop_once() {
     step "2f. link DHCP + DNS for a direct-connect laptop (VALARK_LINK_DHCP)"; ensure_link_dhcp
 
     step "2g. tailscale mode (userspace networking makes tailnet peers look like the Admin, #311)"; tailscale_check
+
+    step "2h. publish <name>.local over mDNS (when avahi runs, #306)"; ensure_mdns
 
     step "3. refresh live catalog (heals stale content links)"
     bash "$LIBRARIAN" refresh >/dev/null 2>&1 && log "catalog refreshed" || log "${YELLOW}catalog refresh failed (cache retained)${NC}"

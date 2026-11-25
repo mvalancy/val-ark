@@ -47,9 +47,18 @@ already held count as 0):
   --cap BYTES   (default budget only) upper bound on the headroom (lastbook.sh: VALARK_MAX_GB left)
   At fetch time a file is deferred (exit 3) when it would cut into the reserve, whatever --budget says.
 
+  --pack-limit IDS   (with --pack auto) consider only these pack ids plus the packs held and
+        verified on disk; every auto guard still applies. "" = no new pack (#203: the
+        librarian's planner chose the pack; scripts/tools/lastbook.sh passes it)
+  --plus-held   also keep what is held: its pack id(s), state maps, the model, the installers
+
 Commands:
   plan   [--dest DIR] [selection]     TSV of what would be fetched + totals
   mirror  --dest DIR  [selection] [--dry-run] [--keep-old] [--tries N] [--retry-wait S]
+  candidates [--dest DIR] [--maps ..] [--addresses follow|none] [--model ..] [--apps ..]
+        planner rows (scripts/lib/planner.py's 9 TAB columns, source "lastbook") for the
+        current release: one per pack (+ base maps), state map (+ its address index), the
+        model and the installers; read by scripts/lib/catalog.sh (#203)
 
 Downloads resume from <name>.part (HTTP Range), are sha256-checked BEFORE the
 final rename (a mismatch deletes the .part and never finalizes), and a file
@@ -510,6 +519,14 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
             sizes = [f["size"] for f in p["files"]]
             return sum(sizes) if all(sizes) else pack_bytes(p)
         by_size = sorted(rel["packs"], key=rank, reverse=True)
+        limit = getattr(args, "pack_limit", None)
+        if limit is not None:
+            # #203: the librarian's planner chose the pack (--pack-limit). auto still runs every guard
+            # below (rank, step up never down, HEAD confirmation, keep the held pack), but only over
+            # the planned id(s) and the packs already held and verified on disk.
+            allow = {c.strip().lower() for c in limit.split(",") if c.strip()}
+            by_size = [p for p in by_size if p["id"].lower() in allow
+                       or (dest and disk_bytes(dest, stamps, p) is not None)]
         held = [p for p in by_size if dest and disk_bytes(dest, stamps, p) is not None]
 
         # The largest pack file held and verified on disk, listed in this release or not (a renamed
@@ -593,6 +610,8 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
             incomplete = True
             notes.append(f"no Lastbook pack could be confirmed upstream ({', '.join(broken)}: the server's size differs "
                          "from the manifest); nothing downloaded (re-checked next run)")
+        elif not chosen and limit is not None and not by_size:
+            pass  # the planner chose no pack and none is held: nothing to fetch, not incomplete
         elif not chosen:
             incomplete = True
             # quote only packs whose size is known: a manifest entry with no size would read as "needs 0 B"
@@ -652,6 +671,117 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
         for c in (list(addrs) if aspec == "all" else codes(args.addresses, list(addrs), "address index", rel["unavailable"].get("address"), notes)):
             take(addrs[c], True, f"addresses {c}")
     return rows, notes, incomplete, upstream_skip
+
+
+# --- the librarian's planner (#203) -------------------------------------------------------------
+
+def _on_disk(dest, stamps, key):
+    """A final file this tool recorded that is still a regular file at its recorded size."""
+    s = stamps.get(key) or {}
+    if not s.get("size") or s.get("part") or key.endswith(".part") or not OWNED_KEY.match(key):
+        return False
+    try:
+        st = os.lstat(dest / key)
+    except OSError:
+        return False
+    return os.path.isfile(dest / key) and not os.path.islink(dest / key) and st.st_size == s["size"]
+
+
+def held_selection(dest, rel, stamps, kept=None):
+    """What this mirror already holds, as selection ids of the CURRENT release:
+    (pack ids, state map codes, model held, installers held). A pack file counts under the id it was
+    recorded with (stamps, else the kept manifest, else this release), so a pack re-released under a
+    new name is still "held" and its refresh can replace it (R1)."""
+    if dest is None or not stamps:
+        return [], [], False, False
+    kept_packs = pack_of_kept(kept)
+    now_packs = {rel_path(f): p["id"] for p in rel["packs"] for f in p["files"]}
+    ids = {p["id"] for p in rel["packs"]}
+    packs = set()
+    for k in stamps:
+        if k.startswith("packs/") and _on_disk(dest, stamps, k):
+            pid = stamps[k].get("pack") or kept_packs.get(k) or now_packs.get(k)
+            if pid in ids:
+                packs.add(pid)
+    old_maps = {rel_path(f): m["id"] for m in (kept or {}).get("maps", []) for f in m["files"]}
+    now_maps = {rel_path(f): m["id"] for m in rel["maps"] for f in m["files"]}
+    map_ids = {m["id"] for m in rel["maps"]}
+    maps = set()
+    for k in stamps:
+        if k.startswith("maps/") and _on_disk(dest, stamps, k):
+            mid = now_maps.get(k) or old_maps.get(k)
+            if mid in map_ids:
+                maps.add(mid)
+    model = any(k.startswith("models/") and _on_disk(dest, stamps, k) for k in stamps)
+    apps = any(k.startswith("app/") and _on_disk(dest, stamps, k) for k in stamps)
+    return sorted(packs), [m["id"] for m in rel["maps"] if m["id"] in maps], model, apps
+
+
+def add_held(args, rel, dest, stamps, kept=None):
+    """--plus-held: keep refreshing what is already held on top of the planned selection, so the
+    weekly run (and a planned run) never stops updating a held map, the model or the installers."""
+    packs, maps, model, apps = held_selection(dest, rel, stamps, kept)
+    if args.pack.lower() == "auto" and args.pack_limit is not None:
+        args.pack_limit = ",".join([c for c in args.pack_limit.split(",") if c.strip()] + packs)
+    mspec = args.maps.lower()
+    if maps and mspec not in ("auto", "all"):
+        have = [] if mspec == "none" else [c.strip() for c in args.maps.split(",") if c.strip()]
+        args.maps = ",".join(have + [c for c in maps if c.lower() not in {h.lower() for h in have}])
+    if model and args.model == "no":
+        args.model = "yes"
+    if apps and args.apps == "none":
+        args.apps = "current"
+
+
+CAND_VALUE = dict(pack=820, map=640, model=560, app=900)
+
+
+def print_candidates(rel, args, out=sys.stdout):
+    """Planner candidate rows (scripts/lib/planner.py, 9 TAB columns) for the current release:
+        id  bucket  category  value  bytes  source(=lastbook)  url  dest(=--dest)  extra
+    extra = kind|needs|rel=size,rel=size,...  (kind pack|map|model|app; needs '-' or 'pack')
+    A pack row carries its own files plus the base maps (they ride with any pack); a map row
+    carries its address index (--addresses follow). Entries with a missing size are left out: an
+    unknown size must never look free to the planner (#230). The planner decides what fits; the
+    fetch itself goes back through `mirror --pack auto --pack-limit` with every guard intact."""
+    dest = str(args.dest or "")
+    rows, skipped = [], []
+
+    def files_spec(files):
+        return ",".join(f"{rel_path(f)}={f['size'] or 0}" for f in files)
+
+    def row(rid, bucket, cat, kind, needs, files, value):
+        if any(not f["size"] for f in files if kind != "app"):
+            skipped.append(f"{kind}:{rid}")
+            return
+        rows.append([f"lastbook:{kind}:{rid}", bucket, cat, str(value), str(sum(f["size"] or 0 for f in files)),
+                     "lastbook", files[0]["url"], dest, f"{kind}|{needs}|{files_spec(files)}"])
+
+    base = [f for m in rel["base_maps"] for f in m["files"]]
+    sized = sorted(rel["packs"], key=lambda p: sum(f["size"] or 0 for f in p["files"]))
+    for i, p in enumerate(sized):  # a larger pack = a little more value, so the fill phase tries it first
+        row(p["id"], "content", "lastbook:pack", "pack", "-", p["files"] + base, CAND_VALUE["pack"] + 20 * i)
+    mspec = args.maps.lower()
+    if mspec != "none":
+        want = None if mspec in ("auto", "all") else {c.strip().lower() for c in args.maps.split(",") if c.strip()}
+        addrs = {a["id"]: a for a in rel["addresses"]}
+        for m in rel["maps"]:
+            if want is not None and m["id"].lower() not in want:
+                continue
+            files = list(m["files"])
+            if args.addresses.lower() != "none" and m["id"] in addrs:
+                files += addrs[m["id"]]["files"]
+            row(m["id"], "content", "lastbook:maps", "map", "pack", files, CAND_VALUE["map"])
+    if args.model != "no":
+        for mdl in rel["models"]:
+            row(mdl["id"], "models", "model:assistant", "model", "pack", mdl["files"], CAND_VALUE["model"])
+    if args.apps == "current" and rel["apps"]:
+        row(rel["app_version"], "content", "lastbook:app", "app", "pack", rel["apps"], CAND_VALUE["app"])
+    print(f"# lastbook candidates manifest={rel.get('published') or ''} app={rel['app_version']} rows={len(rows)}", file=out)
+    for r in rows:
+        print("\t".join(r), file=out)
+    for rid in skipped:
+        print(f"# skipped {rid}: a file has no size in the manifest", file=out)
 
 
 # --- download -----------------------------------------------------------------------------------
@@ -999,7 +1129,7 @@ def print_plan(rows, notes, budget, rel, out=sys.stdout):
 def main(argv=None):
     ap = Parser(prog="lastbook_mirror.py", description="Mirror the current Lastbook release.")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("plan", "mirror"):
+    for name in ("plan", "mirror", "candidates"):
         p = sub.add_parser(name)
         p.add_argument("--dest", required=(name == "mirror"))
         p.add_argument("--pack", default="auto")
@@ -1014,6 +1144,10 @@ def main(argv=None):
         p.add_argument("--app-url", default=APP_URL)
         p.add_argument("--sums-url", default=SUMS_URL)
         p.add_argument("--rewrite", action="append")
+        p.add_argument("--pack-limit", default=None,
+                       help="with --pack auto: consider only these pack ids (plus packs held and verified)")
+        p.add_argument("--plus-held", action="store_true",
+                       help="also refresh what is held: its maps, the model, the installers, its pack id")
         if name == "mirror":
             p.add_argument("--dry-run", action="store_true")
             p.add_argument("--keep-old", action="store_true")
@@ -1037,6 +1171,11 @@ def main(argv=None):
             if it["size"] is None:
                 it["size"] = net.head_size(it["url"])
         kept = kept_release(dest) if dest and dest.is_dir() else None  # read before this run replaces it
+        if args.cmd == "candidates":
+            print_candidates(rel, args)
+            return EXIT_OK
+        if args.plus_held:
+            add_held(args, rel, dest, stamps, kept)
         rows, notes, incomplete, upstream_skip = select(rel, args, budget, dest, stamps, probe=net.head_size,
                                                         kept_packs=pack_of_kept(kept))
     except Usage as e:

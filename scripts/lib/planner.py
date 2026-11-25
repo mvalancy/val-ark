@@ -28,6 +28,15 @@ Already-present items (verified on disk) are skipped and their categories count
 as covered. Cross-flavour dedup via a content key keeps us from grabbing both
 the maxi and nopic variant of the same ZIM.
 
+LASTBOOK (#203): rows with source `lastbook` (scripts/lib/lastbook_mirror.py
+candidates) compete like any other content. Their packs NEST (Small < Medium <
+All), so at most one pack is ever planned: a later phase may UPGRADE the planned
+pack to a larger one (the smaller one's bytes are refunded), and a pack held and
+verified on disk satisfies every pack at most its size. Maps, the model and the
+installers need a pack (held or planned). Presence comes from the mirror's own
+records (.lastbook-verified.json); the fetch and every prune stay with the
+mirror, so these rows are never in the librarian's manifest or evicted.
+
 The same scoring also drives EVICTION (--evict-need BYTES): pick the lowest
 value-per-byte MANAGED items that are NOT the sole on-disk representative of
 their category, until enough space is freed. (Eviction candidates are read from
@@ -62,10 +71,73 @@ def content_key(c):
     return c["id"]
 
 
+_LB_STAMPS = {}
+
+
+def lb_stamps(root):
+    """The Lastbook mirror's records (<root>/.lastbook-verified.json), read once per run."""
+    if root not in _LB_STAMPS:
+        try:
+            import json
+            with open(os.path.join(root, ".lastbook-verified.json")) as fh:
+                v = json.load(fh)
+            _LB_STAMPS[root] = v if isinstance(v, dict) else {}
+        except (OSError, ValueError):
+            _LB_STAMPS[root] = {}
+    return _LB_STAMPS[root]
+
+
+def lb_parse(c):
+    """extra = kind|needs|rel=size,... -> (kind, needs, [(rel, size)])."""
+    f = c["extra"].split("|")
+    if len(f) < 3:
+        return "", "", []
+    files = []
+    for spec in f[2].split(","):
+        rel, _, n = spec.rpartition("=")
+        if rel and n.isdigit() and ".." not in rel.split("/") and not rel.startswith("/"):
+            files.append((rel, int(n)))
+    return f[0], f[1], files
+
+
+def lb_on_disk(root, rel, size=0):
+    """Recorded by the mirror and still a regular file at its recorded (and listed) size."""
+    s = lb_stamps(root).get(rel)
+    if not isinstance(s, dict) or not s.get("size") or s.get("part"):
+        return False
+    p = os.path.join(root, rel)
+    try:
+        if os.path.islink(p) or not os.path.isfile(p) or os.path.getsize(p) != s["size"]:
+            return False
+    except OSError:
+        return False
+    return not size or size == s["size"]
+
+
+def lb_held_top(root):
+    """Recorded bytes of the largest pack FILE held and verified (listed in this release or not)."""
+    best = 0
+    for k, v in lb_stamps(root).items():
+        if k.startswith("packs/") and "/" not in k[6:] and isinstance(v, dict) and lb_on_disk(root, k):
+            best = max(best, v["size"])
+    return best
+
+
+def lb_pack_bytes(c):
+    return sum(n for rel, n in lb_parse(c)[2] if rel.startswith("packs/"))
+
+
+def is_lb_pack(c):
+    return c["source"] == "lastbook" and lb_parse(c)[0] == "pack"
+
+
 def marker_present(c):
     """Is this candidate already fully on disk?"""
     src, dest, b = c["source"], c["dest"], c["bytes"]
     try:
+        if src == "lastbook":
+            files = lb_parse(c)[2]
+            return bool(files) and all(lb_on_disk(dest, rel, n) for rel, n in files)
         if src in ("zim", "url"):
             if not os.path.isfile(dest):
                 return False
@@ -172,6 +244,20 @@ def essential_match(c, kind, pattern):
         return c["bucket"] == "models" and fnmatch.fnmatchcase(c["id"].split(":", 1)[-1], pattern)
     if kind == "inst":
         return c["id"].startswith("inst:") and fnmatch.fnmatchcase(c["id"][5:], pattern)
+    if kind == "lastbook":   # lastbook:<kind>:<id> rows, matched on "<kind>:<id>" (pack:small, app:*)
+        return c["source"] == "lastbook" and c["id"].startswith("lastbook:") \
+            and fnmatch.fnmatchcase(c["id"][9:].lower(), pattern.lower())
+    return False
+
+
+def lb_satisfied(c):
+    """Present, or (a Lastbook pack) no larger than the pack held: the packs nest, so a held
+    Medium or All already holds everything Small has."""
+    if marker_present(c):
+        return True
+    if is_lb_pack(c):
+        top = lb_held_top(c["dest"])
+        return top > 0 and lb_pack_bytes(c) <= top
     return False
 
 
@@ -179,8 +265,11 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
     present_cats = set()
     present_keys = set()
     pool = []
+    lb_held = set()   # Lastbook dirs that hold a verified pack (maps/model/installers may follow)
     for c in cands:
-        if marker_present(c):
+        if c["source"] == "lastbook" and lb_held_top(c["dest"]) > 0:
+            lb_held.add(c["dest"])
+        if lb_satisfied(c):
             present_cats.add(c["category"])
             present_keys.add(content_key(c))
         else:
@@ -189,6 +278,40 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
     planned_ids = set()
     selected = []
     budget_left = budget
+    lb_pack = {}      # Lastbook dir -> the ONE pack planned for it (packs nest: never two)
+
+    def lb_ok(c):
+        """Lastbook: a map / the model / the installers need a pack, held or planned."""
+        if c["source"] != "lastbook" or lb_parse(c)[1] != "pack":
+            return True
+        return c["dest"] in lb_held or c["dest"] in lb_pack
+
+    def lb_slot(c):
+        """For a Lastbook pack: (ok, refund). At most one pack per dir; a larger one replaces
+        (upgrades) the planned one, whose bytes come back. ok=False: a pack at least this large
+        is already planned."""
+        if not is_lb_pack(c):
+            return True, 0
+        cur = lb_pack.get(c["dest"])
+        if cur is None:
+            return True, 0
+        if cur["bytes"] >= c["bytes"]:
+            return False, 0
+        return True, cur["bytes"]
+
+    def lb_commit(c):
+        nonlocal budget_left
+        if not is_lb_pack(c):
+            return
+        cur = lb_pack.get(c["dest"])
+        if cur is not None:
+            for i, (x, _ph) in enumerate(selected):
+                if x is cur:
+                    del selected[i]
+                    break
+            planned_ids.discard(cur["id"])
+            budget_left += cur["bytes"]
+        lb_pack[c["dest"]] = c
     # Phase 0: essentials. `flavours` is the uncollapsed stream so the SMALLEST
     # variant (mini/nopic) of an essential ZIM is reachable. An entry already on
     # disk in any variant is satisfied. Picks do not reserve the content key, so
@@ -201,8 +324,11 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
             continue  # any variant of this ZIM on disk satisfies the entry
         for c in sorted(matches, key=lambda x: x["bytes"]):
             # One pick per ZIM name; every MISSING match for glob kinds (netbootxyz-* = iso+efi+arm64).
-            if c["id"] in planned_ids or c["bytes"] > budget_left or marker_present(c):
+            ok, refund = lb_slot(c)
+            if c["id"] in planned_ids or c["bytes"] > budget_left + refund or lb_satisfied(c) \
+                    or not ok or not lb_ok(c):
                 continue
+            lb_commit(c)
             planned_ids.add(c["id"])
             budget_left -= c["bytes"]
             selected.append((c, 0))
@@ -219,8 +345,10 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
         nonlocal budget_left
         if c["id"] in planned_ids or content_key(c) in taken_keys:
             return False
-        if c["bytes"] > budget_left:
+        ok, refund = lb_slot(c)
+        if not ok or not lb_ok(c) or c["bytes"] > budget_left + refund:
             return False
+        lb_commit(c)
         planned_ids.add(c["id"])
         taken_keys.add(content_key(c))
         taken_cats.add(c["category"])
@@ -233,7 +361,11 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
     by_cat = {}
     for c in pool:
         by_cat.setdefault(c["category"], []).append(c)
-    for cat in sorted(by_cat):
+    # Categories whose rows need something planned first (Lastbook maps / installers need a
+    # pack) go after the others, so the pack can take its diversity slot before them.
+    def needs_first(cat):
+        return any(c["source"] == "lastbook" and lb_parse(c)[1] == "pack" for c in by_cat[cat])
+    for cat in sorted(by_cat, key=lambda k: (needs_first(k), k)):
         if cat in taken_cats:
             continue
         # Scouted rows (hf_scout.py, ids model:scout-*) never take a diversity slot: they
@@ -352,7 +484,9 @@ def list_absent(cands):
     """Emit every candidate that is NOT already fully on disk, most valuable-per-
     byte first. Powers the web catalog of downloadable-but-absent resources. Same
     9 columns as the input candidate stream (no trailing phase)."""
-    absent = [c for c in cands if not marker_present(c)]
+    # Lastbook rows are not offered here: they have no per-item request path (its Library card
+    # mirrors the release, and the planner sizes it in fill).
+    absent = [c for c in cands if c["source"] != "lastbook" and not marker_present(c)]
     absent.sort(key=lambda c: (-density(c), -c["value"], c["bytes"]))
     return absent
 

@@ -22,6 +22,8 @@
 #   pin/unpin/pins         manage durable user requests (pins [--refill])
 #   site                   rewrite the static browse pages (index.html + browse/)
 #                          so the archive can be explored from a plain file server
+#   lastbook-plan [B]      the Lastbook rows the planner picks (scripts/tools/lastbook.sh
+#                          fetches them; #203)
 #
 # fill/maintain opts: --max-bytes B  --max-items N  --time SECONDS  --budget B
 #   KIND = content | model | tool   (request / pin)
@@ -273,10 +275,30 @@ download_one() {
 gen_candidates() { catalog_all_candidates; }
 
 build_plan() {
-    local budget="$1"
+    local budget="$1" summary="${2:-${TMPDIR_VA}/plan.summary}"
     gen_candidates | python3 "$PLANNER" --budget "$budget" \
         --essentials "${DATA_DIR:-${PROJECT_ROOT}/data}/essentials.tsv" --profile "$(_valark_profile)" \
-        --model-max-bytes "$(valark_model_max_bytes)" 2> "${TMPDIR_VA}/plan.summary"
+        --model-max-bytes "$(valark_model_max_bytes)" 2> "$summary"
+}
+
+# --- Lastbook rows of the plan (#203) ----------------------------------------
+# The planner sizes Lastbook like any other content; the fetch goes through
+# scripts/tools/lastbook.sh --plan-file, i.e. lastbook_mirror.py with all of its
+# guards (sha256 before rename, HEAD-confirmed pack upgrades, prune only what it
+# recorded, truncation guards, nested-pack cleanup). Its files never enter the
+# librarian's manifest, so verify/evict never touch them.
+LASTBOOK_SH="${PROJECT_ROOT}/scripts/tools/lastbook.sh"
+lastbook_fill() {   # lastbook_fill PLAN-ROWS-FILE -> lastbook.sh's exit status
+    bash "$LASTBOOK_SH" --plan-file "$1" </dev/null >&2
+}
+# `librarian.sh lastbook-plan [BUDGET]`: the Lastbook rows the planner picks at this
+# budget (what lastbook.sh fetches when run on its own, e.g. by the weekly refresh).
+cmd_lastbook_plan() {
+    local budget="${1:-$(valark_budget_bytes)}"
+    ensure_state
+    catalog_refresh_zim >/dev/null 2>&1 || true
+    catalog_refresh_lastbook >/dev/null 2>&1 || warn "Lastbook catalog refresh failed; using cache if any" >&2
+    build_plan "$budget" "${TMPDIR_VA}/plan-lastbook.summary" | awk -F'\t' '$6=="lastbook"'
 }
 
 # --- commands --------------------------------------------------------------
@@ -307,6 +329,7 @@ cmd_plan() {
     local budget="${1:-$(valark_budget_bytes)}"
     ensure_state
     catalog_refresh_zim >/dev/null 2>&1 || warn "ZIM catalog refresh failed; using cache if any"
+    catalog_refresh_lastbook >/dev/null 2>&1 || warn "Lastbook catalog refresh failed; using cache if any"
     build_plan "$budget" > "${TMPDIR_VA}/plan.tsv"
     cat "${TMPDIR_VA}/plan.summary" >&2
     echo -e "${CYAN}Planned downloads (id | category | size | phase):${NC}"
@@ -333,13 +356,15 @@ cmd_fill() {
     if ! flock -n 9; then warn "another fill is already running; skipping"; return 0; fi
     [ -z "$budget" ] && budget="$(valark_budget_bytes)"
     catalog_refresh_zim >/dev/null 2>&1 || warn "ZIM catalog refresh failed; using cache"
+    catalog_refresh_lastbook >/dev/null 2>&1 || warn "Lastbook catalog refresh failed; using cache"
     build_plan "$budget" > "${TMPDIR_VA}/plan.tsv"
     cat "${TMPDIR_VA}/plan.summary" >&2
     local start; start=$(date +%s)
-    local n_ok=0 n_fail=0 bytes_done=0 items=0
+    local n_ok=0 n_fail=0 bytes_done=0 items=0 lb_done=0
     log "fill: starting (budget $(human "$budget"), $(wc -l < "${TMPDIR_VA}/plan.tsv") planned)"
     while IFS=$'\t' read -r id bucket cat value bytes source url dest extra phase; do
         [ -f "$STOP_FLAG" ] && { warn "STOP flag; halting fill"; break; }
+        [ "$source" = lastbook ] && [ "$lb_done" = 1 ] && continue   # fetched with the Lastbook batch
         [ "$max_items" -gt 0 ] && [ "$items" -ge "$max_items" ] && break
         [ "$max_bytes" -gt 0 ] && [ "$bytes_done" -ge "$max_bytes" ] && break
         if [ "$time_budget" -gt 0 ]; then
@@ -349,6 +374,21 @@ cmd_fill() {
         local fillable; fillable=$(valark_fillable_bytes)
         if [ "$bytes" -gt 0 ] && [ "$fillable" -lt $(( bytes + 1073741824 )) ]; then
             warn "low headroom ($(human "$fillable")); stopping before $id"; break
+        fi
+        if [ "$source" = lastbook ]; then
+            # Every Lastbook row of the plan is fetched in ONE mirror run, at the first one's
+            # turn: the mirror prunes only after a complete run, so it must see the whole
+            # planned selection (and what it already holds) at once.
+            lb_done=1; items=$(( items + 1 ))
+            awk -F'\t' '$6=="lastbook"' "${TMPDIR_VA}/plan.tsv" > "${TMPDIR_VA}/plan-lastbook.tsv"
+            local lb_bytes; lb_bytes=$(awk -F'\t' '{s+=$5} END{print s+0}' "${TMPDIR_VA}/plan-lastbook.tsv")
+            log "[$items] Lastbook: $(cut -f1 "${TMPDIR_VA}/plan-lastbook.tsv" | sed 's/^lastbook://' | paste -sd' ' -) ($(human "$lb_bytes"), p${phase})"
+            if lastbook_fill "${TMPDIR_VA}/plan-lastbook.tsv"; then
+                ok "lastbook"; n_ok=$(( n_ok + 1 )); bytes_done=$(( bytes_done + lb_bytes ))
+            else
+                err "lastbook (resumes next cycle)"; n_fail=$(( n_fail + 1 ))
+            fi
+            continue
         fi
         items=$(( items + 1 ))
         log "[$items] ${id} (${cat}, $(human "$bytes"), p${phase})"
@@ -668,6 +708,7 @@ case "${1:-status}" in
     verify)   cmd_verify ;;
     evict)    shift; cmd_evict "$@" ;;
     maintain) cmd_maintain ;;
+    lastbook-plan) shift; cmd_lastbook_plan "$@" ;;
     refresh)  catalog_refresh_zim --force && ok "catalog cached: $ZIM_CACHE ($(wc -l < "$ZIM_CACHE") entries)" ;;
     scout)    catalog_refresh_scout --force; rc=$?
               [ "${VALARK_SCOUT:-1}" = "0" ] && { warn "VALARK_SCOUT=0: scout disabled"; exit 0; }
@@ -680,5 +721,5 @@ case "${1:-status}" in
     unpin)    shift; cmd_unpin "$1" ;;
     pins)     shift; [ "$1" = "--refill" ] && cmd_pins_refill || cmd_pins ;;
     site)     shift; cmd_site "$@" ;;
-    *) echo "usage: librarian.sh {status|plan|fill|verify|evict|maintain|refresh|scout|catalog|request|pin|unpin|pins|site}"; exit 1 ;;
+    *) echo "usage: librarian.sh {status|plan|fill|verify|evict|maintain|refresh|scout|catalog|request|pin|unpin|pins|site|lastbook-plan}"; exit 1 ;;
 esac

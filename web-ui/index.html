@@ -2415,7 +2415,7 @@ const CONTENT_LIBRARY = [
         source: 'https://lastbook.org',
         updated: 'current release',
         details: {
-            overview: 'Lastbook (MIT) is a free offline survival library: first aid, water, food, shelter and repair manuals, how-to videos, offline street maps with address search, and a local AI model, read by its own app on Mac, Windows and Ubuntu. Val Ark keeps the current release, sha256-verified, sized to the disk: the largest pack (Small 7.7 GB, Medium 67.5 GB or All 388 GB) that fits Lastbook\'s share, then state maps, address indexes and the model while they fit. Servers and NAS mirrors can opt in to every pack.',
+            overview: 'Lastbook (MIT) is a free offline survival library: first aid, water, food, shelter and repair manuals, how-to videos, offline street maps with address search, and a local AI model, read by its own app on Mac, Windows and Ubuntu. Val Ark keeps the current release, sha256-verified, sized to the disk by the same planner as the rest of the library: one pack (Small 7.7 GB, Medium 67.5 GB or All 388 GB), then state maps, address indexes and the model as their value per byte earns room. Servers and NAS mirrors can opt in to every pack.',
             features: [
                 'One content pack sized to the disk (Small / Medium / All); smaller packs are pruned once a larger one is verified',
                 'Offline state maps with address search, base map included',
@@ -2425,7 +2425,7 @@ const CONTENT_LIBRARY = [
             ]
         },
         usage: [
-            {cmd: 'scripts/tools/lastbook.sh plan', desc: 'Preview what would be fetched at this disk size'},
+            {cmd: 'scripts/tools/lastbook.sh plan', desc: 'Preview what the planner would fetch at this disk size'},
             {cmd: 'scripts/tools/lastbook.sh', desc: 'Mirror (or refresh) the current release into content/lastbook/'},
             {cmd: 'scripts/tools/lastbook.sh --pack every --maps all --model yes', desc: 'Servers / NAS mirrors: everything (~570 GB)'}
         ]

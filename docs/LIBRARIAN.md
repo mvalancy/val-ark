@@ -76,12 +76,49 @@ flavours (maxi/nopic/mini) collapse to the most complete one.
 | Kiwix ZIM library | live OPDS via `scripts/lib/kiwix_catalog.py` | **Always current** — ZIM dates never go stale. ~1700+ entries across 9 languages by default (`VALARK_ZIM_LANGS`). |
 | Models (diversity) | `data/models-extra.tsv` | Small high-value models across 18 categories (setup-assistant chat LLMs, small LLMs, code, embeddings, rerankers, tiny VLMs, OCR, depth, segmentation, detection, audio, time-series, safety). |
 | Models (scouted, weekly) | `<state>/catalog/models-scouted.tsv` | **New open models, found automatically** by `scripts/lib/hf_scout.py` — see [Model scout](#model-scout-hf_scoutpy). Planned after the curated rows on a small disk. |
+| Lastbook (survival library) | live release via `lastbook_mirror.py candidates`, cached daily in `<state>/catalog/lastbook.tsv` | See [Lastbook](#lastbook-planned-like-any-other-content). Each pack, state map (+ its address index), the model and the installers. |
 | OS / router / netboot / server source | `data/installers.tsv` | Distro ISOs (Alpine/Debian/Ubuntu/…), OpenWRT firmware, netboot.xyz, Jetson BSP — for PXE / mesh commissioning — plus `server-source`: upstream LAMP + LAN-infrastructure releases (httpd/APR, PHP, MariaDB, PostgreSQL, nginx, OpenSSL/OpenSSH, BIND, Kea, dnsmasq, Unbound, Samba, Dovecot, WordPress, Nextcloud, Gitea, …). |
 
 The grid-down list in `data/essentials.tsv` is not a source of its own: it names ZIMs, models and
 installers from the catalogs above, and the planner takes the matches first (phase 0).
 
 The big LLM/STT/TTS/VLM/image catalog is still managed by `download-models.sh`.
+
+### Lastbook: planned like any other content
+
+[Lastbook](https://lastbook.org) is sized by this planner, not by a fixed share of the disk (#203).
+`catalog.sh` turns its live release (`lastbook_mirror.py candidates`: same URL allow-list and
+validation as a mirror run, cached daily, kept on a failed refresh) into rows: one per **pack**
+(with the base maps, which ride with any pack), one per **state map** (with its address index),
+the **model** (bucket `models`, so `VALARK_MODEL_MAX_GB` applies) and the **installers**.
+They carry a value and a size like every other row, and the owner profile weights them.
+
+- **The packs nest** (Small ⊂ Medium ⊂ All), so the planner plans at most **one**. Diversity takes
+  the Small pack; a later phase may **upgrade** the planned pack to a larger one that fits (the
+  smaller pick's bytes come back). A pack held and verified on disk (the mirror's
+  `.lastbook-verified.json`, at its recorded size; a `.part` or a symlink does not count)
+  satisfies every pack at most its size, while a larger one is still an upgrade.
+- **Maps, the model and the installers need a pack**, held or planned.
+- **Survival profile:** `data/essentials.tsv` lists the Small pack and the installers (kind
+  `lastbook`), so they are planned in phase 0 and a held Medium/All satisfies them.
+- **The fetch stays with the mirror.** `fill` hands every planned Lastbook row to
+  `scripts/tools/lastbook.sh --plan-file` in **one** run at the first row's turn.
+  `lastbook_mirror.py` then runs `--pack auto --pack-limit <planned>`, so every auto guard
+  still holds: step up never down, HEAD-confirmed upgrades, keep the held pack. It also gets
+  the planned maps, model and installers plus `--plus-held`, so whatever is held keeps
+  refreshing. The prune rules from #182/#194 are unchanged: only recorded files go, nested
+  packs only after a larger one is verified, nothing goes when the release looks truncated.
+  These files never enter `state/manifest.tsv`, so `verify` / `evict` never touch them, and
+  the web catalog (`catalog`) does not list them (the Lastbook card mirrors the release).
+- Run on its own (the weekly tool refresh, the Mirror button), `lastbook.sh` first asks
+  `librarian.sh lastbook-plan` for the same rows.
+- **The operator's choice keeps the planner out:** `VALARK_LASTBOOK_PACK=every` (the
+  server / NAS opt-in) or one explicit pack, an explicit `VALARK_LASTBOOK_BUDGET`,
+  `VALARK_LASTBOOK_PLAN=0`, or a selection option on `lastbook.sh`'s command line size Lastbook
+  by its own share as before. `VALARK_LASTBOOK_BUDGET_PCT` is **deprecated**: set on its own it
+  also does this, and logs a warning.
+- A `VALARK_LASTBOOK_DIR` on another disk is planned against the librarian's budget. At fetch
+  time the mirror still stops at that disk's own reserve.
 
 ### Model scout (`hf_scout.py`)
 
@@ -335,6 +372,7 @@ scripts/librarian.sh request model <id>   # pin + fetch ONE item now (content|mo
 scripts/librarian.sh pin content <id>     # keep an item: pins are never evicted
 scripts/librarian.sh unpin <id>    # files kept, but evictable again
 scripts/librarian.sh pins --refill # list pins (--refill re-fetches any that went missing)
+scripts/librarian.sh lastbook-plan # the Lastbook rows the planner picks (what lastbook.sh fetches)
 ```
 
 Downloads prefer **aria2** (8 connections, ~3x faster on per-connection-throttled

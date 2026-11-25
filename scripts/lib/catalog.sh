@@ -7,13 +7,15 @@
 #   2. data/models-extra.tsv  (curated small high-value models)
 #      + <state>/catalog/models-scouted.tsv (weekly Hugging Face scout, hf_scout.py)
 #   3. data/installers.tsv    (OS / router / netboot images)
+#   4. Lastbook's live release (lastbook_mirror.py candidates, cached daily; #203)
 #
 # Normalized candidate schema (TAB-delimited), consumed by librarian.sh:
 #   id  bucket  category  value  bytes  source  url  dest  extra
 #     bucket : content | models | installers   (coarse diversity group)
-#     source : zim | hf-file | hf-repo | url
+#     source : zim | hf-file | hf-repo | url | lastbook
 #     extra  : zim -> content_key (name, for cross-flavour dedup)
 #              hf-file -> repo id ; hf-repo -> --include glob ; url -> sha_url
+#              lastbook -> kind|needs|rel=size,...  (dest = the Lastbook dir)
 #
 # This file is sourced by librarian.sh (which has already sourced valark-env).
 ###############################################################################
@@ -226,9 +228,63 @@ catalog_installer_candidates() {
     }' "$f"
 }
 
+# --- Lastbook: the current release as planner candidates (#203) ---------------
+# scripts/lib/lastbook_mirror.py `candidates` reads the live release manifests (same allow-list and
+# validation as a mirror run; one bad entry fails it) and prints one row per pack, state map (with
+# its address index), the model and the installers. The planner decides what fits next to the
+# ZIMs, models and installers; scripts/tools/lastbook.sh fetches the planned rows through the
+# mirror's own guards. Cached daily like the ZIM catalog: only a complete run replaces the cache,
+# a failed one is not retried for VALARK_LASTBOOK_RETRY (default 1 day), bounded by
+# VALARK_LASTBOOK_TIMEOUT. The planner is the default sizing; it is OFF (no rows: lastbook.sh
+# sizes itself as before) when the operator chose the selection: VALARK_LASTBOOK_PACK other than
+# auto (every = the server opt-in, or one pack), an explicit VALARK_LASTBOOK_BUDGET, the deprecated
+# VALARK_LASTBOOK_BUDGET_PCT, or VALARK_LASTBOOK_PLAN=0.
+LASTBOOK_PY="${PROJECT_ROOT}/scripts/lib/lastbook_mirror.py"
+LASTBOOK_CACHE="${CATALOG_DIR}/lastbook.tsv"
+catalog_lastbook_dir() { echo "${VALARK_LASTBOOK_DIR:-${CONTENT_DIR:-${VALARK_HOME:-$PROJECT_ROOT}/content}/lastbook}"; }
+catalog_lastbook_planned() {
+    [ "${VALARK_LASTBOOK_PLAN:-1}" != "0" ] || return 1
+    case "$(printf '%s' "${VALARK_LASTBOOK_PACK:-auto}" | tr 'A-Z' 'a-z')" in auto) ;; *) return 1 ;; esac
+    [ -z "${VALARK_LASTBOOK_BUDGET:-}" ] && [ -z "${VALARK_LASTBOOK_BUDGET_PCT:-}" ]
+}
+catalog_refresh_lastbook() {
+    catalog_lastbook_planned || return 0
+    mkdir -p "$CATALOG_DIR" 2>/dev/null || true
+    local now; now=$(date +%s)
+    if [ "$1" != "--force" ]; then
+        [ -s "$LASTBOOK_CACHE" ] && [ "$(_scout_age "$LASTBOOK_CACHE" "$now")" -lt "${ZIM_CACHE_TTL}" ] && return 0
+        [ "$(_scout_age "${LASTBOOK_CACHE}.attempt" "$now")" -lt "${VALARK_LASTBOOK_RETRY:-86400}" ] && return 0
+    fi
+    local tmp="${LASTBOOK_CACHE}.tmp.$$" rc=0
+    timeout "${VALARK_LASTBOOK_TIMEOUT:-300}" python3 "$LASTBOOK_PY" candidates --dest "$(catalog_lastbook_dir)" \
+        --maps "${VALARK_LASTBOOK_MAPS:-auto}" --addresses "${VALARK_LASTBOOK_ADDRESSES:-follow}" \
+        --model "${VALARK_LASTBOOK_MODEL:-auto}" --apps "${VALARK_LASTBOOK_APPS:-current}" \
+        > "$tmp" 2>"${LASTBOOK_CACHE}.err" || rc=$?
+    if [ "$rc" -eq 0 ] && grep -q '^# lastbook candidates' "$tmp" 2>/dev/null; then
+        mv -f "$tmp" "$LASTBOOK_CACHE"; rm -f "${LASTBOOK_CACHE}.attempt" 2>/dev/null
+        return 0
+    fi
+    rm -f "$tmp" 2>/dev/null
+    : > "${LASTBOOK_CACHE}.attempt"
+    return 1
+}
+# Rows from the cache, re-pointed at the CURRENT Lastbook dir (VALARK_LASTBOOK_DIR may have moved
+# since the cache was written) and weighted by the owner profile like every other bucket.
+catalog_lastbook_candidates() {
+    catalog_lastbook_planned || return 0
+    [ -s "$LASTBOOK_CACHE" ] || return 0
+    awk -F'\t' -v OFS='\t' -v d="$(catalog_lastbook_dir)" \
+        -v wc="$(_valark_profile_weight content)" -v wm="$(_valark_profile_weight models)" '
+    /^#/ {next}
+    NF >= 9 && $6 == "lastbook" {
+        w = ($2 == "models") ? wm : wc; $4 = int(($4 + 0) * (w + 0 > 0 ? w : 1)); $8 = d; print
+    }' "$LASTBOOK_CACHE"
+}
+
 # --- Unified candidate stream -------------------------------------------------
 catalog_all_candidates() {
     catalog_zim_candidates
     catalog_model_candidates
     catalog_installer_candidates
+    catalog_lastbook_candidates
 }

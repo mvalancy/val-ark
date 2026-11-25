@@ -58,7 +58,9 @@ later). See [README](README.md).
   and the pack ladder lets one rule fit any disk, from a small one (Small) to a big drive (All).
   Budgeting on bytes *still to fetch* makes the choice stable: once a pack is held it costs 0, so a
   later full disk never makes `auto` drop it or flap. The 50% share leaves the librarian (Wikipedia,
-  models, installers) the other half instead of letting whichever runs first take the disk. All
+  models, installers) the other half instead of letting whichever runs first take the disk.
+  *(Superseded by #203: the librarian's planner now sizes Lastbook; the share remains only for an
+  operator-chosen selection, see "Planned by the librarian" below.)* All
   downloads resume from `.part`, so the loop's 2-hour refresh window just continues a big pack next time.
 - **Why every-pack is opt-in for servers:** the packs nest, so `every` stores Small and Medium again
   inside All: worth it only for a mirror that hands packs to other machines of different sizes. On a
@@ -227,8 +229,33 @@ later). See [README](README.md).
     run `lastbook.sh --pack all`). That fetches the current All whatever its size. The old file is
     kept while it is larger than the verified new one (the held-pack guard), so delete it by hand
     once the new one is verified if the disk is tight.
-- **Follow-up (not done):** feeding Lastbook to the librarian as candidates (e.g. an `essentials.tsv`
-  rank) so value-per-byte, not a fixed share, decides its room.
+- **Planned by the librarian, not a fixed share (#203).** This supersedes the 50% share as the
+  default: a share either starved Lastbook on a disk with room or took half of a small disk from
+  everything else, whatever the profile.
+  - *Candidates.* `lastbook_mirror.py candidates` prints one planner row per pack (plus the base
+    maps), state map (plus its address index), the model (bucket `models`) and the installers.
+    It applies the same allow-list and validation as a mirror run, and a row with no size is
+    left out (#230). `catalog.sh` caches these rows daily, points them at the current Lastbook
+    dir and applies the profile weights. `planner.py` then places them with everything else.
+  - *Nesting.* The planner plans at most one pack per Lastbook dir. A later phase may replace the
+    planned pack with a larger one (its bytes are refunded), and a pack held and verified at its
+    recorded size satisfies every pack no larger than it. Maps, the model and the installers
+    need a pack, held or planned. The survival profile lists `pack:small` and `app:*` in
+    `essentials.tsv` (new kind `lastbook`).
+  - *Fetch and prune stay in the mirror.* `librarian.sh fill` passes all the planned Lastbook rows
+    to `lastbook.sh --plan-file` in one run (prune needs the whole selection at once). That run is
+    `--pack auto --pack-limit <planned id>` plus the planned maps, model and installers, and
+    `--plus-held`. So the auto guards (step up never down, HEAD confirmation, keep the held pack,
+    nested prune after a verified larger pack) and the #182/#194 prune rules all still apply. The
+    files never enter `manifest.tsv`, so `verify` and `evict` never delete them. Run alone (the
+    weekly refresh or the Mirror button), `lastbook.sh` asks `librarian.sh lastbook-plan` first.
+    A flock keeps the two from running at once.
+  - *Opt-outs.* `VALARK_LASTBOOK_PACK=every` stays the server opt-in, and it, an explicit pack, an
+    explicit `VALARK_LASTBOOK_BUDGET`, `VALARK_LASTBOOK_PLAN=0` or CLI selection options keep the
+    planner out (no rows), using the share as before. `VALARK_LASTBOOK_BUDGET_PCT` is kept as a
+    **deprecated** fallback: set on its own it selects the old share mode and logs a warning.
+  - *Known limit.* A `VALARK_LASTBOOK_DIR` on another disk is planned against the librarian's
+    budget for the data root. At fetch time the mirror still stops at that disk's own reserve.
 
 ## 2026‑11 — cad-agent references: a private, content-addressed archive of every cited source (cad-agent#323)
 - **Context:** cad-agent keeps a reference knowledge base of ~760 sources (≈330 GitHub repos, ≈350

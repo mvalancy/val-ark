@@ -734,19 +734,88 @@ VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_PACK=nope bash "$SH" > "$T/sh.ou
 check "lastbook.sh: bad option -> non-zero + error" '[ "$rc" != 0 ] && grep -q "bad option" "$T/sh.out"'
 VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_BUDGET_PCT=500 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
 check "lastbook.sh: BUDGET_PCT over 100 is clamped, not rejected" '[ "$rc" != 64 ] && grep -q "^# Lastbook manifest" "$T/sh.out"'
-# the default budget is worked out by lastbook_mirror.py on the Lastbook dir (not DATA_ROOT), as a share;
+# the (deprecated) share budget is worked out by lastbook_mirror.py on the Lastbook dir (not DATA_ROOT);
 # --cap (VALARK_MAX_GB) only when the dir is inside the data trees that cap accounts for
 mkdir -p "$T/bin"; REALPY=$(command -v python3)
 printf '#!/bin/sh\n[ "$(basename "$1")" = lastbook_mirror.py ] && echo "$*" >> "%s"\nexec "%s" "$@"\n' "$T/py.args" "$REALPY" > "$T/bin/python3"; chmod +x "$T/bin/python3"
 : > "$T/py.args"
-PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_MAX_GB=1 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
+PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_BUDGET_PCT=50 VALARK_MAX_GB=1 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
 check "lastbook.sh: default budget = --share PCT + --cap (VALARK_MAX_GB) for content/lastbook, no DATA_ROOT --budget" \
     'grep -q -- "--dest .*/content/lastbook .*--share 50 --cap [0-9]" "$T/py.args" && ! grep -q -- "--budget" "$T/py.args" && grep -q "^# Lastbook manifest" "$T/sh.out"'
 : > "$T/py.args"
 PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$T/elsewhere/lastbook" VALARK_MAX_GB=1 \
-    bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
+    VALARK_LASTBOOK_BUDGET_PCT=50 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
 check "lastbook.sh: a Lastbook dir outside the data trees gets --share but no --cap, and says so" \
     'grep -q -- "--dest $T/elsewhere/lastbook .*--share 50" "$T/py.args" && ! grep -q -- "--cap\|--budget" "$T/py.args" && grep -q "outside the Val Ark data trees" "$T/sh.out"'
+
+# --- 12. planned by the librarian (#203) --------------------------------------------------------
+# candidates: one planner row per pack (+ base maps), state map (+ its address index), model, installers
+VALARK_LASTBOOK_REWRITE="$REAL" python3 "$PY" candidates --dest /lb > "$T/cand.out" 2>"$T/cand.err"; rc=$?
+cid() { grep -v '^#' "$T/cand.out" | cut -f1 | sort | tr '\n' ' ' | sed 's/ $//'; }
+cfield() { awk -F'\t' -v i="$1" -v c="$2" '$1==i {print $c}' "$T/cand.out"; }
+check "candidates: exit 0 + header" '[ "$rc" = 0 ] && head -1 "$T/cand.out" | grep -q "^# lastbook candidates manifest=2026-11-13 app=1.1.11 rows=8"'
+check "candidates: 3 packs, 3 state maps, the model, the installers" '[ "$(cid)" = "lastbook:app:1.1.11 lastbook:map:AK lastbook:map:CA lastbook:map:TX lastbook:model:gemma-4-26b-a4b lastbook:pack:all lastbook:pack:medium lastbook:pack:small" ]'
+check "candidates: 9 planner columns, source lastbook, dest = --dest" '[ -z "$(grep -v "^#" "$T/cand.out" | awk -F"\t" "NF!=9 || \$6!=\"lastbook\" || \$8!=\"/lb\"")" ]'
+check "candidates: a pack row = its file + the base map" '[ "$(cfield lastbook:pack:small 5)" = $((7691528852 + 1100000000)) ] && cfield lastbook:pack:small 9 | grep -q "^pack|-|packs/Lastbook-Small-20261113.zip=7691528852,maps/Lastbook-Map-base.zip=1100000000$"'
+check "candidates: a map row carries its address index and needs a pack" 'cfield lastbook:map:CA 9 | grep -q "^map|pack|maps/Lastbook-Map-CA.zip=3218756405,addresses/Lastbook-Addresses-CA.zip=526161211$"'
+check "candidates: the model is a models-bucket row" '[ "$(cfield lastbook:model:gemma-4-26b-a4b 2)" = models ] && [ "$(cfield lastbook:model:gemma-4-26b-a4b 5)" = 16947541728 ]'
+check "candidates: larger packs carry more value (fill tries them first)" '[ "$(cfield lastbook:pack:small 4)" -lt "$(cfield lastbook:pack:medium 4)" ] && [ "$(cfield lastbook:pack:medium 4)" -lt "$(cfield lastbook:pack:all 4)" ]'
+VALARK_LASTBOOK_REWRITE="$REAL" python3 "$PY" candidates --dest /lb --maps CA --addresses none --model no --apps none > "$T/cand.out" 2>&1
+check "candidates: --maps/--addresses/--model/--apps filter what is offered" '[ "$(cid)" = "lastbook:map:CA lastbook:pack:all lastbook:pack:medium lastbook:pack:small" ] && cfield lastbook:map:CA 9 | grep -q "^map|pack|maps/Lastbook-Map-CA.zip=3218756405$"'
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/nosize/dl/ https://lastbook.org/=$B/nosize/site/ https://huggingface.co/=$B/nosize/hf/" \
+    python3 "$PY" candidates --dest /lb > "$T/cand.out" 2>&1
+check "candidates: a pack with no size is left out (never looks free), and says so" '! cid | grep -q "pack:all" && grep -q "^# skipped pack:all" "$T/cand.out"'
+rm -rf "$T/www/bad"; mkdir -p "$T/www/bad/dl" "$T/www/bad/site"; cp "$FIX/app-v1.json" "$T/www/bad/dl/"; cp "$FIX/SHA256SUMS.txt" "$T/www/bad/site/"
+python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); m["packs"][0]["files"][0]["url"]="https://evil.example/x.zip"; json.dump(m,open(sys.argv[2],"w"))' "$FIX/manifest-v1.json" "$T/www/bad/dl/manifest-v1.json"
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/bad/dl/ https://lastbook.org/=$B/bad/site/" python3 "$PY" candidates --dest /lb > "$T/cand.out" 2>/dev/null; rc=$?
+check "candidates: an off-list URL -> exit 1, no rows" '[ "$rc" = 1 ] && [ ! -s "$T/cand.out" ]'
+
+# --pack-limit: auto over the planned id(s) + what is held, with every auto guard
+plan --pack-limit medium --budget -1 > "$T/plan.out"; rc=$?
+check "--pack-limit medium, unlimited: Medium (not All)" '[ "$(got get pack)" = medium ] && [ "$rc" = 0 ]'
+plan --pack-limit "" --maps none --model no --apps none --budget -1 > "$T/plan.out"; rc=$?
+check "--pack-limit empty, nothing held: no pack, exit 0, no 'does not fit' note" '[ -z "$(got get pack)$(got get map)" ] && [ "$rc" = 0 ] && ! grep -q "no Lastbook pack" "$T/plan.out"'
+D40="$T/m40"; held_all "$D40"
+VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" plan --dest "$D40" --pack-limit small --budget -1 > "$T/plan.out" 2>&1
+check "--pack-limit small with All held: the held All stays chosen (step up, never down)" '[ "$(got get pack)" = all ]'
+mir --dest "$D40" --pack-limit "" --maps none --apps none --model no > "$T/out" 2>"$T/err"; rc=$?
+check "--pack-limit empty with All held: keeps All, prunes the nested Small/Medium" '[ "$rc" = 0 ] && [ -s "$D40/packs/Lastbook-All.zip" ] && [ ! -e "$D40/packs/Lastbook-Medium.zip" ] && grep -q "pruned packs/Lastbook-Medium.zip (nested" "$T/err"'
+# --plus-held: what is held keeps refreshing on top of the planned selection
+VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" plan --dest "$D" --pack-limit "" --maps none --model no --apps none --plus-held --budget -1 > "$T/plan.out" 2>&1
+check "--plus-held: the held pack, map, address index, model and installers stay selected" \
+    '[ "$(got get pack)" = small ] && [ "$(got get map)" = "CA base" ] && [ "$(got get address)" = CA ] && [ -n "$(got get model)" ] && [ "$(got get app)" = 1.1.11 ]'
+VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" plan --dest "$D" --pack-limit "" --maps TX --model no --apps none --plus-held --budget -1 > "$T/plan.out" 2>&1
+check "--plus-held + planned TX: both maps" '[ "$(got get map)" = "CA TX base" ]'
+
+# lastbook.sh fetches what the planner chose (--plan-file = librarian.sh fill's rows)
+LBD="$T/planned/lastbook"
+printf 'lastbook:pack:small\tcontent\tlastbook:pack\t820\t1\tlastbook\tu\t%s\tpack|-|x=1\t1\nlastbook:map:TX\tcontent\tlastbook:maps\t640\t1\tlastbook\tu\t%s\tmap|pack|x=1\t2\n' "$LBD" "$LBD" > "$T/lbplan.tsv"
+: > "$T/py.args"
+PATH="$T/bin:$PATH" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD" VALARK_DL_RETRY_DELAY=0 \
+    bash "$SH" --plan-file "$T/lbplan.tsv" > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh --plan-file: exit 0, the planned pack + map, no model / installers" \
+    '[ "$rc" = 0 ] && [ -s "$LBD/packs/Lastbook-Small-20261113.zip" ] && [ -s "$LBD/maps/Lastbook-Map-TX.zip" ] && [ -s "$LBD/addresses/Lastbook-Addresses-TX.zip" ] && [ ! -e "$LBD/models" ] && [ ! -e "$LBD/app" ] || { cat "$T/sh.out" >&2; false; }'
+check "lastbook.sh --plan-file: auto limited to the planned pack, plus held, no share budget" \
+    'grep -q -- "--pack auto --pack-limit small --maps TX --addresses follow --model no --apps none --plus-held --budget -1" "$T/py.args" && ! grep -q -- "--share" "$T/py.args"'
+check "lastbook.sh --plan-file: says the planner sized it" 'grep -q "sized by the librarian.s planner: pack:small map:TX" "$T/sh.out"'
+printf '' > "$T/lbempty.tsv"
+VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD" bash "$SH" --plan-file "$T/lbempty.tsv" > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh, nothing new planned: keeps + refreshes what is held, exit 0" '[ "$rc" = 0 ] && [ -s "$LBD/packs/Lastbook-Small-20261113.zip" ] && [ -s "$LBD/maps/Lastbook-Map-TX.zip" ] && grep -q "pack: small" "$T/sh.out"'
+VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_DIR="$LBD" VALARK_LASTBOOK_PACK=every VALARK_LASTBOOK_BUDGET=-1 \
+    bash "$SH" plan --plan-file "$T/lbplan.tsv" > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh: every (server opt-in) ignores the planner's rows" '[ "$rc" = 0 ] && [ "$(grep -c "^get	pack" "$T/sh.out")" = 3 ] && grep -q "planner.s rows are ignored" "$T/sh.out"'
+VALARK_LASTBOOK_REWRITE="$TINY" VALARK_LASTBOOK_BUDGET_PCT=50 bash "$SH" plan > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh: VALARK_LASTBOOK_BUDGET_PCT still works, with a deprecation warning" '[ "$rc" = 0 ] && grep -q "BUDGET_PCT is deprecated" "$T/sh.out" && grep -q "^# Lastbook manifest" "$T/sh.out"'
+# On its own (weekly refresh / the Mirror button) lastbook.sh asks the librarian's planner first:
+# end to end on a fresh data root (a fresh stub ZIM cache keeps the Kiwix fetch offline).
+D2="$T/disk2"; mkdir -p "$D2/val-ark/state/catalog"; printf 'x\t\tother\teng\t0\t0\t\t\n' > "$D2/val-ark/state/catalog/zim.tsv"
+VAL_ARK_DATA="$D2" VALARK_LASTBOOK_REWRITE="$TINY" VALARK_SCOUT=0 VALARK_DL_RETRY_DELAY=0 \
+    bash "$SH" > "$T/sh.out" 2>&1; rc=$?
+check "lastbook.sh alone: the planner sizes it (unlimited tiny disk -> All, one pack)" \
+    '[ "$rc" = 0 ] && [ -s "$D2/val-ark/content/lastbook/packs/Lastbook-All.zip" ] && [ -z "$(ls "$D2/val-ark/content/lastbook/packs" | grep -v Lastbook-All.zip)" ] || { cat "$T/sh.out" >&2; false; }'
+check "lastbook.sh alone: the candidates cache was written by the librarian" 'grep -q "^lastbook:pack:all	" "$D2/val-ark/state/catalog/lastbook.tsv"'
+check "lastbook.sh alone: installers + maps planned too" '[ -d "$D2/val-ark/content/lastbook/app/1.1.11" ] && [ -s "$D2/val-ark/content/lastbook/maps/Lastbook-Map-CA.zip" ]'
+check "lastbook.sh: one mirror run at a time (flock)" 'grep -q "flock -n 8" "$SH"'
 
 # server.js reports a VALARK_LASTBOOK_DIR outside content/ under lastbook/, flagged external (not served)
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"

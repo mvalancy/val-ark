@@ -30,8 +30,9 @@ bash -n "$DET" && pass || fail "tailscale-mode.sh must be valid bash"
 # A fake /proc: self/ns/net + self/cgroup describe "us" (the host netns by default),
 # and an unrelated process so the scan has something to skip.
 mk_proc() {  # DIR [SELF_CGROUP]
-    mkdir -p "$1/self/ns" "$1/1"
+    mkdir -p "$1/self/ns" "$1/self/net" "$1/1"
     ln -sfn 'net:[4026531840]' "$1/self/ns/net"
+    : > "$1/self/net/dev"      # its inode stands for our network namespace
     printf '%s\n' "${2:-0::/user.slice/user-1000.slice/session-1.scope}" > "$1/self/cgroup"
     printf '/sbin/init\0splash\0' > "$1/1/cmdline"
 }
@@ -42,6 +43,11 @@ add_daemon() {
     printf '%s\0' "$@" > "$d/cmdline"
     [ "$ns" = - ] || ln -sfn "$ns" "$d/ns/net"
     [ "$cg" = - ] || printf '%s\n' "$cg" > "$d/cgroup"
+}
+# set_netdev DIR PID same|other : /proc/<pid>/net/dev with our inode or another one
+set_netdev() {
+    mkdir -p "$1/$2/net"
+    if [ "$3" = same ]; then ln -sfn ../../self/net/dev "$1/$2/net/dev"; else : > "$1/$2/net/dev"; fi
 }
 HOSTNS='net:[4026531840]'; CTNS='net:[4026532999]'
 HOSTCG='0::/system.slice/tailscaled.service'
@@ -89,6 +95,17 @@ mk_proc "$T/p-ctns";    add_daemon "$T/p-ctns" 5151 "$CTNS" "$DOCKERCG" tailscal
 mk_proc "$T/p-otherns"; add_daemon "$T/p-otherns" 4242 "$CTNS" "$HOSTCG" "${U[@]}"
 # Val Ark itself runs in the same container as a userspace tailscaled -> flagged
 mk_proc "$T/p-samect" "$DOCKERCG"; add_daemon "$T/p-samect" 5151 - "$DOCKERCG" tailscaled --tun=userspace-networking
+# netns unreadable (root's daemon, non-root server) but net/dev shows OUR namespace:
+# a userspace container with network_mode: host -> critical
+mk_proc "$T/p-hostnet"; add_daemon "$T/p-hostnet" 4242 - "$HOSTCG" "${K[@]}"; set_netdev "$T/p-hostnet" 4242 same
+                        add_daemon "$T/p-hostnet" 5151 - "$DOCKERCG" tailscaled --tun=userspace-networking
+                        set_netdev "$T/p-hostnet" 5151 same
+# netns unreadable, net/dev shows ANOTHER namespace -> skipped (not even unknown)
+mk_proc "$T/p-inodiff"; add_daemon "$T/p-inodiff" 5151 - "$DOCKERCG" tailscaled --tun=userspace-networking
+                        set_netdev "$T/p-inodiff" 5151 other
+# systemd-nspawn container, nothing readable -> unknown
+mk_proc "$T/p-nspawn";  add_daemon "$T/p-nspawn" 5151 - '0::/machine.slice/systemd-nspawn@ct1.service/payload' \
+                            tailscaled --tun=userspace-networking
 # a control character in --tun=NAME must not reach the JSON
 mk_proc "$T/p-cntrl";   add_daemon "$T/p-cntrl" 4242 "$HOSTNS" "$HOSTCG" tailscaled "--tun=ts$(printf '\001\033')x"
 fake_net "$T/n-ts" lo eth0 tailscale0
@@ -124,8 +141,15 @@ J="$(det none "$T/p-custom" "$T/n-custom")";    expect "custom --tun=ts9 present
 J="$(det none "$T/p-child" "$T/n-plain")";      expect "be-child helper alone is not a daemon" absent "$J"
 # The daemon's own word wins over a missing interface name we guessed...
 J="$(det "$T/ts-kernel" "$T/p-kernel" "$T/n-plain")"; expect "status TUN true beats a missing tailscale0" kernel "$J"
-# ...and over any argv (a container's userspace daemon shows up in host /proc).
-J="$(det "$T/ts-kernel" "$T/p-user" "$T/n-ts")"; expect "status TUN true beats a userspace argv" kernel "$J"
+# ...and over any argv it can't prove is in our network (a container's userspace
+# daemon shows up in host /proc).
+J="$(det "$T/ts-kernel" "$T/p-host-ct" "$T/n-ts")";  expect "status TUN true + userspace container in its own netns" kernel "$J"
+J="$(det "$T/ts-kernel" "$T/p-host-ct2" "$T/n-ts")"; expect "status TUN true + userspace container, netns unproven" kernel "$J"
+echo "$J" | grep -q '"evidence":\[\]' && pass || fail "kernel via the CLI must carry no evidence ($J)"
+# But a second, userspace daemon PROVEN to share our network still proxies peers.
+J="$(det "$T/ts-kernel" "$T/p-user" "$T/n-ts")";     expect "status TUN true + userspace daemon in our netns (ns/net)" userspace "$J"
+J="$(det "$T/ts-kernel" "$T/p-hostnet" "$T/n-ts")";  expect "status TUN true + host-network userspace container (net/dev)" userspace "$J"
+echo "$J" | grep -q 'pid 5151' && pass || fail "the host-network container must be the evidence ($J)"
 # Only BackendState Running counts as running.
 J="$(det "$T/ts-stopped" "$T/p-user" "$T/n-plain")"; expect "BackendState Stopped is not running" absent "$J"
 echo "$J" | grep -q '"running":false' && pass || fail "a Stopped daemon must report running=false ($J)"
@@ -138,6 +162,9 @@ echo "$J" | grep -q '"userspace":false' && echo "$J" | grep -q 'container' \
 J="$(det none "$T/p-ctns" "$T/n-plain")";       expect "container-only daemon in its own netns" absent "$J"
 J="$(det none "$T/p-otherns" "$T/n-plain")";    expect "userspace daemon in another netns is not flagged" absent "$J"
 J="$(det none "$T/p-samect" "$T/n-plain")";     expect "userspace daemon in our own container" userspace "$J"
+J="$(det none "$T/p-hostnet" "$T/n-ts")";       expect "host-network userspace container, netns unreadable (net/dev inode)" userspace "$J"
+J="$(det none "$T/p-inodiff" "$T/n-plain")";    expect "container in another netns by net/dev inode" absent "$J"
+J="$(det none "$T/p-nspawn" "$T/n-plain")";     expect "systemd-nspawn container (machine.slice), nothing readable" unknown "$J"
 # Control characters never reach the JSON.
 J="$(det none "$T/p-cntrl" "$T/n-plain")";      expect "odd --tun name with no interface" userspace "$J"
 printf '%s' "$J" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if all(c.isprintable() for e in d["evidence"] for c in e) else 1)' \
@@ -148,7 +175,7 @@ VALARK_TAILSCALE_CMD="$T/does-not-exist" VALARK_TAILSCALE_PROC="$T/nope" VALARK_
 python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$T/o.json" && pass || fail "detector must print valid JSON"
 # Works without timeout(1) (stock macOS): a PATH with everything it needs but timeout.
 mkdir -p "$T/bin"
-for c in bash readlink cat tr sed grep awk date uname mkdir mv rm dirname head; do
+for c in bash readlink stat cat tr sed grep awk date uname mkdir mv rm dirname head; do
     p="$(command -v "$c")" && ln -sf "$p" "$T/bin/$c"
 done
 J="$(PATH="$T/bin" VALARK_TAILSCALE_CMD="$T/ts-user" VALARK_TAILSCALE_PROC="$T/p-none" VALARK_TAILSCALE_SYSNET="$T/n-plain" \

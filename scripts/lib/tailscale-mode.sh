@@ -14,16 +14,22 @@
 #
 # Decision, in order:
 #   1. `tailscale status --json` answers with BackendState "Running": its "TUN"
-#      decides. true = kernel (whatever any argv says), false = userspace.
+#      decides. false = userspace. true = kernel, unless a second tailscaled PROVEN
+#      to share our network namespace (step 2's ns/net or net/dev check, never the
+#      cgroup guess) has --tun=userspace-networking (a host-network container).
 #      A BackendState other than Running = not connected = absent.
 #   2. No answer from the CLI: every tailscaled in /proc (be-child helpers skipped)
 #      is classified:
-#        - its /proc/<pid>/ns/net differs from /proc/self/ns/net (both readable):
-#          another network namespace (a container with its own network), so its
-#          127.0.0.1 isn't ours: skipped;
-#        - namespace unreadable and /proc/<pid>/cgroup names docker, containerd,
-#          kubepods, libpod or lxc (and isn't our own cgroup): a container we can't
-#          check -> "unknown" with evidence (a warning, never critical);
+#        - another network namespace (a container with its own network), so its
+#          127.0.0.1 isn't ours: skipped. Proven by /proc/<pid>/ns/net differing
+#          from /proc/self/ns/net (both readable), else by the inode of
+#          /proc/<pid>/net/dev differing from /proc/self/net/dev (world-readable,
+#          one per network namespace: works for root's tailscaled seen by a
+#          non-root server);
+#        - neither readable and /proc/<pid>/cgroup names docker, containerd,
+#          kubepods, libpod, lxc or machine.slice (systemd-nspawn), and isn't our
+#          own cgroup: a container we can't check -> "unknown" with evidence (a
+#          warning, never critical);
 #        - otherwise a local daemon: --tun=userspace-networking in its argv, or no
 #          tailscale0 / --tun=NAME interface in /sys/class/net (Linux) -> userspace;
 #          the interface present -> kernel.
@@ -49,7 +55,7 @@ set -u
 
 PROC="${VALARK_TAILSCALE_PROC:-/proc}"
 SYSNET="${VALARK_TAILSCALE_SYSNET:-/sys/class/net}"
-CONTAINER_RE='docker|containerd|kubepods|libpod|lxc'
+CONTAINER_RE='docker|containerd|kubepods|libpod|lxc|machine\.slice'
 
 ts_cli() {
     local c="${VALARK_TAILSCALE_CMD:-}"
@@ -83,13 +89,18 @@ sysnet_ok() {
 
 EVIDENCE=()
 LOCAL_USER=0; LOCAL_KERNEL=0; LOCAL_SEEN=0; CONTAINER_SEEN=0
+CONFIRMED_USER=0; CONFIRMED_EVIDENCE=()   # --tun=userspace-networking in a netns proven to be ours
 
 # Classify every tailscaled in $PROC (see the header). Reads cmdline files directly,
 # so no `pgrep -f` pattern can match its own argv (gotchas.md, tailscale-ssh).
 scan_daemons() {
-    local f d pid a0 args tun ifname ns_self ns_pid cg_self cg_pid
+    local f d pid a0 args tun ifname ns_self ns_pid ino_self ino_pid cg_self cg_pid same e
     [ -d "$PROC" ] || return 0
     ns_self="$(readlink "$PROC/self/ns/net" 2>/dev/null)" || ns_self=""
+    # /proc/<pid>/net/dev is world-readable and its inode differs per network
+    # namespace, so it still works when ns/net isn't readable (root's tailscaled
+    # seen by a non-root server).
+    ino_self="$(stat -L -c %i "$PROC/self/net/dev" 2>/dev/null)" || ino_self=""
     cg_self="$(cat "$PROC/self/cgroup" 2>/dev/null)" || cg_self=""
     for f in "$PROC"/[0-9]*/cmdline; do
         [ -r "$f" ] || continue
@@ -100,10 +111,19 @@ scan_daemons() {
         printf '%s\n' "$args" | sed -n 2p | grep -qx 'be-child' && continue
         d="${f%/cmdline}"; pid="${d##*/}"
 
+        # same: 1 = our network namespace (proven), 0 = another one, "" = can't tell
+        same=""
         ns_pid="$(readlink "$d/ns/net" 2>/dev/null)" || ns_pid=""
         if [ -n "$ns_self" ] && [ -n "$ns_pid" ]; then
-            [ "$ns_pid" = "$ns_self" ] || continue          # its own network: not our 127.0.0.1
+            [ "$ns_pid" = "$ns_self" ] && same=1 || same=0
         else
+            ino_pid="$(stat -L -c %i "$d/net/dev" 2>/dev/null)" || ino_pid=""
+            if [ -n "$ino_self" ] && [ -n "$ino_pid" ]; then
+                [ "$ino_pid" = "$ino_self" ] && same=1 || same=0
+            fi
+        fi
+        [ "$same" = 0 ] && continue                          # its own network: not our 127.0.0.1
+        if [ -z "$same" ]; then
             cg_pid="$(cat "$d/cgroup" 2>/dev/null)" || cg_pid=""
             if printf '%s' "$cg_pid" | grep -qE "$CONTAINER_RE" && [ "$cg_pid" != "$cg_self" ]; then
                 CONTAINER_SEEN=1; continue
@@ -113,7 +133,9 @@ scan_daemons() {
         LOCAL_SEEN=1
         tun="$(printf '%s\n' "$args" | tun_arg)"
         if [ "$tun" = "userspace-networking" ]; then
-            LOCAL_USER=1; EVIDENCE+=("tailscaled (pid ${pid}) was started with --tun=userspace-networking")
+            e="tailscaled (pid ${pid}) was started with --tun=userspace-networking"
+            LOCAL_USER=1; EVIDENCE+=("$e")
+            [ "$same" = 1 ] && { CONFIRMED_USER=1; CONFIRMED_EVIDENCE+=("$e"); }
             continue
         fi
         ifname="${tun:-tailscale0}"
@@ -141,7 +163,14 @@ detect() {
 
     if [ "$backend" = Running ]; then
         running=true
-        if [ "$tunflag" = true ]; then state=kernel
+        if [ "$tunflag" = true ]; then
+            # The CLI's daemon has a TUN, but a second, userspace tailscaled proven to
+            # share our network (e.g. a container with network_mode: host) still
+            # proxies tailnet peers to our 127.0.0.1.
+            scan_daemons
+            if [ "$CONFIRMED_USER" = 1 ]; then state=userspace; EVIDENCE=("${CONFIRMED_EVIDENCE[@]}")
+            else state=kernel; EVIDENCE=()
+            fi
         elif [ "$tunflag" = false ]; then state=userspace; EVIDENCE+=("tailscale status reports no TUN interface")
         fi
     elif [ -n "$backend" ]; then

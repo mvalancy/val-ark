@@ -83,7 +83,7 @@ DIAGRAMS = {
         nodes={
             'disk': (0, 0, 'disk', 'Disk check', 'mounted, writable', 0),
             'layout': (0, 0, 'wrench', 'Repair layout', 'folders, symlinks', 1),
-            'web': (0, 0, 'globe', 'Web up', 'server, services', 2),
+            'web': (0, 0, 'globe', 'Keep it up', 'server, apps, network', 2),
             'self': (0, 0, 'ark', 'Copy itself', 'for new nodes', 3),
             'catalog': (0, 0, 'map', 'Refresh', 'live catalogs', 4),
             'links': (0, 0, 'magnifier', 'Fix dead links', 'tool, installer URLs', 5),
@@ -402,6 +402,10 @@ def main(argv):
             print(f'stale or missing: docs/img/flow/{n}')
         for n in extra:
             print(f'not produced by the generator: docs/img/flow/{n}')
+        for d, spec in DIAGRAMS.items():   # every diagram belongs in the picture book too
+            if 'docs/HOW-IT-WORKS.md' not in spec['used']:
+                print(f'{d}: add docs/HOW-IT-WORKS.md to used= (the picture book shows every diagram)')
+                bad.append(d)
         unused = [(d, md) for d, spec in DIAGRAMS.items() for md in spec['used']
                   if f'flow/{d}-light.svg' not in ((ROOT / md).read_text(errors='replace') if (ROOT / md).is_file() else '')]
         for d, md in unused:

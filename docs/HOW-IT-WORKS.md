@@ -28,7 +28,7 @@ An Ark is one computer with one big disk. It downloads things once while it has 
   <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Four passes, most important first, until the disk reaches its reserve.">
 </picture>
 
-The Librarian decides what fits. Grid-down essentials come first, then one of each kind, then the small and valuable, then big flagships until the disk reaches its reserve. Filling never deletes anything; making room only happens when someone asks for something specific.
+The Librarian decides what fits. Grid-down essentials come first, then one of each kind, then the small and valuable, then big flagships until the disk reaches its reserve. Filling never evicts anything (it only drops an essential's small copy once the full one is on disk); making room for something else only happens when someone asks for it.
 
 **More:** [The Librarian](LIBRARIAN.md)
 
@@ -39,7 +39,7 @@ The Librarian decides what fits. Grid-down essentials come first, then one of ea
   <img src="img/flow/heal-loop-light.svg" width="100%" alt="Animated diagram: The self-healing loop. Every 30 minutes, and after a reboot, the Ark checks itself and fixes what it can.">
 </picture>
 
-Every 30 minutes, and after a reboot, the loop walks the same circle: check the disk, repair the layout, keep the web server and apps up, refresh catalogs, fix dead links, check files, top up, update apps, test that things run, sweep new uploads, and report what it did.
+Every 30 minutes, and after a reboot, the loop walks the same circle: check the disk, repair the layout, keep the web server and apps up, copy its own source for new machines, refresh catalogs, fix dead links, check files, top up, update apps, test that things run, sweep new uploads, and report what it did.
 
 **More:** [The self-healing loop](ARCHITECTURE.md#self-healing-loop)
 
@@ -50,7 +50,7 @@ Every 30 minutes, and after a reboot, the loop walks the same circle: check the 
   <img src="img/flow/serving-light.svg" width="100%" alt="Animated diagram: Two ways to open an Ark. Static pages on any file share, or the live web server. Both work fully offline.">
 </picture>
 
-The same disk can be read two ways. Static pages need nothing but a file share. The live web server adds search, requests, chat and mail. Use either, or both at once.
+The same disk can be read two ways. Static pages need nothing but a file share. The live web server adds the library reader (Wikipedia and friends, with full-text search), requests, chat and mail. Use either, or both at once.
 
 **More:** [Serving: static or dynamic](SERVING.md)
 
@@ -83,7 +83,7 @@ The box itself is always the Admin. People on your network get what the Use Mode
   <img src="img/flow/setup-light.svg" width="100%" alt="Animated diagram: Setting up a new box. A few screens in a browser. Then the 24/7 loop fills the disk on its own.">
 </picture>
 
-A few screens in a browser: name the box, optionally set a passcode, pick a focus, and save the recovery card. Then the 24/7 loop fills the disk on its own.
+A few screens in a browser: name the box, optionally set a passcode, pick a focus, and save the recovery card. Then the 24/7 loop fills the disk on its own, once it is installed (`./scripts/loop.sh install 30`).
 
 **More:** [First-boot setup](design/commissioning.md)
 

@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/downloads-monitoring-dark.svg">
+  <img src="../img/popup/downloads-monitoring-light.svg" width="100%" alt="Pop-up book scene: Pick what matters. Plain-language profiles sized to the disk, and downloads you can watch.">
+</picture>
+
 # Val Ark — Priorities, Downloads & Monitoring
 
 Part of the [design hierarchy](README.md). How Jordan **picks what matters in plain
@@ -63,7 +68,7 @@ bundle the librarian prioritizes (extending the value-weight mechanism already i
 - A **live estimate**: *"~46 GB · fits easily in your space · ~25 min on a good connection · then works offline."*
 - **When to download**: *Now* / *When the box is idle* / *Only when plugged into power* (for laptops).
 - **Advanced** drawer: the full catalog browse + per-item request (already built) and raw curation weights.
-- Under the hood: picks set curation priorities; the librarian fills highest-value-per-byte first within the cap, auto-evicting low-value unpinned content — exactly the engine that's built.
+- Under the hood: picks set curation priorities; the librarian fills highest-value-per-byte first within the cap. The fill itself never deletes; a one-click request that needs room evicts the lowest-value unpinned content, which is the engine that's built.
 
 ## 2. Watching downloads — the Downloads view
 

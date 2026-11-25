@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/access-identity-dark.svg">
+  <img src="../img/popup/access-identity-light.svg" width="100%" alt="Pop-up book scene: Who can come in. One Admin, a choosable Use Mode, and the box itself is always trusted.">
+</picture>
+
 # Val Ark — Access & Identity
 
 Part of the [design hierarchy](README.md). Answers: *Can the operator choose open vs.

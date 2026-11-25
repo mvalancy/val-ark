@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../docs/img/popup/web-ui-dark.svg">
+  <img src="../docs/img/popup/web-ui-light.svg" width="100%" alt="Pop-up book scene: The web UI. One no-build page: open it in a browser, no npm and no bundler.">
+</picture>
+
 # Web UI
 
 A no-build single-page app. Markup and logic live in `index.html`; styling

@@ -64,7 +64,8 @@ The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
    so a prolific category (devdocs, TED…) can't crowd out diversity.
 3. **Fill remaining space** — then the big flagships by intrinsic value (full
    Wikipedia, large model quants, distro ISOs) until a reserve is reached.
-4. **Trade up, on request** — `fill` itself never deletes anything. When room is needed
+4. **Trade up, on request** — `fill` itself never evicts (it only drops a smaller copy once a
+   fuller version of the same item is on disk, as in phase 0). When room is needed
    (`librarian.sh evict`, or a one-click `request` that has to fit under `VALARK_MAX_GB`),
    the *lowest value/byte* managed, unpinned item goes first, never the sole
    representative of a category.

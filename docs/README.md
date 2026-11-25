@@ -18,6 +18,7 @@ offline content (ZIM via Kiwix), with a zero-dependency web UI.
 | To know **why** something was built a certain way | [`knowledge/decisions.md`](knowledge/decisions.md) |
 | To avoid a **known trap** while coding | [`knowledge/gotchas.md`](knowledge/gotchas.md) |
 | To understand the **appliance design** | [`design/README.md`](design/README.md) |
+| To see **how it all works**, in pictures | [`HOW-IT-WORKS.md`](HOW-IT-WORKS.md) |
 | To **share an Ark**: static file share or live web server | [`SERVING.md`](SERVING.md) |
 | To **run the tests** | [`../tests/AGENTS.md`](../tests/AGENTS.md) |
 
@@ -64,6 +65,7 @@ sync](#keeping-this-map-in-sync)).
 | [TOOLS.md](TOOLS.md) | Catalog of the mirrored tools and their usage (source of truth: the web-ui TOOLS array / tests `TOOL_IDS`). |
 | [PLATFORMS.md](PLATFORMS.md) | Supported platforms and chips, including builds and the OpenWRT subset. |
 | [ARM64-NAS.md](ARM64-NAS.md) | ARM64 NAS appliances (chips such as the Rockchip RK3588): setup notes and gotchas. |
+| [HOW-IT-WORKS.md](HOW-IT-WORKS.md) | The picture book: ten animated diagrams in reading order, from one disk to a whole network, each linking to the guide that goes deeper. |
 | [SERVING.md](SERVING.md) | The two ways to serve an Ark, static (any file share) or dynamic (the web server): how to choose, step-by-step setup, screenshots, security. |
 | [OFFLINE.md](OFFLINE.md) | Offline operation, P2P sync, and the NFS-shared mesh. |
 | [OFFLINE-GAPS.md](OFFLINE-GAPS.md) | "Internet went off today" gap analysis: ranked missing tools, cold-start warnings, content roadmap. |

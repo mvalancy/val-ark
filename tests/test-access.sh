@@ -186,7 +186,7 @@ const ok = [
 process.exit(ok.every(Boolean) ? 0 : (console.error(ok), 1));
 ' "$ROOT/scripts/server.js" && pass || fail "tailnet (tailscale0/utun) and on-link IPv6 detection (#300)"
 if start_open VALARK_TEST_FORCE_REMOTE=1; then
-    for p in content/%2e./docs/ content/.%2e/docs/ content/../docs/; do
+    for p in content/%2e./docs/ content/.%2e/docs/ content/../docs/ kiwix/a/..%5cb kiwix/a/%5c%2e%2e%5cb kiwix/a/%2e%2e%5cb; do
         c=$(gcode --path-as-is "$B/$p"); [ "$c" = "404" ] && pass || fail "a '..' segment behind encoded dots (/$p) must be 404 (got $c)"
     done
     # dots inside a name or in the query are not traversal (Kiwix titles like "...And_Justice")

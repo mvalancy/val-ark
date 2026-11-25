@@ -2960,7 +2960,8 @@ function handleRequest(req, res) {
     // Any '..' segment in the raw path, plain or with encoded dots (%2e., .%2e, %2e%2e): the
     // URL parser would resolve it before we ever saw the path. Only whole segments count, so
     // names like "...And_Justice_for_All" or "foo..tar.gz" and the query string are fine.
-    if (/(^|\/|\\)(\.|%2e){2}(\/|\\|$)/i.test(req.url.split(/[?#]/)[0])) {
+    // %5c / %2f count as separators too: the Kiwix and app proxies forward the raw URL.
+    if (/(^|\/|\\|%5c|%2f)(\.|%2e){2}(\/|\\|%5c|%2f|$)/i.test(req.url.split(/[?#]/)[0])) {
         return send404(res);
     }
 

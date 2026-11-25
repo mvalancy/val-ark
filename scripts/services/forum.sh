@@ -198,31 +198,44 @@ EOF
 # lack the key, and NodeBB binds every interface when bind_address is missing. Pin it
 # to loopback on every start.
 pin_bind_address() {
+    # Pin bind_address to 127.0.0.1 (#317) and repair an old "url" that points at 0.0.0.0
+    # (NodeBB builds links and its socket origin check from it). Written to a temp file and
+    # renamed, so a crash or a full disk can't leave a truncated config.json (#334).
     [ -f "$CONFIG_FILE" ] || return 0
-    local nd py res=""
+    local nd py res="" want_url="http://localhost${URL_ROOT}"
     nd="$(valark_node_dir 2>/dev/null)" || nd=""
     py="$(command -v python3 2>/dev/null)" || py=""
     if [ -n "$nd" ]; then
         res="$("${nd}/node" -e '
-const fs = require("fs"); const f = process.argv[1]; const want = process.argv[2];
-const c = JSON.parse(fs.readFileSync(f, "utf8"));
-if (c.bind_address === want) { console.log("ok"); process.exit(0); }
-c.bind_address = want; fs.writeFileSync(f, JSON.stringify(c, null, 4) + "\n"); console.log("changed");
-' "$CONFIG_FILE" "$BIND" 2>/dev/null)"
+const fs = require("fs"); const [f, want, url] = process.argv.slice(1);
+const c = JSON.parse(fs.readFileSync(f, "utf8")); let changed = false;
+if (c.bind_address !== want) { c.bind_address = want; changed = true; }
+if (typeof c.url !== "string" || /^https?:\/\/0\.0\.0\.0([:/]|$)/.test(c.url)) { c.url = url; changed = true; }
+if (!changed) { console.log("ok"); process.exit(0); }
+const mode = fs.statSync(f).mode & 0o777, tmp = f + ".tmp";
+fs.writeFileSync(tmp, JSON.stringify(c, null, 4) + "\n", { mode }); fs.renameSync(tmp, f); console.log("changed");
+' "$CONFIG_FILE" "$BIND" "$want_url" 2>/dev/null)"
     elif [ -n "$py" ]; then
         res="$("$py" -I -c '
-import json, sys
-f, want = sys.argv[1], sys.argv[2]
-c = json.load(open(f))
-if c.get("bind_address") == want:
+import json, os, re, sys
+f, want, url = sys.argv[1], sys.argv[2], sys.argv[3]
+c = json.load(open(f)); changed = False
+if c.get("bind_address") != want:
+    c["bind_address"] = want; changed = True
+if not isinstance(c.get("url"), str) or re.match(r"^https?://0\.0\.0\.0([:/]|$)", c["url"]):
+    c["url"] = url; changed = True
+if not changed:
     print("ok"); sys.exit(0)
-c["bind_address"] = want
-open(f, "w").write(json.dumps(c, indent=4) + "\n"); print("changed")
-' "$CONFIG_FILE" "$BIND" 2>/dev/null)"
+mode = os.stat(f).st_mode & 0o777; tmp = f + ".tmp"
+fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+with os.fdopen(fd, "w") as fh:
+    fh.write(json.dumps(c, indent=4) + "\n")
+os.replace(tmp, f); print("changed")
+' "$CONFIG_FILE" "$BIND" "$want_url" 2>/dev/null)"
     fi
     case "$res" in
         ok) ;;
-        changed) log "Pinned NodeBB bind_address to ${BIND} in $CONFIG_FILE (#317)" ;;
+        changed) log "Pinned NodeBB bind_address to ${BIND} (and its url, if it pointed at 0.0.0.0) in $CONFIG_FILE (#317, #334)" ;;
         *) err "Could not check bind_address in $CONFIG_FILE; make sure it is \"${BIND}\" (NodeBB binds every interface without it)." ;;
     esac
     return 0

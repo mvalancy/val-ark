@@ -72,6 +72,14 @@ VALARK_BIND=0.0.0.0 bash "$ROOT/scripts/services/forum.sh" config >"$T/forum.out
 grep -q 'bind: "127.0.0.1"' "$ROOT/scripts/services/chat.sh" && ! grep -qE 'bind: "\$\{?(BIND|VALARK_BIND)' "$ROOT/scripts/services/chat.sh" \
   && pass || fail "The Lounge config must bind 127.0.0.1, not VALARK_BIND"
 grep -q -- '-addr "127.0.0.1:${ALPS_PORT}"' "$ROOT/scripts/services/mail.sh" && pass || fail "alps must listen on 127.0.0.1"
+# An old config whose url points at 0.0.0.0 is repaired too; other keys and the file mode survive,
+# and no temp file is left behind (#334).
+printf '{\n    "url": "http://0.0.0.0/app/forum",\n    "secret": "keepme",\n    "port": 4567,\n    "bind_address": "0.0.0.0"\n}\n' > "$CFG"; chmod 600 "$CFG"
+VALARK_BIND=0.0.0.0 bash "$ROOT/scripts/services/forum.sh" config >"$T/forum.out" 2>&1
+grep -q '"url": "http://localhost/app/forum"' "$CFG" && pass || fail "an old 0.0.0.0 url must be repaired ($(cat "$CFG"))"
+grep -q '"secret": "keepme"' "$CFG" && pass || fail "the repair must keep the other keys"
+[ "$(stat -c %a "$CFG")" = "600" ] && pass || fail "the repair must keep the file mode (got $(stat -c %a "$CFG"))"
+[ ! -e "$CFG.tmp" ] && pass || fail "no temp file may be left behind"
 # No web-UI bind may come from VALARK_BIND in the paste/forum scripts.
 grep -nE '(MICROBIN_BIND|bind_address).*VALARK_BIND|^BIND="\$\{VALARK_BIND' "$ROOT/scripts/services/paste.sh" "$ROOT/scripts/services/forum.sh" \
   | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' | grep -q . && fail "paste/forum web binds must not read VALARK_BIND" || pass

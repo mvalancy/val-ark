@@ -35,7 +35,7 @@ jobs:
       # PyYAML for test-ci-artifacts.sh's full workflow parse, which FAILS under CI
       # without it (#315). Pinned; 6.0.4 was days old when this was written.
       - name: Install PyYAML
-        run: python -m pip install 'pyyaml==6.0.3'
+        run: python -m pip install --require-hashes -r .github/ci/requirements-ci.txt
 
       # Cheap, offline guards run FIRST (need only python3, pinned above) so a
       # broken doc link or a leaked host/secret fails in seconds — before the

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
 
-const OUTPUT_DIR = path.resolve(__dirname, '../../../docs/screenshots');
+const OUTPUT_DIR = path.resolve(__dirname, '../../../docs/screenshots/web-ui');
 const WEB_UI = path.resolve(__dirname, '../../../web-ui/index.html');
 
 // All tool IDs from the web UI

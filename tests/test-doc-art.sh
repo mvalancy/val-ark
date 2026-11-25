@@ -9,7 +9,10 @@
 #   3. none carries a <script>, an external href/url() or an event handler;
 #   4. each honours prefers-reduced-motion and stays under the size budget;
 #   5. every scene is embedded as a <picture> (dark <source> + light <img> with
-#      alt text, same scene) somewhere, and every popup/ reference resolves.
+#      alt text, same scene) somewhere, and every popup/ reference resolves;
+#   6. every tracked human-facing doc is on DOC_TREE, the generated docs tree
+#      (checked by --check in step 1; nested AGENTS.md, .github/ and .agents/
+#      skills are exempt).
 # Fully offline; needs only python3 (CI has it).
 ###############################################################################
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

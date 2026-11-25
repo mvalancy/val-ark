@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/governance-dark.svg">
+  <img src="../img/popup/governance-light.svg" width="100%" alt="Pop-up book scene: Agents you can trust. Agents work issues and merge PRs, but strangers cannot steer the repo.">
+</picture>
+
 # Val Ark — Self‑Guided Agent Project: Governance, Automation & Trust
 
 Part of the [knowledge base](README.md); extends [workflow.md](workflow.md). Defines how Val

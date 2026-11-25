@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/recovery-dark.svg">
+  <img src="../img/popup/recovery-light.svg" width="100%" alt="Pop-up book scene: Forgot the password? At the box, or on localhost, you are the Admin. Nobody stays locked out.">
+</picture>
+
 # Val Ark — Recovery
 
 Part of the [design hierarchy](README.md). Pairs with [access-identity.md](access-identity.md).

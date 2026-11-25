@@ -113,10 +113,10 @@ SCENES = {
         links=[(0, 1, 'side'), (0, 2, 'arc'), (1, 3, 'arc'), (2, 3, 'side'), (2, 4, 'arc'), (4, 5, 'side')],
         used=['docs/ARCHITECTURE.md']),
     'librarian': dict(chapter='Chapter 2', title='The Librarian fills the shelves',
-        sub='Essentials first, then diversity, small and valuable, fill, then trade up.', backdrop='shelf',
+        sub='Essentials first, then diversity, small and valuable, then fill the rest.', backdrop='shelf',
         cards=[('shield', 'Essentials', '0'), ('cube', 'Diversity', '1'), ('leaf', 'Small + valuable', '2'),
-               ('disk', 'Fill the rest', '3'), ('magnifier', 'Evict for better', '4')],
-        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side')],
+               ('disk', 'Fill the rest', '3'), ('magnifier', 'Trade up', None)],
+        links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side')],
         used=['docs/LIBRARIAN.md']),
     'tools': dict(chapter='Chapter 3', title='A toolbox for every job',
         sub='Dev tools, AI runtimes, creative suites and media, mirrored for each platform.', backdrop='hills',
@@ -669,7 +669,7 @@ def main(argv):
         for n in extra:
             print(f'not produced by the generator: docs/img/popup/{n}')
         unused = [(sid, md) for sid, spec in SCENES.items() for md in spec['used']
-                  if f'popup/{sid}-light.svg' not in (ROOT / md).read_text(errors='replace')]
+                  if f'popup/{sid}-light.svg' not in ((ROOT / md).read_text(errors='replace') if (ROOT / md).is_file() else '')]
         for sid, md in unused:
             print(f'{md} is listed in used= for {sid} but does not embed it')
         missing, gone = tree_missing()

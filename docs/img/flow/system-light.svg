@@ -11,7 +11,7 @@
 .nd{transform-box:fill-box;transform-origin:50% 50%;animation:pop .6s cubic-bezier(.3,1.4,.5,1) both}
 .ar{fill:none;stroke:#59636e;stroke-width:2;opacity:.75;stroke-dasharray:1;animation:draw .8s ease-out both}
 .ah{fill:#59636e;opacity:.75;animation:fade .4s ease-out both}
-.dot{fill:#f59e0b;animation:run 3.2s linear infinite both}
+.dot{fill:#f59e0b;stroke:#fffdf8;stroke-width:1.5px;animation:run 3.2s linear infinite both}
 .pl{fill:none;stroke:#f59e0b;stroke-width:3;opacity:0;animation:pulse 8s ease-in-out infinite}
 .spin{transform-box:fill-box;transform-origin:50% 50%;animation:spin 8s linear infinite}
 @keyframes pop{from{transform:scale(.2);opacity:0}to{transform:none;opacity:1}}

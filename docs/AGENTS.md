@@ -41,6 +41,7 @@ Every human-facing doc (guides, design, knowledge, the code READMEs, CONTRIBUTIN
   - an SVG has a script, an external reference, or no `<title>`/`<desc>`;
   - an SVG skips `prefers-reduced-motion`, or goes over 40 KB;
   - a scene isn't used as a light/dark pair;
+  - a doc listed in a scene's or diagram's `used=` doesn't embed it;
   - a tracked human-facing doc is missing from `DOC_TREE` (nested `AGENTS.md`, `.github/` and `.agents/` skills are exempt).
 - The resting state is the fully opened scene, so reduced motion (and any renderer that won't animate) shows the finished picture.
 
@@ -51,7 +52,7 @@ One fact, one home. Change it in the owning doc; from any other doc, link — ne
 | Fact / concept | Canonical owner | Notes |
 |----------------|-----------------|-------|
 | Data root + `.env` layout | [LIBRARIAN.md](LIBRARIAN.md) | "Where data lives" section. |
-| Curation priority model | [LIBRARIAN.md](LIBRARIAN.md) | diversity → small-valuable → fill → evict. |
+| Curation priority model | [LIBRARIAN.md](LIBRARIAN.md) | essentials → diversity → small-valuable → fill; `evict` / `request` trade up (fill never deletes). |
 | 24/7 loop steps + `state/selfheal.json` / `state/heal-events.jsonl` | [LIBRARIAN.md](LIBRARIAN.md) | Keep [ARCHITECTURE.md](ARCHITECTURE.md)'s Self-Healing Loop diagram **in sync** with it. |
 | CUDA / Metal source build | [PLATFORMS.md](PLATFORMS.md) | GPU llama.cpp / whisper.cpp / sd.cpp on aarch64. |
 | Tool catalog | [TOOLS.md](TOOLS.md) | Backed by `scripts/tools/*.sh`. |

@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/popup/librarian-dark.svg">
-  <img src="img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Essentials first, then diversity, small and valuable, fill, then trade up.">
+  <img src="img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Essentials first, then diversity, small and valuable, then fill the rest.">
 </picture>
 
 # Librarian — scalable disk-fill, curation & self-healing

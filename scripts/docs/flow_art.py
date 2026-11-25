@@ -143,7 +143,7 @@ def css(t):
 .nd{{transform-box:fill-box;transform-origin:50% 50%;animation:pop .6s cubic-bezier(.3,1.4,.5,1) both}}
 .ar{{fill:none;stroke:{t['muted']};stroke-width:2;opacity:.75;stroke-dasharray:1;animation:draw .8s ease-out both}}
 .ah{{fill:{t['muted']};opacity:.75;animation:fade .4s ease-out both}}
-.dot{{fill:{t['tab']};animation:run 3.2s linear infinite both}}
+.dot{{fill:{t['tab']};stroke:{t['page']};stroke-width:1.5px;animation:run 3.2s linear infinite both}}
 .pl{{fill:none;stroke:{t['tab']};stroke-width:3;opacity:0;animation:pulse 8s ease-in-out infinite}}
 .spin{{transform-box:fill-box;transform-origin:50% 50%;animation:spin 8s linear infinite}}
 @keyframes pop{{from{{transform:scale(.2);opacity:0}}to{{transform:none;opacity:1}}}}
@@ -191,13 +191,6 @@ def render(did, spec, theme):
             nodes[k] = (cx + rx * math.cos(a), cy + r * math.sin(a), *rest)
         p.append(f'<ellipse cx="{cx}" cy="{cy}" rx="{rx:.0f}" ry="{r}" fill="none" stroke="{t["edge"]}" '
                  f'stroke-width="10" opacity=".7"/>')
-        # chevrons halfway between steps show the direction (clockwise) even with motion off
-        for i in range(n):
-            a = -math.pi / 2 + (i + .5) * 2 * math.pi / n
-            px, py = cx + rx * math.cos(a), cy + r * math.sin(a)
-            ang = math.degrees(math.atan2(r * math.cos(a), -rx * math.sin(a)))
-            p.append(f'<path d="M-5-6 3 0-5 6" fill="none" stroke="{t["tab"]}" stroke-width="3" stroke-linecap="round" '
-                     f'stroke-linejoin="round" transform="translate({px:.1f} {py:.1f}) rotate({ang:.1f})"/>')
         # arc length to each step, so a step pulses when the dots (constant speed) reach it
         steps = 2000
         pts = [(rx * math.cos(-math.pi / 2 + 2 * math.pi * k / steps), r * math.sin(-math.pi / 2 + 2 * math.pi * k / steps))
@@ -216,7 +209,14 @@ def render(did, spec, theme):
             p.append(node_svg(x, y, icon, label, cap, acc, t, 0.2 + i * 0.12))
             # pulse each step as the dots pass it
             p.append(f'<rect x="{x - NW/2 - 5:.1f}" y="{y - NH/2 - 5:.1f}" width="{NW + 10}" height="{NH + 10}" rx="15" '
-                     f'class="pl" style="animation-delay:{frac[i] * 8:.2f}s"/>')
+                     f'class="pl" style="animation-delay:{frac[i] * 8 - .45:.2f}s"/>')
+        # chevrons (drawn over the cards) halfway between steps show the direction (clockwise) even with motion off
+        for i in range(n):
+            a = -math.pi / 2 + (i + .5) * 2 * math.pi / n
+            px, py = cx + rx * math.cos(a), cy + r * math.sin(a)
+            ang = math.degrees(math.atan2(r * math.cos(a), -rx * math.sin(a)))
+            p.append(f'<path d="M-5-6 3 0-5 6" fill="none" stroke="{t["tab"]}" stroke-width="3" stroke-linecap="round" '
+                     f'stroke-linejoin="round" transform="translate({px:.1f} {py:.1f}) rotate({ang:.1f})"/>')
         # the travelling dots ride on top of the cards, so they stay visible all the way round
         for k in range(3):
             p.append(f'<circle r="6" class="dot" style="offset-path:path(\'{ring}\');animation-duration:8s;'
@@ -270,7 +270,7 @@ def main(argv):
         for n in extra:
             print(f'not produced by the generator: docs/img/flow/{n}')
         unused = [(d, md) for d, spec in DIAGRAMS.items() for md in spec['used']
-                  if f'flow/{d}-light.svg' not in (ROOT / md).read_text(errors='replace')]
+                  if f'flow/{d}-light.svg' not in ((ROOT / md).read_text(errors='replace') if (ROOT / md).is_file() else '')]
         for d, md in unused:
             print(f'{md} is listed in used= for {d} but does not embed it')
         if bad or extra:

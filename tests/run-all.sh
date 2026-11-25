@@ -51,7 +51,8 @@ echo "=================================================================="
 # env (VALARK_TEST_* or a VALARK_STATE_DIR under the temp dir). Checked after stage 4.
 _test_publishers() {
     local p env args
-    for p in $(pgrep -f 'avahi-publish' 2>/dev/null); do
+    # Only real publisher processes (the binary itself), not any command line that mentions it.
+    for p in $(pgrep -x avahi-publish 2>/dev/null; pgrep -x avahi-publish-address 2>/dev/null); do
         [ "$p" = "$$" ] && continue
         args=$( { tr '\0' ' ' < "/proc/$p/cmdline"; } 2>/dev/null) || args=$(ps -p "$p" -o args= 2>/dev/null)
         env=$( { tr '\0' '\n' < "/proc/$p/environ"; } 2>/dev/null)

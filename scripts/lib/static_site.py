@@ -839,8 +839,24 @@ def tool_key(name):
 
 
 # The build-from-source / install-instructions file write_install_hint drops in a platform
-# folder that has no upstream binary (tools/<platform>/<tool>/INSTALL.txt).
-INSTALL_HINT = re.compile(r'INSTALL(\.(txt|md))?', re.I)
+# folder that has no upstream binary (tools/<platform>/<tool>/INSTALL.txt) — exactly that name.
+INSTALL_HINT = 'INSTALL.txt'
+
+
+def hint_only(s, e, plat, name):
+    """A tool's platform folder whose only content is its install hint -> the hint's file name.
+    Never when the walk ran out of budget (s.truncated): the rest of the folder may be unseen."""
+    if s.truncated or (plat, name) in e.real:
+        return None
+    return e.hints.get((plat, name))
+
+
+def hint_platforms(s, e):
+    """(platforms with something to download, platforms that only carry the install hint)."""
+    built, hinted = [], []
+    for p in sorted(e.platforms):
+        (hinted if all(hint_only(s, e, p, n) for n in e.platforms[p]) else built).append(p)
+    return built, hinted
 
 
 class Entry:
@@ -904,7 +920,7 @@ class Section:
             b, isdir = names.get(top, (0, False))
             names[top] = (b + size, isdir or rel.count('/') >= 2)
             parts = rel.split('/')
-            if len(parts) == 3 and INSTALL_HINT.fullmatch(parts[2]):
+            if len(parts) == 3 and parts[2] == INSTALL_HINT:
                 e.hints[(plat, top)] = parts[2]
             else:
                 e.real.add((plat, top))
@@ -1305,9 +1321,16 @@ class Builder:
                 return f'{nice}: an offline archive ({size}) — open it in Kiwix (desktop, Android or kiwix-serve).'
             return f'Offline reading material: {title.replace("-", " ").replace("_", " ")} ({size}).'
         if s.name == 'tools':
-            plats = ', '.join(PLATFORMS.get(p, p) for p in sorted(e.platforms)) or 'the platforms mirrored here'
+            built, hinted = hint_platforms(s, e)
             blurb = self.cur.tool_scripts.get(e.key) or self.cur.tool_scripts.get(parts[-1])
-            return blurb or f'{title}: portable builds for {plats} ({size}), ready to copy and run offline.'
+            if blurb:
+                return blurb
+            src = ', '.join(PLATFORMS.get(p, p) for p in hinted)
+            if hinted and not built:
+                return f'{title}: build-from-source instructions (INSTALL.txt) for {src} ({size}).'
+            plats = ', '.join(PLATFORMS.get(p, p) for p in built) or 'the platforms mirrored here'
+            return (f'{title}: portable builds for {plats} ({size}), ready to copy and run offline.' +
+                    (f' {src}: build from source (INSTALL.txt).' if hinted else ''))
         if s.name == 'installers':
             cat = parts[0].replace('-', ' ')
             where = ' / '.join(p for p in parts[1:-1]) if len(parts) > 2 else ''
@@ -1415,7 +1438,9 @@ class Builder:
                 if p:
                     info['shots'].append(p)
         info['group'] = ''
-        info['chips'] += [PLATFORMS.get(p, p) for p in sorted(e.platforms)]
+        built, hinted = hint_platforms(s, e)
+        info['chips'] += [PLATFORMS.get(p, p) + (' (build from source)' if p in hinted else '')
+                          for p in sorted(e.platforms)]
 
     def d_installers(self, s, e, info, rcard, abs_dir):
         fn = e.key.rsplit('/', 1)[-1]
@@ -1587,11 +1612,6 @@ class Builder:
             return os.path.join(s.path, plat, name), isdir
         return os.path.join(s.path, e.key), e.is_dir
 
-    @staticmethod
-    def hint_only(e, plat, name):
-        """A tool's platform folder whose only content is its install hint -> the hint's file name."""
-        return e.hints.get((plat, name)) if (plat, name) not in e.real else None
-
     def detail_page(self, s, e, info, shown, item_name, stamp):
         d = self.items_dir
         abs_t, t_dir = self.entry_path(s, e)
@@ -1605,7 +1625,7 @@ class Builder:
         if e.pending_files:
             facts.append(('Still queued', queued_text(e.pending_files, e.pending_bytes)))
         facts += info['facts']
-        if len(e.platforms) > 1:      # one card merges every platform: list each platform's folder
+        if sum(len(n) for n in e.platforms.values()) > 1:   # one card, several folders: list each
             locs = [os.path.relpath(os.path.join(s.path, p_, n), self.root).replace(os.sep, '/')
                     for p_, names in sorted(e.platforms.items()) for n in sorted(names)]
             facts.append(('Location', ', '.join(locs)))
@@ -1625,7 +1645,7 @@ class Builder:
             for p_, names in sorted(e.platforms.items()):
                 for name, (b, isdir) in sorted(names.items()):
                     label = PLATFORMS.get(p_, p_) + ('' if len(names) == 1 else f' · {name}')
-                    hint = self.hint_only(e, p_, name)
+                    hint = hint_only(s, e, p_, name)
                     if hint:              # no binary for this platform: say so, link the instructions
                         parts.append(f'<a href="{href(self.rel(os.path.join(s.path, p_, name, hint), d))}">'
                                      f'{esc(label)}: build from source ({esc(hint)})</a> ')

@@ -128,6 +128,11 @@ are kept current by the loop and the weekly tool refresh.
 
 ## Sharing between machines
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/fleet-dark.svg">
+  <img src="img/flow/fleet-light.svg" width="100%" alt="Animated diagram: One Ark, many machines. Share one Ark across the LAN, or grow new ones from it, with no internet at all.">
+</picture>
+
 ### Option A — NFS shared mirror (mesh)
 
 The data root is NFS-exportable, so fleet nodes mount **one shared mirror** and run

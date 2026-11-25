@@ -247,11 +247,19 @@ flowchart TD
 
 ## Mesh Topology
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/fleet-dark.svg">
+  <img src="img/flow/fleet-light.svg" width="100%" alt="Animated diagram: One Ark, many machines. Share one Ark across the LAN, or grow new ones from it, with no internet at all.">
+</picture>
+
 The data root is **NFS-exportable**: fleet nodes mount the single shared mirror and
 run GPU inference on served models over the network. Syncthing additionally offers
 opportunistic P2P replication to peers. `verify.sh fleet` SSHes to each host in
 `VALARK_FLEET` (set in `.env`), confirms it mounts the shared disk, and runs a real
 inference check. Nothing host-specific is committed — see `.env.example`.
+
+<details>
+<summary>The detailed mesh diagram</summary>
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -294,7 +302,14 @@ graph TB
     SYNC <-.->|"Syncthing P2P"| RT
 ```
 
+</details>
+
 ## Web Server
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/request-dark.svg">
+  <img src="img/flow/request-light.svg" width="100%" alt="Animated diagram: What happens when you tap Request. From one tap on any device to a file on the disk, with live progress on the way.">
+</picture>
 
 This is the **dynamic** way to serve an Ark. The **static** way needs no server: the
 pages written by `librarian.sh site` work from any file share. [SERVING.md](SERVING.md) compares
@@ -317,6 +332,9 @@ fronts the internal kiwix-serve, and `/app/<id>/` fronts each community service
 through this proxy, so the whole hub lives on one origin under the persistent Val Ark
 header. See [COMMUNITY.md](COMMUNITY.md) for the community/comms layer and its
 LAN-only, no-federation security model.
+
+<details>
+<summary>The detailed server diagram</summary>
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -348,6 +366,8 @@ sequenceDiagram
     server.js-->>Browser: SSE completion event
 ```
 
+</details>
+
 ## Content Serving
 
 On startup (and again whenever the loop heals it), `server.js` scans `content/zim/`
@@ -357,6 +377,9 @@ library. The web UI polls `/api/status`, sees kiwix is running, and shows a
 "Browse Wikipedia" banner linking to the offline encyclopedia. The ZIM
 catalog is fetched **live** from the Kiwix OPDS feed, so download dates are never
 stale.
+
+<details>
+<summary>The detailed content-serving diagram</summary>
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -388,6 +411,8 @@ sequenceDiagram
     kiwix-serve-->>server.js: article (HTML)
     server.js-->>Browser: article (HTML)
 ```
+
+</details>
 
 ## Platforms
 

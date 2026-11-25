@@ -15,7 +15,10 @@ removed (--keep-old keeps them), and with --pack auto / one explicit pack the
 smaller packs nested in the verified one go too (ranked by recorded on-disk bytes;
 a missing or implausible manifest size never supersedes). A held pack goes only
 when this run verified a pack at least as large on disk, or the same pack id under
-a new name with at least half its bytes (a re-release replaces the old file). Unrecorded files are never
+a new name with at least half its bytes (a re-release replaces the old file). A held map, address
+index, model or installer the release no longer names goes only once its replacement (the current
+entry of the same id, recorded as `entry` in the stamps; all current installers for an old
+app/<version>/) is verified; an entry dropped upstream altogether still goes. Unrecorded files are never
 touched (except a stray <path>.part whose section/[version/]name path the current
 or previously kept manifests name), symlinked section dirs are never followed, and
 nothing is pruned when the release looks truncated (a section that held files
@@ -702,7 +705,7 @@ def print_candidates(rel, args, out=sys.stdout):
     rows, skipped = [], []
 
     def files_spec(files):
-        return ",".join(f"{rel_path(f)}={f['size'] or 0}" for f in files)
+        return ",".join(f"{rel_path(f)}={f['size'] or 0}@{f['sha256']}" for f in files)
 
     def row(rid, bucket, cat, kind, needs, files, value):
         if kind == "app":  # an installer whose size neither the manifest nor a HEAD gave is left out
@@ -989,7 +992,39 @@ def superseded(dest, rel, stamps, pack_id, kept_packs=None):
     return out
 
 
-def prune(dest, rel, stamps, log, verified_pack=None, names=(), run_packs=(), kept_packs=None):
+def entry_of_kept(kept):
+    """{section/[version/]name: (group, entry id)} for the files a kept release named (maps and base
+    maps are one group, as they share maps/)."""
+    out = {}
+    for g, grp in (("base_maps", "maps"), ("maps", "maps"), ("addresses", "addresses"), ("models", "models")):
+        for e in (kept or {}).get(g, []):
+            for f in e["files"]:
+                out[rel_path(f)] = (grp, e["id"])
+    return out
+
+
+def replacement_verified(dest, rel, stamps, key, sec, kept_entries):
+    """A held map / address index / model / installer that the release no longer names may go only
+    once what replaces it is on disk and verified (#203 review): the current installers (all of
+    them) for an old app/<version>/ file; the current entry of the same id for a map, address index
+    or model. An entry the release dropped altogether has no replacement: it may go (the truncation
+    guards still apply). A file whose entry cannot be told (no kept manifest) is kept."""
+    if sec == "app":
+        return bool(rel["apps"]) and all(stamped(dest, stamps, f) for f in rel["apps"])
+    if sec not in ("maps", "addresses", "models"):
+        return True
+    grp = sec
+    eid = (stamps.get(key) or {}).get("entry") or (kept_entries.get(key) or (None, None))[1]
+    if eid is None:
+        return False
+    groups = {"maps": ("base_maps", "maps"), "addresses": ("addresses",), "models": ("models",)}[grp]
+    now = [e for g in groups for e in rel[g] if e["id"] == eid]
+    if not now:
+        return True  # dropped upstream, not replaced
+    return all(stamped(dest, stamps, f) for e in now for f in e["files"])
+
+
+def prune(dest, rel, stamps, log, verified_pack=None, names=(), run_packs=(), kept_packs=None, kept=None):
     """Drop files THIS tool recorded (in .lastbook-verified.json) that the current release no longer
     names, plus (verified_pack given) the smaller packs nested in that verified pack.
     Never touches an unrecorded file, except a stray `*.part` in a Lastbook section whose final path
@@ -1040,6 +1075,13 @@ def prune(dest, rel, stamps, log, verified_pack=None, names=(), run_packs=(), ke
         if largest_run is None or (held[k].get("size") or 0) > largest_run:
             drop.remove(k)
             log(f"keeping {k}: no pack verified this run is at least as large (re-checked next run)")
+    # Never drop a held map / address index / model / installer before its replacement is verified:
+    # a new app version (or a renamed map) that did not fit, or was not planned, keeps the old copy.
+    kept_entries = entry_of_kept(kept)
+    for k in [k for k in drop if k in held and owned[k][1] in ("maps", "addresses", "models", "app")]:
+        if not replacement_verified(dest, rel, stamps, k, owned[k][1], kept_entries):
+            drop.remove(k)
+            log(f"keeping {k}: its replacement in this release is not downloaded and verified yet")
     drop_held = [k for k in drop if k in held]
     # Per-section guard: a manifest listing only a few states drops most maps but, on a box with
     # the 388 GB All pack, well under half the held bytes, so the whole-mirror check passes.
@@ -1164,6 +1206,11 @@ def main(argv=None):
             if it["size"] is None:
                 it["size"] = net.head_size(it["url"])
         kept = kept_release(dest) if dest and dest.is_dir() else None  # read before this run replaces it
+        # Remember, in the stamps, which entry id each held map / address index / model file belongs
+        # to while the kept manifest still says so: a later run must know what replaces it (#203).
+        for k, (_grp, eid) in entry_of_kept(kept).items():
+            if isinstance(stamps.get(k), dict) and not stamps[k].get("part") and "entry" not in stamps[k]:
+                stamps[k]["entry"] = eid
         if args.cmd == "candidates":
             print_candidates(rel, args)
             return EXIT_OK
@@ -1200,6 +1247,8 @@ def main(argv=None):
             counts[st] += 1
             if r["section"] == "pack" and st in ("verified", "fetched") and rel_path(r) in stamps:
                 stamps[rel_path(r)]["pack"] = r["id"]  # so a later re-release under a new name is a replacement (R1)
+            if r["section"] in ("map", "address", "model") and st in ("verified", "fetched") and rel_path(r) in stamps:
+                stamps[rel_path(r)]["entry"] = r["id"]  # what replaces it later (#203 review)
             if st == "fetched":
                 added += r["size"] or 0
                 log(f"fetched + verified {rel_path(r)} ({human(r['size'])})")
@@ -1217,7 +1266,7 @@ def main(argv=None):
                                      and not counts["deferred"] and not counts["failed"]
                                      and any(r["section"] == "pack" and r["status"] == "get" for r in rows))
         run_packs = {r["id"] for r in rows if r["section"] == "pack" and r["status"] == "get"}
-        pruned = prune(dest, rel, stamps, log, single_pack(args, rows), names, run_packs, pack_of_kept(kept)) \
+        pruned = prune(dest, rel, stamps, log, single_pack(args, rows), names, run_packs, pack_of_kept(kept), kept) \
             if prunable and not args.keep_old else 0
         save_stamps(dest, stamps)
     except OSError as e:

@@ -90,16 +90,23 @@ def lb_stamps(root):
     return _LB_STAMPS[root]
 
 
+_LB_SHA = {}        # (root, rel) -> the sha256 the release lists for that file (from the row)
+
+
 def lb_parse(c):
-    """extra = kind|needs|rel=size,... -> (kind, needs, [(rel, size)])."""
+    """extra = kind|needs|rel=size[@sha256],... -> (kind, needs, [(rel, size)]). The listed sha is
+    remembered for lb_on_disk, so a same-name, same-size re-release is not taken for held."""
     f = c["extra"].split("|")
     if len(f) < 3:
         return "", "", []
     files = []
     for spec in f[2].split(","):
         rel, _, n = spec.rpartition("=")
+        n, _, sha = n.partition("@")
         if rel and n.isdigit() and ".." not in rel.split("/") and not rel.startswith("/"):
             files.append((rel, int(n)))
+            if sha:
+                _LB_SHA[(c["dest"], rel)] = sha.lower()
     return f[0], f[1], files
 
 
@@ -114,6 +121,9 @@ def lb_on_disk(root, rel, size=0):
             return False
     except OSError:
         return False
+    sha = _LB_SHA.get((root, rel))
+    if sha and str(s.get("sha256", "")).lower() != sha:
+        return False   # held under another sha: a re-release of the same name (charged, refreshed)
     return not size or size == s["size"]
 
 

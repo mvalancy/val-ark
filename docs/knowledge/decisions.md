@@ -250,7 +250,8 @@ later). See [README](README.md).
     to fetch: held files cost 0 and a `.part` is credited, so a half-fetched Medium is not
     stranded behind a fresh Small. The mirror's budget is the sum of the planned rows' remaining
     bytes, not unlimited, so a held-item refresh is budgeted too. There is no "plus held"
-    re-enable path, so `MODEL=no` and `APPS=none` hold.
+    re-enable path, so `MODEL=no` and `APPS=none` hold. A "no" means "do not fetch or refresh",
+    not "delete what is held".
   - *Fetch and prune stay in the mirror.*
     - `librarian.sh fill` passes the planned Lastbook rows to `lastbook.sh --plan-file`. The
       phase-0 essentials go in their own batch, then every planned row. Each batch is checked
@@ -282,6 +283,20 @@ later). See [README](README.md).
       per-destination budget.
     - `VALARK_LASTBOOK_BUDGET_PCT` is kept as a **deprecated** fallback: set on its own it
       selects share mode and logs a warning.
+  - *Never delete before the replacement verifies (re-review of PR #288).*
+    - Removing `--plus-held` made one case worse: a new app version that did not fit let prune
+      delete the old installers with nothing in their place.
+    - Now a held map, address index, model or installer that the release no longer names is
+      pruned only once its replacement is on disk and verified. For an old `app/<ver>/` file
+      that means all the current installers; for a map, address index or model it means the
+      current entry with the same id. An entry dropped upstream altogether still goes, under
+      the truncation guards, and a file whose entry cannot be told is kept.
+    - The entry id is recorded in `.lastbook-verified.json` (`entry`, like `pack`), at fetch time
+      and from the kept manifest on every run, so the link survives once the kept manifest
+      moves on.
+    - Candidate rows carry each file's sha256, so a same-name, same-size re-release is not taken
+      for held. With these rules, every held item is at least as well off as with `--plus-held`:
+      it is kept until replaced, and its refresh is planned and charged.
   - *Model category.* The Lastbook GGUF is `lastbook:model`, not `model:assistant`. It must not take
     or cover the curated assistants' diversity slot, and it never takes a diversity slot itself.
 

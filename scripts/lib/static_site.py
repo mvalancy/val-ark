@@ -838,9 +838,14 @@ def tool_key(name):
         name = new
 
 
+# The build-from-source / install-instructions file write_install_hint drops in a platform
+# folder that has no upstream binary (tools/<platform>/<tool>/INSTALL.txt).
+INSTALL_HINT = re.compile(r'INSTALL(\.(txt|md))?', re.I)
+
+
 class Entry:
     __slots__ = ('key', 'is_dir', 'bytes', 'files', 'mtime', 'top', 'pending_bytes', 'pending_files',
-                 'readme', 'license', 'names', 'platforms', 'formats')
+                 'readme', 'license', 'names', 'platforms', 'formats', 'hints', 'real')
 
     def __init__(self, key, is_dir):
         self.key, self.is_dir = key, is_dir
@@ -851,6 +856,8 @@ class Entry:
         self.names = set()      # small set of file names inside (README image lookup)
         self.platforms = {}     # tools: platform -> {real top-level name: (bytes, is_dir)}
         self.formats = set()    # model formats seen inside (.gguf / .onnx / .safetensors / config.json)
+        self.hints = {}         # tools: (platform, name) -> its install-hint file (write_install_hint)
+        self.real = set()       # tools: (platform, name) holding anything besides that hint
 
 
 class Section:
@@ -896,6 +903,11 @@ class Section:
             names = e.platforms.setdefault(plat, {})
             b, isdir = names.get(top, (0, False))
             names[top] = (b + size, isdir or rel.count('/') >= 2)
+            parts = rel.split('/')
+            if len(parts) == 3 and INSTALL_HINT.fullmatch(parts[2]):
+                e.hints[(plat, top)] = parts[2]
+            else:
+                e.real.add((plat, top))
         low = inner.lower()
         for ext in ('.gguf', '.onnx', '.safetensors'):
             if low.endswith(ext):
@@ -1575,6 +1587,11 @@ class Builder:
             return os.path.join(s.path, plat, name), isdir
         return os.path.join(s.path, e.key), e.is_dir
 
+    @staticmethod
+    def hint_only(e, plat, name):
+        """A tool's platform folder whose only content is its install hint -> the hint's file name."""
+        return e.hints.get((plat, name)) if (plat, name) not in e.real else None
+
     def detail_page(self, s, e, info, shown, item_name, stamp):
         d = self.items_dir
         abs_t, t_dir = self.entry_path(s, e)
@@ -1588,7 +1605,12 @@ class Builder:
         if e.pending_files:
             facts.append(('Still queued', queued_text(e.pending_files, e.pending_bytes)))
         facts += info['facts']
-        facts.append(('Location', os.path.relpath(abs_t, self.root).replace(os.sep, '/')))
+        if len(e.platforms) > 1:      # one card merges every platform: list each platform's folder
+            locs = [os.path.relpath(os.path.join(s.path, p_, n), self.root).replace(os.sep, '/')
+                    for p_, names in sorted(e.platforms.items()) for n in sorted(names)]
+            facts.append(('Location', ', '.join(locs)))
+        else:
+            facts.append(('Location', os.path.relpath(abs_t, self.root).replace(os.sep, '/')))
         facts_html = '<dl class="facts">' + ''.join(f'<dt>{esc(k)}</dt><dd>{esc(v)}</dd>' for k, v in facts) + '</dl>'
         links = []
         if e.files:
@@ -1603,6 +1625,11 @@ class Builder:
             for p_, names in sorted(e.platforms.items()):
                 for name, (b, isdir) in sorted(names.items()):
                     label = PLATFORMS.get(p_, p_) + ('' if len(names) == 1 else f' · {name}')
+                    hint = self.hint_only(e, p_, name)
+                    if hint:              # no binary for this platform: say so, link the instructions
+                        parts.append(f'<a href="{href(self.rel(os.path.join(s.path, p_, name, hint), d))}">'
+                                     f'{esc(label)}: build from source ({esc(hint)})</a> ')
+                        continue
                     parts.append(f'<a href="{href(self.rel(os.path.join(s.path, p_, name), d))}{"/" if isdir else ""}">'
                                  f'{esc(label)}</a><span class="muted">{human(b)}</span> ')
             plat = '<h3>Downloads by platform</h3><p class="plat">' + ''.join(parts) + '</p>'

@@ -52,7 +52,8 @@ echo "=================================================================="
 _test_publishers() {
     local p env args
     # Only real publisher processes (the binary itself), not any command line that mentions it.
-    for p in $(pgrep -x avahi-publish 2>/dev/null; pgrep -x avahi-publish-address 2>/dev/null); do
+    # (Linux truncates process names to 15 chars: avahi-publish-address shows as avahi-publish-a.)
+    for p in $(pgrep -x 'avahi-publish(-a)?' 2>/dev/null); do
         [ "$p" = "$$" ] && continue
         args=$( { tr '\0' ' ' < "/proc/$p/cmdline"; } 2>/dev/null) || args=$(ps -p "$p" -o args= 2>/dev/null)
         env=$( { tr '\0' '\n' < "/proc/$p/environ"; } 2>/dev/null)

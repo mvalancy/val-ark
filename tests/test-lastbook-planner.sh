@@ -300,5 +300,41 @@ check "request content lastbook: no match (never pack:all)" 'grep -q "^rc=1" "$T
 reqrun 'resolve_candidate() { grep "^lastbook:pack:all	" "$TT/c.tsv"; }' content all
 check "request: a source download_one cannot fetch is refused BEFORE any pin or eviction" 'grep -q "^rc=1" "$T/calls" && ! grep -q "^PINNED\|^evict\|^download_one" "$T/calls" && grep -q "no per-item request path" "$T/req.out"'
 
+# --- 8. re-review: survival never over-commits; sha re-release charged; no unbounded batch ---------------
+# the kept essential is never refunded: Small (9) + installers (1) are phase 0, and All (390) must NOT
+# be planned at 398 KB (it would need Small's 9 KB back while Small stays planned beside it)
+cands | grep -E "^lastbook:(pack:small|pack:all|app:)" > "$T/c-surv.tsv"
+python3 "$P" --budget $((398*K)) --essentials "$E" --profile survival < "$T/c-surv.tsv" > "$T/p" 2>/dev/null
+check "survival, tight budget: the planned bytes never exceed the budget" '[ "$(awk -F"\t" "{s+=\$5} END {printf \"%.0f\", s+0}" "$T/p")" -le $((398*K)) ]'
+check "survival, tight budget: Small + installers only (All does not fit beside the kept Small)" '[ "$(packs < "$T/p")" = small ] && has lastbook:app:1.1.11 < "$T/p"'
+python3 "$P" --budget $((400*K)) --essentials "$E" --profile survival < "$T/c-surv.tsv" > "$T/p" 2>/dev/null
+check "survival, exactly enough: Small + installers + All = 400 KB" '[ "$(packs < "$T/p")" = "all small" ] && [ "$(awk -F"\t" "{s+=\$5} END {printf \"%.0f\", s+0}" "$T/p")" -le $((400*K)) ]'
+# a same-name, same-size re-release (the row lists another sha256 than the one held) is charged
+mkdir -p "$LB/maps" "$LB/addresses"; head -c $((3*K)) /dev/zero > "$LB/maps/CA.zip"; head -c $((1*K)) /dev/zero > "$LB/addresses/CA.zip"
+mkdir -p "$LB/packs"; head -c $((8*K)) /dev/zero > "$LB/packs/Small.zip"; head -c $((1*K)) /dev/zero > "$LB/maps/base.zip"
+stampit maps/CA.zip addresses/CA.zip packs/Small.zip maps/base.zip
+OLD=$(printf '0%.0s' $(seq 64)); NEW=$(printf 'a%.0s' $(seq 64))
+shaset() { row lastbook:map:CA content lastbook:maps 640 $((4*K)) "$LB" "map|pack|maps/CA.zip=$((3*K))@$1,addresses/CA.zip=$((1*K))@$OLD"
+           row lastbook:pack:small content lastbook:pack 820 $((9*K)) "$LB" "pack|-|packs/Small.zip=$((8*K)),maps/base.zip=$((1*K))"; }
+shaset "$OLD" > "$T/c-sha.tsv"; python3 "$P" --budget $((100*K)) < "$T/c-sha.tsv" > "$T/p" 2>/dev/null
+check "planner: the listed sha256 matches the held one -> CA is held (not planned)" '! has lastbook:map:CA < "$T/p"'
+shaset "$NEW" > "$T/c-sha.tsv"; python3 "$P" --budget $((100*K)) < "$T/c-sha.tsv" > "$T/p" 2>/dev/null
+check "planner: same name + size, another sha256 (a re-release) -> CA planned and charged its map bytes" 'awk -F"\t" "\$1==\"lastbook:map:CA\" && \$5==$((3*K))" "$T/p" | grep -q .'
+rm -rf "$LB/maps" "$LB/addresses" "$LB/packs" "$LB/.lastbook-verified.json"
+mkdir -p "$T/fd-time"
+# lastbook_fill never runs unbounded: with a --time budget and no seconds left it does not start
+bash -c '
+TT="$2"; export VAL_ARK_DATA="$1" VAL_ARK_CONFIG="$2/none.env" FORCE_COLOR=0
+. "$3/scripts/librarian.sh"; ensure_state
+printf "#!/bin/bash\necho RAN \"\$*\" >> %s/lbcalls\n" "$TT" > "$TT/fake-lastbook.sh"; LASTBOOK_SH="$TT/fake-lastbook.sh"
+: > "$TT/lbcalls"
+lastbook_fill /dev/null 0 >/dev/null 2>&1; echo "rc0=$?" >> "$TT/lbcalls"
+lastbook_fill /dev/null -5 >/dev/null 2>&1; echo "rcneg=$?" >> "$TT/lbcalls"
+lastbook_fill /dev/null 30 >/dev/null 2>&1; echo "rc30=$?" >> "$TT/lbcalls"
+lastbook_fill /dev/null >/dev/null 2>&1; echo "rcnone=$?" >> "$TT/lbcalls"
+exit 0' _ "$T/fd-time" "$T" "$ROOT"
+check "lastbook_fill 0 / negative seconds: not started (124), never unbounded" 'grep -q "^rc0=124" "$T/lbcalls" && grep -q "^rcneg=124" "$T/lbcalls" && [ "$(grep -c ^RAN "$T/lbcalls")" = 2 ]'
+check "lastbook_fill with seconds left / no --time budget: runs" 'grep -q "^rc30=0" "$T/lbcalls" && grep -q "^rcnone=0" "$T/lbcalls"'
+
 echo "lastbook-planner: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ]

@@ -295,9 +295,15 @@ LASTBOOK_SH="${PROJECT_ROOT}/scripts/tools/lastbook.sh"
 # holds its lock, nothing fetched; 124 = the time budget ran out, the .parts resume next cycle).
 # Bounded by the fill's remaining --time; the mirror also pauses at the STOP flag. The bytes a
 # run really added land in ${TMPDIR_VA}/lastbook-added (one number).
-lastbook_fill() {
-    local secs="${2:-0}"; rm -f "${TMPDIR_VA}/lastbook-added"
-    local t=(); [ "$secs" -gt 0 ] 2>/dev/null && t=(timeout --kill-after=60 "$secs")
+lastbook_fill() {   # SECONDS: empty = no --time budget (unbounded); a number = the remaining budget
+    local secs="${2:-}"; rm -f "${TMPDIR_VA}/lastbook-added"
+    local t=()
+    if [ -n "$secs" ]; then
+        case "$secs" in *[!0-9-]*|'') secs=0 ;; esac
+        # no time left: do not start (never fall through to an unbounded run)
+        [ "$secs" -ge 1 ] 2>/dev/null || { warn "lastbook: no time left in the fill budget; not starting the batch"; return 124; }
+        t=(timeout --kill-after=60 "$secs")
+    fi
     VALARK_STOP_FLAG="$STOP_FLAG" VALARK_LASTBOOK_SUMMARY="${TMPDIR_VA}/lastbook-added" \
         "${t[@]}" bash "$LASTBOOK_SH" --plan-file "$1" </dev/null >&2
 }
@@ -408,8 +414,11 @@ cmd_fill() {
                 warn "low headroom ($(human "$fillable")) for the Lastbook batch ($(human "$lb_bytes")); skipping it this cycle"
                 continue
             fi
-            local lb_secs=0
-            [ "$time_budget" -gt 0 ] && lb_secs=$(( time_budget - ( $(date +%s) - start ) ))
+            local lb_secs=""
+            if [ "$time_budget" -gt 0 ]; then
+                lb_secs=$(( time_budget - ( $(date +%s) - start ) ))
+                [ "$lb_secs" -ge 1 ] || { log "time budget reached"; break; }
+            fi
             items=$(( items + 1 ))
             log "[$items] Lastbook: $(cut -f1 "$lb_plan" | sed 's/^lastbook://' | paste -sd' ' -) ($(human "$lb_bytes") to fetch, p${phase})"
             local lrc=0; lastbook_fill "$lb_plan" "$lb_secs" || lrc=$?

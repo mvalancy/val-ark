@@ -929,6 +929,56 @@ python3 -c 'import json,sys; f=sys.argv[1]; s=json.load(open(f)); s["maps/Lastbo
 python3 "$ROOT/scripts/lib/planner.py" --budget 1000000000 < "$T/rr.cand" > "$T/rr.plan" 2>/dev/null
 check "same name + size, different sha held: lastbook:map:CA is planned (charged), not held" 'awk -F"\t" "\$1==\"lastbook:map:CA\" && \$5>0" "$T/rr.plan" | grep -q .'
 
+# --- 14. re-review: the model is one slot; base maps don't block prune; unknown / unavailable entries kept --
+# newmodelid: upstream renames the model (new id AND new file); the old id is gone from the release
+rm -rf "$T/www/newmodelid"; cp -r "$T/www/tiny" "$T/www/newmodelid"
+python3 - "$T/www/newmodelid" <<'EOF'
+import hashlib, json, os, sys, urllib.parse
+root = sys.argv[1]; mp = os.path.join(root, "dl", "manifest-v1.json"); m = json.load(open(mp))
+md = m["models"][0]
+data = b"lastbook fixture gemma-5\n" * 60
+path = "unsloth/gemma-5-GGUF/resolve/main/gemma-5-Q4.gguf"
+os.makedirs(os.path.join(root, "hf", os.path.dirname(path)), exist_ok=True)
+open(os.path.join(root, "hf", path), "wb").write(data)
+md.update(id="gemma-5", title="Gemma 5", file="gemma-5-Q4.gguf", url="https://huggingface.co/" + path,
+          size=len(data), sha256=hashlib.sha256(data).hexdigest())
+json.dump(m, open(mp, "w"))
+EOF
+NM="https://downloads.lastbook.org/=$B/newmodelid/dl/ https://lastbook.org/=$B/newmodelid/site/ https://huggingface.co/=$B/newmodelid/hf/"
+OLDM=models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf
+D60="$T/m60"; mir --dest "$D60" --pack small --maps none --apps none --model yes > "$T/out" 2>"$T/err"
+check "setup: Small + the gemma-4 model held" '[ -s "$D60/$OLDM" ]'
+: > "$T/empty.plan"
+VALARK_LASTBOOK_REWRITE="$NM" VALARK_LASTBOOK_DIR="$D60" bash "$SH" --plan-file "$T/empty.plan" > "$T/sh.out" 2>&1; rc=$?
+check "model renamed upstream (gemma-5), new one not planned: the old model is KEPT" \
+    '[ "$rc" = 0 ] && [ -s "$D60/$OLDM" ] && [ ! -e "$D60/models/gemma-5-Q4.gguf" ] && grep -q "keeping $OLDM: its replacement" "$T/sh.out" || { cat "$T/sh.out" >&2; false; }'
+VALARK_LASTBOOK_MODEL=no VALARK_LASTBOOK_REWRITE="$NM" VALARK_LASTBOOK_DIR="$D60" bash "$SH" --plan-file "$T/empty.plan" > "$T/sh.out" 2>&1; rc=$?
+check "model renamed upstream, MODEL=no: the old model is still kept (a no is not a delete)" '[ "$rc" = 0 ] && [ -s "$D60/$OLDM" ]'
+VALARK_LASTBOOK_REWRITE="$NM" python3 "$PY" mirror --dest "$D60" --pack auto --pack-limit "" --maps none --apps none --model yes --budget -1 --tries 1 --retry-wait 0 > "$T/out" 2>"$T/err"; rc=$?
+check "model renamed upstream, gemma-5 fetched + verified: the old model is pruned" '[ "$rc" = 0 ] && [ -s "$D60/models/gemma-5-Q4.gguf" ] && [ ! -e "$D60/$OLDM" ] || { cat "$T/err" >&2; false; }'
+# a held model file whose entry is unknown follows the one-slot rule (current model verified -> it goes)
+echo old > "$D60/models/old-unknown.gguf"; stamp "$D60" models/old-unknown.gguf
+VALARK_LASTBOOK_REWRITE="$NM" python3 "$PY" mirror --dest "$D60" --pack auto --pack-limit "" --maps none --apps none --model no --budget 0 --tries 1 --retry-wait 0 > "$T/out" 2>"$T/err"; rc=$?
+check "unknown-entry model file: one slot, the current model is verified -> pruned" '[ "$rc" = 0 ] && [ ! -e "$D60/models/old-unknown.gguf" ]'
+# a held MAP whose entry is unknown is kept, and the run says so
+mkdir -p "$D60/maps"; echo zz > "$D60/maps/Lastbook-Map-ZZ.zip"; stamp "$D60" maps/Lastbook-Map-ZZ.zip
+VALARK_LASTBOOK_REWRITE="$NM" python3 "$PY" mirror --dest "$D60" --pack auto --pack-limit "" --maps none --apps none --model no --budget 0 --tries 1 --retry-wait 0 > "$T/out" 2>"$T/err"; rc=$?
+check "unknown-entry map file: kept, and logged as unknown" '[ "$rc" = 0 ] && [ -s "$D60/maps/Lastbook-Map-ZZ.zip" ] && grep -q "keeping maps/Lastbook-Map-ZZ.zip: its entry is unknown" "$T/err"'
+# an address index upstream now marks available:false is kept, not pruned
+variant caaddrgone 'A=[x for x in m["address_indexes"] if x["id"]=="CA"][0]; A["available"]=False; A["unavailable_reason"]="records withdrawn"'
+D61="$T/m61"; mir --dest "$D61" --pack small --maps CA,TX --model no --apps none > "$T/out" 2>"$T/err"
+vrun caaddrgone --dest "$D61" --pack auto --pack-limit "" --maps CA,TX; rc=$?
+check "address index marked available:false upstream: the held CA index is kept, and says why" \
+    '[ "$rc" = 0 ] && [ -s "$D61/addresses/Lastbook-Addresses-CA.zip" ] && grep -q "keeping addresses/Lastbook-Addresses-CA.zip: upstream marks CA unavailable (records withdrawn)" "$T/err" || { cat "$T/err" >&2; false; }'
+# planner mode: an unplanned base-map refresh is skipped, not deferred, so the nested Small is still pruned
+variant basebump 'b=m["maps"]; B=[x for x in b if x["id"]=="base"][0]; B["files"][0]["name"]="Lastbook-Map-base-2.zip"; B["files"][0]["url"]=B["files"][0]["url"].replace("Lastbook-Map-base.zip","Lastbook-Map-base-2.zip")'
+cp "$T/www/basebump/dl/maps/Lastbook-Map-base.zip" "$T/www/basebump/dl/maps/Lastbook-Map-base-2.zip"
+D62="$T/m62"; mir --dest "$D62" --pack small --maps none --apps none --model no > "$T/out" 2>"$T/err"
+ALLB=$(VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" plan --pack all --maps none --apps none --model no --budget -1 2>/dev/null | awk -F'\t' '$2=="pack" {print $5}')
+vrun basebump --dest "$D62" --pack auto --pack-limit all --budget "$ALLB"; rc=$?
+check "planner mode, base-map re-release not planned: exit 0 (not 3), All verified, nested Small pruned, old base kept" \
+    '[ "$rc" = 0 ] && [ -s "$D62/packs/Lastbook-All.zip" ] && [ ! -e "$D62/packs/Lastbook-Small-20261113.zip" ] && [ -s "$D62/maps/Lastbook-Map-base.zip" ] && [ ! -e "$D62/maps/Lastbook-Map-base-2.zip" ] && grep -q "map base .* was not planned: skipped" "$T/err" || { echo "rc=$rc ALLB=$ALLB" >&2; cat "$T/err" >&2; false; }'
+
 # server.js reports a VALARK_LASTBOOK_DIR outside content/ under lastbook/, flagged external (not served)
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
 if [ -n "$NODE" ] && command -v curl >/dev/null 2>&1; then

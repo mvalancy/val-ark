@@ -134,11 +134,19 @@ value and a size like every other row, and the owner profile weights them.
     after a larger one is verified, and nothing goes when the release looks truncated.
   - **Nothing held is deleted before its replacement is verified.** That covers a held map,
     address index, model or installer version that the release no longer names (a new app
-    version, a renamed map or model). Such a file stays until what replaces it (all the
-    current installers, or the current entry with the same id) is downloaded and verified. If
-    the planner had no room for the replacement, the old copy is kept, and the replacement
-    stays charged in later plans. Only an entry the release dropped altogether goes, and the
-    truncation guards still apply to that.
+    version, a renamed map or model). Such a file stays until what replaces it is downloaded
+    and verified. Installers and the model are each **one slot**: an old installer or model
+    file waits for every current installer or model, even if upstream renamed the model to a
+    new id. A map or address index waits for the current entry with the same id. If the
+    planner had no room for the replacement, the old copy is kept, and the replacement stays
+    charged in later plans.
+  - Some files are kept rather than pruned, each with a log line saying why: a map or address
+    index whose entry cannot be told, and an address index that upstream marks
+    `available: false`. Only a map or address index entry the release dropped altogether goes,
+    and the truncation guards still apply to that.
+  - In planner mode a base-map refresh the planner did not charge is skipped, not deferred, so
+    it never exits 3 and blocks the prune (such as the nested Small after All verifies). The
+    old base map stays until its replacement is verified.
   - The mirror records each file's entry id in its stamps, so the link survives once the kept
     manifest moves on. Candidate rows carry each file's sha256, so a re-release under the same
     name and size counts as not held and is charged.

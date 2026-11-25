@@ -294,6 +294,13 @@ later). See [README](README.md).
     - The entry id is recorded in `.lastbook-verified.json` (`entry`, like `pack`), at fetch time
       and from the kept manifest on every run, so the link survives once the kept manifest
       moves on.
+    - *Second re-review:* the model and the installers are each one slot. A renamed model (new id)
+      keeps the old file until every current model entry is verified, even with `MODEL=no`.
+      An unknown-entry model file follows the same slot rule, and an unknown-entry map or address
+      index is kept and logged. An address index upstream marks `available: false` is kept.
+      In planner mode the base maps are not wanted (skipped, not deferred), so an unplanned
+      base-map refresh no longer exits 3 and blocks every prune. `lastbook_fill` never runs
+      unbounded: with a `--time` budget and no seconds left it does not start.
     - Candidate rows carry each file's sha256, so a same-name, same-size re-release is not taken
       for held. With these rules, every held item is at least as well off as with `--plus-held`:
       it is kept until replaced, and its refresh is planned and charged.

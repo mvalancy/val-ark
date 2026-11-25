@@ -508,7 +508,9 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
         # A pack comes with the base maps and (by default) the installers, both wanted: reserve room
         # for them in the fit, or a budget just above a pack's size picks it and then defers the
         # base map, exiting 3 on every run so prune never runs (N5).
-        extras = sum(need(m) for m in rel["base_maps"])
+        # (planner mode, --pack-limit: the base maps are not wanted, so they are not reserved either;
+        # the planner's pack row already charged a base map that is missing)
+        extras = 0 if getattr(args, "pack_limit", None) is not None else sum(need(m) for m in rel["base_maps"])
         if args.apps == "current" and rel["apps"]:
             extras += need(dict(files=rel["apps"]))
         # Rank (R3): a pack held and verified on disk by its RECORDED bytes; any other by the bytes the
@@ -652,8 +654,13 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
         args.maps, args.addresses, args.model, args.apps = "none", "none", "no", "none"
 
     if have_pack:
+        # Planner mode (--pack-limit): a base-map refresh the planner did not charge is skipped, not
+        # deferred, so it does not exit 3 and block every prune; the held base map is kept by
+        # replacement_verified until its replacement is verified (#203 review).
+        planned = getattr(args, "pack_limit", None) is not None
         for m in rel["base_maps"]:
-            take(m, True, f"map {m['id']}")
+            if not take(m, not planned, f"map {m['id']}") and planned:
+                notes.append(f"map {m['id']} ({human(need(m))}) was not planned: skipped this run")
     if args.apps == "current" and rel["apps"]:
         take(dict(files=rel["apps"]), True, f"Lastbook {rel['app_version']} installers")
     for mdl in rel["models"]:
@@ -1004,24 +1011,38 @@ def entry_of_kept(kept):
 
 
 def replacement_verified(dest, rel, stamps, key, sec, kept_entries):
-    """A held map / address index / model / installer that the release no longer names may go only
-    once what replaces it is on disk and verified (#203 review): the current installers (all of
-    them) for an old app/<version>/ file; the current entry of the same id for a map, address index
-    or model. An entry the release dropped altogether has no replacement: it may go (the truncation
-    guards still apply). A file whose entry cannot be told (no kept manifest) is kept."""
+    """(may_go, why_kept) for a held map / address index / model / installer that the release no
+    longer names (#203 reviews). It may go only once what replaces it is on disk and verified:
+      - installers and the model are ONE slot each: an old app/<version>/ file or an old model
+        file waits until every current installer / every current model entry is verified, whatever
+        its id was (upstream renames the model, gemma-4 -> gemma-5, and the old one must stay);
+      - a map / address index waits for the current entry of the same id; an entry the release
+        dropped altogether may go (the truncation guards still apply); an entry upstream now marks
+        unavailable (available: false, e.g. a state whose address records were withdrawn) is kept;
+      - a map / address index whose entry cannot be told (no stamps entry, no kept manifest) is kept."""
+    def slot(files):
+        if not files:
+            return False, "the release lists none to replace it"
+        if all(stamped(dest, stamps, f) for f in files):
+            return True, None
+        return False, "its replacement in this release is not downloaded and verified yet"
     if sec == "app":
-        return bool(rel["apps"]) and all(stamped(dest, stamps, f) for f in rel["apps"])
-    if sec not in ("maps", "addresses", "models"):
-        return True
-    grp = sec
+        return slot(rel["apps"])
+    if sec == "models":
+        return slot([f for e in rel["models"] for f in e["files"]])
+    if sec not in ("maps", "addresses"):
+        return True, None
     eid = (stamps.get(key) or {}).get("entry") or (kept_entries.get(key) or (None, None))[1]
     if eid is None:
-        return False
-    groups = {"maps": ("base_maps", "maps"), "addresses": ("addresses",), "models": ("models",)}[grp]
+        return False, "its entry is unknown (no record of which map / address index it was)"
+    unavailable = rel.get("unavailable", {}).get("map" if sec == "maps" else "address", {})
+    if eid in unavailable:
+        return False, f"upstream marks {eid} unavailable ({unavailable[eid]}), so nothing replaces it"
+    groups = ("base_maps", "maps") if sec == "maps" else ("addresses",)
     now = [e for g in groups for e in rel[g] if e["id"] == eid]
     if not now:
-        return True  # dropped upstream, not replaced
-    return all(stamped(dest, stamps, f) for e in now for f in e["files"])
+        return True, None  # dropped upstream, not replaced
+    return slot([f for e in now for f in e["files"]])
 
 
 def prune(dest, rel, stamps, log, verified_pack=None, names=(), run_packs=(), kept_packs=None, kept=None):
@@ -1079,9 +1100,10 @@ def prune(dest, rel, stamps, log, verified_pack=None, names=(), run_packs=(), ke
     # a new app version (or a renamed map) that did not fit, or was not planned, keeps the old copy.
     kept_entries = entry_of_kept(kept)
     for k in [k for k in drop if k in held and owned[k][1] in ("maps", "addresses", "models", "app")]:
-        if not replacement_verified(dest, rel, stamps, k, owned[k][1], kept_entries):
+        ok, why = replacement_verified(dest, rel, stamps, k, owned[k][1], kept_entries)
+        if not ok:
             drop.remove(k)
-            log(f"keeping {k}: its replacement in this release is not downloaded and verified yet")
+            log(f"keeping {k}: {why}")
     drop_held = [k for k in drop if k in held]
     # Per-section guard: a manifest listing only a few states drops most maps but, on a box with
     # the 388 GB All pack, well under half the held bytes, so the whole-mirror check passes.

@@ -91,7 +91,7 @@ for p in content models tools sources assets docs; do
     [ "$(gcode "$B/$p/")" = "401" ] && pass || fail "unauthed /$p/ must be 401 (data-tree read-wall)"
 done
 for p in %2fcontent/ %2Fdocs/ ./docs/; do   # #297: no encoded / doubled slash or dot-segment bypass
-    [ "$(gcode "$B/$p")" = "401" ] && pass || fail "unauthed /$p must be 401 (normalized before the read-wall)"
+    [ "$(gcode --path-as-is "$B/$p")" = "401" ] && pass || fail "unauthed /$p must be 401 (normalized before the read-wall)"
 done
 c=$(gcode -b "$T/cj" "$B/content/"); [ "$c" != "401" ] && pass || fail "authed data-tree read must be allowed (got $c)"
 # the UI shell + its assets stay open so the login wall can render
@@ -129,8 +129,9 @@ if start_open VALARK_TEST_FORCE_PUBLIC=1; then
     for p in api/status/disk api/catalog/content api/packages api/archive/content/x api/downloads/stream \
              content/ models/ tools/ sources/ docs/ DOCS/ kiwix/ app/chat/ \
              %2fdocs/ %2Fcontent/ ./docs/ api/status/disk/; do
-        c=$(gcode "$B/$p"); [ "$c" = "403" ] && pass || fail "Open mode: public peer reading /$p must be 403 (got $c)"
+        c=$(gcode --path-as-is "$B/$p"); [ "$c" = "403" ] && pass || fail "Open mode: public peer reading /$p must be 403 (got $c)"
     done
+    c=$(gcode "$B/docs%00/x"); [ "$c" = "404" ] && pass || fail "a NUL in the path must be 404, not 500 (got $c)"
     c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -I "$B/docs/"); [ "$c" = "403" ] && pass || fail "Open mode: public HEAD /docs/ must be 403 (got $c)"
     # "//docs/…" is read as a protocol-relative URL (host "docs"), so it serves the shell: no doc leaks
     curl -s "$B//docs/ARCHITECTURE.md" | grep -q 'Val Ark - Architecture' && fail "public //docs/ must not leak a doc" || pass

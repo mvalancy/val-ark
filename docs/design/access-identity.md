@@ -13,7 +13,7 @@ accounts? Are there real access controls? What's admin vs. user?* (See
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../img/flow/access-dark.svg">
-  <img src="../img/flow/access-light.svg" width="100%" alt="Animated diagram: Who can do what. The box is always the Admin; the LAN gets what the Use Mode allows; the internet gets nothing.">
+  <img src="../img/flow/access-light.svg" width="100%" alt="Animated diagram: Who can do what. The box is always the Admin; the LAN gets what the Use Mode allows; the internet gets no library.">
 </picture>
 
 Three independent layers, from bottom to top:

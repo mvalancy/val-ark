@@ -310,8 +310,9 @@ a gated tree without matching. That also got past the Passworded/Accounts sign-i
   in every Use Mode. The web-UI shell, `/api/health`, auth and setup stay reachable, and
   `/api/auth/status` reports `localOnly` so the UI can explain why.
 - A socket with no remote address is no longer treated as localhost.
-- `100.64.0.0/10` counts as the tailnet only when the request arrived on the box's own
-  tailnet address, not on a carrier-CGNAT uplink.
+- `100.64.0.0/10` counts as the tailnet only when the request arrived on the box's
+  tailscale interface, not on a carrier-CGNAT uplink (even one the box itself sits on).
+- A NUL in the path gets 404 instead of a 500.
 
 `tests/test-access.sh` covers it: a simulated public peer (`VALARK_TEST_FORCE_PUBLIC=1`,
 fail-safe) gets 403 on the gated trees, the APIs, the progress stream, the app proxies,

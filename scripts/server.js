@@ -1132,6 +1132,17 @@ function clientIp(req) {
 // internet — see docs/ARM64-NAS.md), so members can one-click downloads from those
 // peers. Every trigger is still guarded (allowlist targets, footprint-cap eviction,
 // single-flight fill lock, per-IP rate limit); public/unknown peers are refused.
+// Did this connection arrive on a tailscale interface (tailscale0, utunN with a 100.x
+// tailscale address)? Looked up per request, so a tailnet that comes up later works.
+function arrivedOnTailnet(req) {
+    const la = (req.socket?.localAddress || '').replace(/^::ffff:/, '');
+    if (!la) return false;
+    for (const [name, addrs] of Object.entries(require('os').networkInterfaces())) {
+        if (!/^(tailscale|ts)\d*$/i.test(name)) continue;
+        if ((addrs || []).some(a => a.address === la)) return true;
+    }
+    return false;
+}
 function isLanOrTailnet(req) {
     // Test hook: simulate a public-internet peer. Fail-SAFE like VALARK_TEST_FORCE_REMOTE:
     // it only takes access away, never grants it.
@@ -1148,12 +1159,8 @@ function isLanOrTailnet(req) {
         if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true;     // 172.16.0.0/12
         if (o[0] === 192 && o[1] === 168) return true;                 // 192.168.0.0/16
         // 100.64.0.0/10 is the tailnet only when the request arrived on the box's own
-        // tailnet address; on a carrier-CGNAT uplink the same range is other subscribers.
-        if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) {
-            const la = (req.socket?.localAddress || '').replace(/^::ffff:/, '');
-            const lm = la.match(/^100\.(\d+)\./);
-            return !!(lm && Number(lm[1]) >= 64 && Number(lm[1]) <= 127);
-        }
+        // tailscale interface; on a carrier-CGNAT uplink the same range is other subscribers.
+        if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return arrivedOnTailnet(req);
         if (o[0] === 169 && o[1] === 254) return true;                 // link-local
         return false;
     }
@@ -2914,6 +2921,7 @@ function handleRequest(req, res) {
     const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
     let urlPath;
     try { urlPath = decodeURIComponent(parsedUrl.pathname); } catch (_) { return send404(res); }
+    if (urlPath.includes('\0')) return send404(res);   // a NUL never names a real file
     // One canonical path for every check and route below. Without this, an encoded or
     // doubled slash or a dot segment (/%2fdocs, //docs, /./docs) slips past the
     // read-wall's prefix match and is then normalized straight back into a gated tree

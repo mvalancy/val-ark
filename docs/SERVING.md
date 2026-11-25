@@ -154,6 +154,10 @@ holds `.env`. Don't share that checkout; use a data disk (`VAL_ARK_DATA`) for an
    ```
 
    Set `VALARK_WEB_PORT` in `.env` so the loop checks the same port.
+   The server answers only to names that can be the box's own (IP addresses, `localhost`,
+   single-label names, `.local`, `.lan`, `.home`, `.home.arpa`, `.internal`, `.localdomain`,
+   `.ts.net`, `.fritz.box`). If you reach it by another name, such as a split-horizon
+   `ark.example.org`, add it to `VALARK_ALLOWED_HOSTS` or you'll get a 421.
 
 2. **Keep it running.** The 24/7 loop restarts the server if it stops, and resumes after a reboot:
 
@@ -168,8 +172,12 @@ holds `.env`. Don't share that checkout; use a data disk (`VAL_ARK_DATA`) for an
 3. **Finish setup and choose who can get in.** Open the web UI. From the box itself
    (`localhost`) the setup wizard just starts. From another device it asks for the claim code, which
    the server prints when it starts and `scripts/valark claim` shows again. A new box starts in
-   **Open** mode; change the **Use Mode** on the box with `scripts/valark usemode <mode>` (set an
-   admin passcode first). A Settings control for it is tracked in #303.
+   **Open** mode. Set an admin passcode, then choose the **Use Mode** in **Settings → Who can use
+   Val Ark?** (the setup wizard offers the same choice, defaulting to Open). Only the admin can change
+   it. On the box, `scripts/valark usemode <mode>` does the same. Either way the change is logged:
+   a change in Settings goes to the server log (`<data>/val-ark/state/logs/server.out`), and the CLI prints the
+   same line. Passworded and Accounts are refused until an admin passcode is set, and no mode
+   change is allowed in Safe Mode.
    - **Open** (default): anyone on the LAN can browse and request downloads. A request may evict
      unpinned content to make room.
    - **Passworded** and **Accounts**: browsing, downloads and requests need a sign-in. Today that is

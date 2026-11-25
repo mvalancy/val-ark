@@ -3943,9 +3943,12 @@ function renderSettings() {
     // Storage detail is the most-used control — surface the live breakdown inline.
     html += `<div id="storage" class="detail-section" style="margin-top:1.5rem"><h2>Storage</h2>${renderStorageBreakdown()}
         <p style="color:var(--text-muted);font-size:.9em">Val Ark keeps itself under its footprint cap and evicts the lowest-priority content when it needs room. Change the cap in <code>.env</code> (<code>VALARK_MAX_GB</code>) — a slider is coming to Advanced.</p></div>`;
+    // Who can use Val Ark? — the Use Mode picker (#303). Admin-only on the server
+    // (ADMIN_ONLY_POSTS); the gated modes stay disabled until an admin passcode exists.
+    html += _SETUP_CSS + renderUseModeSection();
     // Downloads & Priorities: the plain-language focus picker → curation weights.
     const curProfile = (_setupState && _setupState.profile) || '';
-    html += `${_SETUP_CSS}<div id="downloads" class="detail-section" style="margin-top:1.5rem"><h2>Downloads &amp; Priorities</h2>
+    html += `<div id="downloads" class="detail-section" style="margin-top:1.5rem"><h2>Downloads &amp; Priorities</h2>
         <p>What should Val Ark fill up with first? Pick a focus — it re-weights everything the box downloads. Change it any time.</p>
         <div class="setup-profiles">${_PROFILES.map(p => `
             <button class="setup-profile${curProfile === p.id ? ' on' : ''}" data-profile="${p.id}" onclick="setDownloadProfile('${p.id}')">
@@ -4592,6 +4595,15 @@ function computeComponents() {
         detail: 'The box booted into recovery because its settings are unreadable. Your content is safe. Recover to set a new passcode and clear it.',
         fault: 'config', repair: { label: 'Recover', act: 'recover' } });
 
+    // 1b) Tailscale in userspace-networking mode (#311): every tailnet peer is the Admin.
+    const ts = _healthData && _healthData.tailscale;
+    if (ts && ts.userspace) comps.push({ key: 'tailscale', icon: '🔓', label: 'Tailnet access', level: 'bad', state: 'Everyone is Admin',
+        detail: 'Tailscale on this box runs in userspace-networking mode, so every device on your tailnet reaches Val Ark as if it were the box itself, and the box is always the Admin. Run tailscaled with a kernel TUN interface (drop --tun=userspace-networking), or stop Tailscale on this box.',
+        fault: 'config', repair: null });
+    else if (ts && ts.state === 'unknown' && ts.evidence && ts.evidence.length) comps.push({ key: 'tailscale', icon: '🔒', label: 'Tailnet access', level: 'warn', state: 'Could not check',
+        detail: 'A Tailscale daemon is running that this box could not inspect (for example in a container). Make sure it uses a kernel TUN interface, not userspace networking, or every tailnet device would be the Admin.',
+        fault: 'config', repair: null });
+
     // 2) Storage.
     let diskPct = null;
     if (_diskData && _diskData.total) diskPct = _diskData.used / _diskData.total * 100;
@@ -4984,6 +4996,42 @@ const _HEALTH_CSS = `<style>
 .hp-qi-a{display:flex;gap:.4rem;flex:0 0 auto}
 .hp-btn-danger{border-color:rgba(224,85,58,.4);color:#e0553a}
 </style>`;
+
+// Use Mode (#303): who can view/use the box. Today the only sign-in is the admin
+// passcode, so Passworded and Accounts both gate on it until member accounts exist.
+const _USE_MODES = [
+    { id: 'open',       icon: '🏠', label: 'Everyone on my network', name: 'Open',
+      desc: 'Anyone on your network or tailnet can browse the library and request downloads, no sign-in. Settings still need the admin.' },
+    { id: 'passworded', icon: '🔑', label: 'People with a code', name: 'Passworded',
+      desc: 'Browsing, downloads and requests need a sign-in. Today the code is the admin passcode; a separate household code is planned.' },
+    { id: 'accounts',   icon: '👥', label: 'Only accounts I create', name: 'Accounts',
+      desc: 'Member accounts aren’t built yet, so today this works like Passworded: the admin passcode is the only sign-in.' },
+];
+function renderUseModeSection() {
+    const st = _authState || {};
+    const cur = st.useMode || 'open';
+    const adminSet = !!st.adminSet;
+    const curM = _USE_MODES.find(m => m.id === cur) || _USE_MODES[0];
+    return `<div id="access" class="detail-section" style="margin-top:1.5rem"><h2>Who can use Val Ark?</h2>
+        <p>Right now: <strong id="usemode-current" data-mode="${escAttr(cur)}">${esc(curM.name)}</strong> (${esc(curM.label.toLowerCase())}). The box itself is always the admin, and the internet never sees the library.</p>
+        <div class="setup-profiles" id="usemode-picker">${_USE_MODES.map(m => {
+            const locked = m.id !== 'open' && !adminSet;
+            return `<button class="setup-profile${cur === m.id ? ' on' : ''}" data-usemode="${escAttr(m.id)}" aria-pressed="${cur === m.id}"${locked ? ' disabled' : ''} onclick="setUseMode(this.dataset.usemode)">
+                <span class="setup-profile-ic" aria-hidden="true">${m.icon}</span>
+                <span class="setup-profile-tx"><strong>${esc(m.name)}: ${esc(m.label)}</strong><span class="setup-profile-desc">${esc(m.desc)}</span></span>
+            </button>`; }).join('')}</div>
+        ${adminSet ? '' : `<p id="usemode-needs-pass" style="color:var(--text-muted);font-size:.9em">Set an admin passcode first (<code>scripts/valark setpassword</code> on the box). Without one nobody on your network could sign in, so Passworded and Accounts stay off.</p>`}
+        <p style="color:var(--text-muted);font-size:.9em">Changing this needs the admin. Each change made here is written to the server log.</p></div>`;
+}
+async function setUseMode(mode) {
+    try {
+        const r = await fetch('/api/setup/usemode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) { await refreshAuthState(); scheduleRender(); }
+        else if (isNeedsAuth(r, d)) signIn('Sign in to change who can use Val Ark.');
+        else alert(d.error || 'Could not change who can use Val Ark.');
+    } catch (e) { alert('Could not change who can use Val Ark.'); }
+}
 
 // Change the download focus (Settings → Downloads & Priorities) → curation weights.
 async function setDownloadProfile(profile) {
@@ -7407,7 +7455,7 @@ const _PROFILES = [
 function _setupSteps() {
     const steps = ['welcome'];
     if (_setupState && _setupState.needsClaim) steps.push('claim');
-    steps.push('name', 'admin', 'profile', 'finish');
+    steps.push('name', 'admin', 'access', 'profile', 'finish');
     return steps;
 }
 
@@ -7448,6 +7496,22 @@ function _renderSetupStep(key) {
                 <input id="setup-pass" class="setup-input" type="password" placeholder="admin passcode (optional)" autocomplete="new-password" value="${esc(_setupData.password)}" oninput="_setupPwMeter(this.value)">
                 <div id="setup-pw-meter" class="setup-meter"></div>
                 <div class="setup-nav">${back}<span class="setup-navr"><button class="setup-btn ghost" onclick="setupSkipAdmin()">Skip for now</button><button class="setup-btn" onclick="setupNext()">Continue &rarr;</button></span></div>`;
+        case 'access': {
+            // Who can use it (#303). Open by default; the gated modes need a passcode,
+            // because the admin passcode is the only sign-in today.
+            const havePass = !!_setupData.password;
+            if (!havePass) _setupData.useMode = 'open';
+            return `<h1>Who can use Val Ark?</h1>
+                <p class="setup-lead">Pick who on your network can browse the library. Change it any time in Settings.</p>
+                <div class="setup-profiles" id="setup-usemode">${_USE_MODES.map(m => {
+                    const locked = m.id !== 'open' && !havePass;
+                    return `<button class="setup-profile${_setupData.useMode === m.id ? ' on' : ''}" data-usemode="${escAttr(m.id)}" aria-pressed="${_setupData.useMode === m.id}"${locked ? ' disabled' : ''} onclick="_setupPickUseMode(this.dataset.usemode)">
+                        <span class="setup-profile-ic">${m.icon}</span>
+                        <span class="setup-profile-tx"><strong>${esc(m.name)}: ${esc(m.label)}</strong><span class="setup-profile-desc">${esc(m.desc)}</span></span>
+                    </button>`; }).join('')}</div>
+                ${havePass ? '' : '<p class="setup-hint">Passworded and Accounts need the admin passcode from the previous step.</p>'}
+                <div class="setup-nav">${back}<button class="setup-btn" onclick="setupNext()">Continue &rarr;</button></div>`;
+        }
         case 'profile':
             return `<h1>What do you want on it?</h1>
                 <p class="setup-lead">Pick a starting focus — change it any time. Val Ark fills the disk in the background.</p>
@@ -7463,6 +7527,7 @@ function _renderSetupStep(key) {
                 <ul class="setup-review">
                     <li><span>Name</span><strong>${esc(_setupData.name || 'valark')}</strong></li>
                     <li><span>Admin passcode</span><strong>${_setupData.password ? 'set' : 'skipped (box-only for now)'}</strong></li>
+                    <li><span>Who can use it</span><strong>${esc((_USE_MODES.find(m => m.id === _setupData.useMode) || _USE_MODES[0]).name)}</strong></li>
                     <li><span>Focus</span><strong>${prof.icon} ${esc(prof.label)}</strong></li>
                 </ul>
                 <div class="setup-nav">${back}<button class="setup-btn" id="setup-finish-btn" onclick="setupFinish()">Set up Val Ark &rarr;</button></div>`;
@@ -7473,6 +7538,7 @@ function _renderSetupStep(key) {
 }
 
 function _setupPickProfile(id) { _setupData.profile = id; paintSetup(); }
+function _setupPickUseMode(id) { if (_USE_MODES.some(m => m.id === id)) _setupData.useMode = id; paintSetup(); }
 function _setupPwMeter(v) {
     const m = document.getElementById('setup-pw-meter'); if (!m) return;
     if (!v) { m.textContent = ''; return; }
@@ -7564,6 +7630,7 @@ const _SETUP_CSS = `<style>
 .setup-profiles{display:flex;flex-direction:column;gap:.6rem}
 .setup-profile{display:flex;gap:.85rem;align-items:flex-start;text-align:left;padding:.85rem 1rem;border:1px solid var(--border,#2a2d34);border-radius:11px;background:var(--bg-primary,#0e0f12);color:var(--text-primary,#e8eaed);cursor:pointer}
 .setup-profile.on{border-color:var(--accent,#e0603a);box-shadow:0 0 0 1px var(--accent,#e0603a) inset}
+.setup-profile:disabled{opacity:.5;cursor:not-allowed}
 .setup-profile-ic{font-size:1.4rem;line-height:1}
 .setup-profile-tx{display:flex;flex-direction:column;gap:.15rem}
 .setup-profile-desc{color:var(--text-muted,#8a8f98);font-size:.85rem}

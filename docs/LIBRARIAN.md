@@ -542,26 +542,32 @@ shows a hint linking to the static catalog, since the dynamic UI needs its serve
    interface so a laptop plugged straight in can reach the Ark; never serves while
    another DHCP server answers, and stops as soon as one appears
    (`scripts/lib/link-dhcp.sh`, [ARM64-NAS.md](ARM64-NAS.md#direct-connect-laptop-dhcp--dns-on-the-wired-port)),
-8. **refresh the live catalog** → content links self-heal (no stale dates),
-9. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
+8. **Tailscale mode check** (#311) — read-only: is tailscaled running in
+   userspace-networking mode, where every tailnet peer reaches the web server from
+   127.0.0.1 and so counts as the Admin? Writes `state/tailscale.json`
+   (`scripts/lib/tailscale-mode.sh`); the server raises a critical notification
+   and the Health page shows it (see
+   [access-identity.md](design/access-identity.md#layer-1--network-floor-automatic-not-a-user-setting)),
+9. **refresh the live catalog** → content links self-heal (no stale dates),
+10. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
    are transient, not dead), web-ui assets, symlinks → `state/linkcheck.txt`,
-10. **integrity verify** → requeue corrupt/short downloads,
-11. **re-fill pinned requests** — user-requested items that went missing come back
+11. **integrity verify** → requeue corrupt/short downloads,
+12. **re-fill pinned requests** — user-requested items that went missing come back
     before the generic fill,
-12. **top-up fill** (bounded; skipped if a fill already runs),
-13. **weekly tool refresh** — re-run the tool mirror so apps track their latest
+13. **top-up fill** (bounded; skipped if a fill already runs),
+14. **weekly tool refresh** — re-run the tool mirror so apps track their latest
     upstream versions (`VALARK_TOOL_REFRESH_DAYS`, default 7; a failed pass
     retries in a day),
-14. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
+15. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
     real ZIM, a tiny LLM infers, the web API answers, and each configured remote
     mesh node (`VALARK_FLEET` in `.env`) is reachable and sees the shared content,
-15. **UI smoke** — a Playwright pass over the dynamic controls (when installed),
-16. **moderation sweep** — screen plain-file community uploads on-device and
+16. **UI smoke** — a Playwright pass over the dynamic controls (when installed),
+17. **moderation sweep** — screen plain-file community uploads on-device and
     quarantine anything not cleanly allowed (`scripts/lib/mod-sweep.sh`, fail-closed),
-17. **report + coordination** — the librarian's `maintain` (writes
+18. **report + coordination** — the librarian's `maintain` (writes
     `state/health.json`: disk + per-category coverage) and a fleet coordination drop
     (`state/coordination/`),
-18. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
+19. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
     snapshot) and append any genuine repairs to `state/heal-events.jsonl` (the feed
     behind the Health page). This is **distinct from `state/health.json`**.
 

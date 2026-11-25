@@ -14,7 +14,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
-[ -n "$NODE" ] || { echo "SKIP: no node runtime" >&2; exit 0; }
+. "$ROOT/tests/lib/require-cmd.sh"
+[ -n "$NODE" ] || missing_cmd node "access"
 
 SRV_PID=""
 T="$(mktemp -d)"; trap 'rm -rf "$T"; stop_pids "$SRV_PID"' EXIT
@@ -195,8 +196,130 @@ if start_open VALARK_TEST_FORCE_REMOTE=1; then
     for p in "kiwix/content/w/A/...And_Justice_for_All" "kiwix/search?pattern=wait..." "kiwix/content/w/A/foo..bar"; do
         c=$(gcode --path-as-is "$B/$p"); [ "$c" != "404" ] && pass || fail "/$p must not be refused as traversal (got $c)"
     done
+    # the proxies forward the raw URL, so a path that only looks like /kiwix or /app after
+    # decoding or cleaning is refused (0.1.31 Gate-2 follow-up)
+    for p in "kiwix/./a" "kiwix//a" "%6biwix/a" "app/chat/./x" "%61pp/chat/x" "kiwix%2Fa" "app/chat%2Fx"; do
+        c=$(gcode --path-as-is "$B/$p"); [ "$c" = "404" ] && pass || fail "/$p must be 404 before the proxy (got $c)"
+    done
 else
     fail "open-mode server for the '..' checks did not start"
+fi
+stop_pids "$SRV_PID"; SRV_PID=""
+
+# 14. Use Mode from the web UI (#303): POST /api/setup/usemode is admin-only, refuses a
+#     gated mode until an admin passcode exists, and switching really engages the wall.
+"$NODE" -e '
+const a=require(process.argv[1]), c=require(process.argv[2]), d=process.argv[3], d2=process.argv[4];
+let refused=false; try { a.setUseMode("passworded", d); } catch (e) { refused=/admin passcode/.test(e.message); }
+const r=c.commission(d2,{name:"box",useMode:"accounts"},{trusted:true});
+process.exit(refused && a.status(d).useMode==="open" && r.error && !c.isCommissioned(d2) && a.status(d2).useMode==="open" ? 0 : 1);
+' "$ROOT/scripts/lib/auth.js" "$ROOT/scripts/lib/commission.js" "$T/um-nopass-unit" "$T/um-wiz-unit" \
+  && pass || fail "setUseMode + commission refuse a gated mode with no admin passcode"
+start_um() {   # $1 = state dir, $2 = extra env assignment (or empty)
+    PORT=$(free_port); B="http://127.0.0.1:$PORT"
+    env $2 VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" \
+      VALARK_STATE_DIR="$1" VALARK_CONTENT_DIR="$T/content" VALARK_MODELS_DIR="$T/models" \
+      "$NODE" "$ROOT/scripts/server.js" "$PORT" >"$T/srv-um.log" 2>&1 &
+    SRV_PID=$!
+    for i in $(seq 1 24); do sleep 0.5; curl -s -o /dev/null --max-time 2 "$B/api/health" && return 0; done
+    return 1
+}
+mode_now() { curl -s "$B/api/auth/status" | grep -o '"useMode":"[a-z]*"'; }
+mkdir -p "$T/um" "$T/um-nopass"
+"$NODE" -e 'const a=require(process.argv[1]);const d=process.argv[2];a.setPassword("testpass","admin",d);a.setUseMode("open",d);' \
+    "$ROOT/scripts/lib/auth.js" "$T/um"
+# 14a. A LAN peer: un-authed is refused; a signed-in admin switches and the wall engages.
+if start_um "$T/um" VALARK_TEST_FORCE_REMOTE=1; then
+    [ "$(jpost -d '{"mode":"passworded"}' "$B/api/setup/usemode")" = "401" ] && pass || fail "usemode from an un-authed LAN peer must be 401"
+    mode_now | grep -q '"open"' && pass || fail "a refused usemode must leave the mode Open"
+    [ "$(gcode "$B/api/status/disk")" = "200" ] && pass || fail "Open: a LAN peer reads before the switch"
+    curl -s -c "$T/cj-um" -X POST -H 'Content-Type: application/json' -d '{"password":"testpass"}' "$B/api/auth/login" | grep -q '"ok":true' \
+      && pass || fail "LAN admin login for the usemode checks"
+    [ "$(jpost -b "$T/cj-um" -d '{"mode":"sideways"}' "$B/api/setup/usemode")" = "400" ] && pass || fail "an invalid Use Mode must be 400"
+    [ "$(jpost -b "$T/cj-um" -d '{}' "$B/api/setup/usemode")" = "400" ] && pass || fail "a missing Use Mode must be 400"
+    [ "$(jpost -b "$T/cj-um" -d '{"mode":"passworded"}' "$B/api/setup/usemode")" = "200" ] && pass || fail "a signed-in admin must be able to set Passworded"
+    mode_now | grep -q '"passworded"' && pass || fail "auth/status must report Passworded after the switch"
+    [ "$(gcode "$B/api/status/disk")" = "401" ] && pass || fail "the read-wall must engage right after switching to Passworded"
+    [ "$(jpost -d '{"target":"all"}' "$B/api/download/content")" = "401" ] && pass || fail "use-actions must need sign-in after switching to Passworded"
+    [ "$(gcode -b "$T/cj-um" "$B/api/status/disk")" = "200" ] && pass || fail "the admin's session must survive the switch (no needless rotation)"
+    grep -q '\[access\] Use Mode changed: open -> passworded' "$T/srv-um.log" && pass || fail "the Use Mode change must be logged"
+    [ "$(jpost -b "$T/cj-um" -d '{"mode":"accounts"}' "$B/api/setup/usemode")" = "200" ] && pass || fail "a signed-in admin must be able to set Accounts"
+    [ "$(gcode "$B/api/status/disk")" = "401" ] && pass || fail "the read-wall must stay up in Accounts"
+    [ "$(jpost -b "$T/cj-um" -d '{"mode":"open"}' "$B/api/setup/usemode")" = "200" ] && pass || fail "a signed-in admin must be able to go back to Open"
+    [ "$(gcode "$B/api/status/disk")" = "200" ] && pass || fail "Open again: un-authed LAN reads must be allowed"
+else
+    fail "usemode server (LAN peer) did not start"
+fi
+stop_pids "$SRV_PID"; SRV_PID=""
+# 14b. A public peer is refused before any auth check.
+if start_um "$T/um" VALARK_TEST_FORCE_PUBLIC=1; then
+    [ "$(jpost -d '{"mode":"passworded"}' "$B/api/setup/usemode")" = "403" ] && pass || fail "usemode from a public peer must be 403"
+    mode_now | grep -q '"open"' && pass || fail "a public peer must not change the mode"
+else
+    fail "usemode server (public peer) did not start"
+fi
+stop_pids "$SRV_PID"; SRV_PID=""
+# 14c. The box itself (localhost = admin) with NO admin passcode: Open is fine, a gated
+#      mode is refused (nobody on the LAN could sign in).
+if start_um "$T/um-nopass" ""; then
+    [ "$(jpost -d '{"mode":"passworded"}' "$B/api/setup/usemode")" = "409" ] && pass || fail "Passworded with no admin passcode must be refused (409)"
+    [ "$(jpost -d '{"mode":"accounts"}' "$B/api/setup/usemode")" = "409" ] && pass || fail "Accounts with no admin passcode must be refused (409)"
+    mode_now | grep -q '"open"' && pass || fail "a refused gated mode must leave the box Open"
+    [ "$(jpost -d '{"mode":"open"}' "$B/api/setup/usemode")" = "200" ] && pass || fail "localhost admin may set Open with no passcode"
+else
+    fail "usemode server (no passcode) did not start"
+fi
+stop_pids "$SRV_PID"; SRV_PID=""
+# 14d. Safe Mode: a corrupt auth.json must never be overwritten by a mode change (it would
+#      be read as defaults and written back, erasing the admin passcode) — not from
+#      Settings on the box itself, and not from `valark usemode` (auth.js setmode).
+mkdir -p "$T/um-corrupt"
+printf '{corrupt' > "$T/um-corrupt/auth.json"; cp "$T/um-corrupt/auth.json" "$T/auth-corrupt.orig"
+if start_um "$T/um-corrupt" ""; then
+    c=$(curl -s -o "$T/um-corrupt.out" -w '%{http_code}' --max-time 6 -X POST -H 'Content-Type: application/json' -d '{"mode":"open"}' "$B/api/setup/usemode")
+    [ "$c" = "409" ] && pass || fail "Safe Mode: usemode from localhost must be 409 (got $c)"
+    grep -qi 'safe mode' "$T/um-corrupt.out" && pass || fail "Safe Mode: the refusal must say Safe Mode ($(cat "$T/um-corrupt.out"))"
+    [ "$(cat "$T/um-corrupt/auth.json")" = "$(cat "$T/auth-corrupt.orig")" ] && pass || fail "Safe Mode: Settings must leave the corrupt auth.json untouched"
+else
+    fail "usemode server (corrupt auth.json) did not start"
+fi
+stop_pids "$SRV_PID"; SRV_PID=""
+VALARK_STATE_DIR="$T/um-corrupt" "$NODE" "$ROOT/scripts/lib/auth.js" setmode open >"$T/cli-corrupt.out" 2>&1 \
+  && fail "Safe Mode: valark usemode must fail on a corrupt auth.json" || pass
+grep -q 'corrupt' "$T/cli-corrupt.out" && pass || fail "Safe Mode: valark usemode must say auth.json is corrupt"
+[ "$(cat "$T/um-corrupt/auth.json")" = "$(cat "$T/auth-corrupt.orig")" ] && pass || fail "Safe Mode: valark usemode must leave the corrupt auth.json untouched"
+# 14e. `valark usemode` logs the change the same way Settings does (stderr line).
+VALARK_STATE_DIR="$T/um" "$NODE" "$ROOT/scripts/lib/auth.js" setmode passworded >"$T/cli-um.out" 2>"$T/cli-um.err" \
+  && grep -q '\[access\] Use Mode changed: open -> passworded (by valark usemode' "$T/cli-um.err" \
+  && pass || fail "valark usemode must log the change on stderr"
+
+# 15. CSRF (#314): a web page elsewhere can't POST, even to the box's own localhost (which
+#     counts as Admin). Same-origin browser POSTs and header-less clients (curl, CLI) work.
+stop_pids "$SRV_PID"; SRV_PID=""
+if start_open ""; then
+    xpost() { curl -s -o /dev/null -w '%{http_code}' --max-time 6 -X POST "$@" "$B/api/maintenance/repair"; }
+    c=$(xpost -H 'Origin: http://evil.example' -H 'Content-Type: text/plain' --data '{}'); [ "$c" = "403" ] && pass || fail "cross-origin POST from localhost must be 403 (got $c)"
+    c=$(xpost -H 'Origin: null' --data '{}'); [ "$c" = "403" ] && pass || fail "Origin: null POST must be 403 (got $c)"
+    c=$(xpost -H "Origin: http://localhost:1" --data '{}'); [ "$c" = "403" ] && pass || fail "another local port is another origin: 403 (got $c)"
+    c=$(xpost -H 'Sec-Fetch-Site: cross-site' --data '{}'); [ "$c" = "403" ] && pass || fail "Sec-Fetch-Site: cross-site must be 403 (got $c)"
+    c=$(xpost -H 'Sec-Fetch-Site: same-site' --data '{}'); [ "$c" = "403" ] && pass || fail "Sec-Fetch-Site: same-site (another port) must be 403 (got $c)"
+    c=$(xpost -H "Origin: $B" -H 'Content-Type: application/json' --data '{}'); [ "$c" != "403" ] && pass || fail "same-origin POST must be accepted (got $c)"
+    c=$(xpost -H 'Sec-Fetch-Site: same-origin' -H 'Content-Type: application/json' --data '{}'); [ "$c" != "403" ] && pass || fail "Sec-Fetch-Site: same-origin must be accepted (got $c)"
+    c=$(xpost -H 'Content-Type: application/json' --data '{}'); [ "$c" != "403" ] && pass || fail "a header-less client (curl, CLI) must still work (got $c)"
+    # review of #316: no CORS for other localhost origins; DNS rebinding; scheme + port spelling
+    h=$(curl -s -D - -o /dev/null -H 'Origin: http://localhost:5173' "$B/api/setup/recovery-card" | tr -d '\r' | grep -i '^access-control-allow-origin' || true)
+    [ -z "$h" ] && pass || fail "another localhost origin must not get CORS access ($h)"
+    c=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: rebind.evil.example' "$B/api/health"); [ "$c" = "421" ] && pass || fail "a foreign Host name must be 421 (got $c)"
+    for hn in "evil.com@127.0.0.1" "evil.com%2elocal" "evil.com.local.attacker.com" "127.0.0.1.nip.io"; do
+        c=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $hn" "$B/api/health"); [ "$c" = "421" ] && pass || fail "Host $hn must be 421 (got $c)"
+    done
+    for hn in valark.local ark.lan myark x.ts.net "[::1]" valark.local. ark.fritz.box "[fe80::1%25eth0]"; do
+        c=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $hn" "$B/api/health"); [ "$c" = "200" ] && pass || fail "Host $hn must be served (got $c)"
+    done
+    c=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Host: valark.local:80' -H 'Origin: http://valark.local' -H 'Content-Type: application/json' --data '{}' "$B/api/maintenance/repair"); [ "$c" != "403" ] && pass || fail "Host with an explicit default port matches its Origin (got $c)"
+    c=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Host: valark.local' -H 'Origin: https://valark.local' --data '{}' "$B/api/maintenance/repair"); [ "$c" = "403" ] && pass || fail "an https Origin on a plain-http request must be 403 (got $c)"
+else
+    fail "open-mode server for the CSRF checks did not start"
 fi
 
 echo "access: ${PASS} passed, ${FAIL} failed"

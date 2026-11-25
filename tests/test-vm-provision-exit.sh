@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Offline regression: the real VM runner must reject partial provisioning.
 set -euo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/lib/require-cmd.sh"; require_python3 "vm-provision-exit"
 VALARK_VM_TEST_ROOT="$(cd "$(dirname "$0")/.." && pwd)" python3 - <<'PY'
 import json
 import os

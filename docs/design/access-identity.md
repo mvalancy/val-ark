@@ -33,6 +33,8 @@ Three independent layers, from bottom to top:
 - **The box's own console and `localhost` are always trusted as admin.** Physical/loopback access means you own the device — this is what makes recovery possible with no password.
 - **LAN + tailnet** are allowed to reach the box; **the public internet is always denied**: every change and request (the LAN/tailnet POST gate) and, in every Use Mode, every read of the library (#297).
 - This floor is invisible to Jordan; it just makes "on the box" and "on my network" safe.
+- **Tailscale in userspace-networking mode breaks this floor, so the box watches for it (#311).** With `tailscaled --tun=userspace-networking` there is no interface: tailscaled accepts a tailnet peer's connection itself and connects onward from 127.0.0.1, so every tailnet peer looks like the box's own console, the Admin. Every loop cycle (step 2g) and the server (at startup and every 10 minutes) run a read-only detector, `scripts/lib/tailscale-mode.sh`. When `tailscale status --json` answers with BackendState `Running`, its `"TUN"` field decides; `true` is fine unless a second tailscaled proven to share the box's network (a container with `network_mode: host`) runs with `--tun=userspace-networking`. Otherwise it looks at every tailscaled process: `--tun=userspace-networking` in its command line, or no `tailscale0` (or its `--tun=NAME`) interface, flags it. A tailscaled in another network namespace (a container with its own network, like the official image, which defaults to userspace networking) is skipped, because its 127.0.0.1 isn't the box's. The namespace comes from `/proc/<pid>/ns/net`, or, when that isn't readable (root's daemon, non-root server), from the inode of the world-readable `/proc/<pid>/net/dev`, which differs per network namespace. Only when neither can be read does a container cgroup (docker, containerd, kubepods, libpod, lxc, machine.slice) make it a **warning** ("could not check"), never the critical alarm. The result goes to `state/tailscale.json`; the notification bell gets a **critical** "Tailscale is giving every tailnet device admin rights" item and the Health page a red "Tailnet access" card. The fix: run tailscaled with a kernel TUN interface (in a container: `/dev/net/tun` + `NET_ADMIN`), or stop Tailscale on the box.
+- **Why the box doesn't just stop trusting 127.0.0.1 when it sees this:** the real console and tailscaled's proxied peers both arrive from 127.0.0.1, and nothing in the connection tells them apart reliably (the socket owner's uid is the closest hint, and it fails whenever tailscaled and the console user are the same account, as in most containers). Refusing every loopback request would lock the console out of its no-password recovery path, so the box warns loudly and leaves the fix to the operator. The `scripts/valark` CLI still works for recovery either way.
 
 ### Layer 2 — Admin (always present)
 - Exactly **one Admin** is created during first-boot commissioning ("Set an admin passcode so only you can change settings" — with a clear "or skip for now" that still lets localhost administer).
@@ -78,6 +80,14 @@ Jordan sees this as one plain-language screen: **"Who can use Val Ark?"** → *E
 - Use Mode: **Open (household)**.
 - Admin: **created at first boot** (with a friendly "you can skip and set it later; until then, only this box/localhost can change settings").
 - Public internet: **denied**, for changes, requests and library reads alike (#297); LAN + tailnet: **allowed**; localhost/console: **admin**. A reverse proxy or tunnel on the box (nginx, Caddy, cloudflared, Tailscale Funnel) makes every visitor look like localhost, so don't put one in front of an Ark.
+- **What counts as LAN** (`isLanOrTailnet` in `scripts/server.js`): the box itself; IPv4 10/8,
+  172.16/12, 192.168/16 and 169.254/16; IPv6 ::1, ULA (fc00::/7), link-local (fe80::/10) and a
+  global address on a /64 (or longer) of an interface that also has a private IPv4 (a home LAN,
+  not a cloud uplink). **Tailnet:** 100.64/10 only when the request arrived on Tailscale's own
+  interface (`tailscale0`, or a macOS `utun` with Tailscale's `fd7a:115c:a1e0::/48` address);
+  everything else is the internet. **Don't run Tailscale in userspace-networking mode on an
+  Ark** (common in containers and on some NAS boxes): with no interface, tailscaled connects
+  onward from 127.0.0.1, so every tailnet peer looks like the box itself, the Admin.
 
 > Design note: reconcile with research patterns (Synology's per-user + admin-group model,
 > Home Assistant's owner + users, Umbrel's single-password model, routers' admin-password +

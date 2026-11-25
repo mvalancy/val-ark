@@ -9,6 +9,7 @@
 # http(s) URL, positive bytes, known category.
 ###############################################################################
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib/require-cmd.sh"; require_python3 "installers-catalog"
 python3 - "$ROOT/data/installers.tsv" <<'PY'
 import sys
 # Add a new category here when data/installers.tsv gains one.

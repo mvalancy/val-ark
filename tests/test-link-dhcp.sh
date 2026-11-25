@@ -13,6 +13,7 @@
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib/require-cmd.sh"; require_python3 "link-dhcp"
 LD="$ROOT/scripts/lib/link-dhcp.sh"
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
@@ -316,7 +317,7 @@ bash "$LD" watch > "$T/watch.out" 2>&1 & wpid=$!
 waitfor alive 60
 echo server > "$T/probe-mode"; echo 7 > "$T/sys/eth0/carrier_changes"   # flap faster than the poll
 check 'waitfor "! alive" 40' "a carrier_changes bump (no visible carrier change) must re-probe and stop"
-check 'grep -q "link change" "$T/watch.out"' "watcher must log the link change"
+check 'waitfor "grep -q \"link change\" \"$T/watch.out\"" 40' "watcher must log the link change"
 echo 1 > "$T/sys/eth0/carrier_changes"; kill $wpid 2>/dev/null; wait $wpid 2>/dev/null
 
 reset; conf 1; echo none > "$T/probe-mode"

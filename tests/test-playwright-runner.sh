@@ -3,7 +3,9 @@
 # Stub Playwright and curl; run the real runner/converter/HTML generator in a sandbox.
 set -o pipefail
 TEST_DIR="$(cd "$(dirname "$0")" && pwd)"
-NODE="$(command -v node)" || { echo 'SKIP: node required for browser-report regression'; exit 0; }
+. "$TEST_DIR/lib/require-cmd.sh"; require_cmd node "browser-report regression"
+require_python3 "browser-report regression"   # the fixture setup + result checks below run python3
+NODE="$(command -v node)"
 T="$(mktemp -d)" || exit 1
 trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/tests/lib" "$T/tests/report" "$T/tests/screenshots/node_modules/.bin" "$T/bin"

@@ -49,12 +49,13 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 **Tests, CI & releases**
 - [Test / VM harness](#test--vm-harness)
-- [VM provisioning must finish](#vm-provisioning-must-finish)
-- [Browser runner failure evidence](#browser-runner-failure-evidence)
-- [Running Playwright from a git worktree (#69)](#running-playwright-from-a-git-worktree-69)
-- [Structural test asserts must skip the comment line (#96)](#structural-test-asserts-must-skip-the-comment-line-96)
 - [Git / releases](#git--releases)
 - [Benign, don't "fix"](#benign-dont-fix)
+- [Running Playwright from a git worktree (#69)](#running-playwright-from-a-git-worktree-69)
+- [Structural test asserts must skip the comment line (#96)](#structural-test-asserts-must-skip-the-comment-line-96)
+- [A skip guard must not switch itself off in CI (#255, #286)](#a-skip-guard-must-not-switch-itself-off-in-ci-255-286)
+- [Browser runner failure evidence](#browser-runner-failure-evidence)
+- [VM provisioning must finish](#vm-provisioning-must-finish)
 
 ## Shell / ops
 
@@ -580,6 +581,17 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   store), so there's no session table. Cookie `varksid` is HttpOnly + SameSite=Lax. **"Sign out
   everywhere" = rotate the secret** (`auth.rotateSessionSecret`) — a per-client logout only drops
   the cookie (the token stays cryptographically valid until expiry, the usual stateless tradeoff).
+- **Changing the Use Mode (#303)** goes through the admin-only `POST /api/setup/usemode`
+  (`{"mode": "open"|"passworded"|"accounts"}`). Three rules hold it safe: (1) a gated mode is
+  refused (409) until an admin passcode exists, because that passcode is the only sign-in today
+  (`auth.setUseMode` throws too, so the CLI and the wizard's `commission` can't do it either);
+  (2) it's refused in **Safe Mode**: `readStore` swallows a corrupt `auth.json` into defaults, so
+  writing the mode there would overwrite the file and drop the admin. The raw-parse check lives in
+  `auth.setUseMode` itself, so `valark usemode` is refused too, not just the endpoint; (3) sessions
+  are **not** rotated: every session is an admin session and the mode doesn't change who the admin
+  is, so a rotation would only sign out the admin making the change. `setUseMode(mode, dir, by)`
+  writes `[access] Use Mode changed: <old> -> <new> (by …)` to stderr when `by` is given: the
+  server's stderr is the server log, and the CLI shows it in the terminal.
 - **Testing the LAN gate:** localhost always bypasses, so set `VALARK_TEST_FORCE_REMOTE=1` to make
   the server treat the client as remote and actually exercise the gate. It's **fail-safe** — it only
   REMOVES the localhost admin bypass, never grants access (safe even if set in prod).
@@ -1060,6 +1072,23 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   daemon, hold `loop.lock` on fd 8 like `run_locked`, then assert a fresh `flock -n` acquires it) so
   an fd‑8 leak into a detached daemon fails the test regardless of source formatting.
 
+
+## A skip guard must not switch itself off in CI (#255, #286)
+
+**Symptom:** a validator that needs `python3` or `node` started with
+`command -v python3 || { echo SKIP; exit 0; }` (the same for git, flock, openssl, file, zstd …).
+That is right on a dev box without the tool, but if CI ever lacks it the check exits 0 and the
+gate goes quietly green with nothing tested.
+
+**Fix:** guard with `tests/lib/require-cmd.sh`: `require_python3 "<what>"`,
+`require_cmd <cmd> "<what>"`, or `[ -n "$NODE" ] || missing_cmd node "<what>"` for a runtime you
+resolved yourself. Locally these skip; when `CI` is set (anything but empty / false / 0 / no / off,
+any case) they exit 1. A per-case skip puts `ci_is_set` on the `SKIP:` line or the one before:
+`if ci_is_set; then fail …; else echo "SKIP: …"; fi`. A skip that is right in CI too (no tools
+mirror on a fresh checkout, a CPython 3.12 the runner may not have) carries a `# ci-skip-ok: <why>`
+comment on the line before. `tests/test-require-cmd.sh` runs every guarded test with that command
+removed from PATH and lints every `SKIP:` line plus every test that calls python3 without
+`require_python3`, so a new bare guard fails CI.
 
 <a id="browser-runner-failure-evidence"></a>
 ## Browser runner failure evidence

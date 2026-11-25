@@ -9,7 +9,7 @@ PROJECT_ROOT="$(dirname "$TEST_DIR")"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-command -v openssl >/dev/null 2>&1 || { echo "SKIP: openssl not installed"; exit 0; }
+. "$TEST_DIR/lib/require-cmd.sh"; require_cmd openssl "tls"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

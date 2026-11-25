@@ -974,13 +974,52 @@ const SECURITY_HEADERS = {
     'Referrer-Policy': 'strict-origin-when-cross-origin',
 };
 
-function getCORSOrigin(req) {
-    const origin = req.headers.origin || '';
-    // Allow localhost on any port
-    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
-        return origin;
+// CSRF guard for every POST (#314). A browser always sends Origin on a cross-origin POST
+// (and Sec-Fetch-Site on modern ones), so a web page elsewhere, even one opened in a
+// browser on the box itself, where localhost counts as Admin, can't drive an admin or
+// "use" action. Requests with neither header (curl, the CLI, scripts) are unaffected.
+function sameOriginPost(req) {
+    const scheme = req.socket && req.socket.encrypted ? 'https:' : 'http:';
+    const origin = req.headers.origin;
+    if (origin !== undefined) {
+        if (origin === 'null') return false;
+        try {
+            const o = new URL(origin), h = new URL(scheme + '//' + String(req.headers.host || ''));
+            return o.protocol === scheme && o.host === h.host;   // URL() drops default ports, canonicalizes IPv6
+        } catch (_) { return false; }
     }
-    return '';
+    const site = req.headers['sec-fetch-site'];
+    return site === undefined || site === 'same-origin' || site === 'none';
+}
+// DNS rebinding guard: a page on an attacker's domain that re-resolves to the box would send a
+// matching Host and Origin. Only names that can belong to this box are served: IP literals,
+// localhost, single-label names (no dot: a LAN hostname), *.local / *.lan / *.home / *.home.arpa /
+// *.internal / *.localdomain / *.ts.net / *.fritz.box, the TLS domain, the box's own hostname, and VALARK_ALLOWED_HOSTS
+// (comma-separated). Anything else gets 421 (review of #316).
+function hostAllowed(req) {
+    let raw = String(req.headers.host || '').toLowerCase();
+    if (!raw) return true;   // HTTP/1.0 without Host: nothing for a rebinding page to forge
+    if (/^\[fe80:[0-9a-f:.]*%[0-9a-z]+\](:\d+)?$/.test(raw)) return true;   // link-local with a zone id
+    // Only the shapes a browser actually sends: a name or IPv4 (with one optional trailing dot)
+    // or a bracketed IPv6, plus a port. No userinfo, escapes or other junk reaches URL().
+    if (!/^([a-z0-9-]+(\.[a-z0-9-]+)*\.?|\[[0-9a-f:.]+\])(:\d+)?$/.test(raw)) return false;
+    raw = raw.replace(/\.(?=(:\d+)?$)/, '');   // 'valark.local.' is 'valark.local'
+    let name;
+    try { name = new URL('http://' + raw).hostname; } catch (_) { return false; }
+    if (/^\[.*\]$/.test(name) || /^\d{1,3}(\.\d{1,3}){3}$/.test(name)) return true;   // IP literal
+    if (name === 'localhost' || !name.includes('.')) return true;
+    if (/\.(local|lan|home|home\.arpa|internal|localdomain|ts\.net|fritz\.box)$/.test(name)) return true;
+    const extra = [process.env.VALARK_TLS_DOMAIN || 'valark.lan', require('os').hostname(),
+        ...String(process.env.VALARK_ALLOWED_HOSTS || '').split(',')]
+        .map(x => String(x).trim().toLowerCase()).filter(Boolean);
+    return extra.includes(name);
+}
+function getCORSOrigin(req) {
+    // The web UI is same-origin and needs no CORS. Reflecting localhost origins let any page on
+    // another localhost port read admin data (the recovery code) from a browser on the box
+    // (review of #316). VALARK_DEV_CORS_ORIGIN allows one exact origin for a dev server only.
+    const dev = process.env.VALARK_DEV_CORS_ORIGIN;
+    return dev && req.headers.origin === dev ? dev : '';
 }
 
 function sendJSON(res, req, data, status = 200, extraHeaders) {
@@ -1117,7 +1156,7 @@ function sessionCookie(token, maxAgeSec, secure) {
 // POSTs that CHANGE the box's config/accounts — always admin (localhost or a
 // logged-in admin), regardless of Use Mode. "Use" actions (downloads/requests/
 // service starts) are gated per Use Mode instead (Open = anyone on the LAN).
-const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser', '/api/setup/profile', '/api/maintenance/repair', '/api/setup/moderation', '/api/moderation/review']);
+const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser', '/api/setup/profile', '/api/maintenance/repair', '/api/setup/moderation', '/api/moderation/review', '/api/setup/usemode']);
 const AUTH_EXEMPT_POSTS = new Set(['/api/auth/login', '/api/auth/logout', '/api/auth/recover', '/api/setup/commission']);
 
 // Peer IP, normalized (node reports LAN/tailnet IPv4 peers as IPv4-mapped IPv6).
@@ -1142,7 +1181,8 @@ function netIfaces() {
 }
 // Linux names it tailscale0; macOS uses a utunN carrying Tailscale's 100.64/10 address AND
 // its fd7a:115c:a1e0::/48 IPv6 (other VPNs, e.g. WARP, also use 100.x on a utun).
-// (Tailscale's userspace-networking mode has no interface, so its peers aren't trusted.)
+// Tailscale's userspace-networking mode has no interface: tailscaled connects onward from
+// 127.0.0.1, so its peers look like the box itself (Admin). Use the kernel interface.
 function arrivedOnTailnet(req, ifaces = netIfaces()) {
     const la = (req.socket?.localAddress || '').replace(/^::ffff:/, '');
     if (!la) return false;
@@ -1427,6 +1467,9 @@ function handleAPI(req, res, urlPath) {
                 error: 'Too many requests — please slow down and try again in a minute.'
             }, 429);
         }
+        if (!sameOriginPost(req)) {
+            return sendJSON(res, req, { error: 'Cross-site requests are not accepted. Use the Val Ark web UI.' }, 403);
+        }
         // An un-owned box serves the setup wizard, NOT the catalog: refuse every
         // mutating action (downloads, requests, service starts, account creation)
         // until it's commissioned — except commissioning itself. This closes the
@@ -1555,6 +1598,34 @@ function handleAPI(req, res, urlPath) {
                     });
                     if (result && result.ok && result.moderation.enabled) ensureModerationModel();
                     break;
+                case '/api/setup/usemode': {
+                    // Choose who can use the box: Open / Passworded / Accounts (#303).
+                    // Admin-only (ADMIN_ONLY_POSTS). Gated modes need an admin passcode
+                    // first (auth.setUseMode refuses otherwise): it's the only sign-in
+                    // today, so "Accounts" behaves like Passworded until member accounts
+                    // exist. Refused in Safe Mode: auth.json is unreadable there, and
+                    // writing the mode would overwrite it with defaults (dropping the admin).
+                    // Sessions are NOT rotated: every session is an admin session and the
+                    // mode doesn't change who the admin is, so rotating would only sign out
+                    // the admin making the change.
+                    const mode = body.mode;
+                    if (!['open', 'passworded', 'accounts'].includes(mode)) {
+                        return sendJSON(res, req, { error: 'Use Mode must be open, passworded or accounts.' }, 400);
+                    }
+                    if (safeModeState().safeMode) {
+                        return sendJSON(res, req, { error: 'Val Ark is in Safe Mode — recover the admin passcode first.' }, 409);
+                    }
+                    const before = auth.status(STATE_DIR);
+                    if (mode !== 'open' && !before.adminSet) {
+                        return sendJSON(res, req, { error: 'Set an admin passcode first — otherwise nobody on your network could sign in.', needsPasscode: true }, 409);
+                    }
+                    // setUseMode logs "[access] Use Mode changed …" (stderr → the server log)
+                    // and refuses a corrupt auth.json even if the Safe Mode cache is stale.
+                    try { auth.setUseMode(mode, STATE_DIR, isLocalhost(req) ? 'this box in Settings' : 'a signed-in admin in Settings'); }
+                    catch (e) { return sendJSON(res, req, { error: e.message }, 409); }
+                    result = { ok: true, useMode: mode, previous: before.useMode };
+                    break;
+                }
                 case '/api/service/start':
                     // Bring up an enabled + mirrored community service (chat/mail/forum/paste).
                     result = startService(body.id);
@@ -1901,7 +1972,44 @@ function getHealthDetail() {
                              .filter(Boolean).reverse();
     } catch (_) {}
     const sm = safeModeState();
-    return { verify, heal, events, safeMode: sm.safeMode, safeModeReasons: sm.reasons, repairRunning: repairInFlight() };
+    return { verify, heal, events, safeMode: sm.safeMode, safeModeReasons: sm.reasons, repairRunning: repairInFlight(),
+             tailscale: tailscaleMode() };
+}
+
+// ---- Tailscale userspace-networking check (#311) ----------------------------
+// In userspace-networking mode tailscaled has no interface and connects onward from
+// 127.0.0.1, so isLocalhost() sees every tailnet peer as the box's own console: the
+// Admin. lib/tailscale-mode.sh detects it (read-only, fail-soft) and writes
+// <state>/tailscale.json; the loop runs it every cycle (step 2g) and the server runs
+// it at startup and every TAILSCALE_CHECK_MS so the Health page doesn't wait for the
+// next cycle. We do NOT stop trusting 127.0.0.1 when it fires: on the box both the
+// real console and tailscaled's proxied peers come from 127.0.0.1 with nothing in
+// the connection that tells them apart reliably (see access-identity.md), and
+// refusing all of them would take away the console's recovery path. The critical
+// notification tells the operator to fix the box instead.
+const TAILSCALE_CHECK_MS = 10 * 60 * 1000;
+let _tsCheckRunning = false;
+function tailscaleMode() {
+    const t = readStateJson('tailscale.json');
+    if (!t || typeof t !== 'object' || typeof t.state !== 'string') return null;
+    return { state: t.state, userspace: t.userspace === true || t.state === 'userspace',
+             evidence: Array.isArray(t.evidence) ? t.evidence.filter(e => typeof e === 'string').slice(0, 5) : [],
+             ts: typeof t.ts === 'string' ? t.ts : null };
+}
+function refreshTailscaleMode() {
+    // Tests spawn no helpers unless they hand the detector a stub tailscale CLI.
+    if (process.env.VALARK_TEST_NO_SPAWN === '1' && !process.env.VALARK_TAILSCALE_CMD) return;
+    if (_tsCheckRunning) return;
+    _tsCheckRunning = true;
+    // Fixed argv; no request data reaches it.
+    execFile('bash', [path.join(__dirname, 'lib', 'tailscale-mode.sh'), 'write', path.join(STATE_DIR, 'tailscale.json')],
+        { timeout: 30000 }, (err, stdout) => {
+            _tsCheckRunning = false;
+            if (!err && /"state":"userspace"/.test(stdout || '')) {
+                console.warn('[tailscale] userspace-networking mode: every tailnet peer reaches this server as 127.0.0.1 (the Admin). ' +
+                             'Run tailscaled with a kernel TUN, or stop it on this box.');
+            }
+        });
 }
 
 // ---- Notification center (issue #69 slice 1) --------------------------------
@@ -1972,6 +2080,21 @@ function getNotifications() {
         title: 'Val Ark is in recovery mode',
         detail: 'The box booted core-only because its settings could not be read. Your content is safe. Open Health to recover and set a new passcode.',
         source: 'config' });
+    // Tailscale in userspace-networking mode (#311): every tailnet peer is the Admin.
+    const ts = tailscaleMode();
+    if (ts && ts.userspace) items.push({ id: 'cond-tailscale-userspace', ts: ts.ts || condTs(), severity: 'critical',
+        title: 'Tailscale is giving every tailnet device admin rights',
+        detail: 'Tailscale on this box runs in userspace-networking mode, so everyone on your tailnet reaches Val Ark as if they were sitting at the box, and the box is always the Admin. ' +
+                'Fix: run tailscaled with a kernel TUN interface (drop --tun=userspace-networking; in a container give it /dev/net/tun and NET_ADMIN), or stop Tailscale on this box.' +
+                (ts.evidence.length ? ' Detected: ' + ts.evidence.join('; ') + '.' : ''),
+        source: 'security' });
+    // A tailscaled the detector found but couldn't check (in a container whose network
+    // namespace it can't read): a warning to look, never the critical alarm.
+    else if (ts && ts.state === 'unknown' && ts.evidence.length) items.push({ id: 'cond-tailscale-unknown', ts: ts.ts || condTs(), severity: 'warning',
+        title: 'Could not check how Tailscale is set up',
+        detail: 'A Tailscale daemon is running that this box could not inspect (' + ts.evidence.join('; ') + '). ' +
+                'If it shares this box\'s network and runs in userspace-networking mode, every tailnet device would reach Val Ark as the Admin. Make sure it uses a kernel TUN interface.',
+        source: 'security' });
     // Disk almost full — same thresholds the Health page uses (>=97 act now, >=90 filling up).
     let diskPct = null;
     try { const d = getDiskStatus(); if (d && d.total) diskPct = d.used / d.total * 100; } catch (_) {}
@@ -2956,6 +3079,10 @@ function serveTlsStatus(res) {
 // Server
 // =============================================================================
 function handleRequest(req, res) {
+    if (!hostAllowed(req)) {
+        res.writeHead(421, { 'Content-Type': 'text/plain' });
+        return res.end('Misdirected request: this Val Ark answers only to its own names (set VALARK_ALLOWED_HOSTS to add one).\n');
+    }
     // Block path traversal attempts early (before URL normalization resolves ..)
     // Any '..' segment in the raw path, plain or with encoded dots (%2e., .%2e, %2e%2e): the
     // URL parser would resolve it before we ever saw the path. Only whole segments count, so
@@ -2975,6 +3102,13 @@ function handleRequest(req, res) {
     // read-wall's prefix match and is then normalized straight back into a gated tree
     // by the file server (#297). '..' is already refused above.
     urlPath = path.posix.normalize(urlPath);
+    // The Kiwix and app proxies forward the raw URL, so they only take a request whose
+    // path was already clean and whose route prefix wasn't percent-encoded: then the raw
+    // URL and the path we checked name the same thing.
+    const rawPath = req.url.split(/[?#]/)[0];
+    const proxyPathOk = (prefix) => {
+        try { return decodeURIComponent(rawPath) === urlPath && (rawPath === prefix || rawPath.startsWith(prefix + '/')); } catch (_) { return false; }
+    };
 
     // The CA trust anchor must be fetchable over BOTH http and https (you can't
     // require trusted HTTPS to download the cert that establishes that trust).
@@ -3031,6 +3165,7 @@ function handleRequest(req, res) {
     // runs with --urlRootLocation /kiwix, so its own links already point at
     // /kiwix/* — we just pipe bytes through, no HTML rewriting.
     if (urlPath === '/kiwix' || urlPath.startsWith('/kiwix/')) {
+        if (!proxyPathOk('/kiwix')) return send404(res);
         return proxyKiwix(req, res);
     }
 
@@ -3038,6 +3173,7 @@ function handleRequest(req, res) {
     // so they render inside the Val Ark shell with the same back-to-ark header.
     const appMatch = urlPath.match(/^\/app\/([a-z0-9-]+)(?:\/|$)/);
     if (appMatch) {
+        if (!proxyPathOk('/app/' + appMatch[1])) return send404(res);
         return proxyAppService(req, res, appMatch[1]);
     }
 
@@ -3345,6 +3481,9 @@ function onFirstBind() {
     const _sampleMs = Math.max(10000, Number(cfg('VALARK_METRICS_SAMPLE_MS', '30000')) || 30000);
     setInterval(sampleMetricsToRing, _sampleMs);
     setTimeout(sampleMetricsToRing, 2000);   // seed a baseline shortly after boot
+    // Tailscale userspace-networking check (#311): once at boot, then periodically.
+    refreshTailscaleMode();
+    setInterval(refreshTailscaleMode, TAILSCALE_CHECK_MS).unref();
 }
 
 let boundPorts = 0;

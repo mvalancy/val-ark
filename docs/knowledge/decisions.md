@@ -298,9 +298,15 @@ later). See [README](README.md).
       keeps the old file until every current model entry is verified, even with `MODEL=no`.
       An unknown-entry model file follows the same slot rule, and an unknown-entry map or address
       index is kept and logged. An address index upstream marks `available: false` is kept.
-      In planner mode the base maps are not wanted (skipped, not deferred), so an unplanned
-      base-map refresh no longer exits 3 and blocks every prune. `lastbook_fill` never runs
-      unbounded: with a `--time` budget and no seconds left it does not start.
+      In planner mode the base maps are not wanted and are taken last, after every planned row
+      (third review). An unplanned base-map refresh never uses up budget charged for other rows,
+      and when nothing is left it is skipped, not deferred. So it no longer makes the run
+      incomplete or blocks the prune, though a run can still exit 3 for other reasons.
+      `lastbook_fill` never runs unbounded: with a `--time` budget and no seconds left it does
+      not start.
+    - Files kept indefinitely are logged with the reason on every run, and only an operator
+      removes them: an entry upstream marks unavailable, an unknown entry, an old model or
+      installer version kept under `MODEL=no` / `APPS=none`.
     - Candidate rows carry each file's sha256, so a same-name, same-size re-release is not taken
       for held. With these rules, every held item is at least as well off as with `--plus-held`:
       it is kept until replaced, and its refresh is planned and charged.

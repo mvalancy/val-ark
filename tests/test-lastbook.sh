@@ -978,6 +978,16 @@ ALLB=$(VALARK_LASTBOOK_REWRITE="$TINY" python3 "$PY" plan --pack all --maps none
 vrun basebump --dest "$D62" --pack auto --pack-limit all --budget "$ALLB"; rc=$?
 check "planner mode, base-map re-release not planned: exit 0 (not 3), All verified, nested Small pruned, old base kept" \
     '[ "$rc" = 0 ] && [ -s "$D62/packs/Lastbook-All.zip" ] && [ ! -e "$D62/packs/Lastbook-Small-20261113.zip" ] && [ -s "$D62/maps/Lastbook-Map-base.zip" ] && [ ! -e "$D62/maps/Lastbook-Map-base-2.zip" ] && grep -q "map base .* was not planned: skipped" "$T/err" || { echo "rc=$rc ALLB=$ALLB" >&2; cat "$T/err" >&2; false; }'
+# survival box holding Medium; upstream re-releases the base map; the plan holds ONLY the installers:
+# the unplanned base map must not eat the installers' budget (taken last, skipped when nothing is left)
+D63="$T/m63"; mir --dest "$D63" --pack medium --maps none --apps none --model no > "$T/out" 2>"$T/err"
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/basebump/dl/ https://lastbook.org/=$B/basebump/site/ https://huggingface.co/=$B/basebump/hf/" \
+    python3 "$PY" candidates --dest "$D63" 2>/dev/null | awk -F'\t' -v OFS='\t' '$1 ~ /^lastbook:app:/ {print $0, 0}' > "$T/apponly.plan"
+check "setup: the plan is only the installers" '[ "$(wc -l < "$T/apponly.plan")" = 1 ]'
+VALARK_LASTBOOK_REWRITE="https://downloads.lastbook.org/=$B/basebump/dl/ https://lastbook.org/=$B/basebump/site/ https://huggingface.co/=$B/basebump/hf/" \
+    VALARK_LASTBOOK_DIR="$D63" bash "$SH" --plan-file "$T/apponly.plan" > "$T/sh.out" 2>&1; rc=$?
+check "installers-only plan + unplanned base re-release: installers fetched, base skipped, exit 0 (complete)" \
+    '[ "$rc" = 0 ] && [ "$(ls "$D63/app/1.1.11" 2>/dev/null | wc -l)" = 4 ] && [ ! -e "$D63/maps/Lastbook-Map-base-2.zip" ] && [ -s "$D63/maps/Lastbook-Map-base.zip" ] && grep -q "current release mirrored" "$T/sh.out" && grep -q "map base .* was not planned: skipped" "$T/sh.out" || { cat "$T/sh.out" >&2; false; }'
 
 # server.js reports a VALARK_LASTBOOK_DIR outside content/ under lastbook/, flagged external (not served)
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"

@@ -653,14 +653,16 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
             notes.append("no Lastbook pack will be held this run, so the planned maps, model and installers wait too")
         args.maps, args.addresses, args.model, args.apps = "none", "none", "no", "none"
 
-    if have_pack:
-        # Planner mode (--pack-limit): a base-map refresh the planner did not charge is skipped, not
-        # deferred, so it does not exit 3 and block every prune; the held base map is kept by
-        # replacement_verified until its replacement is verified (#203 review).
-        planned = getattr(args, "pack_limit", None) is not None
+    # Planner mode (--pack-limit): the base maps are not wanted, and they are taken LAST, after
+    # every planned item, so an unplanned base-map refresh never spends budget the planner charged
+    # for other rows (e.g. a box holding Medium whose plan is only the installers). When the budget
+    # is left over (the planner's pack row charged them) they come along; otherwise they are skipped,
+    # not deferred, so they do not exit 3 and block every prune. The held base map is kept by
+    # replacement_verified until its replacement is verified (#203 reviews).
+    planned_mode = getattr(args, "pack_limit", None) is not None
+    if have_pack and not planned_mode:
         for m in rel["base_maps"]:
-            if not take(m, not planned, f"map {m['id']}") and planned:
-                notes.append(f"map {m['id']} ({human(need(m))}) was not planned: skipped this run")
+            take(m, True, f"map {m['id']}")
     if args.apps == "current" and rel["apps"]:
         take(dict(files=rel["apps"]), True, f"Lastbook {rel['app_version']} installers")
     for mdl in rel["models"]:
@@ -692,6 +694,10 @@ def select(rel, args, budget, dest, stamps, probe=None, kept_packs=None):
     if not follow and aspec != "none":
         for c in (list(addrs) if aspec == "all" else codes(args.addresses, list(addrs), "address index", rel["unavailable"].get("address"), notes)):
             take(addrs[c], True, f"addresses {c}")
+    if have_pack and planned_mode:
+        for m in rel["base_maps"]:
+            if not take(m, False, f"map {m['id']}"):
+                notes.append(f"map {m['id']} ({human(need(m))}) was not planned: skipped this run")
     return rows, notes, incomplete, upstream_skip
 
 

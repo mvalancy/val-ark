@@ -144,9 +144,17 @@ value and a size like every other row, and the owner profile weights them.
     index whose entry cannot be told, and an address index that upstream marks
     `available: false`. Only a map or address index entry the release dropped altogether goes,
     and the truncation guards still apply to that.
-  - In planner mode a base-map refresh the planner did not charge is skipped, not deferred, so
-    it never exits 3 and blocks the prune (such as the nested Small after All verifies). The
-    old base map stays until its replacement is verified.
+  - In planner mode a base-map refresh the planner did not charge is not wanted, and it is
+    taken **last**, after every planned row. It never uses up budget charged for other rows (a
+    box holding Medium whose plan is only the installers still gets the installers). It comes
+    along only when budget is left over, and is otherwise skipped, not deferred. A skipped base
+    map does not make the run incomplete or block the prune (such as the nested Small after All
+    verifies); a run can still exit 3 for other reasons. The old base map stays until its
+    replacement is verified.
+  - **Files kept indefinitely are logged, and only an operator removes them.** That covers an
+    entry upstream marks unavailable, an unknown entry, and an old model or installer version
+    kept under `MODEL=no` / `APPS=none`. Each run logs the file with the reason
+    (`lastbook: keeping <file>: <why>`), and Val Ark never deletes it on its own.
   - The mirror records each file's entry id in its stamps, so the link survives once the kept
     manifest moves on. Candidate rows carry each file's sha256, so a re-release under the same
     name and size counts as not held and is charged.

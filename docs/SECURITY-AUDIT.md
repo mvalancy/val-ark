@@ -330,3 +330,18 @@ or (with #312) open the Use Mode. Every POST now has to be same-origin: a reques
 `Origin` isn't the box's own host (including another port on localhost and `Origin: null`),
 or whose `Sec-Fetch-Site` is `cross-site` or `same-site`, gets `403`. Clients that send
 neither header (curl, `scripts/valark`, scripts) work as before. `tests/test-access.sh` §15.
+
+The review of that fix found two more gaps, fixed in the same change:
+- **CORS reflected any localhost origin.** `getCORSOrigin` answered `Access-Control-Allow-Origin`
+  for any `http(s)://localhost:<port>`, so a page served from another port on the box (a dev
+  server, a notebook) could read admin data from the box's own browser, including the recovery
+  code. The UI is same-origin and needs no CORS; it is gone (`VALARK_DEV_CORS_ORIGIN` allows one
+  exact origin for development).
+- **DNS rebinding.** A page on an attacker's domain that re-resolves to the box sends a matching
+  Host and Origin. The server now answers only names that can be the box's own (IP literals,
+  localhost, single-label names, `*.local`/`*.lan`/`*.home`/`*.home.arpa`/`*.internal`/
+  `*.localdomain`/`*.ts.net`, `VALARK_TLS_DOMAIN`, its hostname, `VALARK_ALLOWED_HOSTS`) and
+  gives `421` to anything else. The POST origin check also compares the scheme and canonical
+  host:port.
+
+Still open: community sub-apps share the UI's origin (#317).

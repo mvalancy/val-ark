@@ -218,6 +218,15 @@ if start_open ""; then
     c=$(xpost -H "Origin: $B" -H 'Content-Type: application/json' --data '{}'); [ "$c" != "403" ] && pass || fail "same-origin POST must be accepted (got $c)"
     c=$(xpost -H 'Sec-Fetch-Site: same-origin' -H 'Content-Type: application/json' --data '{}'); [ "$c" != "403" ] && pass || fail "Sec-Fetch-Site: same-origin must be accepted (got $c)"
     c=$(xpost -H 'Content-Type: application/json' --data '{}'); [ "$c" != "403" ] && pass || fail "a header-less client (curl, CLI) must still work (got $c)"
+    # review of #316: no CORS for other localhost origins; DNS rebinding; scheme + port spelling
+    h=$(curl -s -D - -o /dev/null -H 'Origin: http://localhost:5173' "$B/api/setup/recovery-card" | tr -d '\r' | grep -i '^access-control-allow-origin' || true)
+    [ -z "$h" ] && pass || fail "another localhost origin must not get CORS access ($h)"
+    c=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: rebind.evil.example' "$B/api/health"); [ "$c" = "421" ] && pass || fail "a foreign Host name must be 421 (got $c)"
+    for hn in valark.local ark.lan myark x.ts.net "[::1]"; do
+        c=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $hn" "$B/api/health"); [ "$c" = "200" ] && pass || fail "Host $hn must be served (got $c)"
+    done
+    c=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Host: valark.local:80' -H 'Origin: http://valark.local' -H 'Content-Type: application/json' --data '{}' "$B/api/maintenance/repair"); [ "$c" != "403" ] && pass || fail "Host with an explicit default port matches its Origin (got $c)"
+    c=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Host: valark.local' -H 'Origin: https://valark.local' --data '{}' "$B/api/maintenance/repair"); [ "$c" = "403" ] && pass || fail "an https Origin on a plain-http request must be 403 (got $c)"
 else
     fail "open-mode server for the CSRF checks did not start"
 fi

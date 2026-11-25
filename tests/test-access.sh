@@ -205,5 +205,22 @@ else
     fail "open-mode server for the '..' checks did not start"
 fi
 
+# 15. CSRF (#314): a web page elsewhere can't POST, even to the box's own localhost (which
+#     counts as Admin). Same-origin browser POSTs and header-less clients (curl, CLI) work.
+stop_pids "$SRV_PID"; SRV_PID=""
+if start_open ""; then
+    xpost() { curl -s -o /dev/null -w '%{http_code}' --max-time 6 -X POST "$@" "$B/api/maintenance/repair"; }
+    c=$(xpost -H 'Origin: http://evil.example' -H 'Content-Type: text/plain' --data '{}'); [ "$c" = "403" ] && pass || fail "cross-origin POST from localhost must be 403 (got $c)"
+    c=$(xpost -H 'Origin: null' --data '{}'); [ "$c" = "403" ] && pass || fail "Origin: null POST must be 403 (got $c)"
+    c=$(xpost -H "Origin: http://localhost:1" --data '{}'); [ "$c" = "403" ] && pass || fail "another local port is another origin: 403 (got $c)"
+    c=$(xpost -H 'Sec-Fetch-Site: cross-site' --data '{}'); [ "$c" = "403" ] && pass || fail "Sec-Fetch-Site: cross-site must be 403 (got $c)"
+    c=$(xpost -H 'Sec-Fetch-Site: same-site' --data '{}'); [ "$c" = "403" ] && pass || fail "Sec-Fetch-Site: same-site (another port) must be 403 (got $c)"
+    c=$(xpost -H "Origin: $B" -H 'Content-Type: application/json' --data '{}'); [ "$c" != "403" ] && pass || fail "same-origin POST must be accepted (got $c)"
+    c=$(xpost -H 'Sec-Fetch-Site: same-origin' -H 'Content-Type: application/json' --data '{}'); [ "$c" != "403" ] && pass || fail "Sec-Fetch-Site: same-origin must be accepted (got $c)"
+    c=$(xpost -H 'Content-Type: application/json' --data '{}'); [ "$c" != "403" ] && pass || fail "a header-less client (curl, CLI) must still work (got $c)"
+else
+    fail "open-mode server for the CSRF checks did not start"
+fi
+
 echo "access: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

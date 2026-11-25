@@ -974,6 +974,20 @@ const SECURITY_HEADERS = {
     'Referrer-Policy': 'strict-origin-when-cross-origin',
 };
 
+// CSRF guard for every POST (#314). A browser always sends Origin on a cross-origin POST
+// (and Sec-Fetch-Site on modern ones), so a web page elsewhere, even one opened in a
+// browser on the box itself, where localhost counts as Admin, can't drive an admin or
+// "use" action. Requests with neither header (curl, the CLI, scripts) are unaffected.
+function sameOriginPost(req) {
+    const host = String(req.headers.host || '').toLowerCase();
+    const origin = req.headers.origin;
+    if (origin !== undefined) {
+        if (origin === 'null') return false;
+        try { return new URL(origin).host.toLowerCase() === host; } catch (_) { return false; }
+    }
+    const site = req.headers['sec-fetch-site'];
+    return site === undefined || site === 'same-origin' || site === 'none';
+}
 function getCORSOrigin(req) {
     const origin = req.headers.origin || '';
     // Allow localhost on any port
@@ -1427,6 +1441,9 @@ function handleAPI(req, res, urlPath) {
             return sendJSON(res, req, {
                 error: 'Too many requests — please slow down and try again in a minute.'
             }, 429);
+        }
+        if (!sameOriginPost(req)) {
+            return sendJSON(res, req, { error: 'Cross-site requests are not accepted. Use the Val Ark web UI.' }, 403);
         }
         // An un-owned box serves the setup wizard, NOT the catalog: refuse every
         // mutating action (downloads, requests, service starts, account creation)

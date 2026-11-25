@@ -27,6 +27,7 @@ positives were removed.
 - [Completeness Critic — What the sweep did NOT cover](#completeness-critic--what-the-sweep-did-not-cover)
 - [Addendum — 2026-07-10 (status update)](#addendum--2026-07-10-status-update-the-report-above-is-the-unedited-record)
 - [Addendum — 2026-11-25: library reads stay on the local network](#addendum--2026-11-25-library-reads-stay-on-the-local-network-297)
+- [Addendum — 2026-11-25: cross-site POSTs refused](#addendum--2026-11-25-cross-site-posts-refused-314)
 
 ---
 
@@ -319,3 +320,13 @@ fail-safe) gets 403 on the gated trees, the APIs, the progress stream, the app p
 uppercase and encoded forms, and HEAD, while a LAN peer still reads in Open mode; in
 Passworded mode the encoded forms get 401. **Still a rule:** keep the port off the internet,
 and don't put a reverse proxy or tunnel on the box ([SECURITY.md](../SECURITY.md)).
+
+## Addendum — 2026-11-25: cross-site POSTs refused (#314)
+
+`readBody` parses JSON whatever the Content-Type, and the box itself (`localhost`) counts as
+the Admin. So a web page opened in a browser on the box could POST to admin-only endpoints
+without a preflight (`Content-Type: text/plain`), e.g. to switch moderation off, run a repair
+or (with #312) open the Use Mode. Every POST now has to be same-origin: a request whose
+`Origin` isn't the box's own host (including another port on localhost and `Origin: null`),
+or whose `Sec-Fetch-Site` is `cross-site` or `same-site`, gets `403`. Clients that send
+neither header (curl, `scripts/valark`, scripts) work as before. `tests/test-access.sh` §15.

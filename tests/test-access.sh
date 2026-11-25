@@ -151,5 +151,40 @@ else
     fail "open-mode server (LAN peer) did not start"
 fi
 
+# 13. Edge cases from the 0.1.30 review (#300): a macOS/utun tailnet, a global-IPv6 LAN
+#     peer on the box's own /64, and '..' segments hidden behind encoded dots.
+"$NODE" -e '
+const src = require("fs").readFileSync(process.argv[1], "utf8");
+const grab = n => src.match(new RegExp("function " + n + "\\([\\s\\S]*?\\n}\\n"))[0];
+const f = new Function(grab("arrivedOnTailnet") + grab("ipv6ToBig") + grab("onLinkV6") + "return {arrivedOnTailnet, onLinkV6};")();
+const ifs = {
+  tailscale0: [{ address: "100.101.1.2", family: "IPv4" }],
+  utun4: [{ address: "100.88.7.6", family: "IPv4" }],
+  utun1: [{ address: "fe80::1", family: "IPv6", cidr: "fe80::1/64" }],
+  en0: [{ address: "2001:db8:1:2::10", family: "IPv6", cidr: "2001:db8:1:2::10/64" },
+        { address: "2001:db8:ffff::1", family: "IPv6", cidr: "2001:db8:ffff::1/48" }],
+};
+const rq = la => ({ socket: { localAddress: la } });
+const ok = [
+  f.arrivedOnTailnet(rq("100.101.1.2"), ifs) === true,      // linux tailscale0
+  f.arrivedOnTailnet(rq("100.88.7.6"), ifs) === true,       // macOS utunN with a 100.64/10 address
+  f.arrivedOnTailnet(rq("100.70.0.9"), ifs) === false,      // CGNAT uplink, not ours
+  f.arrivedOnTailnet(rq(""), ifs) === false,
+  f.onLinkV6("2001:db8:1:2::abcd", ifs) === true,           // same /64 as en0
+  f.onLinkV6("2001:db8:1:3::1", ifs) === false,             // another /64
+  f.onLinkV6("2001:db8:ffff:1::1", ifs) === false,          // only a /48 shared: too wide to trust
+  f.onLinkV6("2606:4700::1111", ifs) === false,             // the internet
+  f.onLinkV6("not-an-ip", ifs) === false,
+];
+process.exit(ok.every(Boolean) ? 0 : (console.error(ok), 1));
+' "$ROOT/scripts/server.js" && pass || fail "tailnet (tailscale0/utun) and on-link IPv6 detection (#300)"
+if start_open VALARK_TEST_FORCE_REMOTE=1; then
+    for p in content/%2e./docs/ content/.%2e/docs/; do
+        c=$(gcode --path-as-is "$B/$p"); [ "$c" = "404" ] && pass || fail "a '..' segment behind encoded dots (/$p) must be 404 (got $c)"
+    done
+else
+    fail "open-mode server for the '..' checks did not start"
+fi
+
 echo "access: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

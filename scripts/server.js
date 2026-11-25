@@ -1016,12 +1016,10 @@ function hostAllowed(req) {
     if (name === 'localhost' || !name.includes('.')) return true;
     if (/\.(local|lan|home|home\.arpa|internal|localdomain|ts\.net|fritz\.box)$/.test(name)) return true;
     const tls = String(process.env.VALARK_TLS_DOMAIN || 'valark.lan').trim().toLowerCase().replace(/^\.+|\.+$/g, '');
+    // The TLS domain itself, exactly. Its subdomains are served only when it is a private name,
+    // which the suffix rule above already covers: a real domain (or a public suffix) is never
+    // trusted wholesale, since whoever controls a subdomain's DNS could rebind it to this box.
     if (tls.includes('.') && name === tls) return true;
-    // One label under the TLS domain, as the local CA's *.<tls> cert covers, and only when the
-    // TLS domain itself is a private name: a real domain (or a public suffix) is never trusted
-    // wholesale, since anyone controlling one of its subdomains' DNS could rebind it here.
-    if (/\.(local|lan|home|home\.arpa|internal|localdomain)$/.test(tls) && name.endsWith('.' + tls)
-        && /^[a-z0-9-]+$/.test(name.slice(0, -tls.length - 1))) return true;
     const extra = [require('os').hostname(), ...String(process.env.VALARK_ALLOWED_HOSTS || '').split(',')]
         .map(x => String(x).trim().toLowerCase()).filter(Boolean);
     return extra.includes(name);

@@ -195,6 +195,11 @@ if start_open VALARK_TEST_FORCE_REMOTE=1; then
     for p in "kiwix/content/w/A/...And_Justice_for_All" "kiwix/search?pattern=wait..." "kiwix/content/w/A/foo..bar"; do
         c=$(gcode --path-as-is "$B/$p"); [ "$c" != "404" ] && pass || fail "/$p must not be refused as traversal (got $c)"
     done
+    # the proxies forward the raw URL, so a path that only looks like /kiwix or /app after
+    # decoding or cleaning is refused (0.1.31 Gate-2 follow-up)
+    for p in "kiwix/./a" "kiwix//a" "%6biwix/a" "app/chat/./x" "%61pp/chat/x" "kiwix%2Fa" "app/chat%2Fx"; do
+        c=$(gcode --path-as-is "$B/$p"); [ "$c" = "404" ] && pass || fail "/$p must be 404 before the proxy (got $c)"
+    done
 else
     fail "open-mode server for the '..' checks did not start"
 fi

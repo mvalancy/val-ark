@@ -22,6 +22,7 @@
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tests/lib/require-cmd.sh"; require_python3 "git-bundle-mirror"
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT

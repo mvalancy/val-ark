@@ -22,7 +22,7 @@ pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 check() { if eval "$2"; then pass; else fail "$1"; fi; }
 PY="$ROOT/scripts/lib/static_site.py"
-command -v python3 >/dev/null 2>&1 || { echo "SKIP: no python3" >&2; exit 0; }
+. "$ROOT/tests/lib/require-cmd.sh"; require_python3 "static-site"
 
 T="$(mktemp -d)"
 trap 'rm -rf "${T:?}"' EXIT
@@ -185,8 +185,8 @@ check "ZIM: title + description read from the file (uncompressed cluster)" 'grep
 check "ZIM: xz cluster read too" 'grep -q "Xzwiki (en) · text only · 2025-03" "$C" && [ "$(grep -o "<h4>Testipedia</h4>" "$C" | wc -l)" -ge 2 ]'
 if command -v zstd >/dev/null 2>&1; then
     check "ZIM: zstd cluster read through the zstd CLI" '[ "$(grep -o "<h4>Testipedia</h4>" "$C" | wc -l)" = 3 ] && [ "$(ls "$A/browse/thumbs"/z-*.png | wc -l)" = 3 ]'
-else
-    echo "SKIP: zstd cluster case (no zstd CLI)" >&2
+elif ci_is_set; then fail "ZIM: zstd cluster case needs the zstd CLI, which is missing under CI"
+else echo "SKIP: zstd cluster case (no zstd CLI)" >&2
 fi
 check "ZIM: illustration extracted as thumbnail" 'ls "$A/browse/thumbs"/z-*.png >/dev/null 2>&1 && grep -q "thumbs/z-" "$C"'
 check "ZIM: curated overview + how to open on the detail page" 'grep -q "Curated overview." "$WI" && grep -q "kiwix-serve wikipedia_en_all_maxi_2024-01.zim" "$WI"'

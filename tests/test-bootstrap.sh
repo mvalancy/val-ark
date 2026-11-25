@@ -22,7 +22,8 @@ BS="$ROOT/bootstrap.sh"; export BS
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 
-[ -f "$BS" ] || { echo "SKIP: bootstrap.sh not found" >&2; exit 0; }
+. "$ROOT/tests/lib/require-cmd.sh"
+[ -f "$BS" ] || missing_cmd bootstrap.sh "bootstrap checks"   # skip locally, fail in CI
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 

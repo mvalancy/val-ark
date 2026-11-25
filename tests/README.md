@@ -77,6 +77,7 @@ tests/
   lib/md_link_check.py    # internal doc-link + anchor checker (test-doc-links.sh)
   lib/secret_scan.py      # secret / host-leak scan (+ secrets-allowlist.txt) (test-secrets.sh)
   lib/port_hygiene.py     # hard-coded port checks (test-port-hygiene.sh)
+  lib/require-cmd.sh      # require_cmd / require_python3 / missing_cmd / ci_is_set: skip locally, fail under CI (#255, #286)
   fixtures/lastbook/      # offline Lastbook manifests for test-lastbook.sh
   services/run.sh         # community-services e2e (target = VALARK_URL)
   vm/run.sh, provision.sh # fresh-Ubuntu setup matrix (multipass); provisioner runs inside the VM

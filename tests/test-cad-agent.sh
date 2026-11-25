@@ -24,7 +24,7 @@ pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 SH="$ROOT/scripts/tools/cad-agent.sh"
 OCI="$ROOT/scripts/lib/oci_pull.py"
-command -v python3 >/dev/null 2>&1 || { echo "SKIP: no python3" >&2; exit 0; }
+. "$ROOT/tests/lib/require-cmd.sh"; require_python3 "cad-agent"
 
 T="$(mktemp -d)"; REG_PID=""
 trap 'rm -rf "${T:?}"; [ -n "$REG_PID" ] && kill "$REG_PID" 2>/dev/null' EXIT
@@ -201,7 +201,8 @@ if command -v node >/dev/null 2>&1; then
             process.exit(p && p.state === "mirrored" ? 0 : 1);
         });' "$ROOT/scripts/lib/tool-scan.js" "$SD" && pass || fail "tool-scan must report a filled cad-agent platform as mirrored, not install-hint only"
 else
-    echo "  SKIP: tool-scan check (no node)" >&2
+    if ci_is_set; then fail "tool-scan check needs node, which is missing under CI"
+    else echo "  SKIP: tool-scan check (no node)" >&2; fi
 fi
 
 # --- 5. oci_pull against a local fake registry -------------------------------------
@@ -346,6 +347,9 @@ for c in python3.12 python3; do
     command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys,venv; sys.exit(0 if sys.version_info[:2]==(3,12) else 1)' 2>/dev/null && { PY312="$(command -v "$c")"; break; }
 done
 if [ -z "$PY312" ] || ! "$PY312" -m venv "$T/probe" >/dev/null 2>&1; then
+    # The wheels are cp312 and ubuntu-latest's python3 is not pinned to 3.12 (it may also lack venv),
+    # so CI can legitimately miss it; the rest of this file still runs there.
+    # ci-skip-ok: no CPython 3.12 + venv on the runner is expected, not a broken guard
     echo "  SKIP: verify_cad_agent (no CPython 3.12 with venv here)" >&2
 else
     mkwheel() {  # $1 = wheelhouse, $2 = Requires-Dist line (optional)

@@ -1527,6 +1527,40 @@ test.describe('Val Ark - Consumer Shell (Home status + Settings + Activity)', ()
     await expect(page.locator('#signin-overlay')).toHaveCount(0);
   });
 
+  test('Settings shows the Use Mode and locks gated modes until a passcode exists (#303)', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/settings`);
+    await page.waitForSelector('#usemode-picker', { timeout: 5000 });
+    // Static preview: no auth state → Open, no passcode → gated modes disabled + explained.
+    await expect(page.locator('#usemode-current')).toHaveText('Open');
+    await expect(page.locator('#usemode-picker [data-usemode]')).toHaveCount(3);
+    await expect(page.locator('#usemode-picker [data-usemode="passworded"]')).toBeDisabled();
+    await expect(page.locator('#usemode-needs-pass')).toBeVisible();
+    await expect(page.locator('#access')).toContainText('admin passcode is the only sign-in');
+    // An admin passcode is set and the box is Passworded → shown, all choices live.
+    // (String evaluate: _authState is a top-level `let`, not a window property.)
+    await page.evaluate(`_authState = { useMode: 'passworded', adminSet: true, authed: true, trusted: true }; document.getElementById('app-root').innerHTML = renderSettings();`);
+    await expect(page.locator('#usemode-current')).toHaveText('Passworded');
+    await expect(page.locator('#usemode-picker [data-usemode="passworded"]')).toHaveClass(/\bon\b/);
+    await expect(page.locator('#usemode-picker [data-usemode="accounts"]')).toBeEnabled();
+    await expect(page.locator('#usemode-needs-pass')).toHaveCount(0);
+  });
+
+  test('picking a Use Mode POSTs /api/setup/usemode and prompts sign-in on 401 (#303)', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/settings`);
+    await page.waitForSelector('#usemode-picker', { timeout: 5000 });
+    await page.evaluate(`
+      window.__posts = [];
+      window.fetch = async (url, opts) => {
+        if (url === '/api/setup/usemode') { window.__posts.push(JSON.parse(opts.body)); return new Response(JSON.stringify({ error: 'Sign in required', needsAuth: true }), { status: 401 }); }
+        return new Response('{}', { status: 404 });
+      };
+      _authState = { useMode: 'open', adminSet: true, authed: false, trusted: false };
+      document.getElementById('app-root').innerHTML = renderSettings();`);
+    await page.locator('#usemode-picker [data-usemode="accounts"]').click();
+    await expect(page.locator('#signin-overlay')).toBeVisible();
+    expect(await page.evaluate(() => (window as any).__posts)).toEqual([{ mode: 'accounts' }]);
+  });
+
   test('read-wall renders for a private (Passworded) box when not signed in', async ({ page }) => {
     await page.goto(`file://${WEB_UI}#/`);
     await page.waitForSelector('.home-status', { timeout: 5000 });   // open box → normal app
@@ -1582,7 +1616,7 @@ test.describe('Val Ark - First-boot Commissioning Wizard', () => {
     expect(fns).toEqual(['function', 'function', 'function']);
   });
 
-  test('wizard steps Welcome → Name → (skip admin) → Focus → Review', async ({ page }) => {
+  test('wizard steps Welcome → Name → (skip admin) → Who can use → Focus → Review', async ({ page }) => {
     await page.goto(`file://${WEB_UI}#/setup`);
     await page.waitForSelector('.setup-card', { timeout: 5000 });
     await page.locator('.setup-btn:has-text("Start")').click();
@@ -1590,11 +1624,33 @@ test.describe('Val Ark - First-boot Commissioning Wizard', () => {
     await page.fill('#setup-name', 'homelab');
     await page.locator('.setup-btn:has-text("Continue")').click();      // → admin
     await expect(page.locator('#setup-pass')).toBeVisible();
-    await page.locator('.setup-btn:has-text("Skip")').click();          // → focus
+    await page.locator('.setup-btn:has-text("Skip")').click();          // → who can use (#303)
+    // No passcode → Open is chosen and the gated modes can't be picked.
+    await expect(page.locator('#setup-usemode [data-usemode="open"]')).toHaveClass(/\bon\b/);
+    await expect(page.locator('#setup-usemode [data-usemode="passworded"]')).toBeDisabled();
+    await expect(page.locator('#setup-usemode [data-usemode="accounts"]')).toBeDisabled();
+    await page.locator('.setup-btn:has-text("Continue")').click();      // → focus
     await expect(page.locator('.setup-profile').first()).toBeVisible();
     await page.locator('.setup-btn:has-text("Continue")').click();      // → review
     await expect(page.locator('.setup-review')).toContainText('homelab');
+    await expect(page.locator('.setup-review')).toContainText('Open');
     await expect(page.locator('#setup-finish-btn')).toBeVisible();
+  });
+
+  test('wizard offers Passworded once an admin passcode is typed (#303)', async ({ page }) => {
+    await page.goto(`file://${WEB_UI}#/setup`);
+    await page.waitForSelector('.setup-card', { timeout: 5000 });
+    await page.locator('.setup-btn:has-text("Start")').click();
+    await page.locator('.setup-btn:has-text("Continue")').click();      // → admin
+    await page.fill('#setup-pass', 'correct-horse');
+    await page.locator('.setup-btn:has-text("Continue")').click();      // → who can use
+    const pw = page.locator('#setup-usemode [data-usemode="passworded"]');
+    await expect(pw).toBeEnabled();
+    await pw.click();
+    await expect(page.locator('#setup-usemode [data-usemode="passworded"]')).toHaveClass(/\bon\b/);
+    await page.locator('.setup-btn:has-text("Continue")').click();      // → focus
+    await page.locator('.setup-btn:has-text("Continue")').click();      // → review
+    await expect(page.locator('.setup-review')).toContainText('Passworded');
   });
 });
 

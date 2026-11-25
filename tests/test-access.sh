@@ -198,6 +198,72 @@ if start_open VALARK_TEST_FORCE_REMOTE=1; then
 else
     fail "open-mode server for the '..' checks did not start"
 fi
+stop_pids "$SRV_PID"; SRV_PID=""
+
+# 14. Use Mode from the web UI (#303): POST /api/setup/usemode is admin-only, refuses a
+#     gated mode until an admin passcode exists, and switching really engages the wall.
+"$NODE" -e '
+const a=require(process.argv[1]), c=require(process.argv[2]), d=process.argv[3], d2=process.argv[4];
+let refused=false; try { a.setUseMode("passworded", d); } catch (e) { refused=/admin passcode/.test(e.message); }
+const r=c.commission(d2,{name:"box",useMode:"accounts"},{trusted:true});
+process.exit(refused && a.status(d).useMode==="open" && r.error && !c.isCommissioned(d2) && a.status(d2).useMode==="open" ? 0 : 1);
+' "$ROOT/scripts/lib/auth.js" "$ROOT/scripts/lib/commission.js" "$T/um-nopass-unit" "$T/um-wiz-unit" \
+  && pass || fail "setUseMode + commission refuse a gated mode with no admin passcode"
+start_um() {   # $1 = state dir, $2 = extra env assignment (or empty)
+    PORT=$(free_port); B="http://127.0.0.1:$PORT"
+    env $2 VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" \
+      VALARK_STATE_DIR="$1" VALARK_CONTENT_DIR="$T/content" VALARK_MODELS_DIR="$T/models" \
+      "$NODE" "$ROOT/scripts/server.js" "$PORT" >"$T/srv-um.log" 2>&1 &
+    SRV_PID=$!
+    for i in $(seq 1 24); do sleep 0.5; curl -s -o /dev/null --max-time 2 "$B/api/health" && return 0; done
+    return 1
+}
+mode_now() { curl -s "$B/api/auth/status" | grep -o '"useMode":"[a-z]*"'; }
+mkdir -p "$T/um" "$T/um-nopass"
+"$NODE" -e 'const a=require(process.argv[1]);const d=process.argv[2];a.setPassword("testpass","admin",d);a.setUseMode("open",d);' \
+    "$ROOT/scripts/lib/auth.js" "$T/um"
+# 14a. A LAN peer: un-authed is refused; a signed-in admin switches and the wall engages.
+if start_um "$T/um" VALARK_TEST_FORCE_REMOTE=1; then
+    [ "$(jpost -d '{"mode":"passworded"}' "$B/api/setup/usemode")" = "401" ] && pass || fail "usemode from an un-authed LAN peer must be 401"
+    mode_now | grep -q '"open"' && pass || fail "a refused usemode must leave the mode Open"
+    [ "$(gcode "$B/api/status/disk")" = "200" ] && pass || fail "Open: a LAN peer reads before the switch"
+    curl -s -c "$T/cj-um" -X POST -H 'Content-Type: application/json' -d '{"password":"testpass"}' "$B/api/auth/login" | grep -q '"ok":true' \
+      && pass || fail "LAN admin login for the usemode checks"
+    [ "$(jpost -b "$T/cj-um" -d '{"mode":"sideways"}' "$B/api/setup/usemode")" = "400" ] && pass || fail "an invalid Use Mode must be 400"
+    [ "$(jpost -b "$T/cj-um" -d '{}' "$B/api/setup/usemode")" = "400" ] && pass || fail "a missing Use Mode must be 400"
+    [ "$(jpost -b "$T/cj-um" -d '{"mode":"passworded"}' "$B/api/setup/usemode")" = "200" ] && pass || fail "a signed-in admin must be able to set Passworded"
+    mode_now | grep -q '"passworded"' && pass || fail "auth/status must report Passworded after the switch"
+    [ "$(gcode "$B/api/status/disk")" = "401" ] && pass || fail "the read-wall must engage right after switching to Passworded"
+    [ "$(jpost -d '{"target":"all"}' "$B/api/download/content")" = "401" ] && pass || fail "use-actions must need sign-in after switching to Passworded"
+    [ "$(gcode -b "$T/cj-um" "$B/api/status/disk")" = "200" ] && pass || fail "the admin's session must survive the switch (no needless rotation)"
+    grep -q '\[access\] Use Mode changed: open -> passworded' "$T/srv-um.log" && pass || fail "the Use Mode change must be logged"
+    [ "$(jpost -b "$T/cj-um" -d '{"mode":"accounts"}' "$B/api/setup/usemode")" = "200" ] && pass || fail "a signed-in admin must be able to set Accounts"
+    [ "$(gcode "$B/api/status/disk")" = "401" ] && pass || fail "the read-wall must stay up in Accounts"
+    [ "$(jpost -b "$T/cj-um" -d '{"mode":"open"}' "$B/api/setup/usemode")" = "200" ] && pass || fail "a signed-in admin must be able to go back to Open"
+    [ "$(gcode "$B/api/status/disk")" = "200" ] && pass || fail "Open again: un-authed LAN reads must be allowed"
+else
+    fail "usemode server (LAN peer) did not start"
+fi
+stop_pids "$SRV_PID"; SRV_PID=""
+# 14b. A public peer is refused before any auth check.
+if start_um "$T/um" VALARK_TEST_FORCE_PUBLIC=1; then
+    [ "$(jpost -d '{"mode":"passworded"}' "$B/api/setup/usemode")" = "403" ] && pass || fail "usemode from a public peer must be 403"
+    mode_now | grep -q '"open"' && pass || fail "a public peer must not change the mode"
+else
+    fail "usemode server (public peer) did not start"
+fi
+stop_pids "$SRV_PID"; SRV_PID=""
+# 14c. The box itself (localhost = admin) with NO admin passcode: Open is fine, a gated
+#      mode is refused (nobody on the LAN could sign in).
+if start_um "$T/um-nopass" ""; then
+    [ "$(jpost -d '{"mode":"passworded"}' "$B/api/setup/usemode")" = "409" ] && pass || fail "Passworded with no admin passcode must be refused (409)"
+    [ "$(jpost -d '{"mode":"accounts"}' "$B/api/setup/usemode")" = "409" ] && pass || fail "Accounts with no admin passcode must be refused (409)"
+    mode_now | grep -q '"open"' && pass || fail "a refused gated mode must leave the box Open"
+    [ "$(jpost -d '{"mode":"open"}' "$B/api/setup/usemode")" = "200" ] && pass || fail "localhost admin may set Open with no passcode"
+else
+    fail "usemode server (no passcode) did not start"
+fi
+stop_pids "$SRV_PID"; SRV_PID=""
 
 echo "access: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

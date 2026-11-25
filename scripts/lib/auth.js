@@ -89,9 +89,13 @@ function listAdmins(dir) {
   return out;
 }
 
+// Passworded/Accounts gate reads behind a sign-in, and today the only sign-in is the
+// admin passcode (member accounts aren't built yet). Without one, nobody on the LAN
+// could get in, so a gated mode is refused until an admin passcode exists (#303).
 function setUseMode(mode, dir) {
   if (!['open', 'passworded', 'accounts'].includes(mode)) throw new Error('mode must be open|passworded|accounts');
   const s = readStore(dir);
+  if (mode !== 'open' && !(s.admin && s.admin.hash)) throw new Error('set an admin passcode before choosing ' + mode);
   s.useMode = mode;
   writeStore(s, dir);
   return mode;

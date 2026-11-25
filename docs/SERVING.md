@@ -168,8 +168,10 @@ holds `.env`. Don't share that checkout; use a data disk (`VAL_ARK_DATA`) for an
 3. **Finish setup and choose who can get in.** Open the web UI. From the box itself
    (`localhost`) the setup wizard just starts. From another device it asks for the claim code, which
    the server prints when it starts and `scripts/valark claim` shows again. A new box starts in
-   **Open** mode; change the **Use Mode** on the box with `scripts/valark usemode <mode>` (set an
-   admin passcode first). A Settings control for it is tracked in #303.
+   **Open** mode. Set an admin passcode, then choose the **Use Mode** in **Settings → Who can use
+   Val Ark?** (the setup wizard offers the same choice, defaulting to Open). Only the admin can change
+   it, and each change is written to the server log. On the box, `scripts/valark usemode <mode>`
+   does the same. Passworded and Accounts are refused until an admin passcode is set.
    - **Open** (default): anyone on the LAN can browse and request downloads. A request may evict
      unpinned content to make room.
    - **Passworded** and **Accounts**: browsing, downloads and requests need a sign-in. Today that is

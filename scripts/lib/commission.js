@@ -202,10 +202,14 @@ function commission(dir, opts, ctx) {
   const useMode = USE_MODES.includes(opts.useMode) ? opts.useMode : 'open';
 
   // Admin passcode is OPTIONAL (Jordan can skip; localhost still administers).
-  if (opts.password != null && String(opts.password).length) {
-    if (String(opts.password).length < 8) return { error: 'Passcode must be at least 8 characters.' };
-    auth.setPassword(String(opts.password), 'admin', dir);
+  const pwGiven = opts.password != null && String(opts.password).length > 0;
+  if (pwGiven && String(opts.password).length < 8) return { error: 'Passcode must be at least 8 characters.' };
+  // A gated mode with no passcode would lock every LAN visitor out (the admin passcode
+  // is the only sign-in today), so refuse it before anything is written (#303).
+  if (useMode !== 'open' && !pwGiven && !auth.status(dir).adminSet) {
+    return { error: 'Set an admin passcode to make this box private, or choose Open.' };
   }
+  if (pwGiven) auth.setPassword(String(opts.password), 'admin', dir);
   if (useMode !== 'open') auth.setUseMode(useMode, dir);
 
   const s = readSettings(dir);

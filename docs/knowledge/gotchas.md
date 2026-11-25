@@ -580,6 +580,15 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   store), so there's no session table. Cookie `varksid` is HttpOnly + SameSite=Lax. **"Sign out
   everywhere" = rotate the secret** (`auth.rotateSessionSecret`) — a per-client logout only drops
   the cookie (the token stays cryptographically valid until expiry, the usual stateless tradeoff).
+- **Changing the Use Mode (#303)** goes through the admin-only `POST /api/setup/usemode`
+  (`{"mode": "open"|"passworded"|"accounts"}`). Three rules hold it safe: (1) a gated mode is
+  refused (409) until an admin passcode exists, because that passcode is the only sign-in today
+  (`auth.setUseMode` throws too, so the CLI and the wizard's `commission` can't do it either);
+  (2) it's refused in **Safe Mode**: `readStore` swallows a corrupt `auth.json` into defaults, so
+  writing the mode there would overwrite the file and drop the admin; (3) sessions are **not**
+  rotated: every session is an admin session and the mode doesn't change who the admin is, so a
+  rotation would only sign out the admin making the change. Each change is logged as
+  `[access] Use Mode changed: <old> -> <new>` in the server log.
 - **Testing the LAN gate:** localhost always bypasses, so set `VALARK_TEST_FORCE_REMOTE=1` to make
   the server treat the client as remote and actually exercise the gate. It's **fail-safe** — it only
   REMOVES the localhost admin bypass, never grants access (safe even if set in prod).

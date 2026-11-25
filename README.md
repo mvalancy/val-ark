@@ -90,6 +90,7 @@ The [serving guide](docs/SERVING.md) walks through each one, with screenshots.
 
 Every human-facing guide opens with its own pop-up scene. Good places to start:
 
+- [How it works, in pictures](docs/HOW-IT-WORKS.md): the whole system in ten moving diagrams
 - [Docs map](docs/README.md): every doc, with a "start here" table
 - [Architecture](docs/ARCHITECTURE.md): how the pieces fit, and the project layout
 - [Platforms](docs/PLATFORMS.md): which machines it runs on and serves

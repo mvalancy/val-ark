@@ -19,6 +19,7 @@ Each file is either a **reference** (describes what the code *is* — keep it ma
 | [COMMUNITY.md](COMMUNITY.md) | Both | Offline community services (chat, mail, boards, file drop) — reference for the services + guide to running them. **Canonical** for comms. |
 | [ENCRYPTION.md](ENCRYPTION.md) | Guide | The local CA + TLS for the offline LAN. **Canonical** for TLS/HTTPS (link here, don't re-explain). |
 | [PLATFORMS.md](PLATFORMS.md) | Guide | Per-platform setup + acceleration; the OpenWRT subset. **Canonical** for the CUDA/Metal source build. |
+| [HOW-IT-WORKS.md](HOW-IT-WORKS.md) | Guide | The picture book: every flow diagram in reading order, with a short caption each. It links out and doesn't restate the guides; a new diagram should be added here too. |
 | [SERVING.md](SERVING.md) | Guide | Static (any file share) vs dynamic (`server.js`) serving: choosing, setup for each, screenshots. **Canonical** for that choice. |
 | [OFFLINE.md](OFFLINE.md) | Guide | Offline operation, P2P sync, and the NFS-shared mesh. |
 | [ARM64-NAS.md](ARM64-NAS.md) | Guide | ARM64 NAS appliances (chips such as the Rockchip RK3588): setup notes + gotchas. |

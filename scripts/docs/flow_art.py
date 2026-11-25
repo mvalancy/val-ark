@@ -55,7 +55,7 @@ DIAGRAMS = {
                ('lib', 'disk', 'downloads', 0), ('loop', 'disk', 'repairs', 0), ('loop', 'lib', 'tops up', 0),
                ('loop', 'site', 'rewrites', 0), ('disk', 'srv', '', 0),
                ('srv', 'people', 'web UI', 0), ('site', 'share', 'plain HTML', 0)],
-        used=['docs/ARCHITECTURE.md', 'README.md']),
+        used=['docs/ARCHITECTURE.md', 'README.md', 'docs/HOW-IT-WORKS.md']),
     'fill': dict(
         title='How the Librarian fills a disk',
         sub='Four passes, most important first, until the disk reaches its reserve.',
@@ -75,7 +75,7 @@ DIAGRAMS = {
         },
         edges=[('cat', 'cand', '', 0), ('cand', 'p0', '', 0), ('p0', 'p1', '', 0), ('p1', 'p2', '', 0),
                ('p2', 'p3', '', 'elbow'), ('p3', 'dl', '', 0), ('dl', 'disk', '', 0), ('trade', 'disk', 'evicts', 0)],
-        used=['docs/LIBRARIAN.md', 'docs/ARCHITECTURE.md']),
+        used=['docs/LIBRARIAN.md', 'docs/ARCHITECTURE.md', 'docs/HOW-IT-WORKS.md']),
     'heal-loop': dict(
         title='The self-healing loop',
         sub='Every 30 minutes, and after a reboot, the Ark checks itself and fixes what it can.',
@@ -95,7 +95,7 @@ DIAGRAMS = {
             'report': (0, 0, 'eye', 'Report', 'Health page, events', 3),
         },
         centre=('gear', 'loop.sh', 'every 30 min'),
-        used=['docs/ARCHITECTURE.md', 'docs/design/errors-selfheal.md']),
+        used=['docs/ARCHITECTURE.md', 'docs/design/errors-selfheal.md', 'docs/HOW-IT-WORKS.md']),
     'request': dict(
         title='What happens when you tap Request',
         sub='From one tap on any device to a file on the disk, with live progress on the way.',
@@ -116,7 +116,7 @@ DIAGRAMS = {
         edges=[('tap', 'gate', '', 0), ('gate', 'mode', '', 0), ('mode', 'job', 'checked id', 0),
                ('job', 'pin', 'request', 0), ('pin', 'room', '', 0), ('room', 'dl', '', 0),
                ('dl', 'lib', '', 0), ('job', 'activity', 'progress', 0)],
-        used=['docs/ARCHITECTURE.md', 'docs/design/downloads-monitoring.md']),
+        used=['docs/ARCHITECTURE.md', 'docs/design/downloads-monitoring.md', 'docs/HOW-IT-WORKS.md']),
     'access': dict(
         title='Who can do what',
         sub='The box is always the Admin; the LAN gets what the Use Mode allows; the internet gets no library.',
@@ -136,7 +136,7 @@ DIAGRAMS = {
         edges=[('box', 'admin', 'always', 0), ('lan', 'admin', 'passcode', 0), ('lan', 'mode', '', 0),
                ('net', 'block', '', 0), ('admin', 'set', '', 0), ('admin', 'use', '', 0),
                ('mode', 'use', 'Open: anyone here', 0)],
-        used=['docs/design/access-identity.md', 'docs/SERVING.md']),
+        used=['docs/design/access-identity.md', 'docs/SERVING.md', 'docs/HOW-IT-WORKS.md']),
     'fleet': dict(
         title='One Ark, many machines',
         sub='Share one Ark across the LAN, or set up new ones from it, without the internet.',
@@ -153,7 +153,7 @@ DIAGRAMS = {
         },
         edges=[('ark', 'src', 'copies itself', 0), ('ark', 'peer', 'P2P sync', 0), ('ark', 'mesh', 'NFS export', 0),
                ('ark', 'laptop', 'file share', 0), ('src', 'new', 'installs offline', 0), ('new', 'ark2', '', 0)],
-        used=['docs/OFFLINE.md', 'docs/ARCHITECTURE.md']),
+        used=['docs/OFFLINE.md', 'docs/ARCHITECTURE.md', 'docs/HOW-IT-WORKS.md']),
     'community': dict(
         title='The village square',
         sub='Chat, mail, boards and file drops run on the box and open inside the web UI.',
@@ -173,7 +173,7 @@ DIAGRAMS = {
         edges=[('env', 'loop', '', 0), ('env', 'start', 'enables', 0), ('start', 'svc', '', 0), ('loop', 'svc', '', 0),
                ('acct', 'svc', '', 0), ('svc', 'proxy', '', 0),
                ('proxy', 'chat', '', 0), ('proxy', 'board', '', 0)],
-        used=['docs/COMMUNITY.md']),
+        used=['docs/COMMUNITY.md', 'docs/HOW-IT-WORKS.md']),
     'moderation': dict(
         title='Keeping shared files safe',
         sub='Files in the uploads folder are checked on the box by a local model. Doubtful ones wait for the Admin.',
@@ -192,7 +192,7 @@ DIAGRAMS = {
         edges=[('up', 'sweep', '', 0), ('sweep', 'model', '', 0), ('model', 'hold', '', 0),
                ('hold', 'quar', 'flagged or unsure', 0), ('model', 'shared', 'clean', 0),
                ('quar', 'review', '', 0)],
-        used=['docs/design/safety-moderation.md']),
+        used=['docs/design/safety-moderation.md', 'docs/HOW-IT-WORKS.md']),
     'setup': dict(
         title='Setting up a new box',
         sub='A few screens in a browser. Then the 24/7 loop fills the disk on its own.',
@@ -210,7 +210,7 @@ DIAGRAMS = {
         },
         edges=[('welcome', 'claim', '', 0), ('claim', 'name', '', 0), ('name', 'pass', '', 0),
                ('pass', 'focus', '', 0), ('focus', 'card', '', 'elbow'), ('card', 'fill', '', 0), ('fill', 'open', '', 0)],
-        used=['docs/design/commissioning.md']),
+        used=['docs/design/commissioning.md', 'docs/HOW-IT-WORKS.md']),
     'serving': dict(
         title='Two ways to open an Ark',
         sub='Static pages on any file share, or the live web server. Both work fully offline.',
@@ -228,7 +228,7 @@ DIAGRAMS = {
         },
         edges=[('disk', 'site', '', 0), ('site', 'share', 'static', 0), ('share', 'lap', '', 0),
                ('disk', 'srv', '', 0), ('srv', 'live', 'dynamic', 0), ('live', 'ppl', '', 0)],
-        used=['docs/SERVING.md']),
+        used=['docs/SERVING.md', 'docs/HOW-IT-WORKS.md']),
 }
 
 

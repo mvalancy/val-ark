@@ -96,6 +96,64 @@ DIAGRAMS = {
         },
         centre=('gear', 'loop.sh', 'every 30 min'),
         used=['docs/ARCHITECTURE.md', 'docs/design/errors-selfheal.md']),
+    'request': dict(
+        title='What happens when you tap Request',
+        sub='From one tap on any device to a file on the disk, with live progress on the way.',
+        h=500,
+        zones=[(28, 104, 230, 372, 'You'), (286, 104, 420, 372, 'The web server'),
+               (734, 104, 438, 372, 'The Librarian')],
+        nodes={
+            'tap': (143, 200, 'play', 'Tap Request', 'web UI, any device', 0),
+            'activity': (143, 400, 'eye', 'Activity page', 'live progress', 1),
+            'gate': (390, 200, 'shield', 'Gates', 'LAN or tailnet, limit', 2),
+            'mode': (600, 200, 'lock', 'Use Mode', 'Open, or signed in', 3),
+            'job': (495, 400, 'gear', 'Job', 'runs in the background', 4),
+            'pin': (845, 200, 'key', 'Pin it', 'never evicted', 5),
+            'room': (1060, 200, 'wrench', 'Make room', 'only if it won\'t fit', 6),
+            'dl': (1060, 400, 'disk', 'Download', 'resumable, checked', 7),
+            'lib': (845, 400, 'book', 'In the library', 'loop keeps it filled', 0),
+        },
+        edges=[('tap', 'gate', '', 0), ('gate', 'mode', '', 0), ('mode', 'job', 'checked id', 0),
+               ('job', 'pin', 'request', 0), ('pin', 'room', '', 0), ('room', 'dl', '', 0),
+               ('dl', 'lib', '', 0), ('job', 'activity', 'progress', 0)],
+        used=['docs/ARCHITECTURE.md', 'docs/design/downloads-monitoring.md']),
+    'access': dict(
+        title='Who can do what',
+        sub='The box is always the Admin; the LAN gets what the Use Mode allows; the internet can change nothing.',
+        h=540,
+        zones=[(28, 104, 300, 412, 'Who is asking'), (356, 104, 420, 412, 'The gate'),
+               (804, 104, 368, 412, 'What they can do')],
+        nodes={
+            'box': (178, 190, 'house', 'The box itself', 'localhost, console', 0),
+            'lan': (178, 330, 'wifi', 'Your network', 'LAN and tailnet', 1),
+            'net': (178, 460, 'globe', 'The internet', 'everyone else', 2),
+            'admin': (566, 190, 'key', 'Admin', 'box, or passcode', 3),
+            'mode': (566, 330, 'lock', 'Use Mode', 'Open, or sign in', 4),
+            'block': (566, 460, 'shield', 'No changes', 'no requests, no setup', 5),
+            'set': (988, 190, 'gear', 'Settings, repair', 'moderation, accounts', 6),
+            'use': (988, 330, 'book', 'Browse, request', 'library, downloads', 7),
+        },
+        edges=[('box', 'admin', 'always', 0), ('lan', 'admin', 'passcode', 0), ('lan', 'mode', '', 0),
+               ('net', 'block', '', 0), ('admin', 'set', '', 0), ('admin', 'use', '', 0),
+               ('mode', 'use', 'Open: anyone here', 0)],
+        used=['docs/design/access-identity.md', 'docs/SERVING.md']),
+    'fleet': dict(
+        title='One Ark, many machines',
+        sub='Share one Ark across the LAN, or set up new ones from it, without the internet.',
+        h=600,
+        zones=[(28, 104, 330, 470, 'The Ark'), (386, 104, 786, 470, 'Over the local network')],
+        nodes={
+            'ark': (193, 245, 'ark', 'The Ark', 'one data disk', 0),
+            'src': (193, 455, 'terminal', 'Its own source', 'bundle, bootstrap.sh', 1),
+            'peer': (700, 180, 'wifi', 'Syncthing peer', 'syncs models, content', 2),
+            'mesh': (700, 290, 'chip', 'GPU node', 'runs models over NFS', 3),
+            'laptop': (700, 400, 'paste', 'Any laptop', 'static pages, a share', 4),
+            'new': (700, 510, 'cube', 'New machine', 'curl bootstrap.sh', 5),
+            'ark2': (1040, 510, 'ark', 'Another Ark', 'fills when online', 6),
+        },
+        edges=[('ark', 'src', 'copies itself', 0), ('ark', 'peer', 'P2P sync', 0), ('ark', 'mesh', 'NFS export', 0),
+               ('ark', 'laptop', 'file share', 0), ('src', 'new', 'installs offline', 0), ('new', 'ark2', '', 0)],
+        used=['docs/OFFLINE.md', 'docs/ARCHITECTURE.md']),
 }
 
 
@@ -244,7 +302,7 @@ def render(did, spec, theme):
                 if abs(vy) > abs(vx) * 0.6:
                     labels.append(f'<text x="{mx + 10:.1f}" y="{my + 4:.1f}" class="el" text-anchor="start">{esc(label)}</text>')
                 else:
-                    labels.append(f'<text x="{mx:.1f}" y="{my - 8:.1f}" class="el" text-anchor="middle">{esc(label)}</text>')
+                    labels.append(f'<text x="{mx:.1f}" y="{my - 11:.1f}" class="el" text-anchor="middle">{esc(label)}</text>')
         for i, (x, y, icon, label, cap, ai) in enumerate(nodes.values()):
             p.append(node_svg(x, y, icon, label, cap, ACCENTS[ai % len(ACCENTS)], t, 0.2 + i * 0.08))
         p.extend(labels)

@@ -139,6 +139,95 @@ and the model filter drops oversized candidates).
    or install Playwright's ARM browsers + a virtual display if UI tests are needed
    on-device.
 
+## Direct-connect laptop: DHCP + DNS on the wired port
+
+Off-grid there may be no router at all: a laptop gets plugged straight into the
+NAS's ethernet port. With `VALARK_LINK_DHCP=1` in `.env`, the self-heal loop
+(step 2f, `scripts/lib/link-dhcp.sh`) makes that work, without ever fighting a
+real router:
+
+1. **Probe first, twice.** `scripts/lib/dhcp_probe.py` (stdlib, run as `python3 -I`)
+   sends up to four DHCPDISCOVERs at 0, 2, 4 and 8 s, each with a fresh xid, then
+   listens `VALARK_LINK_DHCP_PROBE_SECS` (4) more. Several tries matter because a
+   switch port in STP listening/learning drops frames for ~30 s after link-up. It never
+   sends a REQUEST, so no lease is taken. It receives on a raw socket, so a DHCP client
+   holding UDP 68 doesn't block it. It ignores frames this host sent (our own dnsmasq),
+   by packet type and source MAC, so a second Ark on the same link still counts as a
+   server. A BOOTP reply without a DHCP message type also counts (fail closed). Serving
+   starts only after **two** empty probes at least `VALARK_LINK_DHCP_CONFIRM_SECS` (30)
+   and at most `VALARK_LINK_DHCP_CONFIRM_MAX_SECS` (300) apart on the same link epoch. A link change or any answer in between restarts that.
+2. **Serve on one interface.** It adds `10.254.77.1/24` (prefix: `VALARK_LINK_DHCP_NET`,
+   which must be private and not already routed or addressed on another interface) and
+   starts dnsmasq with `--conf-file=/dev/null --interface=<iface> --bind-interfaces
+   --except-interface=lo --listen-address=<NET>.1`. Leases come from `.10` to `.60`,
+   5 minutes long for the first 10 minutes (so a router that shows up late wins
+   quickly), then `VALARK_LINK_DHCP_LEASE` (1h). No router option is handed out, so the
+   laptop keeps its own default route.
+3. **DNS** (`VALARK_LINK_DHCP_DNS`). In every mode the box's hostname, `valark` and
+   `VALARK_LINK_DHCP_NAMES` (and `<name>.home.arpa`, with `home.arpa` as the search
+   domain) resolve to the link address.
+   - `forward` (default) sends every other lookup to the box's own upstream resolvers,
+     so a laptop that also has Wi-Fi keeps its internet whenever the Ark is online.
+     dnsmasq never reads `resolv.conf` itself (`--no-resolv`). The module passes an
+     explicit `--server=` list taken from `/etc/resolv.conf` with our link address,
+     our whole `/24`, `0.0.0.0`/`::` and anything that isn't an IP literal removed, so
+     it can't forward to itself in a loop. If nothing usable is left (the Ark is
+     offline, or only lists itself), it behaves like `local`. A `resolv.conf` change
+     while serving restarts dnsmasq with the new list. **Privacy:** in this mode the
+     laptop's lookups leave through the Ark's upstream resolvers (whoever the Ark uses
+     can see them), not through the laptop's own network.
+   - `local` answers only the box's names and REFUSES everything else, which fails
+     fast.
+   - `off` hands out no DNS (`--port=0`); use `http://10.254.77.1/`.
+
+   The `VALARK_WEB_PUBLIC_PORT` NAT redirect already covers every real interface, so
+   `http://valark/` reaches the web UI.
+4. **Keep checking.** A small watcher (started by the loop, flock'd so there is only
+   one) polls the interface's `carrier_changes` counter every
+   `VALARK_LINK_DHCP_WATCH_SECS` (2), so even a quick unplug and replug between two
+   polls triggers a re-probe. It also re-probes every `VALARK_LINK_DHCP_RECHECK_SECS`
+   (60) and re-adds the address if something (e.g. NetworkManager) removed it. It
+   re-reads the knobs from `.env` before each check, so editing or deleting a line takes
+   effect.
+5. **Every other outcome stops it.** dnsmasq is killed and the address removed when:
+   - a server answers;
+   - the link goes down;
+   - the probe can't run;
+   - the config is invalid;
+   - the interface becomes ambiguous (e.g. a USB ethernet adapter adds a second wired
+     port and `VALARK_LINK_DHCP_IFACE` isn't set);
+   - root or dnsmasq goes away;
+   - the knob is turned off;
+   - the watcher exits (`STOP` flag, SIGTERM).
+6. **Fail soft.** Not root and no passwordless `sudo -n`? No `dnsmasq`? It logs one
+   clear line, writes the reason to `state/link-dhcp.json` and does nothing.
+
+Runtime files (pid, locks, leases, dnsmasq and watcher logs) live on tmpfs in
+`/run/valark-link-dhcp` (`VALARK_LINK_DHCP_RUN`), never on the data disk. That disk may
+be SMB/NFS, where flock is unreliable, and if it is not mounted the files would seed a
+tree on the root fs (#58). Only `state/link-dhcp.json` goes to `state/`, and only when
+that directory already exists. Its `mode` is one of `off`, `idle`, `probing`,
+`present`, `serving`, `unavailable` or `error`. `scripts/lib/link-dhcp.sh status`
+prints it; `... stop` stops serving now.
+
+**Hardware checklist before turning it on:**
+
+- [ ] `command -v dnsmasq`. On Debian 11, `apt install dnsmasq-base` ships the binary
+  without a system-wide service. If the `dnsmasq` user doesn't exist (`id dnsmasq`),
+  the module passes `--user=nobody`.
+- [ ] Nothing else binds `0.0.0.0:53` or `:67`; check with `ss -lunp`. If something
+  does, dnsmasq fails to start and the module stops and removes the address (fail
+  closed). It doesn't serve until the port is free. With `VALARK_LINK_DHCP_DNS=off`,
+  only port 67 is needed.
+- [ ] Does the vendor network manager own the wired port, and does it remove the added
+  address? The watcher re-adds it, but marking the port unmanaged is cleaner.
+- [ ] Is the port administratively up (`ip link` shows `UP`)? If not, no carrier is
+  ever seen, so bring it up in the vendor UI.
+- [ ] Does the probe see a real router's OFFER on that NIC? Check both with the box's
+  DHCP client running and with the port unconfigured.
+
+Offline test: `tests/test-link-dhcp.sh`.
+
 ## Verified working on an RK3588-class unit
 
 - `./start.sh setup` → resolves the NVMe data root, bootstraps Node, creates layout.

@@ -1621,10 +1621,16 @@ function handleAPI(req, res, urlPath) {
                         // Keep the wizard's promises (#306): publish <name>.local when the box
                         // can, start filling if the 24/7 loop isn't installed, then answer with
                         // the address to use and what happened.
+                        // Answer within ~3 s even if avahi or crontab is slow (#339): the work
+                        // carries on, and the UI reads the outcome from /api/setup/state.
                         const done = result;
-                        refreshMdns(() => startFirstFill((fill) => {
+                        let answered = false;
+                        const answer = (fill) => {
+                            if (answered) return; answered = true; clearTimeout(cap);
                             sendJSON(res, req, { ...done, access: boxAddress(req), fill });
-                        }));
+                        };
+                        const cap = setTimeout(() => answer({ ...firstFillState(), pending: true }), 3000);
+                        refreshMdns(() => startFirstFill(answer));
                         return;
                     }
                     break;

@@ -59,6 +59,7 @@ printf '#!/bin/bash\nexit 0\n' > "$T/bin/daemon-up"
 # crontab: `-l` prints $CRONTAB_FILE (exit 1 "no crontab" when it doesn't exist).
 cat > "$T/bin/crontab" <<'EOF'
 #!/bin/bash
+[ -n "${CRONTAB_SLEEP:-}" ] && sleep "$CRONTAB_SLEEP"
 [ "$1" = "-l" ] || exit 1
 [ -f "$CRONTAB_FILE" ] || { echo "no crontab for this user" >&2; exit 1; }
 cat "$CRONTAB_FILE"
@@ -305,6 +306,23 @@ if [ "$up" = 1 ]; then
 else fail "server 4 did not start"; fi
 stop_pids "$SRV_PID"; SRV_PID=""
 
+# --- 8b. the last wizard step answers within ~3 s even when crontab is slow (#339) -----
+stop_pids "$SRV_PID"; SRV_PID=""
+if start_server "$T/s4" "$T/srv4.log" VALARK_MDNS_PUBLISH=none VALARK_MDNS_DAEMON_CMD=none CRONTAB_SLEEP=4; then
+    t0=$(date +%s%N)
+    R=$(curl -s --max-time 15 -H 'Content-Type: application/json' -d '{"name":"Slow Box"}' "$B/api/setup/commission")
+    ms=$(( ( $(date +%s%N) - t0 ) / 1000000 ))
+    [ "$ms" -lt 4500 ] && pass || fail "commission must answer within ~3 s with a slow crontab (took ${ms} ms)"
+    printf '%s' "$R" | grep -q '"ok":true' && printf '%s' "$R" | grep -q '"pending":true' && pass || fail "a capped answer is ok and says the fill is pending ($R)"
+    # the work carries on after the answer: the first fill is recorded once crontab returns
+    for i in $(seq 1 20); do curl -s --max-time 3 "$B/api/setup/state" | grep -q '"startedAt"' && break; sleep 0.5; done
+    curl -s --max-time 3 "$B/api/setup/state" | grep -q '"startedAt"' && pass || fail "the first fill must still start after the capped answer"
+    sleep 5   # let the slow crontab stubs those state reads started finish before stopping
+else
+    fail "server for the slow-crontab case did not start"
+fi
+stop_pids "$SRV_PID"; SRV_PID=""
+
 # --- 9. cron_install never wipes a crontab it couldn't read ----------------------
 cat > "$T/bin/crontab-fails" <<'EOF'
 #!/bin/bash
@@ -363,7 +381,7 @@ PATH="$T/cron/bin:$PATH" bash "$T/cron/run.sh" >"$T/cron.out" 2>&1; rc=$?
 
 # --- 10. nothing left running ---------------------------------------------------
 left=$(pgrep -f "$T/" 2>/dev/null | grep -vx "$$" | tr '\n' ' ')
-[ -z "$left" ] && pass || { fail "processes left running from this test: $left"; pkill -f "$T/" 2>/dev/null; }
+[ -z "$left" ] && pass || { fail "processes left running from this test: $left $(for q in $left; do ps -o args= -p "$q"; done)"; pkill -f "$T/" 2>/dev/null; }
 
 echo "setup-promises: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

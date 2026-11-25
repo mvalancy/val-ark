@@ -239,7 +239,17 @@ function configHealth(dir) {
   return { safeMode: reasons.length > 0, reasons };
 }
 
-module.exports = { state, commission, isCommissioned, ensureClaim, readClaim, consumeClaim, readSettings, writeSettings, PROFILES,
+// The box name as a DNS label for <label>.local (#306). One rule, mirrored by
+// lib/mdns.sh to_label() and the wizard's _mdnsLabel(): lower case, spaces and
+// underscores become '-', anything else outside [a-z0-9-] is dropped, repeated '-'
+// squeezed, no leading/trailing '-', at most 63 characters; empty -> 'valark'.
+function mdnsLabel(name) {
+  const l = String(name || '').toLowerCase().replace(/[ _]/g, '-').replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63).replace(/-+$/, '');
+  return l || 'valark';
+}
+
+module.exports = { state, commission, mdnsLabel, isCommissioned, ensureClaim, readClaim, consumeClaim, readSettings, writeSettings, PROFILES,
   ensureRecovery, readRecovery, regenerateRecovery, verifyRecovery, recoverAdmin, grandfather, configHealth, setProfile,
   getModeration, setModeration };
 

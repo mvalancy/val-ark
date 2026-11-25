@@ -549,26 +549,34 @@ shows a hint linking to the static catalog, since the dynamic UI needs its serve
    (`scripts/lib/tailscale-mode.sh`); the server raises a critical notification
    and the Health page shows it (see
    [access-identity.md](design/access-identity.md#layer-1--network-floor-automatic-not-a-user-setting)),
-9. **refresh the live catalog** → content links self-heal (no stale dates),
-10. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
+9. **publish `<name>.local`** (#306) — `scripts/lib/mdns.sh ensure`: when the
+   hostname is the box name, avahi (or macOS) already answers; else, when
+   avahi-daemon runs and `avahi-publish` is installed, keep one
+   `avahi-publish -a -R <name>.local <lan-ip>` child up (fd 8 closed). Never
+   installs anything; otherwise writes the reason to `state/mdns.json` and the web
+   UI shows the LAN IP instead. "Published" means announced, not that every client
+   resolves `.local`, so the UI shows the IP beside it. Runs are serialised on
+   `state/mdns.lock`,
+10. **refresh the live catalog** → content links self-heal (no stale dates),
+11. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
    are transient, not dead), web-ui assets, symlinks → `state/linkcheck.txt`,
-11. **integrity verify** → requeue corrupt/short downloads,
-12. **re-fill pinned requests** — user-requested items that went missing come back
+12. **integrity verify** → requeue corrupt/short downloads,
+13. **re-fill pinned requests** — user-requested items that went missing come back
     before the generic fill,
-13. **top-up fill** (bounded; skipped if a fill already runs),
-14. **weekly tool refresh** — re-run the tool mirror so apps track their latest
+14. **top-up fill** (bounded; skipped if a fill already runs),
+15. **weekly tool refresh** — re-run the tool mirror so apps track their latest
     upstream versions (`VALARK_TOOL_REFRESH_DAYS`, default 7; a failed pass
     retries in a day),
-15. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
+16. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
     real ZIM, a tiny LLM infers, the web API answers, and each configured remote
     mesh node (`VALARK_FLEET` in `.env`) is reachable and sees the shared content,
-16. **UI smoke** — a Playwright pass over the dynamic controls (when installed),
-17. **moderation sweep** — screen plain-file community uploads on-device and
+17. **UI smoke** — a Playwright pass over the dynamic controls (when installed),
+18. **moderation sweep** — screen plain-file community uploads on-device and
     quarantine anything not cleanly allowed (`scripts/lib/mod-sweep.sh`, fail-closed),
-18. **report + coordination** — the librarian's `maintain` (writes
+19. **report + coordination** — the librarian's `maintain` (writes
     `state/health.json`: disk + per-category coverage) and a fleet coordination drop
     (`state/coordination/`),
-19. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
+20. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
     snapshot) and append any genuine repairs to `state/heal-events.jsonl` (the feed
     behind the Health page). This is **distinct from `state/health.json`**.
 

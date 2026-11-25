@@ -67,7 +67,9 @@ SUM_AFTER="$(cat "$T/content/zim/w.zim" "$T/models/llm/m.gguf" | sha256sum)"
 #  library appearing after boot must not flip an un-owned box.)
 PORT=$(free_port)
 S2="$T/srv"; mkdir -p "$S2/content/zim" "$S2/models"
-VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" \
+# NO_SPAWN: commissioning starts a first `loop.sh once` when no cron exists (#306);
+# a test must never run a real cycle (tests/test-setup-promises.sh covers that path).
+VALARK_TEST_NO_SPAWN=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" \
   VALARK_STATE_DIR="$S2/state" VALARK_CONTENT_DIR="$S2/content" VALARK_MODELS_DIR="$S2/models" \
   "$NODE" "$ROOT/scripts/server.js" "$PORT" >"$T/srv.log" 2>&1 &
 SRV_PID=$!

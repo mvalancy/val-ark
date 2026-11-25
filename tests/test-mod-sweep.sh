@@ -20,6 +20,7 @@ fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 SWEEP="$ROOT/scripts/lib/mod-sweep.sh"
 COMMISSION="$ROOT/scripts/lib/commission.js"
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
+. "$ROOT/tests/lib/require-cmd.sh"; [ -n "$NODE" ] || missing_cmd node "mod-sweep"
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 STORE="$T/store"; mkdir -p "$STORE"

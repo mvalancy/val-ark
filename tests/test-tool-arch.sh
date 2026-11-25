@@ -14,8 +14,9 @@
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
-command -v file >/dev/null 2>&1 || { echo "SKIP: no 'file' utility" >&2; exit 0; }
+. "$ROOT/tests/lib/require-cmd.sh"; require_cmd file "tool-arch"
 TOOLS="$ROOT/tools"
+# ci-skip-ok: a fresh checkout (CI included) has no tools mirror to check; nothing to test there
 [ -d "$TOOLS" ] || { echo "SKIP: no tools mirror on this host (fresh checkout/CI)" >&2; exit 0; }
 
 # tool-dir : binary-name  (same resolve-by-name set verify.sh runs)

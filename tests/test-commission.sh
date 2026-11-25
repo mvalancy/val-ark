@@ -17,7 +17,8 @@ pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
-[ -n "$NODE" ] || { echo "SKIP: no node runtime for commission.js" >&2; exit 0; }
+. "$ROOT/tests/lib/require-cmd.sh"
+[ -n "$NODE" ] || missing_cmd node "commission"
 
 SRV_PID=""
 T="$(mktemp -d)"; trap 'stop_pids "$SRV_PID"; rm -rf "$T"' EXIT   # the trap must stop the server too

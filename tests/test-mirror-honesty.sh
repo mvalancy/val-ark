@@ -26,10 +26,10 @@ SRC="${VALARK_TEST_SCRIPTS_SRC:-$ROOT}"
 PARTS="${VALARK_TEST_PARTS:-AB}"    # A = shell layer, B = server job layer (old code retries 5 x 15s: use B for the negative control)
 pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
+. "$ROOT/tests/lib/require-cmd.sh"; require_python3 "mirror-honesty"
 NODE="$HOME/.local/node/bin/node"; [ -x "$NODE" ] || NODE="$(command -v node 2>/dev/null)"
-[ -n "$NODE" ] || { echo "SKIP: no node runtime" >&2; exit 0; }
-command -v python3 >/dev/null 2>&1 || { echo "SKIP: no python3" >&2; exit 0; }
-command -v flock >/dev/null 2>&1 || { echo "SKIP: no flock" >&2; exit 0; }
+[ -n "$NODE" ] || missing_cmd node "mirror-honesty"
+require_cmd flock "mirror-honesty"
 
 T="$(mktemp -d)"; SRV_PID=""
 cleanup() { stop_pids "$SRV_PID"; rm -rf "${T:?}" 2>/dev/null; }

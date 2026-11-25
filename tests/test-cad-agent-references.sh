@@ -30,8 +30,8 @@ fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 check() { if eval "$2"; then pass; else fail "$1"; fi; }
 PY="$ROOT/scripts/lib/references_mirror.py"
 SH="$ROOT/scripts/tools/cad-agent-references.sh"
-command -v python3 >/dev/null 2>&1 || { echo "SKIP: no python3" >&2; exit 0; }
-command -v git >/dev/null 2>&1 || { echo "SKIP: no git" >&2; exit 0; }
+. "$ROOT/tests/lib/require-cmd.sh"; require_python3 "cad-agent-references"
+require_cmd git "cad-agent-references"
 
 T="$(mktemp -d)"; SRV_PID=""
 NPID=""
@@ -498,7 +498,8 @@ if [ -n "$NODE" ] && command -v curl >/dev/null 2>&1; then
     rm -f "${PD:?}/copy.html"; rmdir "${PD:?}"
     [ "$MADE_PRIVATE" = 1 ] && rmdir "${ROOT:?}/private"
 else
-    echo "  SKIP: served-tree check (no node or curl)" >&2
+    if ci_is_set; then fail "served-tree check needs node and curl, missing under CI"
+    else echo "  SKIP: served-tree check (no node or curl)" >&2; fi
 fi
 
 echo "cad-agent-references: ${PASS} passed, ${FAIL} failed"

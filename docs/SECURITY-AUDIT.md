@@ -297,12 +297,24 @@ a follow-up pass should exercise them.
 Until this change, `isLanOrTailnet` gated only POSTs. In **Open** mode `readAllowed`
 returned true for any peer, and the server binds `0.0.0.0` by default. So an Ark whose
 port was reachable from the internet (a port forward, a cloud VM) served the library,
-catalog, `/api/archive/`, `/kiwix/` and the raw data trees to anyone. Passworded and
-Accounts modes were not affected, because a login can only be POSTed from the LAN.
+catalog, `/api/archive/`, `/kiwix/` and the raw data trees to anyone.
 
-**Fixed:** `server.js` now refuses a gated read (`isReadGated`) from a peer that is not
-LAN, tailnet or localhost with `403`, whatever the Use Mode. The web-UI shell, `/api/health`,
-auth and setup stay reachable. `tests/test-access.sh` §12 covers both sides: a simulated
-public peer (`VALARK_TEST_FORCE_PUBLIC=1`, fail-safe) gets 403 on six gated reads and on a
-request, while a LAN peer still reads in Open mode. Keeping the port off the internet is
-still the rule ([SECURITY.md](../SECURITY.md)); this is defence in depth.
+The review of the fix found an older bypass too. The read-wall matched the decoded URL by
+prefix, but the file server normalized it afterwards, so `/%2fdocs/…` or `/./docs/…` reached
+a gated tree without matching. That also got past the Passworded/Accounts sign-in wall.
+
+**Fixed:**
+- The URL is decoded once (bad escapes get 404) and normalized before any check or route,
+  so every gate sees the same path the file server serves.
+- A gated read (`isReadGated`) from a peer that is not LAN, tailnet or localhost gets `403`
+  in every Use Mode. The web-UI shell, `/api/health`, auth and setup stay reachable, and
+  `/api/auth/status` reports `localOnly` so the UI can explain why.
+- A socket with no remote address is no longer treated as localhost.
+- `100.64.0.0/10` counts as the tailnet only when the request arrived on the box's own
+  tailnet address, not on a carrier-CGNAT uplink.
+
+`tests/test-access.sh` covers it: a simulated public peer (`VALARK_TEST_FORCE_PUBLIC=1`,
+fail-safe) gets 403 on the gated trees, the APIs, the progress stream, the app proxies,
+uppercase and encoded forms, and HEAD, while a LAN peer still reads in Open mode; in
+Passworded mode the encoded forms get 401. **Still a rule:** keep the port off the internet,
+and don't put a reverse proxy or tunnel on the box ([SECURITY.md](../SECURITY.md)).

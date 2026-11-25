@@ -29,7 +29,8 @@ printf '{ this is NOT valid json ' > "$T/state/settings.json"
 
 PORT=$(free_port); B="http://127.0.0.1:$PORT"
 # No VALARK_TEST_FORCE_REMOTE → the test client is localhost, so it can recover with no code.
-VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" \
+# NO_SPAWN: no loop.sh or mDNS publisher from this test (#306).
+VALARK_TEST_NO_SPAWN=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" \
   VALARK_STATE_DIR="$T/state" VALARK_CONTENT_DIR="$T/content" VALARK_MODELS_DIR="$T/models" \
   "$NODE" "$ROOT/scripts/server.js" "$PORT" >"$T/srv.log" 2>&1 &
 SRV_PID=$!
@@ -61,7 +62,7 @@ echo "SECRET-LIBRARY" > "$S3/content/zim/w.zim"
     "$ROOT/scripts/lib/auth.js" "$ROOT/scripts/lib/commission.js" "$S3/state" 2>/dev/null
 printf '{ corrupt auth json ' > "$S3/state/auth.json"     # corrupt AUTH store (settings intact + commissioned)
 PORT2=$(free_port); B2="http://127.0.0.1:$PORT2"
-VALARK_TEST_FORCE_REMOTE=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT2" \
+VALARK_TEST_FORCE_REMOTE=1 VALARK_TEST_NO_SPAWN=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT2" \
   VALARK_STATE_DIR="$S3/state" VALARK_CONTENT_DIR="$S3/content" VALARK_MODELS_DIR="$S3/models" \
   "$NODE" "$ROOT/scripts/server.js" "$PORT2" >"$T/srv2.log" 2>&1 &
 SRV_PID2=$!

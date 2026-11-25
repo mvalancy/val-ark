@@ -41,6 +41,14 @@
 #   VALARK_MDNS_IP          the IPv4 address to publish
 #   VALARK_MDNS_SETTLE      seconds to wait before checking the publisher stayed up (1)
 #   VALARK_MDNS_OS          stands in for `uname -s`
+# (lan_ip reads `ip`/`ifconfig` from PATH; tests put stubs first.)
+#
+# Safety: with a state dir under the system temp dir (a test's), only a publisher
+# that is itself under the temp dir (a stub) is ever started. `ensure`/`stop` hold
+# STATE_DIR/mdns.lock (flock -n on fd 7) so two runs never race.
+#
+# "published" means our publisher is up and announcing; it does not prove every
+# client on the network resolves .local (some don't), so the UI also shows the IP.
 ###############################################################################
 set -u
 
@@ -100,23 +108,48 @@ host_label() {
 is_private4() { printf '%s' "$1" | grep -qE '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)'; }
 is_ipv4() { printf '%s' "$1" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; }
 
-# The LAN IPv4 to publish: the source of the default route, else the first private
-# address the box holds (never loopback, never Tailscale's 100.64/10).
+# Interfaces whose address is never "the LAN address": VPNs/tunnels, containers,
+# bridges, loopback. SAME list as server.js lanIp() (_SKIP_IFACE); keep them in step.
+SKIP_IFACE_RE='^(tailscale|ts|utun|wg|tun|zt|docker|br-|veth|virbr|lo)'
+skip_iface() { printf '%s' "$1" | grep -qE "$SKIP_IFACE_RE"; }
+
+# The LAN IPv4 to publish: the default route's source address when that route leaves
+# through a LAN interface (not a tunnel/VPN/container one), else the first private
+# address on a LAN interface. Never loopback, never Tailscale/WireGuard/ZeroTier/docker.
 lan_ip() {
-    local ip="${VALARK_MDNS_IP:-}" a
+    local ip="${VALARK_MDNS_IP:-}" a dev line
     if [ -n "$ip" ]; then is_ipv4 "$ip" && printf '%s' "$ip"; return; fi
     if command -v ip >/dev/null 2>&1; then
-        ip=$(ip -4 route get 192.0.2.1 2>/dev/null | grep -oE 'src [0-9.]+' | head -1 | cut -d' ' -f2)
-        if [ -n "$ip" ] && is_private4 "$ip"; then printf '%s' "$ip"; return; fi
-        for a in $(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1); do
+        line=$(ip -4 route get 192.0.2.1 2>/dev/null | head -1)
+        dev=$(printf '%s' "$line" | grep -oE 'dev [^ ]+' | head -1 | cut -d' ' -f2)
+        ip=$(printf '%s' "$line" | grep -oE 'src [0-9.]+' | head -1 | cut -d' ' -f2)
+        if [ -n "$ip" ] && [ -n "$dev" ] && ! skip_iface "$dev" && is_private4 "$ip"; then printf '%s' "$ip"; return; fi
+        # "2: eth0    inet 10.0.0.5/24 brd ... scope global eth0" -> "eth0 10.0.0.5"
+        while read -r dev a; do
+            skip_iface "${dev%@*}" && continue
             is_private4 "$a" && { printf '%s' "$a"; return; }
-        done
+        done < <(ip -4 -o addr show scope global 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $2, $4}')
     elif command -v ifconfig >/dev/null 2>&1; then
-        for a in $(ifconfig 2>/dev/null | awk '$1=="inet"{print $2}' | sed 's/^addr://'); do
+        # BSD/macOS: "en0: flags=..." header lines, then "inet A.B.C.D ..." lines.
+        while read -r dev a; do
+            skip_iface "$dev" && continue
             is_private4 "$a" && { printf '%s' "$a"; return; }
-        done
+        done < <(ifconfig 2>/dev/null | awk '/^[^ \t]/{d=$1; sub(/:$/, "", d)} $1=="inet"{a=$2; sub(/^addr:/, "", a); print d, a}')
     fi
 }
+
+# A throwaway state dir (the system temp dir) is a test's: there, only a publisher
+# that itself lives in the temp dir (a stub) may be started, never the real
+# avahi-publish, so a test can't leave a real <name>.local announcing on the LAN.
+in_tmp() {
+    local d="$1" t
+    for t in "${TMPDIR:-/tmp}" /tmp /var/tmp; do
+        t="${t%/}"; [ -n "$t" ] || continue
+        case "$d/" in "$t"/*) return 0 ;; esac
+    done
+    return 1
+}
+real_path() { (cd "$1" 2>/dev/null && pwd -P) || printf '%s' "$1"; }
 
 # Our publisher's pid: alive AND `ps` still shows the argv recorded when we started
 # it (line 2 of mdns.pid), so a recycled pid is never mistaken for ours.
@@ -150,11 +183,27 @@ write_out() {   # JSON line -> OUT atomically (ensure only)
     printf '%s' "$1" > "${OUT}.tmp" 2>/dev/null && mv -f "${OUT}.tmp" "$OUT" 2>/dev/null
 }
 
+# One ensure/stop at a time per state dir (the server every 10 min and loop step 2h
+# can overlap). fd 7, NOT 8: fd 8 is loop.lock, held by the loop cycle that may be
+# running us. Busy -> report the last result and leave it to the run in progress.
+if [ "$MODE" != check ] && command -v flock >/dev/null 2>&1; then
+    mkdir -p "$SD" 2>/dev/null
+    exec 7>"${SD}/mdns.lock"
+    if ! flock -n 7; then
+        [ -s "$OUT" ] && cat "$OUT" || printf '{"state":"busy","reason":"another mdns.sh run holds the lock"}'
+        exit 0
+    fi
+fi
+
 if [ "$MODE" = stop ]; then stop_ours; exit 0; fi
 
 NAME=$(box_name); LABEL=$(to_label "$NAME")
 IP=$(lan_ip)
 PUB=$(find_publisher) || PUB=""
+SD_REAL=$(real_path "$SD")
+if [ -n "$PUB" ] && { in_tmp "$SD" || in_tmp "$SD_REAL"; } && ! in_tmp "$PUB" && ! in_tmp "$(real_path "$(dirname "$PUB")")"; then
+    PUB=""; TMP_GUARD=1
+fi
 RUNNING=0; daemon_running && RUNNING=1
 HOSTL=""; CAN=false
 if [ "$OS" = Darwin ]; then HOSTL=$(host_label)          # mDNSResponder always runs on macOS
@@ -172,6 +221,7 @@ if [ "$OS" = Darwin ]; then reason="macOS publishes only its Local Hostname; set
 elif [ "$RUNNING" != 1 ]; then
     if command -v avahi-daemon >/dev/null 2>&1 || [ -n "$PUB" ]; then reason="avahi-daemon is not running"
     else reason="avahi (mDNS) is not installed"; fi
+elif [ "${TMP_GUARD:-0}" = 1 ]; then reason="a temporary (test) state dir never starts the real avahi-publish"
 elif [ -z "$PUB" ]; then reason="avahi-publish is not installed (package avahi-utils)"
 elif [ -z "$IP" ]; then reason="no LAN IPv4 address to publish"
 fi
@@ -194,11 +244,12 @@ fi
 rm -f "$PIDF" 2>/dev/null
 mkdir -p "$SD" 2>/dev/null
 log="${SD}/mdns-publish.log"
-# 8>&- : never hand loop.lock to a long-lived child (see header).
+# 8>&- : never hand loop.lock to a long-lived child (see header); 7>&- : nor our
+# own mdns.lock, or every later ensure would find it busy forever.
 if command -v setsid >/dev/null 2>&1; then
-    setsid nohup "$PUB" "${args[@]}" >"$log" 2>&1 </dev/null 8>&- &
+    setsid nohup "$PUB" "${args[@]}" >"$log" 2>&1 </dev/null 7>&- 8>&- &
 else
-    nohup "$PUB" "${args[@]}" >"$log" 2>&1 </dev/null 8>&- &
+    nohup "$PUB" "${args[@]}" >"$log" 2>&1 </dev/null 7>&- 8>&- &
 fi
 npid=$!
 sleep "${VALARK_MDNS_SETTLE:-1}"

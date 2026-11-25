@@ -75,7 +75,9 @@ mkdir -p "$T/content/zim"
 boot() {
   local name="$1" port="$2" tools="$3" models="$4" state="$5"; shift 5
   mkdir -p "$state"
-  env VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 \
+  # VALARK_MDNS_PUBLISH=none: this suite needs real spawns (so no NO_SPAWN); say outright
+  # that no mDNS publisher may start (#306), or a real one would announce on the LAN.
+  env VALARK_COMMISSIONED=1 VALARK_MDNS_PUBLISH=none VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 \
       VALARK_WEB_PORT="$port" VALARK_HTTPS_PORT="$(free_port)" \
       VALARK_ASK_MAX_CONCURRENT=1 \
       VALARK_TOOLS_DIR="$tools" VALARK_MODELS_DIR="$models" \

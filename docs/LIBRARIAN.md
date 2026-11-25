@@ -553,7 +553,9 @@ shows a hint linking to the static catalog, since the dynamic UI needs its serve
    avahi-daemon runs and `avahi-publish` is installed, keep one
    `avahi-publish -a -R <name>.local <lan-ip>` child up (fd 8 closed). Never
    installs anything; otherwise writes the reason to `state/mdns.json` and the web
-   UI shows the LAN IP instead,
+   UI shows the LAN IP instead. "Published" means announced, not that every client
+   resolves `.local`, so the UI shows the IP beside it. Runs are serialised on
+   `state/mdns.lock`,
 10. **refresh the live catalog** → content links self-heal (no stale dates),
 11. **check & repair links** — tool/installer URLs (retry-aware: curl 000/429/403
    are transient, not dead), web-ui assets, symlinks → `state/linkcheck.txt`,

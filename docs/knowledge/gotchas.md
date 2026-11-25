@@ -566,8 +566,16 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   "You'll open it at http://<name>.local/" while nothing published the name, and the design said
   commissioning started the fill when it only saved settings. Now `lib/mdns.sh` publishes the
   name when avahi can (never installing anything), and `server.js boxAddress()` is the ONLY place
-  that picks the address to show: `.local` only when `state/mdns.json` says it answers (and, for
-  `published`, our publisher pid is alive), else the LAN IP with the reason. Add a new surface that
+  that picks the address to show: `.local` only when `state/mdns.json` says it is announced (and, for
+  `published`, our publisher pid is alive with the argv mdns.sh recorded), else the LAN IP with the
+  reason. "Announced" is not "every client resolves it" (some phones and Windows setups don't do
+  mDNS), so the IP is always shown beside it. **Tests must never start a real publisher** (it
+  would keep announcing on the LAN after the test): the server skips mdns.sh whenever a
+  `VALARK_TEST_*` hook is set or its state dir is in the temp dir, unless `VALARK_MDNS_PUBLISH`
+  is `none` or a stub in the temp dir, and mdns.sh refuses a non-temp publisher for a temp state
+  dir; `tests/run-all.sh` fails if a test left an `avahi-publish` running. **`crontab -l | … |
+  crontab -` wipes the crontab when the read fails** for a reason other than "no crontab";
+  `loop.sh cron_install` now stops on that failure. Add a new surface that
   shows the address → call `boxAddress(req)`, don't rebuild `http://${name}.local/`. Commissioning
   starts one `loop.sh once` only when no `val-ark-loop` cron entry exists; any test that
   commissions through a real server must set `VALARK_TEST_NO_SPAWN=1` (or point

@@ -30,7 +30,10 @@ fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 MDNS="$ROOT/scripts/lib/mdns.sh"
 
 T="$(mktemp -d)"; SRV_PID=""
-stop_publishers() { local f p; for f in "$T"/*/mdns.pid "$T"/*/*/mdns.pid; do [ -f "$f" ] || continue; p=$(head -1 "$f" | tr -cd '0-9'); [ -n "$p" ] && kill "$p" 2>/dev/null; done; return 0; }
+stop_publishers() {
+    local f p; for f in "$T"/*/mdns.pid "$T"/*/*/mdns.pid; do [ -f "$f" ] || continue; p=$(head -1 "$f" | tr -cd '0-9'); [ -n "$p" ] && kill "$p" 2>/dev/null; done
+    pkill -f "$T/bin/avahi-publish" 2>/dev/null; return 0
+}
 trap 'stop_pids "$SRV_PID"; stop_publishers; rm -rf "$T"' EXIT
 trap_signals
 HAVE_PROC_FD=0; [ -e /proc/self/fd/0 ] && HAVE_PROC_FD=1
@@ -44,6 +47,7 @@ cat > "$T/bin/avahi-publish" <<'EOF'
 #!/bin/bash
 printf '%s\n' "$*" >> "$PUB_REC"
 if [ -e /proc/self/fd/8 ]; then echo open; else echo closed; fi >> "$PUB_FD"
+if [ -e /proc/self/fd/7 ]; then echo fd7=open; else echo fd7=closed; fi >> "$PUB_FD.7"
 while :; do sleep 1; done
 EOF
 # A publisher that dies at once (avahi's "Local name collision").
@@ -110,6 +114,64 @@ sleep 300 & OTHER=$!
 printf '%s\nnot-our-argv\nx\n' "$OTHER" > "$S/mdns.pid"
 bash "$MDNS" stop "$S"; kill -0 "$OTHER" 2>/dev/null && pass || fail "stop must not kill a recycled pid"
 kill "$OTHER" 2>/dev/null; wait "$OTHER" 2>/dev/null
+
+if [ "$HAVE_PROC_FD" = 1 ]; then grep -q 'fd7=open' "$PUB_FD.7" && fail "the publisher must not inherit mdns.lock (fd 7)" || pass; fi
+
+# --- 2b. temp state dir: never the real publisher ---------------------------------
+S="$T/m2b"; settings "$S" "box"
+OUT=$(env "${menv[@]}" VALARK_MDNS_PUBLISH=/bin/sleep bash "$MDNS" ensure "$S")
+[ "$(printf '%s' "$OUT" | jget state)" = unavailable ] && printf '%s' "$OUT" | jget reason | grep -q 'temporary (test) state dir' && [ ! -f "$S/mdns.pid" ] \
+    && pass || fail "a temp state dir must never start a publisher from outside the temp dir (got $OUT)"
+
+# --- 2c. two ensures at once -> one publisher (mdns.lock, fd 7) --------------------
+S="$T/m2c"; settings "$S" "Race Box"; : > "$PUB_REC"
+env "${menv[@]}" bash "$MDNS" ensure "$S" >"$T/r1" & r1=$!
+env "${menv[@]}" bash "$MDNS" ensure "$S" >"$T/r2" & r2=$!
+env "${menv[@]}" bash "$MDNS" ensure "$S" >"$T/r3" & r3=$!
+wait "$r1" "$r2" "$r3"
+[ "$(grep -c 'race-box.local' "$PUB_REC")" = 1 ] && pass || fail "concurrent ensures must start exactly one publisher (got $(grep -c race-box "$PUB_REC"))"
+env "${menv[@]}" bash "$MDNS" ensure "$S" >/dev/null
+[ "$(grep -c 'race-box.local' "$PUB_REC")" = 1 ] && pass || fail "the lock is released after a run (the next ensure keeps the publisher)"
+if command -v flock >/dev/null 2>&1; then
+    # Hold mdns.lock ourselves: ensure must neither wait nor act, and report the last result.
+    exec 6>"$S/mdns.lock"; flock -n 6
+    P_OLD=$(head -1 "$S/mdns.pid"); bash "$MDNS" stop "$S" >/dev/null   # busy: must not stop it
+    kill -0 "$P_OLD" 2>/dev/null && pass || fail "a busy lock must leave the publisher alone"
+    OUT=$(env "${menv[@]}" bash "$MDNS" ensure "$S")
+    [ "$(printf '%s' "$OUT" | jget label)" = race-box ] && [ "$(grep -c 'race-box.local' "$PUB_REC")" = 1 ] && pass || fail "a busy lock reports the last result and starts nothing (got $OUT)"
+    exec 6>&-
+fi
+grep -q 'flock -n 7' "$MDNS" && ! grep -qE 'flock -n 8|exec 8>' "$MDNS" && pass || fail "mdns.lock must use fd 7, never fd 8 (loop.lock)"
+bash "$MDNS" stop "$S"
+
+# --- 2d. lan_ip: VPN / container / bridge interfaces are never the LAN address ---
+mkdir -p "$T/ipbin"
+cat > "$T/ipbin/ip" <<'EOF'
+#!/bin/bash
+case "$*" in
+  "-4 route get 192.0.2.1") cat "$IP_ROUTE" ;;
+  "-4 -o addr show scope global") cat "$IP_ADDRS" ;;
+esac
+EOF
+chmod +x "$T/ipbin/ip"
+lanip() {   # ROUTE-LINE ADDR-LINES... -> the ip mdns.sh would publish
+    printf '%s\n' "$1" > "$T/route.fx"; shift; printf '%s\n' "$@" > "$T/addrs.fx"
+    S="$T/ipfx"; settings "$S" "box"
+    env PATH="$T/ipbin:$PATH" IP_ROUTE="$T/route.fx" IP_ADDRS="$T/addrs.fx" VALARK_MDNS_PUBLISH=none VALARK_MDNS_DAEMON_CMD=none \
+        bash "$MDNS" check "$S" | jget ip
+}
+a() { printf '%s: %-12s inet %s/24 brd x scope global %s' "$1" "$2" "$3" "$2"; }
+r=$(lanip "192.0.2.1 dev wg0 src 10.0.0.9 uid 1000" "$(a 3 wg0 10.0.0.9)" "$(a 2 eth0 10.0.0.5)")
+[ "$r" = 10.0.0.5 ] && pass || fail "a default route via WireGuard must not win (got $r)"
+r=$(lanip "192.0.2.1 dev tun0 src 10.0.0.20" "$(a 4 docker0 172.16.0.0)" "$(a 5 br-1a2b 10.0.0.9)" "$(a 6 veth9@if5 10.0.0.20)" "$(a 7 virbr0 192.168.0.0)" "$(a 8 tailscale0 100.70.0.1)" "$(a 9 zt0 10.0.0.9)" "$(a 2 enp3s0 10.0.0.5)")
+[ "$r" = 10.0.0.5 ] && pass || fail "docker/br-/veth/virbr/tailscale/zt/tun addresses are skipped (got $r)"
+r=$(lanip "192.0.2.1 dev eth0 src 10.0.0.5" "$(a 3 docker0 172.16.0.0)" "$(a 2 eth0 10.0.0.5)")
+[ "$r" = 10.0.0.5 ] && pass || fail "the default route's address wins on a LAN interface (got $r)"
+r=$(lanip "" "$(a 3 docker0 172.16.0.0)" "$(a 4 wg0 10.0.0.9)")
+[ "$r" = "" ] && pass || fail "only tunnel/container addresses -> no LAN IP (got $r)"
+L1=$(grep -oE "SKIP_IFACE_RE='[^']*'" "$MDNS" | sed -E "s/.*'(.*)'/\1/")
+L2=$(grep -oE 'const _SKIP_IFACE = /[^/]*/' "$ROOT/scripts/server.js" | sed -E 's|.*= /(.*)/|\1|')
+[ -n "$L1" ] && [ "$L1" = "$L2" ] && pass || fail "mdns.sh and server.js must skip the same interfaces ($L1 vs $L2)"
 
 # --- 3. one label rule: commission.js mdnsLabel == mdns.sh -----------------------
 for n in "My Box" "kitchen_ark" "--Ark--" "ARK 2" "x__ y" "!!!"; do
@@ -209,6 +271,12 @@ if start_server "$T/s3" "$T/srv3.log" VALARK_MDNS_PUBLISH="$T/bin/avahi-publish"
     sleep 0.5; [ ! -s "$LOOP_REC" ] && pass || fail "cron installed -> loop.sh not started"
     CARD=$(curl -s --max-time 5 "$B/api/setup/recovery-card")
     [ "$(printf '%s' "$CARD" | jget address)" = "http://kitchen-ark.local:$PORT/" ] && [ -z "$(printf '%s' "$CARD" | jget mdnsNote)" ] && pass || fail "recovery card shows .local when it answers (got $CARD)"
+    # the pid now belongs to another process (a recycled pid) -> not our publisher
+    sleep 300 & IMPOSTOR=$!
+    { echo "$IMPOSTOR"; sed -n 2,3p "$T/s3/mdns.pid"; } > "$T/s3/mdns.pid.new"
+    REAL=$(head -1 "$T/s3/mdns.pid"); mv "$T/s3/mdns.pid.new" "$T/s3/mdns.pid"
+    [ "$(curl -s --max-time 5 "$B/api/status/health" | jget access.mdns)" = false ] && pass || fail "a recycled pid (alive, other argv) must not count as the publisher"
+    kill "$IMPOSTOR" "$REAL" 2>/dev/null; wait "$IMPOSTOR" 2>/dev/null; sleep 1.2
     # the publisher dies -> the server stops promising .local
     kill "$(head -1 "$T/s3/mdns.pid")" 2>/dev/null; sleep 0.3
     [ "$(curl -s --max-time 5 "$B/api/status/health" | jget access.mdns)" = false ] && pass || fail "a dead publisher -> .local no longer promised"
@@ -218,6 +286,65 @@ fi
 stop_pids "$SRV_PID"; SRV_PID=""
 sleep 1   # let a restart the server triggered settle before stopping publishers
 stop_publishers
+
+# --- 8. a test server never starts a real publisher (#306 review) -----------------
+# Commissioned, NO VALARK_TEST_NO_SPAWN, no VALARK_MDNS_PUBLISH, a working avahi on
+# PATH: the state dir is in the temp dir, so the server must not run mdns.sh at all.
+mkdir -p "$T/pathpub"; cp "$T/bin/avahi-publish" "$T/pathpub/avahi-publish"
+: > "$PUB_REC"
+PORT=$(free_port); B="http://127.0.0.1:$PORT"
+env PATH="$T/pathpub:$PATH" VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" \
+    VALARK_HTTPS_PORT="$(free_port)" VALARK_STATE_DIR="$T/s4" VALARK_CONTENT_DIR="$T/content" VALARK_MODELS_DIR="$T/models" \
+    VALARK_MDNS_DAEMON_CMD="$T/bin/daemon-up" VALARK_MDNS_IP=10.0.0.5 VALARK_MDNS_HOSTNAME=otherhost \
+    "$NODE" "$ROOT/scripts/server.js" "$PORT" >"$T/srv4.log" 2>&1 &
+SRV_PID=$!
+up=0; for i in $(seq 1 30); do sleep 0.3; curl -sf --max-time 2 "$B/api/health" >/dev/null 2>&1 && { up=1; break; }; done
+if [ "$up" = 1 ]; then
+    sleep 1.5
+    [ ! -s "$PUB_REC" ] && [ ! -f "$T/s4/mdns.json" ] && pass || fail "a test server (temp state dir) must not start any publisher"
+else fail "server 4 did not start"; fi
+stop_pids "$SRV_PID"; SRV_PID=""
+
+# --- 9. cron_install never wipes a crontab it couldn't read ----------------------
+cat > "$T/bin/crontab-fails" <<'EOF'
+#!/bin/bash
+if [ "$1" = "-l" ]; then echo "crontab: cannot connect to the cron daemon" >&2; exit 1; fi
+cat > "$CRON_WRITTEN"; exit 0
+EOF
+cat > "$T/bin/crontab-none" <<'EOF'
+#!/bin/bash
+if [ "$1" = "-l" ]; then
+  [ -f "$CRON_WRITTEN" ] && { cat "$CRON_WRITTEN"; exit 0; }
+  echo "no crontab for tester" >&2; exit 1
+fi
+cat > "$CRON_WRITTEN"; exit 0
+EOF
+chmod +x "$T/bin/crontab-fails" "$T/bin/crontab-none"
+mkcron() {   # STUB -> a runner for loop.sh's real cron_install/_cron_read
+    mkdir -p "$T/cron/bin" "$T/cron/my repo" "$T/cron/logs"; cp "$T/bin/$1" "$T/cron/bin/crontab"
+    { echo 'PROJECT_ROOT="'"$T/cron/my repo"'"; _DIR="'"$T/cron/my repo/scripts"'"; LOG_DIR="'"$T/cron/logs"'"; STATE_DIR="'"$T/cron"'"'
+      echo 'CRON_TAG=val-ark-loop; RED=""; NC=""; log(){ echo "$*"; }'
+      awk '/^_cron_read\(\) \{/,/^\}/' "$ROOT/scripts/loop.sh"
+      awk '/^cron_install\(\) \{/,/^\}/' "$ROOT/scripts/loop.sh"
+      echo 'cron_install 30'; } > "$T/cron/run.sh"
+}
+export CRON_WRITTEN="$T/cron.written"; rm -f "$CRON_WRITTEN"
+mkcron crontab-fails
+PATH="$T/cron/bin:$PATH" bash "$T/cron/run.sh" >"$T/cron.out" 2>&1; rc=$?
+[ "$rc" != 0 ] && [ ! -e "$CRON_WRITTEN" ] && pass || fail "a failing 'crontab -l' must stop install without writing (rc=$rc, wrote=$( [ -e "$CRON_WRITTEN" ] && echo yes || echo no))"
+grep -q 'leaving the crontab untouched' "$T/cron.out" && pass || fail "install says why it stopped"
+mkcron crontab-none
+printf 'MAILTO=""\n0 3 * * * /usr/bin/true # keep me\n' > "$CRON_WRITTEN"
+PATH="$T/cron/bin:$PATH" bash "$T/cron/run.sh" >"$T/cron.out" 2>&1; rc=$?
+[ "$rc" = 0 ] && grep -q '# keep me' "$CRON_WRITTEN" && [ "$(grep -c val-ark-loop "$CRON_WRITTEN")" = 2 ] && pass || fail "install keeps existing entries and adds two tagged lines (rc=$rc)"
+grep -qF "cd \"$T/cron/my repo\" && bash \"$T/cron/my repo/scripts/loop.sh\" once" "$CRON_WRITTEN" && pass || fail "cron lines quote PROJECT_ROOT and the script path"
+rm -f "$CRON_WRITTEN"
+PATH="$T/cron/bin:$PATH" bash "$T/cron/run.sh" >/dev/null 2>&1; rc=$?
+[ "$rc" = 0 ] && [ "$(grep -c val-ark-loop "$CRON_WRITTEN")" = 2 ] && pass || fail "'no crontab' starts from an empty table (rc=$rc)"
+
+# --- 10. nothing left running ---------------------------------------------------
+left=$(pgrep -f "$T/" 2>/dev/null | grep -vx "$$" | tr '\n' ' ')
+[ -z "$left" ] && pass || { fail "processes left running from this test: $left"; pkill -f "$T/" 2>/dev/null; }
 
 echo "setup-promises: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

@@ -57,8 +57,9 @@ but it only saved settings. **Decision.** `scripts/lib/mdns.sh` publishes the na
 every loop cycle (step 2h) with what the box already has: the hostname (avahi/macOS answer for
 it) or one kept-up `avahi-publish -a -R` child (D-Bus, no root). It never installs packages and
 never edits `/etc/avahi` (that needs root and outlives Val Ark). `server.js boxAddress()` is the
-single decision of which address to show (wizard, recovery card, Health): `.local` only when it
-answers, else the LAN IP plus the reason. Commissioning starts ONE bounded `loop.sh once` when no
+single decision of which address to show (wizard, recovery card, Health): `.local` only while it is
+announced (publisher up; that is not proof every client resolves it, so the IP is shown beside
+it), else the LAN IP plus the reason. Commissioning starts ONE bounded `loop.sh once` when no
 `val-ark-loop` cron entry exists. Installing the cron is NOT automatic: it writes the user's
 crontab, so it is an explicit admin action (Home's admin-only **Keep it healthy 24/7**,
 `POST /api/setup/loop-install`, fixed argv `loop.sh install 30`) or the printed command.

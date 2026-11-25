@@ -2868,11 +2868,35 @@ function installLoop(cb) {
 // reports it live (published by our avahi-publish child, or native: the hostname is
 // the name); otherwise the box's real LAN IPv4 is shown, with the reason .local is
 // unavailable. mdns.sh never installs anything; the loop re-runs it every cycle.
+// "mdns: true" means our publisher is up and announcing (or the hostname is the name);
+// it does NOT prove every client resolves .local (some phones/Windows setups don't), so
+// the IP is always shown beside it (altUrl).
 const MDNS_SH = path.join(__dirname, 'lib', 'mdns.sh');
 const MDNS_CHECK_MS = 10 * 60 * 1000;
 let _mdnsCheck = null;          // last `mdns.sh check` (an un-commissioned box)
 let _mdnsWaiters = null;
-function _mdnsNoSpawn() { return process.env.VALARK_TEST_NO_SPAWN === '1' && !process.env.VALARK_MDNS_PUBLISH; }
+// Never start a REAL publisher from a test (it would keep announcing <name>.local on the
+// LAN after the test). A test is recognised by any VALARK_TEST_* hook or a state dir in
+// the system temp dir; there mdns.sh runs only when VALARK_MDNS_PUBLISH is 'none' or a
+// stub that itself lives in the temp dir (mdns.sh enforces the same rule).
+function _inTmp(p) {
+    if (!p) return false;
+    let real = p; try { real = fs.realpathSync(p); } catch (_) {}
+    const roots = new Set([require('os').tmpdir(), '/tmp', '/var/tmp']);
+    for (const r of [...roots]) { try { roots.add(fs.realpathSync(r)); } catch (_) {} }
+    for (const r of roots) {
+        const base = r.replace(/\/+$/, '');
+        if (!base) continue;
+        if ([p, real].some(x => x === base || x.startsWith(base + '/'))) return true;
+    }
+    return false;
+}
+function _mdnsNoSpawn() {
+    const pub = process.env.VALARK_MDNS_PUBLISH;
+    const testy = Object.keys(process.env).some(k => k.startsWith('VALARK_TEST_')) || _inTmp(STATE_DIR);
+    if (!testy) return false;
+    return !(pub === 'none' || (pub && _inTmp(pub)));
+}
 function _cleanMdns(m) {
     if (!m || typeof m !== 'object' || typeof m.state !== 'string') return null;
     const str = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f]/g, '').slice(0, n) : '');
@@ -2882,16 +2906,30 @@ function _cleanMdns(m) {
 function mdnsState() {
     const m = _cleanMdns(readStateJson('mdns.json'));
     if (!boxCommissioned() && _mdnsCheck) return _mdnsCheck;
-    if (m && m.state === 'published') {
-        // Our publisher may have died since the last ensure; don't promise .local then.
-        let alive = false;
-        try {
-            const pid = parseInt(fs.readFileSync(path.join(STATE_DIR, 'mdns.pid'), 'utf8'), 10);
-            if (pid > 1) { process.kill(pid, 0); alive = true; }
-        } catch (e) { alive = e && e.code === 'EPERM'; }
-        if (!alive) { refreshMdns(); return { ...m, state: 'unavailable', reason: 'the .local publisher stopped; restarting it' }; }
+    if (m && m.state === 'published' && !mdnsPublisherAlive()) {
+        // Our publisher died (or its pid now belongs to another process) since the last
+        // ensure; don't promise .local then.
+        refreshMdns();
+        return { ...m, state: 'unavailable', reason: 'the .local publisher stopped; restarting it' };
     }
     return m || _mdnsCheck;
+}
+// Is the pid in mdns.pid alive AND still running the argv mdns.sh recorded for it (line
+// 2)? Same rule as mdns.sh any_our_pid, so a recycled pid never counts as our publisher.
+function mdnsPublisherAlive() {
+    let lines;
+    try { lines = fs.readFileSync(path.join(STATE_DIR, 'mdns.pid'), 'utf8').split('\n'); } catch (_) { return false; }
+    const pid = parseInt(lines[0], 10), want = String(lines[1] || '').trim();
+    if (!(pid > 1) || !want) return false;
+    let args = null;
+    try {
+        args = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean).join(' ');
+    } catch (_) {
+        if (fs.existsSync('/proc/self/cmdline')) return false;   // Linux: no such process
+        try { args = execFileSync('ps', ['-p', String(pid), '-o', 'args='], { timeout: 2000, encoding: 'utf8' }).trim(); }
+        catch (_) { return false; }
+    }
+    return args === want;
 }
 // Run mdns.sh (ensure on a commissioned box, else check); cb() when done.
 function refreshMdns(cb) {
@@ -2907,15 +2945,22 @@ function refreshMdns(cb) {
         for (const f of w) { try { f(); } catch (_) {} }
     });
 }
+// Interfaces that never carry "the LAN address" (VPNs/tunnels, containers, bridges,
+// loopback). SAME list as lib/mdns.sh SKIP_IFACE_RE; keep them in step.
+const _SKIP_IFACE = /^(tailscale|ts|utun|wg|tun|zt|docker|br-|veth|virbr|lo)/i;
 function _rfc1918(a) { return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a); }
 // The LAN IPv4 to show: the address this request arrived on when it's a private LAN
 // address, else the first private IPv4 of a non-tailnet interface, else any non-loopback
 // IPv4 the request arrived on. null when there is none (e.g. only loopback).
 function lanIp(req) {
     const la = String(req?.socket?.localAddress || '').replace(/^::ffff:/, '');
-    if (_rfc1918(la)) return la;
-    for (const [name, addrs] of Object.entries(netIfaces())) {
-        if (/^(tailscale|ts|utun|docker|br-|veth|virbr|lo)/i.test(name)) continue;
+    const ifs = netIfaces();
+    // The arrival address counts only when it isn't on a VPN/container interface (a
+    // WireGuard or docker address is often RFC 1918 too).
+    const onSkipped = Object.entries(ifs).some(([n, as]) => _SKIP_IFACE.test(n) && (as || []).some(a => a.address === la));
+    if (_rfc1918(la) && !onSkipped) return la;
+    for (const [name, addrs] of Object.entries(ifs)) {
+        if (_SKIP_IFACE.test(name)) continue;
         for (const a of addrs || []) {
             if ((a.family === 'IPv4' || a.family === 4) && !a.internal && _rfc1918(a.address)) return a.address;
         }
@@ -2952,7 +2997,7 @@ function boxAddress(req) {
     }
     return {
         name: s.name || 'valark', label, host: `${label}.local`,
-        mdns: live,                                   // <label>.local answers right now
+        mdns: live,                                   // <label>.local is being announced now
         canPublish: !!(m && m.canPublish),            // this box can publish any name (wizard)
         hostLabel: (m && m.hostLabel) || '',          // the name the responder already answers for
         localUrl, ip, ipUrl,

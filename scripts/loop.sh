@@ -433,22 +433,50 @@ loop_once() {
 
 # Cron management — durable 24/7 driver that survives reboots/sessions.
 CRON_TAG="val-ark-loop"
+# The user's current crontab, or empty when they have none. `crontab -l` exits non-zero
+# both for "no crontab for <user>" (fine: start empty) and for real failures (cron
+# unreachable, permission denied, ...). Piping a failed read into `crontab -` would
+# REPLACE the user's whole crontab with just our lines, so any other failure stops here.
+_cron_read() {
+    local out err rc
+    err=$(mktemp 2>/dev/null || echo "${STATE_DIR}/.crontab.err.$$")
+    out=$(crontab -l 2>"$err"); rc=$?
+    if [ "$rc" -ne 0 ]; then
+        if grep -qi 'no crontab' "$err" 2>/dev/null; then out=""
+        else
+            log "${RED}crontab -l failed${NC} ($(head -c 200 "$err" 2>/dev/null | tr '\n' ' ')); leaving the crontab untouched" >&2
+            rm -f "$err"; return 1
+        fi
+    fi
+    rm -f "$err"
+    printf '%s' "$out"
+}
 cron_install() {
     local every="${1:-30}"   # minutes
+    case "$every" in ''|*[!0-9]*) log "${RED}install: minutes must be a number${NC}"; return 64 ;; esac
+    command -v crontab >/dev/null 2>&1 || { log "${RED}crontab not found${NC}: run 'loop.sh run' under a service manager instead"; return 1; }
     mkdir -p "$LOG_DIR" 2>/dev/null
+    local cur
+    cur=$(_cron_read) || return 1
     # No outer flock here: loop.sh 'once' self-guards via run_locked (fd 8 on
     # loop.lock). An outer flock on the same file would dead-lock the inner one.
-    local line="*/${every} * * * * cd ${PROJECT_ROOT} && bash ${_DIR}/loop.sh once >> ${LOG_DIR}/loop_cron.log 2>&1 # ${CRON_TAG}"
+    # Paths are quoted: a repo or data dir with a space must not split the command.
+    local line="*/${every} * * * * cd \"${PROJECT_ROOT}\" && bash \"${_DIR}/loop.sh\" once >> \"${LOG_DIR}/loop_cron.log\" 2>&1 # ${CRON_TAG}"
     # @reboot: bring the Ark back immediately after a reboot instead of waiting up
     # to ${every} min for the next periodic tick. The sleep gives the data disk
     # (FUSE/NTFS via fstab) time to mount before the cycle's writability check.
-    local reboot_line="@reboot sleep 90 && cd ${PROJECT_ROOT} && bash ${_DIR}/loop.sh once >> ${LOG_DIR}/loop_cron.log 2>&1 # ${CRON_TAG}"
-    (crontab -l 2>/dev/null | grep -v "${CRON_TAG}"; echo "$reboot_line"; echo "$line") | crontab -
+    local reboot_line="@reboot sleep 90 && cd \"${PROJECT_ROOT}\" && bash \"${_DIR}/loop.sh\" once >> \"${LOG_DIR}/loop_cron.log\" 2>&1 # ${CRON_TAG}"
+    { [ -n "$cur" ] && printf '%s\n' "$cur" | grep -v "${CRON_TAG}"; echo "$reboot_line"; echo "$line"; } | crontab - || {
+        log "${RED}crontab install failed${NC}"; return 1; }
     log "installed cron: @reboot + every ${every} min (tag ${CRON_TAG})"
     crontab -l 2>/dev/null | grep "${CRON_TAG}"
+    return 0
 }
 cron_uninstall() {
-    crontab -l 2>/dev/null | grep -v "${CRON_TAG}" | crontab -
+    local cur
+    cur=$(_cron_read) || return 1
+    [ -n "$cur" ] || { log "no crontab; nothing to remove"; return 0; }
+    { printf '%s\n' "$cur" | grep -v "${CRON_TAG}"; true; } | crontab - || { log "${RED}crontab update failed${NC}"; return 1; }
     log "removed ${CRON_TAG} cron entries"
 }
 

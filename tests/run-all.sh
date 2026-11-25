@@ -45,6 +45,24 @@ echo "=================================================================="
 echo -e "  ${BOLD}Val Ark - Test Suite${NC}"
 echo "=================================================================="
 
+# mDNS publishers started by tests must not outlive them (#306): a leaked real
+# avahi-publish keeps announcing <name>.local on the LAN. A test's publisher is one that
+# started during this run AND names the temp dir in its argv (a stub) or carries a test
+# env (VALARK_TEST_* or a VALARK_STATE_DIR under the temp dir). Checked after stage 4.
+_test_publishers() {
+    local p env args
+    for p in $(pgrep -f 'avahi-publish' 2>/dev/null); do
+        [ "$p" = "$$" ] && continue
+        args=$( { tr '\0' ' ' < "/proc/$p/cmdline"; } 2>/dev/null) || args=$(ps -p "$p" -o args= 2>/dev/null)
+        env=$( { tr '\0' '\n' < "/proc/$p/environ"; } 2>/dev/null)
+        if printf '%s' "$args" | grep -qE "(^| )(/tmp|/var/tmp|${TMPDIR:-/tmp})/" \
+           || printf '%s\n' "$env" | grep -qE '^VALARK_TEST_|^VALARK_STATE_DIR=(/tmp|/var/tmp)/'; then
+            echo "$p"
+        fi
+    done | sort -u
+}
+_PUB_BEFORE="$(_test_publishers)"
+
 # --- 1. Bash validators -------------------------------------------------------
 echo -e "\n${BOLD}Bash validators${NC}"
 results_init "bash-validators" "Bash validators (deps / models / tls / tools / urls / doc-links / doc-art / secrets)"
@@ -101,6 +119,17 @@ if [ "${VALARK_RUN_VM:-0}" = "1" ]; then
 else
     echo -e "\n  ${YELLOW}VM matrix skipped${NC} (VALARK_RUN_VM=1 to run Ubuntu 22/24/26 fresh-setup tests)"
 fi
+
+# --- 4b. No mDNS publisher left behind by a test (#306) -------------------------
+results_init "test-leaks" "Processes left behind by tests"
+_leaked="$(comm -13 <(printf '%s\n' "$_PUB_BEFORE") <(_test_publishers) | grep -v '^$')"
+if [ -z "$_leaked" ]; then
+    results_case "no avahi-publish left running by a test" pass 0
+else
+    for _p in $_leaked; do echo -e "  ${RED}leaked publisher${NC} pid $_p: $(ps -p "$_p" -o args= 2>/dev/null)"; done
+    results_case "no avahi-publish left running by a test" fail 0 "pids: $(echo $_leaked)"
+fi
+results_finish
 
 # --- 5. Unified HTML report ---------------------------------------------------
 echo ""

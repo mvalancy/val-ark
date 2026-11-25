@@ -72,6 +72,30 @@ VALARK_BIND=0.0.0.0 bash "$ROOT/scripts/services/forum.sh" config >"$T/forum.out
 grep -q 'bind: "127.0.0.1"' "$ROOT/scripts/services/chat.sh" && ! grep -qE 'bind: "\$\{?(BIND|VALARK_BIND)' "$ROOT/scripts/services/chat.sh" \
   && pass || fail "The Lounge config must bind 127.0.0.1, not VALARK_BIND"
 grep -q -- '-addr "127.0.0.1:${ALPS_PORT}"' "$ROOT/scripts/services/mail.sh" && pass || fail "alps must listen on 127.0.0.1"
+# An old config whose url points at 0.0.0.0 is repaired too; other keys and the file mode survive,
+# and no temp file is left behind (#334).
+printf '{\n    "url": "http://0.0.0.0/app/forum",\n    "secret": "keepme",\n    "port": 4567,\n    "bind_address": "0.0.0.0"\n}\n' > "$CFG"; chmod 600 "$CFG"
+VALARK_BIND=0.0.0.0 bash "$ROOT/scripts/services/forum.sh" config >"$T/forum.out" 2>&1
+grep -q '"url": "http://localhost/app/forum"' "$CFG" && pass || fail "an old 0.0.0.0 url must be repaired ($(cat "$CFG"))"
+grep -q '"secret": "keepme"' "$CFG" && pass || fail "the repair must keep the other keys"
+[ "$(stat -c %a "$CFG")" = "600" ] && pass || fail "the repair must keep the file mode (got $(stat -c %a "$CFG"))"
+ls "$CFG".tmp* >/dev/null 2>&1 && fail "no temp file may be left behind" || pass
+# A planted world-readable temp file can't loosen the config's mode; IPv6/uppercase "any" urls
+# are repaired; and the python path (no node) behaves the same (review of #336).
+for path in node python; do
+    printf '{ "url": "HTTP://[::]:4567/app/forum", "secret": "keepme", "bind_address": "0.0.0.0" }\n' > "$CFG"; chmod 600 "$CFG"
+    install -m 666 /dev/null "$CFG.tmp"
+    if [ "$path" = python ]; then
+        mkdir -p "$T/nonode"; for b in bash python3 cat head od tr mkdir grep sed dirname basename date ls rm mv chmod stat uname id readlink; do
+            p=$(command -v "$b") && ln -sf "$p" "$T/nonode/$b"; done
+        PATH="$T/nonode" VALARK_NODE_DIR=/nonexistent VALARK_BIND=0.0.0.0 bash "$ROOT/scripts/services/forum.sh" config >"$T/forum.out" 2>&1
+    else
+        VALARK_BIND=0.0.0.0 bash "$ROOT/scripts/services/forum.sh" config >"$T/forum.out" 2>&1
+    fi
+    grep -q '"url": "http://localhost/app/forum"' "$CFG" && pass || fail "$path: an IPv6/uppercase any-address url must be repaired ($(cat "$CFG"); $(tail -2 "$T/forum.out"))"
+    [ "$(stat -c %a "$CFG")" = "600" ] && pass || fail "$path: a planted 666 temp file must not loosen the config (got $(stat -c %a "$CFG"))"
+    rm -f "$CFG.tmp"
+done
 # No web-UI bind may come from VALARK_BIND in the paste/forum scripts.
 grep -nE '(MICROBIN_BIND|bind_address).*VALARK_BIND|^BIND="\$\{VALARK_BIND' "$ROOT/scripts/services/paste.sh" "$ROOT/scripts/services/forum.sh" \
   | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' | grep -q . && fail "paste/forum web binds must not read VALARK_BIND" || pass

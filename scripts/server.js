@@ -1191,7 +1191,7 @@ function sessionCookie(token, maxAgeSec, secure) {
 // POSTs that CHANGE the box's config/accounts — always admin (localhost or a
 // logged-in admin), regardless of Use Mode. "Use" actions (downloads/requests/
 // service starts) are gated per Use Mode instead (Open = anyone on the LAN).
-const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser', '/api/setup/profile', '/api/maintenance/repair', '/api/setup/moderation', '/api/moderation/review', '/api/setup/usemode']);
+const ADMIN_ONLY_POSTS = new Set(['/api/service/adduser', '/api/setup/profile', '/api/maintenance/repair', '/api/setup/moderation', '/api/moderation/review', '/api/setup/usemode', '/api/setup/loop-install']);
 const AUTH_EXEMPT_POSTS = new Set(['/api/auth/login', '/api/auth/logout', '/api/auth/recover', '/api/setup/commission']);
 
 // Peer IP, normalized (node reports LAN/tailnet IPv4 peers as IPv4-mapped IPv6).
@@ -1367,7 +1367,7 @@ function handleAPI(req, res, urlPath) {
                 // (space, verify tallies, link/asset counts, this-cycle repairs), the
                 // functional-verify per-check results (verify.json), the timestamped
                 // heal-events feed, and Safe-Mode state. Read-gated like all /api/status.
-                return sendJSON(res, req, getHealthDetail());
+                return sendJSON(res, req, getHealthDetail(req));
             case '/api/status/notifications':
                 // Notification center (issue #69 slice 1): a read-only aggregation of
                 // recent self-heal events + current warning/critical conditions for the
@@ -1421,6 +1421,11 @@ function handleAPI(req, res, urlPath) {
                 if (st.commissioned) { st.hasClaim = false; st.needsClaim = false; }
                 const sm = safeModeState();
                 st.safeMode = sm.safeMode; st.safeModeReasons = sm.reasons;
+                // How to reach the box (<name>.local or its LAN IP, #306) + whether filling
+                // has started / the 24/7 loop is installed (Home's "filling" card).
+                st.access = boxAddress(req);
+                st.fill = firstFillState();
+                loopInstalled();   // refresh the cron cache in the background
                 return sendJSON(res, req, st);
             }
             case '/api/setup/recovery-card': {
@@ -1428,13 +1433,15 @@ function handleAPI(req, res, urlPath) {
                 // code. The code is a SECRET, so this is admin-only (localhost or a signed
                 // session); un-authed peers can't read it.
                 if (!isAdmin(req)) return sendJSON(res, req, { error: 'Admin only.', needsAuth: true }, 401);
-                const s = commission.readSettings(STATE_DIR);
-                const host = (req.headers.host || '').split(':')[0] || 'valark.local';
-                const nm = (s.name || 'valark').toLowerCase().replace(/[^a-z0-9-]/g, '') || 'valark';
+                // The address is boxAddress()'s pick: <name>.local only when it really
+                // answers, else the LAN IP with the reason .local is unavailable (#306).
+                const a = boxAddress(req);
                 return sendJSON(res, req, {
-                    name: s.name || 'valark',
-                    address: `http://${nm}.local/`,
-                    addressAlt: `http://${host}/`,
+                    name: a.name,
+                    address: a.url,
+                    addressAlt: a.altUrl,
+                    mdns: a.mdns,
+                    mdnsNote: a.mdns ? '' : `${a.host} is unavailable on this box (${a.reason})`,
                     recovery: commission.ensureRecovery(STATE_DIR),
                 });
             }
@@ -1610,6 +1617,16 @@ function handleAPI(req, res, urlPath) {
                     // the box/localhost is trusted and may commission without one.
                     // (Public peers are already refused by the isLanOrTailnet gate.)
                     result = commission.commission(STATE_DIR, body, { trusted: isLocalhost(req) });
+                    if (result && result.ok) {
+                        // Keep the wizard's promises (#306): publish <name>.local when the box
+                        // can, start filling if the 24/7 loop isn't installed, then answer with
+                        // the address to use and what happened.
+                        const done = result;
+                        refreshMdns(() => startFirstFill((fill) => {
+                            sendJSON(res, req, { ...done, access: boxAddress(req), fill });
+                        }));
+                        return;
+                    }
                     break;
                 case '/api/setup/profile':
                     // Change the download profile (Downloads & Priorities). Admin-only
@@ -1671,6 +1688,11 @@ function handleAPI(req, res, urlPath) {
                     // localhost or a logged-in admin, so a remote admin can do it too.
                     result = addServiceUser(body.id, body.username, body.password);
                     break;
+                case '/api/setup/loop-install':
+                    // "Keep it healthy 24/7" (Home, after setup). Admin-only (ADMIN_ONLY_POSTS):
+                    // runs `loop.sh install 30`, which writes this user's crontab. Fixed argv;
+                    // takes NO request data.
+                    return installLoop((r) => sendJSON(res, req, r, r.error ? 400 : 200));
                 case '/api/maintenance/repair':
                     // One-click "Run self-heal now" (Health page). Admin-only
                     // (ADMIN_ONLY_POSTS). Runs the loop's own fixers with a fixed argv —
@@ -2052,7 +2074,7 @@ function serviceMirrored(id) {
 function readStateJson(name) {
     try { return JSON.parse(fs.readFileSync(path.join(STATE_DIR, name), 'utf8')); } catch (_) { return null; }
 }
-function getHealthDetail() {
+function getHealthDetail(req) {
     const verify = readStateJson('verify.json');
     const heal = readStateJson('selfheal.json');   // loop.sh write_health (NOT librarian's health.json)
     let events = [];
@@ -2063,7 +2085,7 @@ function getHealthDetail() {
     } catch (_) {}
     const sm = safeModeState();
     return { verify, heal, events, safeMode: sm.safeMode, safeModeReasons: sm.reasons, repairRunning: repairInFlight(),
-             tailscale: tailscaleMode() };
+             tailscale: tailscaleMode(), access: boxAddress(req), fill: firstFillState() };
 }
 
 // ---- Tailscale userspace-networking check (#311) ----------------------------
@@ -2728,25 +2750,261 @@ function ensureModerationModel() {
     } catch (_) {}
 }
 
+// loop.sh is always run through this fixed wrapper: `bash -c 'exec 8>&- && exec "$0" "$@"'
+// bash loop.sh <verb> [arg]`. The wrapper string and every argv element are constants
+// (verb ∈ once/install, arg = '30'); no request data reaches it. `exec 8>&-` closes fd 8
+// in case this server inherited loop.lock (a long-lived child holding that fd would
+// keep the loop's cycle lock forever — scripts/AGENTS.md). VALARK_TEST_LOOP_SH is a
+// test seam: a stub that records its argv instead of running a real cycle.
+const BASH_BIN = fs.existsSync('/usr/bin/bash') ? '/usr/bin/bash' : '/bin/bash';
+const LOOP_WRAP = 'exec 8>&- && exec "$0" "$@"';
+function _loopSh() { return process.env.VALARK_TEST_LOOP_SH || path.join(ROOT, 'scripts/loop.sh'); }
+function _loopArgv(verb) {
+    const extra = verb === 'install' ? ['install', '30'] : ['once'];
+    return ['-c', LOOP_WRAP, BASH_BIN, _loopSh(), ...extra];
+}
+function _loopEnv() {
+    return { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || ''), FORCE_COLOR: '0' };
+}
+// Test hook: exercise the gate + dedupe contract without actually running the loop
+// (heavy + network). Fail-safe like VALARK_TEST_FORCE_REMOTE — it only PREVENTS the
+// action; the auth gate still fully applies, so it can never grant access.
+function _noLoopSpawn() { return process.env.VALARK_TEST_NO_SPAWN === '1' && !process.env.VALARK_TEST_LOOP_SH; }
+
 function triggerRepair() {
     if (_repairProc) return { ok: true, started: false, running: true };
     if (Date.now() - _repairStartedAt < 30000) return { ok: true, started: false, cooldown: true };
-    // Test hook: exercise the gate + dedupe contract without actually running the loop
-    // (heavy + network). Fail-safe like VALARK_TEST_FORCE_REMOTE — it only PREVENTS the
-    // action; the auth gate above still fully applies, so it can never grant access.
-    if (process.env.VALARK_TEST_NO_SPAWN === '1') { _repairStartedAt = Date.now(); return { ok: true, started: true, running: true, test: true }; }
+    if (_noLoopSpawn()) { _repairStartedAt = Date.now(); return { ok: true, started: true, running: true, test: true }; }
     let proc;
     try {
-        proc = spawn('/usr/bin/bash', [path.join(ROOT, 'scripts/loop.sh'), 'once'], {
-            cwd: ROOT, detached: true, stdio: 'ignore',
-            env: { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:' + (process.env.PATH || ''), FORCE_COLOR: '0' },
-        });
+        proc = spawn(BASH_BIN, _loopArgv('once'), { cwd: ROOT, detached: true, stdio: 'ignore', env: _loopEnv() });
     } catch (e) { return { error: 'Could not start self-heal: ' + e.message }; }
     _repairProc = proc; _repairStartedAt = Date.now();
     proc.on('exit', () => { _repairProc = null; });
     proc.on('error', () => { _repairProc = null; });
     proc.unref();
     return { ok: true, started: true, running: true };
+}
+
+// ---- After setup: start filling + is the 24/7 loop installed? (#306) ---------
+// Commissioning used to only save settings; filling waited for someone to run
+// `loop.sh install`. Now, if no cron entry exists, commissioning starts ONE bounded
+// `loop.sh once` (the same fixed-argv, deduped spawn as "Run self-heal": its fill step
+// is capped by LOOP_FILL_SECONDS) and records it in <state>/first-fill.json so Home can
+// say filling has started. Making it permanent is the admin's call: Home shows
+// `./scripts/loop.sh install 30` and an admin-only "Keep it healthy 24/7" button
+// (POST /api/setup/loop-install), which runs exactly that with a fixed argv.
+const CRON_TAG = 'val-ark-loop';   // loop.sh cron_install's tag
+let _cron = { at: 0, installed: false, hasCron: false, waiters: null };
+function _onPath(cmd) {
+    for (const d of String(process.env.PATH || '').split(':')) {
+        if (!d) continue;
+        try { fs.accessSync(path.join(d, cmd), fs.constants.X_OK); return true; } catch (_) {}
+    }
+    return false;
+}
+// Calls cb(installed) with a fresh answer (when the cache is older than maxAgeMs).
+function loopInstalled(cb, maxAgeMs = 60000) {
+    if (Date.now() - _cron.at < maxAgeMs) return cb && cb(_cron.installed);
+    if (_cron.waiters) { if (cb) _cron.waiters.push(cb); return; }
+    _cron.waiters = cb ? [cb] : [];
+    const done = (installed, hasCron) => {
+        _cron.installed = installed; _cron.hasCron = hasCron; _cron.at = Date.now();
+        const w = _cron.waiters; _cron.waiters = null;
+        for (const f of w) { try { f(installed); } catch (_) {} }
+    };
+    if (!_onPath('crontab')) return done(false, false);
+    // Fixed argv; `crontab -l` only reads this user's table.
+    execFile('crontab', ['-l'], { timeout: 5000 }, (err, stdout) => {
+        done(!err && String(stdout || '').split('\n').some(l => l.includes(CRON_TAG) && !/^\s*#/.test(l)), true);
+    });
+}
+function firstFillState() {
+    const f = readStateJson('first-fill.json');
+    return {
+        loopInstalled: _cron.installed, cronAvailable: _cron.hasCron, running: repairInFlight(),
+        startedAt: f && typeof f.ts === 'string' ? f.ts : null,
+        started: !!(f && f.started),
+    };
+}
+// After a successful commission: cb({ loopInstalled, started, ... }).
+function startFirstFill(cb) {
+    loopInstalled((installed) => {
+        let started = false, note = '';
+        if (installed) note = 'The 24/7 loop is installed; its next cycle fills the disk.';
+        else {
+            const r = triggerRepair();
+            started = !!(r && r.ok && (r.started || r.running));
+            if (!started) note = (r && r.error) || 'Could not start the first fill.';
+        }
+        try {
+            fs.mkdirSync(STATE_DIR, { recursive: true });
+            fs.writeFileSync(path.join(STATE_DIR, 'first-fill.json'),
+                JSON.stringify({ ts: new Date().toISOString(), started, loopInstalled: installed }) + '\n');
+        } catch (_) {}
+        cb({ ...firstFillState(), started, note });
+    }, 0);
+}
+// POST /api/setup/loop-install (ADMIN_ONLY_POSTS): `loop.sh install 30` — it writes this
+// user's crontab (an @reboot + every-30-min entry, tagged val-ark-loop). Fixed argv.
+let _loopInstalling = false;
+function installLoop(cb) {
+    if (!_onPath('crontab')) return cb({ error: 'This box has no cron (crontab not found). Run ./scripts/loop.sh run under a service manager instead.' });
+    if (_loopInstalling) return cb({ error: 'Already installing — try again in a moment.' });
+    if (_noLoopSpawn()) return cb({ ok: true, loopInstalled: false, test: true });
+    _loopInstalling = true;
+    execFile(BASH_BIN, _loopArgv('install'), { cwd: ROOT, timeout: 30000, env: _loopEnv() }, (err) => {
+        _loopInstalling = false;
+        loopInstalled((installed) => {
+            if (installed) return cb({ ok: true, loopInstalled: true });
+            cb({ error: 'loop.sh install did not add a cron entry' + (err ? ' (' + String(err.message || err).slice(0, 160) + ')' : '') + '. Run ./scripts/loop.sh install 30 on the box.' });
+        }, 0);
+    });
+}
+
+// ---- The box's address: <name>.local or its LAN IP (#306) --------------------
+// ONE place decides which address to show; the wizard, the recovery card and the
+// Health page all use boxAddress(). <name>.local is promised only when lib/mdns.sh
+// reports it live (published by our avahi-publish child, or native: the hostname is
+// the name); otherwise the box's real LAN IPv4 is shown, with the reason .local is
+// unavailable. mdns.sh never installs anything; the loop re-runs it every cycle.
+// "mdns: true" means our publisher is up and announcing (or the hostname is the name);
+// it does NOT prove every client resolves .local (some phones/Windows setups don't), so
+// the IP is always shown beside it (altUrl).
+const MDNS_SH = path.join(__dirname, 'lib', 'mdns.sh');
+const MDNS_CHECK_MS = 10 * 60 * 1000;
+let _mdnsCheck = null;          // last `mdns.sh check` (an un-commissioned box)
+let _mdnsWaiters = null;
+// Never start a REAL publisher from a test (it would keep announcing <name>.local on the
+// LAN after the test). A test is recognised by any VALARK_TEST_* hook or a state dir in
+// the system temp dir; there mdns.sh runs only when VALARK_MDNS_PUBLISH is 'none' or a
+// stub that itself lives in the temp dir (mdns.sh enforces the same rule).
+function _inTmp(p) {
+    if (!p) return false;
+    let real = p; try { real = fs.realpathSync(p); } catch (_) {}
+    const roots = new Set([require('os').tmpdir(), '/tmp', '/var/tmp']);
+    for (const r of [...roots]) { try { roots.add(fs.realpathSync(r)); } catch (_) {} }
+    for (const r of roots) {
+        const base = r.replace(/\/+$/, '');
+        if (!base) continue;
+        if ([p, real].some(x => x === base || x.startsWith(base + '/'))) return true;
+    }
+    return false;
+}
+function _mdnsNoSpawn() {
+    const pub = process.env.VALARK_MDNS_PUBLISH;
+    const testy = Object.keys(process.env).some(k => k.startsWith('VALARK_TEST_')) || _inTmp(STATE_DIR);
+    if (!testy) return false;
+    return !(pub === 'none' || (pub && _inTmp(pub)));
+}
+function _cleanMdns(m) {
+    if (!m || typeof m !== 'object' || typeof m.state !== 'string') return null;
+    const str = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f]/g, '').slice(0, n) : '');
+    return { state: str(m.state, 16), label: str(m.label, 63), canPublish: m.canPublish === true,
+             hostLabel: str(m.hostLabel, 63), ip: str(m.ip, 45), reason: str(m.reason, 200), ts: str(m.ts, 32) };
+}
+function mdnsState() {
+    const m = _cleanMdns(readStateJson('mdns.json'));
+    if (!boxCommissioned() && _mdnsCheck) return _mdnsCheck;
+    if (m && m.state === 'published' && !mdnsPublisherAlive()) {
+        // Our publisher died (or its pid now belongs to another process) since the last
+        // ensure; don't promise .local then.
+        refreshMdns();
+        return { ...m, state: 'unavailable', reason: 'the .local publisher stopped; restarting it' };
+    }
+    return m || _mdnsCheck;
+}
+// Is the pid in mdns.pid alive AND still running the argv mdns.sh recorded for it (line
+// 2)? Same rule as mdns.sh any_our_pid, so a recycled pid never counts as our publisher.
+function mdnsPublisherAlive() {
+    let lines;
+    try { lines = fs.readFileSync(path.join(STATE_DIR, 'mdns.pid'), 'utf8').split('\n'); } catch (_) { return false; }
+    const pid = parseInt(lines[0], 10), want = String(lines[1] || '').trim();
+    if (!(pid > 1) || !want) return false;
+    let args = null;
+    try {
+        args = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean).join(' ');
+    } catch (_) {
+        if (fs.existsSync('/proc/self/cmdline')) return false;   // Linux: no such process
+        try { args = execFileSync('ps', ['-p', String(pid), '-o', 'args='], { timeout: 2000, encoding: 'utf8' }).trim(); }
+        catch (_) { return false; }
+    }
+    return args === want;
+}
+// Run mdns.sh (ensure on a commissioned box, else check); cb() when done.
+function refreshMdns(cb) {
+    if (_mdnsNoSpawn()) return cb && cb();
+    if (_mdnsWaiters) { if (cb) _mdnsWaiters.push(cb); return; }
+    _mdnsWaiters = cb ? [cb] : [];
+    const mode = boxCommissioned() ? 'ensure' : 'check';
+    // Fixed argv; mdns.sh reads the name from settings.json itself.
+    execFile('bash', [MDNS_SH, mode, STATE_DIR], { timeout: 20000 }, (err, stdout) => {
+        if (mode === 'check') { try { _mdnsCheck = _cleanMdns(JSON.parse(String(stdout || '').trim())); } catch (_) {} }
+        else _mdnsCheck = null;
+        const w = _mdnsWaiters; _mdnsWaiters = null;
+        for (const f of w) { try { f(); } catch (_) {} }
+    });
+}
+// Interfaces that never carry "the LAN address" (VPNs/tunnels, containers, bridges,
+// loopback). SAME list as lib/mdns.sh SKIP_IFACE_RE; keep them in step.
+const _SKIP_IFACE = /^(tailscale|ts|utun|wg|tun|zt|docker|br-|veth|virbr|lo)/i;
+function _rfc1918(a) { return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a); }
+// The LAN IPv4 to show: the address this request arrived on when it's a private LAN
+// address, else the first private IPv4 of a non-tailnet interface, else any non-loopback
+// IPv4 the request arrived on. null when there is none (e.g. only loopback).
+function lanIp(req) {
+    const la = String(req?.socket?.localAddress || '').replace(/^::ffff:/, '');
+    const ifs = netIfaces();
+    // The arrival address counts only when it isn't on a VPN/container interface (a
+    // WireGuard or docker address is often RFC 1918 too).
+    const onSkipped = Object.entries(ifs).some(([n, as]) => _SKIP_IFACE.test(n) && (as || []).some(a => a.address === la));
+    if (_rfc1918(la) && !onSkipped) return la;
+    for (const [name, addrs] of Object.entries(ifs)) {
+        if (_SKIP_IFACE.test(name)) continue;
+        for (const a of addrs || []) {
+            if ((a.family === 'IPv4' || a.family === 4) && !a.internal && _rfc1918(a.address)) return a.address;
+        }
+    }
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(la) && !la.startsWith('127.')) return la;
+    return null;
+}
+// ':PORT' as the visitor typed it (the Host header), '' for the scheme's default port.
+function _visitPort(req) {
+    const h = String(req?.headers?.host || '');
+    const secure = isSecureReq(req);
+    const m = h.match(/:(\d{1,5})$/);
+    if (m) return (m[1] === (secure ? '443' : '80')) ? '' : ':' + m[1];
+    if (h) return '';
+    const lp = req?.socket?.localPort;
+    return lp && lp !== (secure ? 443 : 80) ? ':' + lp : '';
+}
+function boxAddress(req) {
+    const s = commission.readSettings(STATE_DIR);
+    const label = commission.mdnsLabel(s.name);
+    const m = mdnsState();
+    const scheme = isSecureReq(req) ? 'https' : 'http';
+    const port = _visitPort(req);
+    const ip = lanIp(req);
+    const localUrl = `${scheme}://${label}.local${port}/`;
+    const ipUrl = ip ? `${scheme}://${ip}${port}/` : null;
+    const live = !!(m && m.label === label && (m.state === 'published' || m.state === 'native'));
+    let reason = '';
+    if (!live) {
+        if (!m) reason = 'not checked yet';
+        else if (m.state === 'unavailable') reason = m.reason || 'unavailable';
+        else if (m.label !== label) reason = 'not published yet';
+        else reason = m.reason || 'not published yet';
+    }
+    return {
+        name: s.name || 'valark', label, host: `${label}.local`,
+        mdns: live,                                   // <label>.local is being announced now
+        canPublish: !!(m && m.canPublish),            // this box can publish any name (wizard)
+        hostLabel: (m && m.hostLabel) || '',          // the name the responder already answers for
+        localUrl, ip, ipUrl,
+        url: live ? localUrl : (ipUrl || localUrl),  // THE address to show
+        altUrl: live ? ipUrl : null,
+        reason,
+    };
 }
 
 // ---- "Ask Val Ark": the on-box assistant (roadmap Phase 8, slice 1) ----------
@@ -3577,6 +3835,11 @@ function onFirstBind() {
     // Tailscale userspace-networking check (#311): once at boot, then periodically.
     refreshTailscaleMode();
     setInterval(refreshTailscaleMode, TAILSCALE_CHECK_MS).unref();
+    // <name>.local (#306): publish on a commissioned box (check only before setup), and
+    // keep the publisher up between loop cycles. Plus the cron (24/7 loop) lookup.
+    refreshMdns();
+    setInterval(refreshMdns, MDNS_CHECK_MS).unref();
+    loopInstalled();
 }
 
 let boundPorts = 0;
@@ -3636,7 +3899,8 @@ try {
             const claim = commission.ensureClaim(STATE_DIR);
             console.log('');
             console.log('  This Val Ark is NOT set up yet. Open it and follow the wizard:');
-            console.log(`     http://valark.local/   (or  http://<this-ip>/ )`);
+            console.log('     at one of the addresses printed below (http://<name>.local/ works once setup');
+            console.log('     publishes it, when avahi runs on this box)');
             console.log(`  Setup claim code (enter it in the wizard from another device): ${claim}`);
             console.log('  (On this box / localhost you can skip the code.)');
             console.log('');

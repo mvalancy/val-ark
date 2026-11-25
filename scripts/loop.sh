@@ -6,7 +6,7 @@
 #   1. ensure the data disk is writable (self-heal NTFS/ro reverts)
 #   2. repair the repo<->disk symlink layout (2b-2d web server, public port, community
 #      services, 2e self-mirror of Val Ark's own source, 2f direct-connect link DHCP,
-#      2g Tailscale userspace-networking check)
+#      2g Tailscale userspace-networking check, 2h <name>.local over mDNS)
 #   3. refresh the live catalog  -> ZIM/content links self-heal (no stale dates)
 #   4. link check + repair        -> tool/installer URLs, web-ui assets, symlinks
 #   5. integrity verify           -> requeue corrupt/short downloads (5b re-fill pinned requests)
@@ -310,6 +310,23 @@ tailscale_check() {
     esac
 }
 
+# --- step 2h: publish <name>.local over mDNS when the box can (#306) ----------
+# lib/mdns.sh: native (hostname = name), or ONE kept-up `avahi-publish -a -R` child, or
+# "unavailable" with a reason (no avahi, daemon stopped, ...) in state/mdns.json, which
+# server.js reads to show the LAN IP instead. Never installs anything.
+# 8>&- : the publisher it spawns must not inherit loop.lock (see ensure_services).
+ensure_mdns() {
+    local out st reason to=()
+    command -v timeout >/dev/null 2>&1 && to=(timeout 30)
+    out=$("${to[@]}" bash "${_DIR}/lib/mdns.sh" ensure "$STATE_DIR" 2>/dev/null 8>&-)
+    st=$(printf '%s' "$out" | grep -oE '"state":"[a-z]+"' | head -1 | cut -d'"' -f4)
+    reason=$(printf '%s' "$out" | grep -oE '"reason":"[^"]*"' | head -1 | cut -d'"' -f4)
+    case "$st" in
+        published|native) log "mdns: $(printf '%s' "$out" | grep -oE '"host":"[^"]*"' | cut -d'"' -f4) ($st)" ;;
+        *) log "${YELLOW}mdns: .local unavailable${NC} (${reason:-unknown}); the web UI shows the LAN IP instead" ;;
+    esac
+}
+
 # --- step 8b: write the self-heal snapshot the Health page reads --------------
 # selfheal.json = latest cycle summary (space, verify tallies, link/asset counts,
 # what was repaired this cycle). heal-events.jsonl = the append-only, capped feed
@@ -375,6 +392,8 @@ loop_once() {
 
     step "2g. tailscale mode (userspace networking makes tailnet peers look like the Admin, #311)"; tailscale_check
 
+    step "2h. publish <name>.local over mDNS (when avahi runs, #306)"; ensure_mdns
+
     step "3. refresh live catalog (heals stale content links)"
     bash "$LIBRARIAN" refresh >/dev/null 2>&1 && log "catalog refreshed" || log "${YELLOW}catalog refresh failed (cache retained)${NC}"
 
@@ -414,22 +433,56 @@ loop_once() {
 
 # Cron management — durable 24/7 driver that survives reboots/sessions.
 CRON_TAG="val-ark-loop"
+# The user's current crontab, or empty when they have none. `crontab -l` exits non-zero
+# both for "no crontab for <user>" (fine: start empty) and for real failures (cron
+# unreachable, permission denied, ...). Piping a failed read into `crontab -` would
+# REPLACE the user's whole crontab with just our lines, so any other failure stops here.
+_cron_read() {
+    local out err rc
+    err=$(mktemp 2>/dev/null || echo "${STATE_DIR}/.crontab.err.$$")
+    out=$(LC_ALL=C crontab -l 2>"$err"); rc=$?   # C locale: "no crontab" in English
+    if [ "$rc" -ne 0 ]; then
+        if grep -qi 'no crontab' "$err" 2>/dev/null; then out=""
+        else
+            log "${RED}crontab -l failed${NC} ($(head -c 200 "$err" 2>/dev/null | tr '\n' ' ')); leaving the crontab untouched" >&2
+            rm -f "$err"; return 1
+        fi
+    fi
+    rm -f "$err"
+    printf '%s' "$out"
+}
 cron_install() {
     local every="${1:-30}"   # minutes
+    case "$every" in ''|*[!0-9]*) log "${RED}install: minutes must be a number${NC}"; return 64 ;; esac
+    command -v crontab >/dev/null 2>&1 || { log "${RED}crontab not found${NC}: run 'loop.sh run' under a service manager instead"; return 1; }
+    # cron turns an unescaped '%' into a newline (the rest becomes stdin), so a path
+    # with one would run a broken command. Refuse rather than escape.
+    local p
+    for p in "$PROJECT_ROOT" "$_DIR" "$LOG_DIR"; do
+        case "$p" in *%*) log "${RED}install refused${NC}: cron treats '%' as a newline and this path has one: $p (move Val Ark, or run 'loop.sh run' under a service manager)"; return 1 ;; esac
+    done
     mkdir -p "$LOG_DIR" 2>/dev/null
+    local cur
+    cur=$(_cron_read) || return 1
     # No outer flock here: loop.sh 'once' self-guards via run_locked (fd 8 on
     # loop.lock). An outer flock on the same file would dead-lock the inner one.
-    local line="*/${every} * * * * cd ${PROJECT_ROOT} && bash ${_DIR}/loop.sh once >> ${LOG_DIR}/loop_cron.log 2>&1 # ${CRON_TAG}"
+    # Paths are quoted: a repo or data dir with a space must not split the command.
+    local line="*/${every} * * * * cd \"${PROJECT_ROOT}\" && bash \"${_DIR}/loop.sh\" once >> \"${LOG_DIR}/loop_cron.log\" 2>&1 # ${CRON_TAG}"
     # @reboot: bring the Ark back immediately after a reboot instead of waiting up
     # to ${every} min for the next periodic tick. The sleep gives the data disk
     # (FUSE/NTFS via fstab) time to mount before the cycle's writability check.
-    local reboot_line="@reboot sleep 90 && cd ${PROJECT_ROOT} && bash ${_DIR}/loop.sh once >> ${LOG_DIR}/loop_cron.log 2>&1 # ${CRON_TAG}"
-    (crontab -l 2>/dev/null | grep -v "${CRON_TAG}"; echo "$reboot_line"; echo "$line") | crontab -
+    local reboot_line="@reboot sleep 90 && cd \"${PROJECT_ROOT}\" && bash \"${_DIR}/loop.sh\" once >> \"${LOG_DIR}/loop_cron.log\" 2>&1 # ${CRON_TAG}"
+    { [ -n "$cur" ] && printf '%s\n' "$cur" | grep -v "${CRON_TAG}"; echo "$reboot_line"; echo "$line"; } | crontab - || {
+        log "${RED}crontab install failed${NC}"; return 1; }
     log "installed cron: @reboot + every ${every} min (tag ${CRON_TAG})"
     crontab -l 2>/dev/null | grep "${CRON_TAG}"
+    return 0
 }
 cron_uninstall() {
-    crontab -l 2>/dev/null | grep -v "${CRON_TAG}" | crontab -
+    local cur
+    cur=$(_cron_read) || return 1
+    [ -n "$cur" ] || { log "no crontab; nothing to remove"; return 0; }
+    { printf '%s\n' "$cur" | grep -v "${CRON_TAG}"; true; } | crontab - || { log "${RED}crontab update failed${NC}"; return 1; }
     log "removed ${CRON_TAG} cron entries"
 }
 

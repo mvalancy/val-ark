@@ -513,6 +513,17 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   the dead parent → a wrong pidfile → the loop's per-cycle `start` spawned duplicate instances that
   fought over `:9000`. Use `nohup ... & echo $!` for the true pid, plus a **port-based liveness
   fallback** (`_lounge_up`) so a stale pidfile can never trigger a duplicate start.
+- **A sub-app is the Val Ark origin, so its user content must be sandboxed (#317).** `/app/<id>/`
+  shares the UI's origin and localhost is the Admin: an HTML file a user uploads (MicroBin
+  `/file/{id}?preview=true` serves it inline) could POST to `/api/*` with a valid Origin. The
+  proxy sandboxes the upload routes listed in `SUBAPP_USER_CONTENT` (plus any response with
+  `Content-Disposition`). **Adding a sub-app, or one gains an upload/raw route? Add its route
+  there** (match the decoded path, case-insensitive) and a case in
+  `tests/test-subapp-isolation.sh`. Don't strip a sub-app's whole CSP either: only
+  `frame-ancestors` blocks the frame, and the rest can be the app's own upload sandbox.
+  And a sub-app's **web** port binds `127.0.0.1`, never `VALARK_BIND`: that knob is for
+  protocol ports (mail, IRC), and owners set it to `0.0.0.0` for IMAP, which would put the
+  web UI on the LAN around the proxy (`tests/test-service-binds.sh`).
 - **Minting a login is an admin action → `POST /api/service/adduser` is admin‑gated.** LAN
   users self‑register on the forum, join chat with just a nickname, or ask the host; only the
   operator (localhost/admin) provisions **mail** logins. The UI hides the create form off‑admin

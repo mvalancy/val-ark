@@ -13,8 +13,8 @@
 # Security / offline posture:
 #   * NO server-to-server links, NO internet relay, NO federation. ngIRCd is
 #     configured with zero [Server] blocks and the web client is single-org.
-#   * Everything binds to ${VALARK_BIND} (default 0.0.0.0 = whole LAN; set
-#     VALARK_BIND=127.0.0.1 in .env to keep it host-only). It never reaches out.
+#   * Native IRC (ngIRCd) binds ${VALARK_BIND} (default 127.0.0.1; 0.0.0.0 lets LAN
+#     IRC clients in). It never reaches out.
 #   * The web client (The Lounge) listens ONLY on 127.0.0.1 — it is reachable
 #     from the LAN solely through the Val Ark reverse proxy, which enforces the
 #     box's access control (Use Mode). By default chat is PUBLIC/open: a visitor

@@ -48,9 +48,9 @@ already lives inside Val Ark:
    exactly like the 45 existing tool mirrors. Nothing is installed on the server itself.
 2. **Run LAN-bound** on the Val Ark host. `scripts/services/<id>.sh start|stop|restart|status`
    builds (first run, for source-only components) and launches the service, binding its
-   web UI to `127.0.0.1` so only the reverse proxy can reach it. Any user-facing protocol
-   ports honour `VALARK_BIND` (mail's IMAP/submission default `0.0.0.0` for the LAN;
-   plaintext native IRC defaults `127.0.0.1`).
+   web UI to `127.0.0.1` **always**, so only the reverse proxy can reach it. Only the
+   protocol ports honour `VALARK_BIND` (mail's IMAP/submission default `0.0.0.0` for the
+   LAN; plaintext native IRC defaults `127.0.0.1`); a web UI never does (#317).
 3. **Framed** in the web shell at `/app/<id>/`. `server.js` reverse-proxies the service
    same-origin, so the fixed Val Ark top-nav stays on screen as a permanent
    "back to Val Ark" header — the same pattern `/kiwix/` uses today (pipe bytes through,
@@ -157,7 +157,9 @@ Val Ark already mirrors** — no MongoDB, no second datastore.
   responds). `forum.sh start` is self-contained: it bootstraps NodeBB's `package.json`,
   runs `npm install --omit=dev --legacy-peer-deps`, and performs an unattended setup — no
   manual steps.
-- **Bind:** `VALARK_BIND` (default `127.0.0.1:4567`); internal Redis binds `127.0.0.1` only.
+- **Bind:** always `127.0.0.1:4567`, whatever `VALARK_BIND` says (`forum.sh` pins
+  `bind_address` in an existing config on every start too); internal Redis binds
+  `127.0.0.1` only.
 - **First run:** creates the admin account interactively, or unattended via
   `VALARK_FORUM_ADMIN_USERNAME` / `_PASSWORD` / `_EMAIL`. ActivityPub/federation, social
   login, and outbound webhooks are left disabled.
@@ -172,7 +174,7 @@ that can be forced off.
 
 - **Runtime deps:** none. Mirror with `scripts/tools/paste.sh`; the service auto-picks the
   host binary from `tools/<platform>/paste/microbin`. Stores everything in a local SQLite DB.
-- **Bind:** `127.0.0.1:8085` by default (set `VALARK_BIND=0.0.0.0` to expose directly).
+- **Bind:** always `127.0.0.1:8085`, whatever `VALARK_BIND` says.
   `MICROBIN_PUBLIC_PATH=/app/paste/` so links resolve behind the proxy.
 - **First run:** auto-generates HTTP Basic creds (user `valark`) plus a separate admin
   password (user `admin`), saved to `<dataDir>/credentials.txt` (chmod 600); override via
@@ -189,9 +191,11 @@ that can be forced off.
 This layer is built for a **trusted offline LAN/mesh, not the internet**. The posture is
 explicit and uniform across all four services:
 
-- **LAN/mesh-only binding.** Web UIs bind `127.0.0.1` and are reachable only through the
-  Val Ark reverse proxy (one origin, over HTTP or the local-CA HTTPS listener). Protocol
-  ports that must face users honour `VALARK_BIND`: mail's IMAP 143 + submission 587 default
+- **LAN/mesh-only binding.** Web UIs always bind `127.0.0.1` and are reachable only
+  through the Val Ark reverse proxy (one origin, over HTTP or the local-CA HTTPS
+  listener), so the upload sandbox, the read-wall and the internet-peer refusal always
+  apply. `VALARK_BIND` never moves a web UI onto the LAN (#317). Protocol ports that
+  must face users honour `VALARK_BIND`: mail's IMAP 143 + submission 587 default
   `0.0.0.0` for the LAN, while native IRC 6667 defaults `127.0.0.1` (it is plaintext — web
   chat rides the proxy). Set `VALARK_BIND=127.0.0.1` in `.env` for host-only. None of this
   is intended to be port-forwarded to the public internet.
@@ -206,6 +210,19 @@ explicit and uniform across all four services:
   instance behind HTTP Basic plus a separate admin password. First-run credentials are
   generated and saved to chmod-600 files in each service's state dir (or pinned via env) —
   operators should rotate them after first login.
+- **Uploads can't act as the Val Ark UI (#317).** The sub-apps share the UI's origin, and
+  the box's own browser counts as the Admin. So the proxy serves what *users* put in a
+  sub-app inside a sandbox (`Content-Security-Policy: sandbox allow-scripts allow-forms
+  allow-popups allow-downloads`, no `allow-same-origin`, plus `nosniff`): MicroBin's
+  `/file/`, `/secure_file/`, `/raw/` and `/archive/`, NodeBB's `/assets/uploads/` and
+  `/uploads/`, The Lounge's `/uploads/` and `/storage/`, alps' raw message parts, `/proxy`
+  and `/bimi/avatar`, and any sub-app response that carries `Content-Disposition`. An HTML
+  upload still opens, but as an opaque origin with no cookies, storage or API access. The
+  sub-apps' own pages and assets are not sandboxed. The proxy keeps each sub-app's own CSP
+  (only `frame-ancestors` is removed, so the frame works) and never forwards the Val Ark
+  session cookie. As a second line, `/api/*` refuses writes and script reads (`fetch`/XHR)
+  from a page under `/app/` or `/kiwix/`. **Still true:** an XSS bug in a sub-app's own UI
+  runs as the Val Ark origin; only a separate origin per app would close that.
 - **Data on the data disk.** All config, credentials, and message history live under the
   Val Ark data tree at `state/services/<id>`, so they ride the same NFS-exportable disk and
   backups as the rest of the mirror.
@@ -230,16 +247,17 @@ service's process state, ports, data dir, and a liveness probe.
 
 | Key | Purpose |
 |-----|---------|
-| `VALARK_BIND` | LAN bind address for user-facing ports (`127.0.0.1` = host-only everywhere; mail defaults `0.0.0.0`, native IRC and the web UIs default `127.0.0.1`). |
+| `VALARK_BIND` | LAN bind address for the protocol ports only: mail IMAP/submission (default `0.0.0.0`) and native IRC (default `127.0.0.1`). The sub-apps' web UIs always bind `127.0.0.1`, whatever it says (#317). `127.0.0.1` = host-only. |
 | `VALARK_WEB_PORT` | The primary origin/port the shell + all `/app/<id>/` proxies are served on (default 3000; also reachable via `VALARK_WEB_EXTRA_PORTS`, the `VALARK_WEB_PUBLIC_PORT` redirect, and HTTPS on `VALARK_HTTPS_PORT`). |
 | `VALARK_SERVICES` | Space-separated enable list, e.g. `"chat mail forum paste"` (empty = none). |
 | `VALARK_CHAT_ADMIN_USER` / `VALARK_CHAT_ADMIN_PASS` | Pin the chat admin login. |
 | `VALARK_FORUM_ADMIN_USERNAME` / `_PASSWORD` / `_EMAIL` | Unattended forum admin creation. |
 | `PASTE_AUTH_USER` / `PASTE_AUTH_PASSWORD` / `PASTE_ADMIN_PASSWORD` | Pin paste credentials. |
 
-Per-service internal ports (`VALARK_KIWIX_PORT`-style) keep their documented defaults
-(9000 / 1323 / 4567 / 8085) and rarely need changing since they are localhost-only behind
-the proxy.
+Per-service internal ports keep their documented defaults (9000 / 1323 / 4567 / 8085) and
+rarely need changing since they are localhost-only behind the proxy. When one is changed,
+`server.js` reads the same key as the service script, so the proxy follows it:
+`VALARK_CHAT_WEB_PORT`, `VALARK_MAIL_WEB_PORT`, `VALARK_FORUM_PORT`, `PASTE_PORT`.
 
 ---
 

@@ -69,6 +69,42 @@ for id in $SERVICES; do
     fi
 done
 
+# 2b. Sub-app isolation against the real apps (#317). The proxy sandboxes user-upload
+#     routes by path, whatever the app answers (404/401 for a made-up id still carries
+#     the header), and keeps each app's own CSP minus frame-ancestors so the frame works.
+_hdrs() { curl -s -D - -o /dev/null --max-time 8 "$1" 2>/dev/null | tr -d '\r' | tr 'A-Z' 'a-z'; }
+_sandbox_ok() { printf '%s' "$1" | grep -q '^content-security-policy: sandbox allow-scripts allow-forms allow-popups allow-downloads$' \
+    && ! printf '%s' "$1" | grep -q 'allow-same-origin'; }
+for pair in "paste:/app/paste/file/e2eprobe?preview=true" \
+            "forum:/app/forum/assets/uploads/files/e2e-probe.html" \
+            "chat:/app/chat/uploads/e2eprobe/e2e-probe.html"; do
+    id="${pair%%:*}"; path="${pair#*:}"
+    if [ "$(_svc_field "$svc_json" "$id" running)" != "True" ]; then
+        results_case "$id: upload route is sandboxed" skip 0 "$id not running"
+        continue
+    fi
+    h="$(_hdrs "${URL}${path}")"
+    if _sandbox_ok "$h"; then
+        results_case "$id: upload route ${path%%\?*} is sandboxed" pass 0
+    else
+        results_case "$id: upload route ${path%%\?*} is sandboxed" fail 0 "no sandbox CSP: $(printf '%s' "$h" | grep -E '^(http/|content-security)' | tr '\n' ' ')"
+    fi
+done
+for id in $SERVICES; do
+    if [ "$(_svc_field "$svc_json" "$id" running)" != "True" ]; then
+        results_case "$id: index has no frame-ancestors / X-Frame-Options" skip 0 "$id not running"
+        continue
+    fi
+    h="$(_hdrs "${URL}/app/${id}/")"
+    if printf '%s' "$h" | grep -E '^(content-security-policy:.*frame-ancestors|x-frame-options:)' >/dev/null; then
+        results_case "$id: index has no frame-ancestors / X-Frame-Options" fail 0 "$(printf '%s' "$h" | grep -E '^(content-security|x-frame)' | tr '\n' ' ')"
+    elif _sandbox_ok "$h"; then
+        results_case "$id: index has no frame-ancestors / X-Frame-Options" fail 0 "the app's own index must not be sandboxed"
+    else
+        results_case "$id: index has no frame-ancestors / X-Frame-Options (and isn't sandboxed)" pass 0
+    fi
+done
+
 # 3. Every service advertises how a person gets a login (drives the UI signup panel).
 for id in $SERVICES; do
     signup="$(printf '%s' "$svc_json" | python3 -c "import sys,json;print(json.load(sys.stdin).get('$id',{}).get('account',{}).get('signup'))" 2>/dev/null)"

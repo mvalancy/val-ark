@@ -26,6 +26,11 @@ of the dashboard.
 
 ## The Four Services
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/flow/community-dark.svg">
+  <img src="img/flow/community-light.svg" width="100%" alt="Animated diagram: The village square. Chat, mail, boards and file drops run on the box and open inside the web UI.">
+</picture>
+
 | ID | Name | What it is | Software (why) | Path | Internal port |
 |----|------|-----------|----------------|------|---------------|
 | `chat` | IRC Chat | Real-time channels + DMs | ngIRCd + The Lounge (tiny C daemon, sqlite-backed web client) | `/app/chat/` | 9000 |

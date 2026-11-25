@@ -22,6 +22,11 @@ the **UniFi UT2 / RK3588 have an on-board AI accelerator (NPU)** — so moderati
 
 ## Principle
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/flow/moderation-dark.svg">
+  <img src="../img/flow/moderation-light.svg" width="100%" alt="Animated diagram: Keeping shared files safe. Files in the uploads folder are checked on the box by a local model. Doubtful ones wait for the Admin.">
+</picture>
+
 > **Screen shared uploads on the box, with the box's own AI, on by default — privately.**
 > Nothing a user shares (files, pastes, forum posts, mail attachments, mesh shares) is
 > published to others until it's been checked locally. No image or text is ever sent off the

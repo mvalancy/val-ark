@@ -163,14 +163,23 @@ real router:
    5 minutes long for the first 10 minutes (so a router that shows up late wins
    quickly), then `VALARK_LINK_DHCP_LEASE` (1h). No router option is handed out, so the
    laptop keeps its own default route.
-3. **DNS** (`VALARK_LINK_DHCP_DNS`). `local` (default) answers the box's hostname,
-   `valark` and `VALARK_LINK_DHCP_NAMES` (and `<name>.home.arpa`, with `home.arpa` as
-   the search domain) and REFUSES everything else. `forward` sends the rest to the
-   box's own resolvers. `off` hands out no DNS (`--port=0`); use `http://10.254.77.1/`.
-   **Trade-off:** with `local`, a laptop that also has Wi-Fi internet may send its
-   internet lookups to the Ark and fail them. Pick `forward` (fine while the Ark itself
-   is online) or `off` for such laptops. The `VALARK_WEB_PUBLIC_PORT` NAT redirect
-   already covers every real interface, so `http://valark/` reaches the web UI.
+3. **DNS** (`VALARK_LINK_DHCP_DNS`). In every mode the box's hostname, `valark` and
+   `VALARK_LINK_DHCP_NAMES` (and `<name>.home.arpa`, with `home.arpa` as the search
+   domain) resolve to the link address.
+   - `forward` (default) sends every other lookup to the box's own upstream resolvers,
+     so a laptop that also has Wi-Fi keeps its internet whenever the Ark is online.
+     dnsmasq never reads `resolv.conf` itself (`--no-resolv`). The module passes an
+     explicit `--server=` list taken from `/etc/resolv.conf` with our link address,
+     our whole `/24`, `0.0.0.0`/`::` and anything that isn't an IP literal removed, so
+     it can't forward to itself in a loop. If nothing usable is left (the Ark is
+     offline, or only lists itself), it behaves like `local`. A `resolv.conf` change
+     while serving restarts dnsmasq with the new list.
+   - `local` answers only the box's names and REFUSES everything else, which fails
+     fast.
+   - `off` hands out no DNS (`--port=0`); use `http://10.254.77.1/`.
+
+   The `VALARK_WEB_PUBLIC_PORT` NAT redirect already covers every real interface, so
+   `http://valark/` reaches the web UI.
 4. **Keep checking.** A small watcher (started by the loop, flock'd so there is only
    one) polls the interface's `carrier_changes` counter every
    `VALARK_LINK_DHCP_WATCH_SECS` (2), so even a quick unplug and replug between two

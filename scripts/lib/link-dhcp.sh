@@ -21,7 +21,10 @@
 #     counter, polled every VALARK_LINK_DHCP_WATCH_SECS) and every
 #     VALARK_LINK_DHCP_RECHECK_SECS (60).
 #   * dnsmasq is bound with --interface=<iface> --bind-interfaces, no router
-#     option, and DNS per VALARK_LINK_DHCP_DNS (local | forward | off).
+#     option, and DNS per VALARK_LINK_DHCP_DNS (forward | local | off).
+#     forward (default) passes non-local names ONLY to the box's own upstream
+#     resolvers, read from resolv.conf, minus our link address/subnet (no
+#     self-forwarding loop); with no usable upstream it behaves like local.
 #   * Runtime files (pid, locks, leases, logs) live on tmpfs in
 #     VALARK_LINK_DHCP_RUN (/run/valark-link-dhcp), never on the data disk; only
 #     the small state/link-dhcp.json status goes to state/ (and only if it exists).
@@ -42,6 +45,7 @@
 #                               server IPs; exit !=0 = unknown
 #   VALARK_LINK_DHCP_DNSMASQ / _IP / _SUDO / _ID   binaries (dnsmasq, ip, sudo, id)
 #   VALARK_LINK_DHCP_SYSFS      /sys/class/net      VALARK_LINK_DHCP_RUN  runtime dir
+#   VALARK_LINK_DHCP_RESOLV     resolv.conf the forward mode reads upstreams from
 ###############################################################################
 set -o pipefail
 _LD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -73,7 +77,8 @@ _ld_config(){
     LD_WATCH_SECS="${VALARK_LINK_DHCP_WATCH_SECS:-2}"
     LD_RECHECK_SECS="${VALARK_LINK_DHCP_RECHECK_SECS:-60}"
     LD_LOCK_WAIT="${VALARK_LINK_DHCP_LOCK_WAIT:-60}"
-    LD_DNS="${VALARK_LINK_DHCP_DNS:-local}"
+    LD_DNS="${VALARK_LINK_DHCP_DNS:-forward}"
+    LD_RESOLV="${VALARK_LINK_DHCP_RESOLV:-/etc/resolv.conf}"   # where forward finds upstreams
     LD_SYSFS="${VALARK_LINK_DHCP_SYSFS:-/sys/class/net}"
     LD_IPBIN="${VALARK_LINK_DHCP_IP:-ip}"
     LD_SUDO="${VALARK_LINK_DHCP_SUDO:-sudo}"
@@ -101,7 +106,7 @@ _ld_config(){
     for v in "$LD_LEASE" "$LD_EARLY_LEASE"; do
         [[ $v =~ ^[0-9]+[mh]?$ ]] || LD_CFG_ERR="${LD_CFG_ERR:-lease '${v}' must match [0-9]+[mh]?}"
     done
-    case "$LD_DNS" in local|forward|off) ;; *) LD_CFG_ERR="${LD_CFG_ERR:-VALARK_LINK_DHCP_DNS must be local, forward or off}" ;; esac
+    case "$LD_DNS" in forward|local|off) ;; *) LD_CFG_ERR="${LD_CFG_ERR:-VALARK_LINK_DHCP_DNS must be forward, local or off}" ;; esac
     for v in "$LD_EARLY_SECS" "$LD_CONFIRM_SECS" "$LD_RECHECK_SECS" "$LD_LOCK_WAIT"; do
         _int "$v" || LD_CFG_ERR="${LD_CFG_ERR:-timer value '${v}' must be a whole number of seconds}"
     done
@@ -275,8 +280,25 @@ ld_stop(){   # reason — idempotent; always removes our address if present
     return 0
 }
 
+# Upstream resolvers for DNS=forward: the box's own resolv.conf nameservers,
+# never our link address or anything in our /24 (that would forward to
+# ourselves in a loop), never 0.0.0.0/::, only plain IPv4/IPv6 literals.
+# Empty output = no usable upstream -> answer local names, REFUSE the rest fast.
+_upstreams(){
+    [ "$LD_DNS" = forward ] || return 0
+    local kw ip
+    while read -r kw ip _; do
+        [ "$kw" = nameserver ] || continue
+        case "$ip" in
+            "$LD_SELF_IP"|"${LD_NET}".*|0.0.0.0|::|0:0:0:0:0:0:0:0) continue ;;
+        esac
+        [[ $ip =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ || $ip =~ ^[0-9A-Fa-f:]+$ ]] || continue
+        printf '%s\n' "$ip"
+    done < <(cat "$LD_RESOLV" 2>/dev/null) | awk '!s[$0]++'
+}
+
 ld_start(){   # iface lease
-    local ifc="$1" lease="$2" pid n args=() i=0 rc
+    local ifc="$1" lease="$2" pid n args=() i=0 rc ups
     _addr_ensure "$ifc"; rc=$?
     [ "$rc" = 1 ] && { log "could not add ${LD_SELF_IP}/24 to ${ifc}"; return 1; }
     echo "$ifc" > "$LD_IFFILE"
@@ -291,7 +313,15 @@ ld_start(){   # iface lease
         off) args+=(--port=0 --dhcp-option=6) ;;
         *)   args+=(--domain-needed --bogus-priv --domain="$LD_DOMAIN" --local="/${LD_DOMAIN}/"
                     --dhcp-option=option:domain-search,"$LD_DOMAIN")
-             [ "$LD_DNS" = local ] && args+=(--no-resolv)
+             # Never let dnsmasq read resolv.conf itself: forward gets an explicit,
+             # filtered --server list (empty = local-only, non-local names REFUSED).
+             args+=(--no-resolv)
+             ups=$(_upstreams)
+             if [ -n "$ups" ]; then
+                 while IFS= read -r n; do args+=(--server="$n"); done <<<"$ups"
+             elif [ "$LD_DNS" = forward ]; then
+                 log "DNS forward: no usable upstream resolver on this box — answering local names only"
+             fi
              while IFS= read -r n; do args+=(--host-record="${n},${n}.${LD_DOMAIN},${LD_SELF_IP}"); done < <(_names) ;;
     esac
     rm -f "$LD_PIDFILE"
@@ -306,6 +336,7 @@ ld_start(){   # iface lease
         log "dnsmasq did not come up on ${ifc}"; ld_stop "dnsmasq did not come up"; return 1
     fi
     echo "$lease" > "$LD_LEASEFILE"; date +%s > "$LD_STARTED"
+    printf '%s\n' "$ups" > "${LD_RUN}/upstreams"
     log "started serving DHCP+DNS on ${ifc} only (${LD_SELF_IP}, ${LD_NET}.${LD_RS}-${LD_RE}, lease ${lease}, dns ${LD_DNS}, pid ${pid})"
 }
 
@@ -346,6 +377,12 @@ _decide(){
             log "settled: switching lease ${LD_EARLY_LEASE} -> ${LD_LEASE}"
             _dnsmasq_kill
             ld_start "$LD_IFC" "$LD_LEASE" || { MODE=error; DETAIL="dnsmasq failed to restart"; return; }
+        fi
+        if [ "$LD_DNS" = forward ] && [ "$(_upstreams)" != "$(cat "${LD_RUN}/upstreams" 2>/dev/null)" ]; then
+            log "upstream resolvers changed — restarting dnsmasq"
+            local cur; cur=$(cat "$LD_LEASEFILE" 2>/dev/null); cur=${cur:-$LD_LEASE}
+            _dnsmasq_kill
+            ld_start "$LD_IFC" "$cur" || { MODE=error; DETAIL="dnsmasq failed to restart"; return; }
         fi
         MODE=serving; DETAIL="no other DHCP server on the link"; return
     fi

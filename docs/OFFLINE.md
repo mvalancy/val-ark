@@ -245,9 +245,11 @@ over the wired port, so `http://valark/` (or the box's hostname) opens the web U
 the community apps with no router, internet or VPN. It probes for a DHCP server first
 and never serves while one answers, so plugging the Ark into a home or office network
 is safe; it stops the moment a real server appears. Needs root or passwordless sudo
-and `dnsmasq`. By default its DNS answers only the Ark's own names. A laptop that also
-has Wi-Fi internet may then fail its internet lookups; set `VALARK_LINK_DHCP_DNS=forward`
-or `off` for that case. Details and the hardware checklist:
+and `dnsmasq`. Its DNS answers the Ark's own names and, by default
+(`VALARK_LINK_DHCP_DNS=forward`), passes other lookups to the Ark's own upstream
+resolvers. A laptop that also has Wi-Fi keeps its internet while the Ark is online;
+when the Ark is offline, non-local lookups fail fast. `local` (Ark names only) and
+`off` (no DNS) are the alternatives. Details and the hardware checklist:
 [ARM64-NAS.md](ARM64-NAS.md#direct-connect-laptop-dhcp--dns-on-the-wired-port).
 
 ## Network Requirements

@@ -106,6 +106,7 @@ conf() {
         echo "VALARK_LINK_DHCP_ID=$T/bin/id"
         echo "VALARK_LINK_DHCP_SYSFS=$T/sys"
         echo "VALARK_LINK_DHCP_RUN=$RUN"
+        echo "VALARK_LINK_DHCP_RESOLV=$T/resolv.conf"
         echo "VALARK_LINK_DHCP_NAMES=ark-test"
         echo "VALARK_LINK_DHCP_WATCH_SECS=0.2"
         echo "VALARK_LINK_DHCP_RECHECK_SECS=${RECHECK:-3600}"
@@ -129,6 +130,7 @@ reset() {
           "$T"/dnsmasq-mode "$T"/as-root "$T"/has-dnsmasq-user "$T/state/STOP" "$T/state/link-dhcp.json"
     rm -rf "$RUN"; mkdir -p "$RUN"
     echo 1 > "$T/sys/eth0/carrier"; rm -rf "$T/sys/eth1"
+    printf 'search example\nnameserver 192.0.2.53\n' > "$T/resolv.conf"
     unset RECHECK CONFIRM EARLY EXTRA
 }
 serve_now() { conf 1 "$@"; echo none > "$T/probe-mode"; run check; run check; }   # two empty probes
@@ -169,7 +171,8 @@ check 'arg --bind-interfaces && arg --except-interface=lo && arg --listen-addres
 check 'arg --conf-file=/dev/null && arg --dhcp-option=3' "no system config, no router option"
 check 'arg "--dhcp-range=$NET.10,$NET.60,255.255.255.0,5m"' "first minutes of serving use the short early lease"
 check 'arg "--host-record=valark,valark.home.arpa,$SELF_IP" && arg "--host-record=ark-test,ark-test.home.arpa,$SELF_IP"' "DNS must resolve the box names to the link address"
-check 'arg --no-resolv && arg --local=/home.arpa/ && arg --dhcp-option=option:domain-search,home.arpa' "DNS local mode: local names only, REFUSE the rest"
+check 'arg --no-resolv && arg --local=/home.arpa/ && arg --dhcp-option=option:domain-search,home.arpa' "DNS: never reads resolv.conf itself; home.arpa stays local"
+check 'arg --server=192.0.2.53 && [ "$(grep -c "^--server=" "$T/dnsmasq.args")" = 1 ]' "default DNS=forward: the box's own upstream resolver, explicitly"
 check 'arg --user=nobody' "no dnsmasq user -> --user=nobody"
 check '! grep -q wlan0 "$T/dnsmasq.args"' "dnsmasq must never mention another interface"
 check 'has_addr eth0' "must assign itself $SELF_IP/24 on eth0"
@@ -277,11 +280,26 @@ check '! has_addr && [ "$(mode)" = error ]' "dnsmasq that fails must remove the 
 reset; EARLY=0 conf 1; echo none > "$T/probe-mode"; run check; run check; run check
 check 'arg "--dhcp-range=$NET.10,$NET.60,255.255.255.0,1h" && [ "$(runs)" = 2 ] && alive' "after EARLY_SECS dnsmasq restarts with the normal lease"
 
-# --- 18. finding 14: DNS modes ---------------------------------------------------------------
+# --- 18. finding 14: DNS modes (forward is the default) ------------------------------------------
 reset; EXTRA="VALARK_LINK_DHCP_DNS=off" serve_now
-check 'arg --port=0 && arg --dhcp-option=6 && ! grep -q host-record "$T/dnsmasq.args"' "DNS off: no DNS server, none advertised"
-reset; EXTRA="VALARK_LINK_DHCP_DNS=forward" serve_now
-check '! arg --no-resolv && arg --local=/home.arpa/' "DNS forward: local names + upstream for the rest"
+check 'arg --port=0 && arg --dhcp-option=6 && ! grep -q "host-record\|--server=" "$T/dnsmasq.args"' "DNS off: no DNS server, none advertised"
+reset; EXTRA="VALARK_LINK_DHCP_DNS=local" serve_now
+check 'arg --no-resolv && ! grep -q "^--server=" "$T/dnsmasq.args" && arg "--host-record=valark,valark.home.arpa,$SELF_IP"' "DNS local: local names only, no upstream (REFUSE the rest)"
+# forward must never forward to our own link address / subnet (a loop), nor to junk
+reset; printf 'nameserver %s\nnameserver %s.7\nnameserver 0.0.0.0\nnameserver bad;name\nnameserver 192.0.2.53\nnameserver 2001:db8::53\nnameserver 192.0.2.53\n' "$SELF_IP" "$NET" > "$T/resolv.conf"
+serve_now
+check '! grep -q "^--server=$NET\." "$T/dnsmasq.args" && ! arg --server=0.0.0.0 && ! grep -q "bad;name" "$T/dnsmasq.args"' "forward must drop our own address/subnet, 0.0.0.0 and junk"
+check 'arg --server=192.0.2.53 && arg --server=2001:db8::53 && [ "$(grep -c "^--server=" "$T/dnsmasq.args")" = 2 ]' "forward keeps real upstreams (v4 + v6), de-duplicated"
+# no usable upstream (offline box / only ourselves listed): local names, rest fails fast
+reset; printf 'nameserver %s\n' "$SELF_IP" > "$T/resolv.conf"; serve_now
+check 'alive && arg --no-resolv && ! grep -q "^--server=" "$T/dnsmasq.args" && arg "--host-record=valark,valark.home.arpa,$SELF_IP"' "forward with no upstream must behave like local (no self-forward loop)"
+check 'grep -q "no usable upstream" "$T/out"' "forward with no upstream must say so"
+reset; rm -f "$T/resolv.conf"; serve_now
+check 'alive && ! grep -q "^--server=" "$T/dnsmasq.args"' "missing resolv.conf = no upstream, still serves local names"
+# upstreams change while serving -> dnsmasq restarted with the new list
+reset; serve_now; printf 'nameserver 192.0.2.54\n' > "$T/resolv.conf"; run check
+check 'alive && arg --server=192.0.2.54 && ! arg --server=192.0.2.53 && [ "$(runs)" = 2 ]' "changed upstream resolvers must restart dnsmasq with the new list"
+run check; check '[ "$(runs)" = 2 ]' "unchanged upstreams must not restart"
 
 # --- 19. watcher: re-check, carrier_changes, STOP, TERM, knob removal (findings 2, 7, 9) ---------
 reset; RECHECK=1 conf 1; echo none > "$T/probe-mode"

@@ -310,7 +310,10 @@ if start_open ""; then
     h=$(curl -s -D - -o /dev/null -H 'Origin: http://localhost:5173' "$B/api/setup/recovery-card" | tr -d '\r' | grep -i '^access-control-allow-origin' || true)
     [ -z "$h" ] && pass || fail "another localhost origin must not get CORS access ($h)"
     c=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: rebind.evil.example' "$B/api/health"); [ "$c" = "421" ] && pass || fail "a foreign Host name must be 421 (got $c)"
-    for hn in valark.local ark.lan myark x.ts.net "[::1]"; do
+    for hn in "evil.com@127.0.0.1" "evil.com%2elocal" "evil.com.local.attacker.com" "127.0.0.1.nip.io"; do
+        c=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $hn" "$B/api/health"); [ "$c" = "421" ] && pass || fail "Host $hn must be 421 (got $c)"
+    done
+    for hn in valark.local ark.lan myark x.ts.net "[::1]" valark.local. ark.fritz.box "[fe80::1%25eth0]"; do
         c=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $hn" "$B/api/health"); [ "$c" = "200" ] && pass || fail "Host $hn must be served (got $c)"
     done
     c=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Host: valark.local:80' -H 'Origin: http://valark.local' -H 'Content-Type: application/json' --data '{}' "$B/api/maintenance/repair"); [ "$c" != "403" ] && pass || fail "Host with an explicit default port matches its Origin (got $c)"

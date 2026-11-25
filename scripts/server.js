@@ -994,16 +994,21 @@ function sameOriginPost(req) {
 // DNS rebinding guard: a page on an attacker's domain that re-resolves to the box would send a
 // matching Host and Origin. Only names that can belong to this box are served: IP literals,
 // localhost, single-label names (no dot: a LAN hostname), *.local / *.lan / *.home / *.home.arpa /
-// *.internal / *.localdomain / *.ts.net, the TLS domain, the box's own hostname, and VALARK_ALLOWED_HOSTS
+// *.internal / *.localdomain / *.ts.net / *.fritz.box, the TLS domain, the box's own hostname, and VALARK_ALLOWED_HOSTS
 // (comma-separated). Anything else gets 421 (review of #316).
 function hostAllowed(req) {
-    const raw = String(req.headers.host || '');
+    let raw = String(req.headers.host || '').toLowerCase();
     if (!raw) return true;   // HTTP/1.0 without Host: nothing for a rebinding page to forge
+    if (/^\[fe80:[0-9a-f:.]*%[0-9a-z]+\](:\d+)?$/.test(raw)) return true;   // link-local with a zone id
+    // Only the shapes a browser actually sends: a name or IPv4 (with one optional trailing dot)
+    // or a bracketed IPv6, plus a port. No userinfo, escapes or other junk reaches URL().
+    if (!/^([a-z0-9-]+(\.[a-z0-9-]+)*\.?|\[[0-9a-f:.]+\])(:\d+)?$/.test(raw)) return false;
+    raw = raw.replace(/\.(?=(:\d+)?$)/, '');   // 'valark.local.' is 'valark.local'
     let name;
-    try { name = new URL('http://' + raw).hostname.toLowerCase(); } catch (_) { return false; }
+    try { name = new URL('http://' + raw).hostname; } catch (_) { return false; }
     if (/^\[.*\]$/.test(name) || /^\d{1,3}(\.\d{1,3}){3}$/.test(name)) return true;   // IP literal
     if (name === 'localhost' || !name.includes('.')) return true;
-    if (/\.(local|lan|home|home\.arpa|internal|localdomain|ts\.net)$/.test(name)) return true;
+    if (/\.(local|lan|home|home\.arpa|internal|localdomain|ts\.net|fritz\.box)$/.test(name)) return true;
     const extra = [process.env.VALARK_TLS_DOMAIN || 'valark.lan', require('os').hostname(),
         ...String(process.env.VALARK_ALLOWED_HOSTS || '').split(',')]
         .map(x => String(x).trim().toLowerCase()).filter(Boolean);

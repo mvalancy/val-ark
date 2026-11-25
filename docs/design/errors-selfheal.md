@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/errors-selfheal-dark.svg">
+  <img src="../img/popup/errors-selfheal-light.svg" width="100%" alt="Pop-up book scene: One big easy button. The loop repairs itself every half hour; the rest is one tap in plain words.">
+</picture>
+
 # Val Ark — Errors & Self-Heal
 
 Part of the [design hierarchy](README.md). The promise: **"one big EASY button, regardless

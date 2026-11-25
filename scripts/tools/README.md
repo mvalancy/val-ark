@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../docs/img/popup/tool-scripts-dark.svg">
+  <img src="../../docs/img/popup/tool-scripts-light.svg" width="100%" alt="Pop-up book scene: One script per tool. Each mirrors its tool for every platform, using shared download helpers.">
+</picture>
+
 # Tool Download Scripts
 
 Each tool has its own Bash script here. Every script sources `_common.sh` for shared download helpers, then defines a `download_<tool>()` function that mirrors platform-specific binaries (or clones source for tools without portable builds).

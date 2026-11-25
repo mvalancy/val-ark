@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../docs/img/popup/scripts-dark.svg">
+  <img src="../docs/img/popup/scripts-light.svg" width="100%" alt="Pop-up book scene: The scripts. Orchestration, curation and the server; all find the data through one file.">
+</picture>
+
 # Scripts
 
 Orchestration, curation, and server layer for Val Ark. All scripts resolve their

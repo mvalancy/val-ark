@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/gotchas-dark.svg">
+  <img src="../img/popup/gotchas-light.svg" width="100%" alt="Pop-up book scene: Hard-won fixes. Symptom, cause, fix: the traps that cost real time, so nobody falls in twice.">
+</picture>
+
 # Val Ark — Operational Gotchas & Hard‑Won Fixes
 
 Non‑obvious things that cost real time. Format: **symptom → cause → fix.** Add to this when

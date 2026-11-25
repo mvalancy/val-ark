@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/popup/current-state-dark.svg">
+  <img src="../img/popup/current-state-light.svg" width="100%" alt="Pop-up book scene: Where it stands today. Shipped: setup in a browser, an admin area, recovery and real access controls.">
+</picture>
+
 # Val Ark — Current State (as of `VERSION` 0.1.17)
 
 > Snapshot of the **shipped** consumer appliance. It answers, directly, the questions this

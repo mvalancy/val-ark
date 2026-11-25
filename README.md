@@ -65,6 +65,10 @@ Val Ark finds your largest disk by itself. To choose one, copy `.env.example` to
 curl -fsSL http://<ark-host>:3000/bootstrap.sh | bash
 ```
 
+Use the Ark's IP address or a local name (`ark.local`, `ark.lan`, or a plain hostname). If you
+reach it by another DNS name, add that name to `VALARK_ALLOWED_HOSTS` on the Ark first, or it
+answers 421.
+
 ## Two ways to share it
 
 Both work fully offline. Use either one, or both at once.

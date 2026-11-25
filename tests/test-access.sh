@@ -318,9 +318,25 @@ if start_open ""; then
     done
     c=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Host: valark.local:80' -H 'Origin: http://valark.local' -H 'Content-Type: application/json' --data '{}' "$B/api/maintenance/repair"); [ "$c" != "403" ] && pass || fail "Host with an explicit default port matches its Origin (got $c)"
     c=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Host: valark.local' -H 'Origin: https://valark.local' --data '{}' "$B/api/maintenance/repair"); [ "$c" = "403" ] && pass || fail "an https Origin on a plain-http request must be 403 (got $c)"
+    c=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Host: [fe80::1%25eth0]:80' -H 'Origin: http://[fe80::1%25eth0]' -H 'Content-Type: application/json' --data '{}' "$B/api/maintenance/repair"); [ "$c" != "403" ] && [ "$c" != "421" ] && pass || fail "a zone-id IPv6 same-origin POST must reach the endpoint (got $c)"
+    c=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Host: [fe80::1%25eth0]:80' -H 'Origin: http://[fe80::1%25wlan0]' -H 'Content-Type: application/json' --data '{}' "$B/api/maintenance/repair"); [ "$c" = "403" ] && pass || fail "a different IPv6 zone is another origin: 403 (got $c)"
 else
     fail "open-mode server for the CSRF checks did not start"
 fi
+# The TLS domain: the exact name is served; one label under it only when it's a private name
+# (the local CA's *.<tls> cert); a real domain or public suffix is never trusted wholesale.
+tls_host() {   # $1 = TLS domain, $2 = Host, $3 = expected code
+    stop_pids "$SRV_PID"; SRV_PID=""
+    if start_open "VALARK_TLS_DOMAIN=$1"; then
+        c=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: $2" "$B/api/health"); [ "$c" = "$3" ] && pass || fail "TLS domain $1: Host $2 must be $3 (got $c)"
+    else fail "server with VALARK_TLS_DOMAIN=$1 did not start"; fi
+}
+tls_host ark.example.org ark.example.org 200
+tls_host ark.example.org lib.ark.example.org 421
+tls_host com evil.com 421
+tls_host co.uk evil.co.uk 421
+tls_host ark.home.arpa lib.ark.home.arpa 200
+tls_host myark.lan a.b.myark.lan 200
 
 echo "access: ${PASS} passed, ${FAIL} failed"
 [ $FAIL -eq 0 ] && exit 0 || exit 1

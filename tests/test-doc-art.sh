@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 
 # Skips locally without python3; fails under CI so the gate can't switch itself off (#255).
-. "${SCRIPT_DIR}/lib/require-python3.sh"
+. "${SCRIPT_DIR}/lib/require-cmd.sh"
 require_python3 "doc-art check"
 
 cd "${PROJECT_ROOT}" || exit 1

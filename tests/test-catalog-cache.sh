@@ -194,7 +194,9 @@ if [ -n "$NODE" ]; then
     ' "$ROOT/scripts/lib/catalog-parse.js" "$T/browse.tsv" 2>"$T/node.err"
     [ $? -eq 0 ] && pass || fail "parseCatalogTSV language filter: $(cat "$T/node.err" 2>/dev/null)"
 else
-    echo "SKIP: no node runtime — parseCatalogTSV filter case skipped" >&2
+    . "$ROOT/tests/lib/require-cmd.sh"
+    if ci_is_set; then fail "parseCatalogTSV filter case needs node, which is missing under CI"
+    else echo "SKIP: no node runtime — parseCatalogTSV filter case skipped" >&2; fi
 fi
 
 # === 10. browse refresh is gated to CONTENT only — model/installer never fetch =

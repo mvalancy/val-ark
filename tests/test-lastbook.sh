@@ -45,7 +45,7 @@ check() { if eval "$2"; then pass; else fail "$1"; fi; }
 PY="$ROOT/scripts/lib/lastbook_mirror.py"
 SH="$ROOT/scripts/tools/lastbook.sh"
 FIX="$ROOT/tests/fixtures/lastbook"
-. "$ROOT/tests/lib/require-python3.sh"; require_python3 "lastbook"
+. "$ROOT/tests/lib/require-cmd.sh"; require_python3 "lastbook"
 
 . "$ROOT/tests/lib/ports.sh"
 T="$(mktemp -d)"; SRV_PID=""; NPID=""
@@ -778,7 +778,8 @@ if [ -n "$NODE" ] && command -v curl >/dev/null 2>&1; then
     fi
     stop_pids "$NPID"; NPID=""
 else
-    echo "  SKIP: server.js external Lastbook dir (no node or curl)" >&2
+    if ci_is_set; then fail "server.js external Lastbook dir check needs node and curl, missing under CI"
+    else echo "  SKIP: server.js external Lastbook dir (no node or curl)" >&2; fi
 fi
 check "lastbook comes last in download-tools.sh ordered_tools" 'sed -n "/local ordered_tools=(/,/^    )/p" "$ROOT/scripts/download-tools.sh" | grep -v "^ *#" | tr -s " \n" " " | grep -q "cad-agent lastbook )"'
 check "lastbook is in download-tools.sh list (default refresh)" 'bash "$ROOT/scripts/download-tools.sh" list 2>/dev/null | grep -q "  lastbook$"'

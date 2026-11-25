@@ -48,6 +48,7 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 - [Browser runner failure evidence](#browser-runner-failure-evidence)
 - [Running Playwright from a git worktree (#69)](#running-playwright-from-a-git-worktree-69)
 - [Structural test asserts must skip the comment line (#96)](#structural-test-asserts-must-skip-the-comment-line-96)
+- [A skip guard must not switch itself off in CI (#255, #286)](#a-skip-guard-must-not-switch-itself-off-in-ci-255-286)
 - [Git / releases](#git--releases)
 - [Benign, don't "fix"](#benign-dont-fix)
 
@@ -1048,6 +1049,19 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
 
 
 <a id="browser-runner-failure-evidence"></a>
+## A skip guard must not switch itself off in CI (#255, #286)
+
+**Symptom:** a validator that needs `python3` or `node` started with
+`command -v python3 || { echo SKIP; exit 0; }`. That is right on a dev box without the runtime,
+but if CI ever lacks it the check exits 0 and the gate goes quietly green with nothing tested.
+
+**Fix:** guard with `tests/lib/require-cmd.sh`: `require_python3 "<what>"`,
+`require_cmd node "<what>"`, or `[ -n "$NODE" ] || missing_cmd node "<what>"` for a runtime you
+resolved yourself. Locally these skip; when `CI` is set (anything but empty / false / 0 / no / off)
+they exit 1. A per-case skip uses `if ci_is_set; then fail …; else echo SKIP …; fi`.
+`tests/test-require-cmd.sh` runs every user with the runtime removed from PATH and lints for a
+bare guard, so a new one fails CI.
+
 ## Browser runner failure evidence
 
 **Symptom (2026-10-23):** `tests/run-all.sh` could report green after Playwright

@@ -17,8 +17,7 @@ fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 
 # The CLI needs a node runtime; skip cleanly if truly absent (CI provides one).
 if ! "$HOME/.local/node/bin/node" -v >/dev/null 2>&1 && ! command -v node >/dev/null 2>&1; then
-    echo "SKIP: no node runtime for the valark CLI" >&2
-    exit 0
+    . "$ROOT/tests/lib/require-cmd.sh"; missing_cmd node "the valark CLI"   # skip locally, fail in CI
 fi
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT

@@ -35,7 +35,7 @@ pass() { PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL=$((FAIL + 1)); }
 check() { if eval "$2"; then pass; else fail "$1"; fi; }
 PY="$ROOT/scripts/lib/release_mirror.py"
-. "$ROOT/tests/lib/require-python3.sh"; require_python3 "release-mirror"
+. "$ROOT/tests/lib/require-cmd.sh"; require_python3 "release-mirror"
 
 . "$ROOT/tests/lib/ports.sh"
 T="$(mktemp -d)"; SRV_PID=""

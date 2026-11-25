@@ -206,6 +206,19 @@ explicit and uniform across all four services:
   instance behind HTTP Basic plus a separate admin password. First-run credentials are
   generated and saved to chmod-600 files in each service's state dir (or pinned via env) —
   operators should rotate them after first login.
+- **Uploads can't act as the Val Ark UI (#317).** The sub-apps share the UI's origin, and
+  the box's own browser counts as the Admin. So the proxy serves what *users* put in a
+  sub-app inside a sandbox (`Content-Security-Policy: sandbox allow-scripts allow-forms
+  allow-popups allow-downloads`, no `allow-same-origin`, plus `nosniff`): MicroBin's
+  `/file/`, `/secure_file/`, `/raw/` and `/archive/`, NodeBB's `/assets/uploads/` and
+  `/uploads/`, The Lounge's `/uploads/` and `/storage/`, alps' raw message parts, `/proxy`
+  and `/bimi/avatar`, and any sub-app response that carries `Content-Disposition`. An HTML
+  upload still opens, but as an opaque origin with no cookies, storage or API access. The
+  sub-apps' own pages and assets are not sandboxed. The proxy keeps each sub-app's own CSP
+  (only `frame-ancestors` is removed, so the frame works) and never forwards the Val Ark
+  session cookie. As a second line, `/api/*` refuses writes and script reads (`fetch`/XHR)
+  from a page under `/app/` or `/kiwix/`. **Still true:** an XSS bug in a sub-app's own UI
+  runs as the Val Ark origin; only a separate origin per app would close that.
 - **Data on the data disk.** All config, credentials, and message history live under the
   Val Ark data tree at `state/services/<id>`, so they ride the same NFS-exportable disk and
   backups as the rest of the mirror.
@@ -237,9 +250,10 @@ service's process state, ports, data dir, and a liveness probe.
 | `VALARK_FORUM_ADMIN_USERNAME` / `_PASSWORD` / `_EMAIL` | Unattended forum admin creation. |
 | `PASTE_AUTH_USER` / `PASTE_AUTH_PASSWORD` / `PASTE_ADMIN_PASSWORD` | Pin paste credentials. |
 
-Per-service internal ports (`VALARK_KIWIX_PORT`-style) keep their documented defaults
-(9000 / 1323 / 4567 / 8085) and rarely need changing since they are localhost-only behind
-the proxy.
+Per-service internal ports keep their documented defaults (9000 / 1323 / 4567 / 8085) and
+rarely need changing since they are localhost-only behind the proxy. When one is changed,
+`server.js` reads the same key as the service script, so the proxy follows it:
+`VALARK_CHAT_WEB_PORT`, `VALARK_MAIL_WEB_PORT`, `VALARK_FORUM_PORT`, `PASTE_PORT`.
 
 ---
 

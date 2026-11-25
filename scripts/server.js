@@ -1134,12 +1134,55 @@ function clientIp(req) {
 // single-flight fill lock, per-IP rate limit); public/unknown peers are refused.
 // Did this connection arrive on a tailscale interface (tailscale0, utunN with a 100.x
 // tailscale address)? Looked up per request, so a tailnet that comes up later works.
-function arrivedOnTailnet(req) {
+// os.networkInterfaces(), cached for a few seconds (an internet peer can make us ask).
+let _ifCache = { at: 0, v: {} };
+function netIfaces() {
+    if (Date.now() - _ifCache.at > 5000) _ifCache = { at: Date.now(), v: require('os').networkInterfaces() };
+    return _ifCache.v;
+}
+// Linux names it tailscale0; macOS uses a utunN carrying Tailscale's 100.64/10 address AND
+// its fd7a:115c:a1e0::/48 IPv6 (other VPNs, e.g. WARP, also use 100.x on a utun).
+// (Tailscale's userspace-networking mode has no interface, so its peers aren't trusted.)
+function arrivedOnTailnet(req, ifaces = netIfaces()) {
     const la = (req.socket?.localAddress || '').replace(/^::ffff:/, '');
     if (!la) return false;
-    for (const [name, addrs] of Object.entries(require('os').networkInterfaces())) {
-        if (!/^(tailscale|ts)\d*$/i.test(name)) continue;
-        if ((addrs || []).some(a => a.address === la)) return true;
+    const cgnat = a => /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(a);
+    for (const [name, addrs] of Object.entries(ifaces)) {
+        const list = addrs || [];
+        const tsV6 = list.some(a => /^fd7a:115c:a1e0:/i.test(a.address));
+        const tail = /^(tailscale|ts)\d*$/i.test(name) || (/^utun\d+$/i.test(name) && list.some(a => cgnat(a.address)) && tsV6);
+        if (tail && list.some(a => a.address === la)) return true;
+    }
+    return false;
+}
+// A global IPv6 peer is on the LAN when it shares an on-link prefix (/64 or longer) with
+// one of the box's own interfaces that ALSO carries a private (RFC 1918) IPv4 address, e.g.
+// a home router's delegated /64. A cloud uplink or an ISP's shared WAN /64 has no private
+// IPv4 beside it, so its neighbours (other customers) are not trusted.
+function ipv6ToBig(a) {
+    const s = a.split('%')[0].toLowerCase();
+    if (!/^[0-9a-f:]+$/.test(s) || (s.match(/::/g) || []).length > 1) return null;
+    const [h, t] = s.split('::');
+    const head = h ? h.split(':') : [], tail = t !== undefined && t ? t.split(':') : [];
+    const fill = t !== undefined ? 8 - head.length - tail.length : 0;
+    if (t !== undefined && fill < 1) return null;   // '::' must stand for at least one group
+    const parts = [...head, ...Array(Math.max(fill, 0)).fill('0'), ...tail];
+    if (parts.length !== 8 || parts.some(x => !/^[0-9a-f]{1,4}$/.test(x))) return null;
+    return parts.reduce((n, x) => (n << 16n) + BigInt(parseInt(x, 16)), 0n);
+}
+function onLinkV6(peer, ifaces = netIfaces()) {
+    const p = ipv6ToBig(peer); if (p === null) return false;
+    const rfc1918 = a => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a);
+    for (const addrs of Object.values(ifaces)) {
+        if (!(addrs || []).some(a => (a.family === 'IPv4' || a.family === 4) && rfc1918(a.address))) continue;
+        for (const a of addrs || []) {
+            if (a.family !== 'IPv6' && a.family !== 6) continue;
+            const bits = Number(String(a.cidr || '').split('/')[1]);
+            if (!(bits >= 64 && bits <= 128)) continue;
+            const mine = ipv6ToBig(a.address); if (mine === null) continue;
+            const mask = ((1n << BigInt(bits)) - 1n) << BigInt(128 - bits);
+            if ((mine & mask) === (p & mask)) return true;
+        }
     }
     return false;
 }
@@ -1168,7 +1211,7 @@ function isLanOrTailnet(req) {
     if (low === '::1') return true;
     if (/^f[cd][0-9a-f]{2}:/.test(low)) return true;   // ULA fc00::/7 (tailnet fd7a:…⊂ this)
     if (/^fe[89ab][0-9a-f]:/.test(low)) return true;   // link-local fe80::/10
-    return false;
+    return onLinkV6(low);                               // global IPv6 on the box's own /64
 }
 
 // Per-IP token bucket for expensive POST triggers (download / request / service
@@ -2914,13 +2957,18 @@ function serveTlsStatus(res) {
 // =============================================================================
 function handleRequest(req, res) {
     // Block path traversal attempts early (before URL normalization resolves ..)
-    if (req.url.includes('..') || req.url.includes('%2e%2e') || req.url.includes('%2E%2E')) {
+    // Any '..' segment in the raw path, plain or with encoded dots (%2e., .%2e, %2e%2e): the
+    // URL parser would resolve it before we ever saw the path. Only whole segments count, so
+    // names like "...And_Justice_for_All" or "foo..tar.gz" and the query string are fine.
+    // %5c / %2f count as separators too: the Kiwix and app proxies forward the raw URL.
+    if (/(^|\/|\\|%5c|%2f)(\.|%2e){2}(\/|\\|%5c|%2f|$)/i.test(req.url.split(/[?#]/)[0])) {
         return send404(res);
     }
 
     const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
     let urlPath;
     try { urlPath = decodeURIComponent(parsedUrl.pathname); } catch (_) { return send404(res); }
+    if (urlPath.split('/').includes('..')) return send404(res);   // belt and braces
     if (urlPath.includes('\0')) return send404(res);   // a NUL never names a real file
     // One canonical path for every check and route below. Without this, an encoded or
     // doubled slash or a dot segment (/%2fdocs, //docs, /./docs) slips past the

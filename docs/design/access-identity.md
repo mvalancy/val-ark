@@ -78,6 +78,12 @@ Jordan sees this as one plain-language screen: **"Who can use Val Ark?"** → *E
 - Use Mode: **Open (household)**.
 - Admin: **created at first boot** (with a friendly "you can skip and set it later; until then, only this box/localhost can change settings").
 - Public internet: **denied**, for changes, requests and library reads alike (#297); LAN + tailnet: **allowed**; localhost/console: **admin**. A reverse proxy or tunnel on the box (nginx, Caddy, cloudflared, Tailscale Funnel) makes every visitor look like localhost, so don't put one in front of an Ark.
+- **What counts as LAN** (`isLanOrTailnet` in `scripts/server.js`): the box itself; IPv4 10/8,
+  172.16/12, 192.168/16 and 169.254/16; IPv6 ::1, ULA (fc00::/7), link-local (fe80::/10) and a
+  global address on a /64 (or longer) of an interface that also has a private IPv4 (a home LAN,
+  not a cloud uplink). **Tailnet:** 100.64/10 only when the request arrived on Tailscale's own
+  interface (`tailscale0`, or a macOS `utun` with Tailscale's `fd7a:115c:a1e0::/48` address);
+  userspace networking isn't trusted. Everything else is the internet.
 
 > Design note: reconcile with research patterns (Synology's per-user + admin-group model,
 > Home Assistant's owner + users, Umbrel's single-password model, routers' admin-password +

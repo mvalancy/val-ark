@@ -846,6 +846,7 @@ INSTALL_HINT = 'INSTALL.txt'
 def hint_only(s, e, plat, name):
     """A tool's platform folder whose only content is its install hint -> the hint's file name.
     Never when the walk ran out of budget (s.truncated): the rest of the folder may be unseen."""
+    # A truncated walk deliberately drops EVERY build-from-source label in the section (the safe side).
     if s.truncated or (plat, name) in e.real:
         return None
     return e.hints.get((plat, name))

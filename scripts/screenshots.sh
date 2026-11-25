@@ -6,7 +6,7 @@
 #
 # Generates:
 #   docs/screenshots/web-ui/*.png    - Web UI screenshots (Playwright)
-#   docs/screenshots/web-ui/*.svg    - Terminal recordings (asciinema + svg-term-cli)
+#   docs/screenshots/terminal/*.svg  - Terminal recordings (asciinema + svg-term-cli)
 ###############################################################################
 
 set -o pipefail
@@ -14,6 +14,7 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 SCREENSHOT_DIR="${PROJECT_ROOT}/docs/screenshots/web-ui"
+TERMINAL_DIR="${PROJECT_ROOT}/docs/screenshots/terminal"
 TESTS_DIR="${PROJECT_ROOT}/tests/screenshots"
 
 RED='\033[0;31m'
@@ -22,7 +23,7 @@ YELLOW='\033[1;33m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-mkdir -p "$SCREENSHOT_DIR"
+mkdir -p "$SCREENSHOT_DIR" "$TERMINAL_DIR"
 
 ###############################################################################
 # Web UI Screenshots (Playwright)
@@ -85,7 +86,7 @@ capture_terminal() {
     asciinema rec --overwrite -c "echo ''; printf '0\n' | bash ${PROJECT_ROOT}/start.sh 2>/dev/null || true" "$cast_menu" 2>/dev/null
 
     if [ -f "$cast_menu" ]; then
-        $svg_term --in "$cast_menu" --out "${SCREENSHOT_DIR}/terminal-menu.svg" \
+        $svg_term --in "$cast_menu" --out "${TERMINAL_DIR}/terminal-menu.svg" \
             --window --width 80 --height 24 --term xterm-256color 2>/dev/null
         rm -f "$cast_menu"
         echo -e "  ${GREEN}✓${NC} terminal-menu.svg"
@@ -97,7 +98,7 @@ capture_terminal() {
     asciinema rec --overwrite -c "bash ${PROJECT_ROOT}/start.sh status 2>/dev/null || true" "$cast_status" 2>/dev/null
 
     if [ -f "$cast_status" ]; then
-        $svg_term --in "$cast_status" --out "${SCREENSHOT_DIR}/terminal-status.svg" \
+        $svg_term --in "$cast_status" --out "${TERMINAL_DIR}/terminal-status.svg" \
             --window --width 80 --height 24 --term xterm-256color 2>/dev/null
         rm -f "$cast_status"
         echo -e "  ${GREEN}✓${NC} terminal-status.svg"
@@ -105,8 +106,8 @@ capture_terminal() {
 
     echo ""
     local svg_count
-    svg_count=$(find "$SCREENSHOT_DIR" -name '*.svg' 2>/dev/null | wc -l)
-    echo -e "  ${GREEN}✓${NC} ${svg_count} SVG recordings in docs/screenshots/web-ui/"
+    svg_count=$(find "$TERMINAL_DIR" -name '*.svg' 2>/dev/null | wc -l)
+    echo -e "  ${GREEN}✓${NC} ${svg_count} SVG recordings in docs/screenshots/terminal/"
 }
 
 ###############################################################################

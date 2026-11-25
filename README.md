@@ -27,8 +27,9 @@ healthy around the clock.
   read through Kiwix), chosen from the live Kiwix catalog. Also [Lastbook](https://lastbook.org),
   an offline survival library.
 - **Apps and tools:** 50+ apps for Linux (x86_64 and arm64), macOS and Windows, from Blender and
-  Inkscape to llama.cpp, plus a developer stack, offline APT repos and source archives.
-  See the [tools catalog](docs/TOOLS.md).
+  Inkscape to llama.cpp. See the [tools catalog](docs/TOOLS.md). Mirrors you can run by hand add
+  a developer stack, offline APT repos and source archives
+  ([details](docs/LIBRARIAN.md#standalone-mirrors-run-by-hand-not-part-of-fill--the-loop)).
 - **AI models:** language, speech, vision and image models, chosen for value per byte.
   See the [model inventory](docs/MODEL_INVENTORY.md).
 - **Community:** chat, mail, message boards and file sharing on the LAN, with no internet.
@@ -69,16 +70,17 @@ The [serving guide](docs/SERVING.md) walks through each one, with screenshots.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/popup/docs-tree-dark.svg">
-  <img src="docs/img/popup/docs-tree-light.svg" width="100%" alt="The documentation tree: the README leads to the docs map, the workshop guides, the policies and the AI-agent manuals; the docs map branches into the guides, the design hierarchy and the knowledge base, each page with its file path.">
+  <img src="docs/img/popup/docs-tree-light.svg" width="100%" alt="The documentation tree: the README leads to the docs map, the workshop guides, the policies and the AI-agent manuals; the docs map branches into the guides, the design hierarchy and the knowledge base. Each page at the tip of a branch shows its file path.">
 </picture>
 
-Every guide opens with its own pop-up scene. Good places to start:
+Every human-facing guide opens with its own pop-up scene. Good places to start:
 
 - [Docs map](docs/README.md): every doc, with a "start here" table
 - [Architecture](docs/ARCHITECTURE.md): how the pieces fit, and the project layout
 - [Platforms](docs/PLATFORMS.md): which machines it runs on and serves
 - [Offline and P2P](docs/OFFLINE.md): sharing one Ark across a LAN or a fleet
 - [Tests](tests/README.md): one runner, one offline report
+- For AI agents: [CLAUDE.md](CLAUDE.md), [AGENTS.md](AGENTS.md) and [.agents/](.agents/README.md)
 
 ## Contributing and license
 

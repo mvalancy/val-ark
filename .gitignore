@@ -74,7 +74,6 @@ web-ui/content
 # Playwright screenshot tests
 tests/screenshots/node_modules/
 test-results/
-docs/screenshots/.last-run.json
 
 # Logs
 *.log

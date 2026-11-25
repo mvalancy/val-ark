@@ -16,6 +16,9 @@ later). See [README](README.md).
 
 | Date | Decision | Issue / Phase |
 |------|----------|---------------|
+| 2026‑11 | [Docs as a picture book: a short README and a generated docs tree](#202611--docs-as-a-picture-book-a-short-readme-and-a-generated-docs-tree-282) | #282 |
+| 2026‑11 | [Grid-down essentials tier + survival profile](#202611--grid-down-essentials-tier--survival-profile) | |
+| 2026‑11 | [Static browse pages for server-less archives](#202611--static-browse-pages-for-server-less-archives-257) | #257 |
 | 2026‑11 | [Lastbook: auto-sized by default, every pack opt-in](#202611--lastbook-auto-sized-by-default-every-pack-opt-in-181) | #181 |
 | 2026‑11 | [cad-agent references: a private, content-addressed archive of every cited source](#202611--cad-agent-references-a-private-content-addressed-archive-of-every-cited-source-cad-agent323) | cad-agent#323 |
 | 2026‑11 | [Python wheelhouses + container archives as tool artifacts](#202611--python-wheelhouses--container-archives-as-tool-artifacts-149) | #149 |
@@ -42,6 +45,82 @@ later). See [README](README.md).
 | 2026‑07 | [Feature branch: discover/request + self‑replication + tests](#202607--feature-branch-discoverrequest--selfreplication--tests-pr-1) | PR #1 |
 | — | [Earlier project facts (fleet, curation)](#earlier-project-facts-fleet-curation) | — |
 | 2026‑07 | [Notification center: bell/inbox slice 1](#202607--notification-center-bellinbox-slice-1-69) | #69 |
+
+---
+
+## 2026‑11 — Docs as a picture book: a short README and a generated docs tree (#282)
+
+**Context.** The front-page README had grown to 514 lines of diagrams, tool lists and command
+references that the guides already owned, and only the top-level guides had pop-up art.
+**Decision.** The README is a short front page (what an Ark is, screenshots, quick start, static vs
+dynamic, the docs tree) that links into the guides. Every human-facing doc opens with a generated
+pop-up scene, and `DOC_TREE` in `scripts/docs/popup_art.py` draws the whole docs hierarchy as one
+animated SVG tree, replacing the mermaid doc graph. `--check` fails when a tracked human-facing doc
+is left off the tree. Screenshots live in `docs/screenshots/<topic>/`.
+**Why.** People read pictures first; one fact keeps one home; and a generated tree with a test
+cannot drift the way a hand-drawn graph did.
+
+---
+
+## 2026‑11 — Grid-down essentials tier + survival profile
+- <a id="griddown-essentials"></a>**The planner gains a phase 0 that always runs first:** the ranked
+  `data/essentials.tsv`. Val Ark's premise is "the internet may disappear", so the most critical small
+  items (water, field medicine, medicines, food, shelter, a pocket encyclopedia, a CPU-sized assistant)
+  must land before diversity or value/byte ever get a say, on ANY disk size.
+- **Smallest variant first, never blocking.** Phase 0 picks from the *uncollapsed* stream (the normal
+  pipeline keeps only the largest ZIM flavour) so it can take the mini/nopic variant, and it skips an
+  entry that doesn't fit instead of stopping. It deliberately does NOT reserve the content key, so on a
+  big disk phases 1–3 still upgrade to the maxi. Eviction would NOT clean up the small copy (it has the
+  *higher* value/byte, so evict() removes it last), hence an explicit step: `planner.py --superseded`
+  lists managed, unpinned smaller variants whose larger variant is complete on disk, and
+  `librarian.sh fill` removes them at the end of every fill, so nothing is stored twice.
+- Phase-0 picks count toward category coverage (phase 1) and the phase-2 per-category caps.
+- **Focus, not a fork:** rows carry `focus` (`all` or profile list). A new `survival` profile weights
+  content 1.4 / tools 1.2 / models 0.8 and unlocks survival-only rows (Army field manuals, self-reliance
+  video). Every profile still gets the `all` rows. Grid-down topics also get a +80 value boost for all
+  profiles in `catalog.sh`.
+- Backward compatible: without `--essentials` the planner is unchanged (tested).
+- <a id="prune-after-stop"></a>**The superseded prune is skipped after a STOP halt (#177).** A
+  `state/STOP` flag means "stop changing the disk" (the owner may be about to unplug or inspect it)
+  and the plan ran only partway, so `cmd_fill` does not delete anything after a STOP — the prune just
+  runs at the end of the next un-halted fill. Every other early exit (time / byte / item budget, low
+  headroom) still prunes, because freeing the redundant small copy is exactly what helps then. The
+  prune's manifest rewrite is an exact first-column match (`awk '$1!=id'`), so an id that is a prefix
+  or extension of the pruned id is never dropped; `tests/test-essentials.sh` §8 runs the real
+  `prune_superseded` + `cmd_fill` against a fixture to hold both rules.
+- <a id="mini-then-maxi"></a>**Known trade-off, kept on purpose: mini first, maxi later.** On a big
+  disk an essential ZIM is fetched twice — the mini in phase 0, the maxi in phase 1–3, then the mini is
+  pruned — so its small variant's bytes are downloaded and thrown away. And on a disk where the maxi
+  would fit alone but not beside the mini (budget between `maxi` and `mini + maxi`), the maxi is never
+  planned; that essential stays on its mini. We considered "skip the mini when the maxi is also planned":
+  it would either move a multi-GB download into phase 0 (delaying every lower-ranked life-safety item
+  behind it on a time-bounded `maintain` fill) or leave the essential with *no* copy until phase 3
+  reaches it. Crediting the mini's bytes back to the maxi's budget doesn't work either: the prune runs
+  after the fill, so the disk briefly holds both, and the fill's live headroom check would then stop the
+  whole fill before the maxi. The waste is bounded by the small variants' size (typically ~10% of the
+  full ones), while getting the critical small copy onto the disk fast is the point of phase 0, so the
+  behavior stays as is (documented in `docs/LIBRARIAN.md`).
+
+---
+
+## 2026‑11 — Static browse pages for server-less archives (#257)
+
+- A NAS or USB disk is often reachable only as a plain file share; opening `web-ui/index.html` there
+  showed "nothing installed" because the SPA needs `server.js`. Decision: generate a **static**
+  catalog (`scripts/lib/static_site.py`, `librarian.sh site`, refreshed by `maintain`) instead of
+  teaching the SPA to read the disk: it works over `file://`, SMB and any dumb HTTP server.
+- Relative links only, no external URLs, no JS requirement: the page has to open on an offline
+  laptop pointed at a share. Names are escaped and links percent-encoded (archive file names come
+  from upstream and are untrusted).
+- Scale over completeness: per-section row caps, per-entry file caps and a walk limit, plus a
+  `--listing` TSV input so a mirror that already keeps an index never walks millions of files over a
+  slow share. Unchanged pages are not rewritten (fewer writes on network shares).
+- A file listing is not a catalog: every card carries a picture and a human description. Sources in
+  order: the web UI's own data tables (read from `web-ui/index.html` by a small JS-literal reader, so
+  there is one source of truth), the item's own metadata (ZIM `M/Title`, `M/Description`,
+  `M/Illustration_48x48@1`; model / dataset cards), the `data/*.tsv` notes, then a generated badge.
+  ZIM metadata is read with a few small random reads (header, URL-pointer binary search, one cluster)
+  instead of a ZIM library, and cached, because the archive may sit on a slow share.
 
 ---
 
@@ -807,61 +886,3 @@ domains, loopback, and `$`/`{}`/`<>` placeholders pass automatically.
   Self‑heal events are reassuring **info** ("handled it for you"); the lone exception is
   `moderation-error` (could NOT quarantine) → **warning**. Failed functional‑verify checks are
   **warning** ("working on it — self‑heal re‑verifies"), matching the Health page framing.
-
-## 2026‑11 — Grid-down essentials tier + survival profile
-- <a id="griddown-essentials"></a>**The planner gains a phase 0 that always runs first:** the ranked
-  `data/essentials.tsv`. Val Ark's premise is "the internet may disappear", so the most critical small
-  items (water, field medicine, medicines, food, shelter, a pocket encyclopedia, a CPU-sized assistant)
-  must land before diversity or value/byte ever get a say, on ANY disk size.
-- **Smallest variant first, never blocking.** Phase 0 picks from the *uncollapsed* stream (the normal
-  pipeline keeps only the largest ZIM flavour) so it can take the mini/nopic variant, and it skips an
-  entry that doesn't fit instead of stopping. It deliberately does NOT reserve the content key, so on a
-  big disk phases 1–3 still upgrade to the maxi. Eviction would NOT clean up the small copy (it has the
-  *higher* value/byte, so evict() removes it last), hence an explicit step: `planner.py --superseded`
-  lists managed, unpinned smaller variants whose larger variant is complete on disk, and
-  `librarian.sh fill` removes them at the end of every fill, so nothing is stored twice.
-- Phase-0 picks count toward category coverage (phase 1) and the phase-2 per-category caps.
-- **Focus, not a fork:** rows carry `focus` (`all` or profile list). A new `survival` profile weights
-  content 1.4 / tools 1.2 / models 0.8 and unlocks survival-only rows (Army field manuals, self-reliance
-  video). Every profile still gets the `all` rows. Grid-down topics also get a +80 value boost for all
-  profiles in `catalog.sh`.
-- Backward compatible: without `--essentials` the planner is unchanged (tested).
-- <a id="prune-after-stop"></a>**The superseded prune is skipped after a STOP halt (#177).** A
-  `state/STOP` flag means "stop changing the disk" (the owner may be about to unplug or inspect it)
-  and the plan ran only partway, so `cmd_fill` does not delete anything after a STOP — the prune just
-  runs at the end of the next un-halted fill. Every other early exit (time / byte / item budget, low
-  headroom) still prunes, because freeing the redundant small copy is exactly what helps then. The
-  prune's manifest rewrite is an exact first-column match (`awk '$1!=id'`), so an id that is a prefix
-  or extension of the pruned id is never dropped; `tests/test-essentials.sh` §8 runs the real
-  `prune_superseded` + `cmd_fill` against a fixture to hold both rules.
-- <a id="mini-then-maxi"></a>**Known trade-off, kept on purpose: mini first, maxi later.** On a big
-  disk an essential ZIM is fetched twice — the mini in phase 0, the maxi in phase 1–3, then the mini is
-  pruned — so its small variant's bytes are downloaded and thrown away. And on a disk where the maxi
-  would fit alone but not beside the mini (budget between `maxi` and `mini + maxi`), the maxi is never
-  planned; that essential stays on its mini. We considered "skip the mini when the maxi is also planned":
-  it would either move a multi-GB download into phase 0 (delaying every lower-ranked life-safety item
-  behind it on a time-bounded `maintain` fill) or leave the essential with *no* copy until phase 3
-  reaches it. Crediting the mini's bytes back to the maxi's budget doesn't work either: the prune runs
-  after the fill, so the disk briefly holds both, and the fill's live headroom check would then stop the
-  whole fill before the maxi. The waste is bounded by the small variants' size (typically ~10% of the
-  full ones), while getting the critical small copy onto the disk fast is the point of phase 0, so the
-  behavior stays as is (documented in `docs/LIBRARIAN.md`).
-
-## 2026‑11 — Static browse pages for server-less archives (#257)
-
-- A NAS or USB disk is often reachable only as a plain file share; opening `web-ui/index.html` there
-  showed "nothing installed" because the SPA needs `server.js`. Decision: generate a **static**
-  catalog (`scripts/lib/static_site.py`, `librarian.sh site`, refreshed by `maintain`) instead of
-  teaching the SPA to read the disk: it works over `file://`, SMB and any dumb HTTP server.
-- Relative links only, no external URLs, no JS requirement: the page has to open on an offline
-  laptop pointed at a share. Names are escaped and links percent-encoded (archive file names come
-  from upstream and are untrusted).
-- Scale over completeness: per-section row caps, per-entry file caps and a walk limit, plus a
-  `--listing` TSV input so a mirror that already keeps an index never walks millions of files over a
-  slow share. Unchanged pages are not rewritten (fewer writes on network shares).
-- A file listing is not a catalog: every card carries a picture and a human description. Sources in
-  order: the web UI's own data tables (read from `web-ui/index.html` by a small JS-literal reader, so
-  there is one source of truth), the item's own metadata (ZIM `M/Title`, `M/Description`,
-  `M/Illustration_48x48@1`; model / dataset cards), the `data/*.tsv` notes, then a generated badge.
-  ZIM metadata is read with a few small random reads (header, URL-pointer binary search, one cluster)
-  instead of a ZIM library, and cached, because the archive may sit on a slow share.

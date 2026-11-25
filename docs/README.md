@@ -25,11 +25,12 @@ offline content (ZIM via Kiwix), with a zero-dependency web UI.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/popup/docs-tree-dark.svg">
-  <img src="img/popup/docs-tree-light.svg" width="100%" alt="The documentation tree: the README leads to the docs map, the workshop guides, the policies and the AI-agent manuals; the docs map branches into the guides, the design hierarchy and the knowledge base, each page with its file path.">
+  <img src="img/popup/docs-tree-light.svg" width="100%" alt="The documentation tree: the README leads to the docs map, the workshop guides, the policies and the AI-agent manuals; the docs map branches into the guides, the design hierarchy and the knowledge base. Each page at the tip of a branch shows its file path.">
 </picture>
 
 The tree is drawn by [`scripts/docs/popup_art.py`](../scripts/docs/popup_art.py) from its
-`DOC_TREE` list, and `tests/test-doc-art.sh` fails if a tracked doc is missing from it.
+`DOC_TREE` list, and `tests/test-doc-art.sh` fails if a tracked human-facing doc is missing from it (see
+[Pop-up art](AGENTS.md#pop-up-art-the-chapter-scenes) for what is exempt).
 Every guide on it opens with its own pop-up scene.
 
 Every important folder also carries its own `AGENTS.md` (local operating notes) and/or a
@@ -120,6 +121,8 @@ Each important folder carries local operating notes.
 | `web-ui/` | [web-ui/AGENTS.md](../web-ui/AGENTS.md) · [web-ui/README.md](../web-ui/README.md) — zero-dep SPA (TOOLS array, TOOL_META, logos, screenshots). |
 | `data/` | [data/AGENTS.md](../data/AGENTS.md) — the six catalog TSVs (installers, models-extra, essentials, dev-stack, apt-sets, source-repos) and their schemas. |
 | `docs/` | [docs/AGENTS.md](AGENTS.md) — the reference guides (this folder). |
+| `docs/screenshots/` | Screenshots by topic: `web-ui/`, `serving/`, `mirror-honesty/`, `terminal/`. |
+| `docs/img/` | Drawn art: `hero/` and the generated `popup/` scenes and docs tree. |
 | `docs/design/` | [docs/design/AGENTS.md](design/AGENTS.md) — the scope-first design set. |
 | `docs/knowledge/` | [docs/knowledge/AGENTS.md](knowledge/AGENTS.md) — the shared brain. |
 | `.github/` | [.github/AGENTS.md](../.github/AGENTS.md) — issue/PR templates + CI notes. |

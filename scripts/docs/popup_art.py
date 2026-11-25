@@ -212,14 +212,14 @@ SCENES = {
         used=['docs/design/research-brief.md']),
     'roadmap': dict(chapter='Design', title='The road, phase by phase',
         sub='Each phase ships something an owner can feel. Recovery lands before any gate.', backdrop='hills',
-        cards=[('key', 'Recovery', '1'), ('check', 'Setup', '2'), ('lock', 'Access', '3'),
-               ('eye', 'Home', '4'), ('disk', 'Storage', '5'), ('brain', 'Assistant', '8')],
+        cards=[('check', 'Setup', '1'), ('key', 'Access', '2'), ('eye', 'Home', '3'),
+               ('disk', 'Storage', '4'), ('play', 'Downloads', '5'), ('brain', 'Assistant', '8')],
         links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side'), (4, 5, 'side')],
         used=['docs/design/roadmap.md']),
     'commissioning': dict(chapter='Design', title='The first five minutes',
         sub='A fresh box becomes a working Ark in a browser: no files, flags or jargon.', backdrop='city',
-        cards=[('wifi', 'Find it', None), ('key', 'Claim code', None), ('shield', 'Use Mode', None),
-               ('paste', 'Paper card', None), ('check', 'Ready', None)],
+        cards=[('wifi', 'Find it', None), ('disk', 'Storage', None), ('shield', 'Who can use', None),
+               ('book', 'Topics', None), ('check', 'Ready', None)],
         links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side')],
         used=['docs/design/commissioning.md']),
     'access-identity': dict(chapter='Design', title='Who can come in',
@@ -248,7 +248,7 @@ SCENES = {
         used=['docs/design/deployment.md']),
     'downloads-monitoring': dict(chapter='Design', title='Pick what matters',
         sub='Plain-language profiles sized to the disk, and downloads you can watch.', backdrop='hills',
-        cards=[('leaf', 'Survival', None), ('book', 'Learning', None), ('brain', 'AI', None),
+        cards=[('book', 'Wikipedia', None), ('wrench', 'How-to', None), ('brain', 'AI helper', None),
                ('disk', 'Fits disk', None), ('play', 'Progress', None)],
         links=[(0, 3, 'arc'), (1, 3, 'arc'), (2, 3, 'side'), (3, 4, 'side')],
         used=['docs/design/downloads-monitoring.md']),
@@ -319,7 +319,7 @@ SCENES = {
         links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side')],
         used=['CONTRIBUTING.md']),
     'security-policy': dict(chapter='Policy', title='Reporting a problem',
-        sub='A LAN appliance, never on the open internet. Report privately; we fix fast.', backdrop='vault',
+        sub='A LAN appliance, never on the open internet. Report it privately, fixed in private.', backdrop='vault',
         cards=[('magnifier', 'Found one', None), ('mail', 'Tell us', None), ('shield', 'Fix', None),
                ('check', 'Release', None)],
         links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side')],
@@ -327,6 +327,10 @@ SCENES = {
 }
 
 # ---------------------------------------------------------------- drawing
+def sentence(title):
+    """A title as a sentence: 'Forgot the password?' stays, 'The scripts' gains a period."""
+    return title if title[-1] in '.?!' else title + '.'
+
 def esc(s):
     return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
 
@@ -425,7 +429,7 @@ def render(sid, spec, theme):
     rnd = random.Random(sid)
     xs, w = layout(len(spec['cards']))
     title = f"Val Ark: {spec['title']}"
-    desc = (f"Pop-up book scene for {spec['chapter']}: {spec['title']}. Paper cut-outs for "
+    desc = (f"Pop-up book scene for {spec['chapter']}: {sentence(spec['title'])} Paper cut-outs for "
             + ', '.join(c[1] for c in spec['cards'])
             + ' unfold from the spine of an open book, then fold flat and repeat. ' + spec['sub'])
     css = f"""
@@ -568,7 +572,9 @@ def tree_missing():
         tracked = subprocess.run(['git', 'ls-files', '*.md'], cwd=ROOT, capture_output=True,
                                  text=True, check=True).stdout.split()
     except (OSError, subprocess.CalledProcessError):
-        return [], []   # not a git checkout (e.g. a release tarball): nothing to compare
+        # not a git checkout (e.g. a release tarball): walk the tree instead
+        tracked = [str(f.relative_to(ROOT)) for f in ROOT.rglob('*.md')
+                   if not {'.git', 'node_modules'} & set(f.relative_to(ROOT).parts)]
     want = {p for p in tracked if not re.search(r'(^|/)AGENTS\.md$|^\.github/|^\.agents/(skills|knowledge)/', p)}
     want.add('AGENTS.md')
     have = set(tree_paths())
@@ -661,13 +667,12 @@ def main(argv):
             print(f'not produced by the generator: docs/img/popup/{n}')
         missing, gone = tree_missing()
         for n in missing:
-            print(f'not on the docs tree (DOC_TREE): {n}')
+            print(f'not on the docs tree (DOC_TREE in scripts/docs/popup_art.py): {n}')
         for n in gone:
             print(f'on the docs tree but missing: {n}')
-        if missing or gone:
-            return 1
         if bad or extra:
             print('run: python3 scripts/docs/popup_art.py')
+        if bad or extra or missing or gone:
             return 1
         print(f'ok: {len(files)} pop-up SVGs match the generator')
         return 0

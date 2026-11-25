@@ -2385,7 +2385,7 @@ function handleModerationCheck(req, res) {
 
 // ---- Review queue (Safety card) ----------------------------------------------------
 // The sweep appends each quarantined item to queue.jsonl; a review action (remove /
-// restore / dismiss) is recorded in reviewed.jsonl so the queue log stays append-only.
+// dismiss) is recorded in reviewed.jsonl so the queue log stays append-only.
 // An item's ID is its quarantine BASENAME (unique, contains no separators) — it both
 // correlates the two logs AND confines the file operation to the quarantine dir.
 function _modQueueFiles() {

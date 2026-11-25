@@ -119,7 +119,7 @@ DIAGRAMS = {
         used=['docs/ARCHITECTURE.md', 'docs/design/downloads-monitoring.md']),
     'access': dict(
         title='Who can do what',
-        sub='The box is always the Admin; the LAN gets what the Use Mode allows; the internet can change nothing.',
+        sub='The box is always the Admin; the LAN gets what the Use Mode allows; the internet gets no library.',
         h=540,
         zones=[(28, 104, 300, 412, 'Who is asking'), (356, 104, 420, 412, 'The gate'),
                (804, 104, 368, 412, 'What they can do')],
@@ -129,7 +129,7 @@ DIAGRAMS = {
             'net': (178, 460, 'globe', 'The internet', 'everyone else', 2),
             'admin': (566, 190, 'key', 'Admin', 'box, or passcode', 3),
             'mode': (566, 330, 'lock', 'Use Mode', 'Open, or sign in', 4),
-            'block': (566, 460, 'shield', 'No changes', 'no requests, no setup', 5),
+            'block': (566, 460, 'shield', 'Refused', 'no reads, no changes', 5),
             'set': (988, 190, 'gear', 'Settings, repair', 'moderation, accounts', 6),
             'use': (988, 330, 'book', 'Browse, request', 'library, downloads', 7),
         },

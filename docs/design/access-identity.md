@@ -13,7 +13,7 @@ accounts? Are there real access controls? What's admin vs. user?* (See
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../img/flow/access-dark.svg">
-  <img src="../img/flow/access-light.svg" width="100%" alt="Animated diagram: Who can do what. The box is always the Admin; the LAN gets what the Use Mode allows; the internet can change nothing.">
+  <img src="../img/flow/access-light.svg" width="100%" alt="Animated diagram: Who can do what. The box is always the Admin; the LAN gets what the Use Mode allows; the internet gets no library.">
 </picture>
 
 Three independent layers, from bottom to top:
@@ -31,7 +31,7 @@ Three independent layers, from bottom to top:
 
 ### Layer 1 — Network floor (automatic, not a user setting)
 - **The box's own console and `localhost` are always trusted as admin.** Physical/loopback access means you own the device — this is what makes recovery possible with no password.
-- **LAN + tailnet** are allowed to reach the box; **the public internet is always denied** for write actions. (This already exists as the LAN/tailnet POST gate.)
+- **LAN + tailnet** are allowed to reach the box; **the public internet is always denied**: every change and request (the LAN/tailnet POST gate) and, in every Use Mode, every read of the library (#297).
 - This floor is invisible to Jordan; it just makes "on the box" and "on my network" safe.
 
 ### Layer 2 — Admin (always present)
@@ -77,7 +77,7 @@ Jordan sees this as one plain-language screen: **"Who can use Val Ark?"** → *E
 
 - Use Mode: **Open (household)**.
 - Admin: **created at first boot** (with a friendly "you can skip and set it later; until then, only this box/localhost can change settings").
-- Public internet: **denied** for every change and request (and for reads in Passworded / Accounts); LAN + tailnet: **allowed**; localhost/console: **admin**. In Open mode, reads aren't yet limited to the LAN, so keep the port off the internet (#297).
+- Public internet: **denied**, for changes, requests and library reads alike (#297); LAN + tailnet: **allowed**; localhost/console: **admin**. A reverse proxy or tunnel on the box (nginx, Caddy, cloudflared, Tailscale Funnel) makes every visitor look like localhost, so don't put one in front of an Ark.
 
 > Design note: reconcile with research patterns (Synology's per-user + admin-group model,
 > Home Assistant's owner + users, Umbrel's single-password model, routers' admin-password +

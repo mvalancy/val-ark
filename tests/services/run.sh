@@ -2,7 +2,7 @@
 ###############################################################################
 # Val Ark - community-services end-to-end tests.
 #
-# Exercises the four LAN comms services (chat / mail / forum / paste) against a
+# Exercises the LAN community services (chat / mail / forum / paste / gitea) against a
 # running Ark: status API shape, per-service enabled/mirrored/running, and that
 # each RUNNING service answers through its /app/<id>/ reverse-proxy frame. Writes
 # a common-schema result file for the unified HTML report.
@@ -15,7 +15,7 @@ _DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${_DIR}/../lib/results.sh"
 
 URL="${VALARK_URL:-http://127.0.0.1:3000}"; URL="${URL%/}"
-SERVICES="chat mail forum paste"
+SERVICES="chat mail forum paste gitea"
 
 _http() { curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$1" 2>/dev/null; }
 _json() { curl -s --max-time 8 "$1" 2>/dev/null; }
@@ -77,7 +77,8 @@ _sandbox_ok() { printf '%s' "$1" | grep -q '^content-security-policy: sandbox al
     && ! printf '%s' "$1" | grep -q 'allow-same-origin'; }
 for pair in "paste:/app/paste/file/e2eprobe?preview=true" \
             "forum:/app/forum/assets/uploads/files/e2e-probe.html" \
-            "chat:/app/chat/uploads/e2eprobe/e2e-probe.html"; do
+            "chat:/app/chat/uploads/e2eprobe/e2e-probe.html" \
+            "gitea:/app/gitea/e2eprobe/probe/raw/branch/main/e2e-probe.html"; do
     id="${pair%%:*}"; path="${pair#*:}"
     if [ "$(_svc_field "$svc_json" "$id" running)" != "True" ]; then
         results_case "$id: upload route is sandboxed" skip 0 "$id not running"

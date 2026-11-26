@@ -95,6 +95,20 @@ print("%d copies, %d re-hashed, %d bundle(s) verified" % (d["copies"], d["hashed
     else bad "cad-agent references integrity: ${summary:-verify exited $rc}"; fi
 }
 
+verify_gitea() {
+    # The mirrored Gitea binary for THIS host runs offline (#346): `gitea --version`
+    # must answer with its version line. Not mirrored here: nothing to check.
+    local bin="$1/gitea/gitea" out
+    [ -f "$bin" ] || return 0
+    [ -x "$bin" ] || chmod +x "$bin" 2>/dev/null
+    out=$(timeout 30 "$bin" --version 2>&1 </dev/null)
+    if [ $? -eq 0 ] && printf '%s' "$out" | grep -qi '^gitea version [0-9]'; then
+        chk "tool runs: gitea ($(printf '%s' "$out" | head -1 | awk '{print $3}'))"
+    else
+        bad "tool present but won't run: gitea ($bin: $(printf '%s' "$out" | head -1 | cut -c1-120))"
+    fi
+}
+
 verify_local() {
     echo "── local functional checks ──"
     local td; td=$(native_tools_dir)
@@ -116,6 +130,7 @@ verify_local() {
         fi
     done
     [ "$any_tool" = 0 ] && skip "no native tool binaries in $td yet"
+    verify_gitea "$td"
 
     # 1b) cad-agent's mirrored wheelhouse installs OFFLINE (pip --no-index) into a
     # throwaway venv and the CLI runs. Core package only: the full extras set is

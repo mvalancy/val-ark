@@ -34,7 +34,7 @@ disk and keep itself healthy 24/7. Start here to understand how a box boots, fil
 ### Subsystems (own AGENTS.md)
 
 - [`lib/`](lib/AGENTS.md) — shared sourced/required building blocks (data-root, curation pipeline, moderation, auth, TLS).
-- [`services/`](services/AGENTS.md) — Community hub LAN service runners (chat/mail/forum/paste/seaweedfs).
+- [`services/`](services/AGENTS.md) — Community hub LAN service runners (chat/mail/forum/paste/gitea/seaweedfs).
 - [`tools/`](tools/AGENTS.md) — the ~50-script tool-mirroring subsystem + `_common.sh`.
 
 ## server.js navigation map
@@ -56,7 +56,7 @@ Zero-dep Node HTTP(S) server, ~3.4k lines. Sections are marked by `// ====` bann
 | 2928–3045 | Server (`handleRequest` + listen) | top-level router (blocks `..`/`%2e` early; routes `/ca.crt`, `/bootstrap.sh`, `/kiwix`, `/sources`, API, static); creates HTTP/HTTPS servers, binds `PORT` + `EXTRA_PORTS`. |
 | 3046–3377 | Kiwix Auto-Launch | scans `content/zim` for complete `.zim`, launches `kiwix-serve` on the internal `KIWIX_PORT`, proxied at `/kiwix/`. |
 
-**Served surfaces:** ~48 `/api/…` routes · `/app/<id>/` (chat/mail/forum/paste) · `/kiwix/` (offline library) · `/sources/` (self bundle/tarball) · `/bootstrap.sh` (host-aware installer) · `/ca.crt`.
+**Served surfaces:** ~48 `/api/…` routes · `/app/<id>/` (chat/mail/forum/paste/gitea) · `/kiwix/` (offline library) · `/sources/` (self bundle/tarball) · `/bootstrap.sh` (host-aware installer) · `/ca.crt`.
 
 ## How to work here
 

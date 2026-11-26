@@ -1685,7 +1685,7 @@ function handleAPI(req, res, urlPath) {
                     break;
                 }
                 case '/api/service/start':
-                    // Bring up an enabled + mirrored community service (chat/mail/forum/paste).
+                    // Bring up an enabled + mirrored community service (chat/mail/forum/paste/gitea).
                     result = startService(body.id);
                     break;
                 case '/api/service/adduser':
@@ -1939,6 +1939,13 @@ const SUBAPP_USER_CONTENT = {
     chat:  /^\/app\/chat\/(?:uploads|storage)\//i,
     // alps: raw message parts, plus its remote-resource proxy and BIMI avatars.
     mail:  /^\/app\/mail\/(?:(?:mailboxes|message)\/.+\/raw|proxy|bimi\/avatar)(?:\/|$)/i,
+    // Gitea (#346): site-wide attachments, avatars and package files (npm/PyPI/generic
+    // uploads under /api/packages/); per repo /{owner}/{repo}/... raw and media (LFS)
+    // files, attachments, release downloads, archives, raw wiki pages and the render
+    // frame, also via /api/v1/repos/{owner}/{repo}/...; and LFS objects.
+    gitea: new RegExp('^/app/gitea/(?:(?:attachments|avatars|repo-avatars|api/packages)/'
+        + '|(?:api/v1/repos/)?[^/]+/[^/]+/(?:raw|media|attachments|releases/download|archive|wiki/raw|render)(?:/|$)'
+        + '|[^/]+/[^/]+\\.git/info/lfs/)', 'i'),
 };
 function isSubAppUserContent(id, urlPath) {
     const re = SUBAPP_USER_CONTENT[id];
@@ -1966,6 +1973,13 @@ function pipeProxy(req, res, port, label, pathOverride, opts) {
     // Never leak the Val Ark admin session cookie to backend sub-apps (NodeBB, The
     // Lounge, kiwix, …) — they don't need it and could log/exfiltrate the bearer token.
     const fwdHeaders = { ...req.headers, host: `127.0.0.1:${port}` };
+    if (opts.preserveHost && req.headers.host) {
+        // The upstream builds absolute links (clone URLs, avatars, API urls) from the Host
+        // the browser used, so pass it through (hostAllowed() already vetted it) along with
+        // the scheme of the listener the request arrived on, never a client-supplied one.
+        fwdHeaders.host = req.headers.host;
+        fwdHeaders['x-forwarded-proto'] = req.socket && req.socket.encrypted ? 'https' : 'http';
+    }
     if (fwdHeaders.cookie) {
         const kept = fwdHeaders.cookie.split(/;\s*/).filter((c) => c && !/^varksid=/.test(c)).join('; ');
         if (kept) fwdHeaders.cookie = kept; else delete fwdHeaders.cookie;
@@ -2033,6 +2047,9 @@ const APP_SERVICES = {
     mail:  { port: envPort('VALARK_MAIL_WEB_PORT', 1323), strip: true },   // alps webmail
     forum: { port: envPort('VALARK_FORUM_PORT', 4567), strip: false },     // NodeBB serves under its configured url base
     paste: { port: envPort('PASTE_PORT', 8085), strip: true },             // MicroBin serves at root; PUBLIC_PATH only prefixes links
+    // Gitea serves at root; ROOT_URL's /app/gitea/ only prefixes links. preserveHost: its
+    // PUBLIC_URL_DETECTION=auto builds absolute URLs from the browser's Host.
+    gitea: { port: envPort('VALARK_GITEA_PORT', 3300), strip: true, preserveHost: true },
 };
 function proxyAppService(req, res, id, urlPath, name) {
     const svc = APP_SERVICES[id];
@@ -2043,7 +2060,7 @@ function proxyAppService(req, res, id, urlPath, name) {
         if (!targetPath.startsWith('/')) targetPath = '/' + targetPath;
     }
     pipeProxy(req, res, svc.port, name || id, targetPath,
-        { subApp: true, userContent: isSubAppUserContent(id, urlPath || '') });
+        { subApp: true, userContent: isSubAppUserContent(id, urlPath || ''), preserveHost: !!svc.preserveHost });
 }
 
 // Liveness of each sub-app (so the UI offers "Launch" only when it's actually
@@ -3293,6 +3310,7 @@ const COMMUNITY_ACCOUNTS = {
     mail:  { signup: 'host',   label: 'Mail',              note: 'The host provisions your mailbox (login + IMAP account); sign in at /app/mail/.' },
     forum: { signup: 'self',   label: 'Message Boards',    registerPath: '/app/forum/register', note: 'Create your own account on the forum’s Register page.' },
     paste: { signup: 'shared', label: 'Files & Pastebin',  note: 'One shared, access-gated instance — get the access code from your host (no per-user signup).' },
+    gitea: { signup: 'host',   label: 'Git forge',         note: 'Registration is off: the host creates your login (gitea.sh adduser; the first one is the site admin), then you sign in at /app/gitea/.' },
 };
 
 // Create a login on a host-provisioned community service (chat/mail). Minting a

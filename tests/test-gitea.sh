@@ -148,6 +148,23 @@ printf '{"ts":"x","label":"shed-ark","state":"unavailable","reason":"no avahi"}\
 VALARK_WEB_PORT="$WP" bash "$SVC" config >/dev/null 2>&1
 ini server ROOT_URL | grep -qE "$DEF_RE" && pass || fail "an unannounced name must not be used (got $(ini server ROOT_URL))"
 rm -f "$T/state/mdns.json"
+# The default host must skip tunnel/container interfaces (same list as mdns.sh / lanIp()).
+FB="$T/fakebin"; mkdir -p "$FB"
+cat > "$FB/ip" <<'FAKE'
+#!/bin/sh
+case "$*" in
+  *"route get"*) echo "192.0.2.1 dev docker0 src 10.0.0.9 uid 0" ;;
+  *"addr show"*) echo "3: docker0    inet 10.0.0.9/16 scope global docker0"
+                 echo "4: wg0    inet 10.0.0.9/24 scope global wg0"
+                 echo "5: tailscale0    inet 10.0.0.20/32 scope global tailscale0"
+                 echo "6: veth1a@if7    inet 10.0.0.20/24 scope global veth1a"
+                 echo "7: eth0    inet 10.0.0.5/24 scope global eth0" ;;
+esac
+FAKE
+chmod +x "$FB/ip"
+PATH="$FB:$PATH" VALARK_WEB_PORT="$WP" bash "$SVC" config >/dev/null 2>&1
+v=$(ini server ROOT_URL)
+[ "$v" = "http://10.0.0.5:$WP/app/gitea/" ] && pass || fail "the default host must skip docker/wg/tailscale/veth interfaces (got '$v')"
 [ "$(ini service DISABLE_REGISTRATION)" = "true" ] && pass || fail "registration must be off"
 [ "$(ini service SHOW_REGISTRATION_BUTTON)" = "false" ] && pass || fail "the register button must be hidden"
 [ "$(ini database DB_TYPE)" = "sqlite3" ] && pass || fail "the database must be SQLite"
@@ -235,7 +252,9 @@ class H(BaseHTTPRequestHandler):
         self.send_header("X-Stub-Host", self.headers.get("Host", ""))
         self.send_header("X-Stub-Proto", self.headers.get("X-Forwarded-Proto", ""))
         for h in ("X-Forwarded-For", "X-Real-IP", "X-Forwarded-Host", "X-Forwarded-Server", "Forwarded",
-                  "X-WEBAUTH-USER", "X-WEBAUTH-EMAIL", "Remote-User", "X_WEBAUTH_USER"):
+                  "X-WEBAUTH-USER", "X-WEBAUTH-EMAIL", "Remote-User", "X_WEBAUTH_USER",
+                  "True-Client-IP", "X-Client-IP", "CF-Connecting-IP", "X-Original-URL", "X-Original-Forwarded-For",
+                  "X-Remote-User", "X_Remote_User", "X_Original_Host", "True_Client_IP"):
             self.send_header("X-Echo-" + h.replace("_", "-u-"), "[%s]" % self.headers.get(h, "-"))
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -309,12 +328,15 @@ else
     # Identity headers come from the proxy, never the client: every sub-app, not just Gitea.
     forged=(-H 'X-Forwarded-For: 203.0.113.7' -H 'X-Real-IP: 203.0.113.7' -H 'X-Forwarded-Host: x.lan'
             -H 'X-Forwarded-Server: x.lan' -H 'Forwarded: for=203.0.113.7;host=x.lan' -H 'X-WEBAUTH-USER: alice'
-            -H 'X-WEBAUTH-EMAIL: alice@x.lan' -H 'Remote-User: alice' -H 'X_WEBAUTH_USER: alice')
+            -H 'X-WEBAUTH-EMAIL: alice@x.lan' -H 'Remote-User: alice' -H 'X_WEBAUTH_USER: alice'
+            -H 'True-Client-IP: 203.0.113.7' -H 'X-Client-IP: 203.0.113.7' -H 'CF-Connecting-IP: 203.0.113.7'
+            -H 'X-Original-URL: /admin' -H 'X-Original-Forwarded-For: 203.0.113.7' -H 'X-Remote-User: alice'
+            -H 'X_Remote_User: alice' -H 'X_Original_Host: x.lan' -H 'True_Client_IP: 203.0.113.7')
     for u in /app/gitea/explore /app/paste/; do
         h="$(hdrs "$u" "${forged[@]}")"
         echo "$h" | grep -q '^x-echo-x-forwarded-for: \[127.0.0.1\]$' && pass \
           || fail "$u: X-Forwarded-For must be the real peer only ($(echo "$h" | grep x-echo-x-forwarded-for))"
-        for k in x-real-ip x-forwarded-host x-forwarded-server forwarded x-webauth-user x-webauth-email remote-user x-u-webauth-u-user; do
+        for k in x-real-ip x-forwarded-host x-forwarded-server forwarded x-webauth-user x-webauth-email remote-user x-u-webauth-u-user true-client-ip x-client-ip cf-connecting-ip x-original-url x-original-forwarded-for x-remote-user x-u-remote-u-user x-u-original-u-host true-u-client-u-ip; do
             echo "$h" | grep -q "^x-echo-$k: \[-\]$" && pass || fail "$u: a client's $k must be stripped ($(echo "$h" | grep "x-echo-$k"))"
         done
     done

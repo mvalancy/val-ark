@@ -73,10 +73,20 @@ _box_host() {
         label=$(sed -n 's/.*"label":"\([A-Za-z0-9-]*\)".*/\1/p' "$m" | head -1)
         case "$st" in published|native) [ -n "$label" ] && { echo "${label}.local"; return; } ;; esac
     fi
-    # The default route's source address (no packet is sent), then any private address.
-    ip=$( { ip -4 route get 192.0.2.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p'
-            hostname -I 2>/dev/null | tr ' ' '\n'; } \
-        | grep -E '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)' | head -1)
+    # The default route's source address (no packet is sent) when it leaves through a LAN
+    # interface, else the first private address on one. Same exclusions as lib/mdns.sh
+    # (SKIP_IFACE_RE) and server.js lanIp(): never a tunnel/VPN/container/bridge address.
+    local skip='^(tailscale|ts|utun|wg|tun|zt|docker|br-|veth|virbr|lo)' priv='^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)' dev line
+    line=$(ip -4 route get 192.0.2.1 2>/dev/null | head -1)
+    dev=$(printf '%s' "$line" | sed -n 's/.* dev \([^ ]*\).*/\1/p')
+    ip=$(printf '%s' "$line" | sed -n 's/.* src \([0-9.]*\).*/\1/p')
+    if [ -z "$ip" ] || [ -z "$dev" ] || printf '%s' "$dev" | grep -qE "$skip" || ! printf '%s' "$ip" | grep -qE "$priv"; then
+        ip=$(ip -4 -o addr show scope global 2>/dev/null | awk '{sub(/\/.*/, "", $4); sub(/@.*/, "", $2); print $2, $4}' \
+            | while read -r dev a; do
+                printf '%s' "$dev" | grep -qE "$skip" && continue
+                printf '%s' "$a" | grep -qE "$priv" && { echo "$a"; break; }
+              done)
+    fi
     echo "${ip:-localhost}"
 }
 _root_url() {

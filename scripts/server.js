@@ -1984,7 +1984,7 @@ function pipeProxy(req, res, port, label, pathOverride, opts) {
     // name (X-WEBAUTH-USER, Remote-User) is one config change from a login bypass. Node
     // keeps underscore spellings, so those are matched too.
     for (const k of Object.keys(fwdHeaders)) {
-        if (/^(?:x[-_]forwarded[-_]|forwarded$|x[-_]real[-_]ip$|x[-_]webauth[-_]|remote[-_]user$)/i.test(k)) delete fwdHeaders[k];
+        if (/^(?:x[-_]forwarded[-_]|forwarded$|x[-_]real[-_]ip$|x[-_]webauth[-_]|x?[-_]?remote[-_]user$|true[-_]client[-_]ip$|x[-_]client[-_]ip$|cf[-_]connecting[-_]ip$|x[-_]original[-_])/i.test(k)) delete fwdHeaders[k];
     }
     const peer = clientIp(req);
     if (peer) fwdHeaders['x-forwarded-for'] = peer;

@@ -53,7 +53,7 @@ DIAGRAMS = {
         edges=[('kiwix', 'lib', 'catalogs', 0), ('hf', 'lib', '', 0), ('gh', 'lib', 'installers', 0),
                ('gh', 'loop', 'weekly app refresh', 0),
                ('lib', 'disk', 'downloads', 0), ('loop', 'disk', 'repairs', 0), ('loop', 'lib', 'tops up', 0),
-               ('loop', 'site', 'rewrites', 0), ('disk', 'srv', '', 0),
+               ('loop', 'site', 'rewrites', 0), ('disk', 'srv', '', 0), ('disk', 'site', 'served from', 0),
                ('srv', 'people', 'web UI', 0), ('site', 'share', 'plain HTML', 0)],
         used=['docs/ARCHITECTURE.md', 'README.md', 'docs/HOW-IT-WORKS.md']),
     'fill': dict(

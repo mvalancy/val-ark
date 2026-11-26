@@ -1939,13 +1939,18 @@ const SUBAPP_USER_CONTENT = {
     chat:  /^\/app\/chat\/(?:uploads|storage)\//i,
     // alps: raw message parts, plus its remote-resource proxy and BIMI avatars.
     mail:  /^\/app\/mail\/(?:(?:mailboxes|message)\/.+\/raw|proxy|bimi\/avatar)(?:\/|$)/i,
-    // Gitea (#346): site-wide attachments, avatars and package files (npm/PyPI/generic
-    // uploads under /api/packages/); per repo /{owner}/{repo}/... raw and media (LFS)
-    // files, attachments, release downloads, archives, raw wiki pages and the render
-    // frame, also via /api/v1/repos/{owner}/{repo}/...; and LFS objects.
-    gitea: new RegExp('^/app/gitea/(?:(?:attachments|avatars|repo-avatars|api/packages)/'
+    // Gitea (#346): site-wide attachments, avatars, package files (npm/PyPI/generic uploads
+    // under /api/packages/) and the container registry (/v2/); per repo /{owner}/{repo}/...
+    // raw and media (LFS) files, attachments, release downloads, archives, raw wiki pages
+    // and the render frame, also via /api/v1/repos/{owner}/{repo}/...; LFS objects (with or
+    // without .git); commit/PR/compare .patch and .diff (and the API's git/commits ones),
+    // which carry user text as text/plain; and a user's /{name}.keys / .gpg key dumps.
+    gitea: new RegExp('^/app/gitea/(?:(?:attachments|avatars|repo-avatars|api/packages|v2)/'
         + '|(?:api/v1/repos/)?[^/]+/[^/]+/(?:raw|media|attachments|releases/download|archive|wiki/raw|render)(?:/|$)'
-        + '|[^/]+/[^/]+\\.git/info/lfs/)', 'i'),
+        + '|[^/]+/[^/]+(?:\\.git)?/info/lfs/'
+        + '|[^/]+/[^/]+/(?:commit|pulls|compare)/.+\\.(?:patch|diff)$'
+        + '|api/v1/repos/[^/]+/[^/]+/git/commits/[^/]+\\.(?:patch|diff)$'
+        + '|[^/]+\\.(?:keys|gpg)$)', 'i'),
 };
 function isSubAppUserContent(id, urlPath) {
     const re = SUBAPP_USER_CONTENT[id];
@@ -1973,6 +1978,16 @@ function pipeProxy(req, res, port, label, pathOverride, opts) {
     // Never leak the Val Ark admin session cookie to backend sub-apps (NodeBB, The
     // Lounge, kiwix, …) — they don't need it and could log/exfiltrate the bearer token.
     const fwdHeaders = { ...req.headers, host: `127.0.0.1:${port}` };
+    // Identity/forwarding headers are ours to set, never the client's (#386 review): an
+    // upstream that trusts loopback (Gitea's REVERSE_PROXY_TRUSTED_PROXIES) would take a
+    // forged X-Forwarded-For / X-Real-IP / Forwarded as the peer address, and a header-auth
+    // name (X-WEBAUTH-USER, Remote-User) is one config change from a login bypass. Node
+    // keeps underscore spellings, so those are matched too.
+    for (const k of Object.keys(fwdHeaders)) {
+        if (/^(?:x[-_]forwarded[-_]|forwarded$|x[-_]real[-_]ip$|x[-_]webauth[-_]|remote[-_]user$)/i.test(k)) delete fwdHeaders[k];
+    }
+    const peer = clientIp(req);
+    if (peer) fwdHeaders['x-forwarded-for'] = peer;
     if (opts.preserveHost && req.headers.host) {
         // The upstream builds absolute links (clone URLs, avatars, API urls) from the Host
         // the browser used, so pass it through (hostAllowed() already vetted it) along with

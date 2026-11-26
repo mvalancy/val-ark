@@ -2301,7 +2301,8 @@ const TOOLS = [
                 'Single static binary with SQLite: no database server, no runtime',
                 'Offline mode: no CDN assets, no Gravatar, no mailer, no update checks',
                 'Registration off; the host creates logins and the first one is the site admin',
-                'Raw files, attachments and release downloads are served sandboxed by the Val Ark proxy'
+                'Raw files, attachments and release downloads are served sandboxed by the Val Ark proxy',
+                'Set VALARK_GITEA_ROOT_URL in .env to the address people use: webhooks and git push hints are built from it (default: this box\u2019s .local name or LAN IP)'
             ],
             screenshots: ['screenshots/gitea-1.png'],
             cli: [

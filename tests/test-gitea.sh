@@ -133,7 +133,21 @@ VALARK_BIND=0.0.0.0 VALARK_WEB_PORT="$WP" bash "$SVC" config >"$T/cfg.out" 2>&1
 grep -q '0\.0\.0\.0' "$INI" && fail "app.ini must not mention 0.0.0.0" || pass
 [ "$(ini server HTTP_PORT)" = "3300" ] && pass || fail "the default port must be 3300 (server.js APP_SERVICES)"
 grep -q "gitea: { port: envPort('VALARK_GITEA_PORT', 3300)" "$ROOT/scripts/server.js" && pass || fail "server.js must proxy the same port key + default"
-[ "$(ini server ROOT_URL)" = "http://localhost:$WP/app/gitea/" ] && pass || fail "ROOT_URL must carry /app/gitea/ (got $(ini server ROOT_URL))"
+DEF_RE="^http://(localhost|10\.[0-9.]+|192\.168\.[0-9.]+|172\.[0-9.]+):$WP/app/gitea/\$"
+ini server ROOT_URL | grep -qE "$DEF_RE" && pass || fail "the default ROOT_URL is the box's LAN address + /app/gitea/ (got $(ini server ROOT_URL))"
+[ "$(stat -c %a "$T/state/services/gitea")" = "700" ] && pass || fail "the data dir (gitea.db: password hashes) must be mode 700 (got $(stat -c %a "$T/state/services/gitea"))"
+chmod 755 "$T/state/services/gitea"; bash "$SVC" config >/dev/null 2>&1
+[ "$(stat -c %a "$T/state/services/gitea")" = "700" ] && pass || fail "a loosened data dir must be tightened back to 700 on the next start"
+[ "$(ini service ENABLE_REVERSE_PROXY_AUTHENTICATION)" = "false" ] && [ "$(ini service ENABLE_REVERSE_PROXY_AUTO_REGISTRATION)" = "false" ] \
+  && [ "$(ini security REVERSE_PROXY_TRUSTED_PROXIES)" = "127.0.0.0/8,::1/128" ] && pass || fail "header auth must be off and only loopback trusted as a proxy"
+# While our <name>.local is announced (state/mdns.json, as server.js boxAddress() reads it) it wins.
+printf '{"ts":"x","name":"Shed Ark","label":"shed-ark","host":"shed-ark.local","state":"published","canPublish":true}\n' > "$T/state/mdns.json"
+VALARK_WEB_PORT="$WP" bash "$SVC" config >/dev/null 2>&1
+[ "$(ini server ROOT_URL)" = "http://shed-ark.local:$WP/app/gitea/" ] && pass || fail "an announced mDNS name must be the default host (got $(ini server ROOT_URL))"
+printf '{"ts":"x","label":"shed-ark","state":"unavailable","reason":"no avahi"}\n' > "$T/state/mdns.json"
+VALARK_WEB_PORT="$WP" bash "$SVC" config >/dev/null 2>&1
+ini server ROOT_URL | grep -qE "$DEF_RE" && pass || fail "an unannounced name must not be used (got $(ini server ROOT_URL))"
+rm -f "$T/state/mdns.json"
 [ "$(ini service DISABLE_REGISTRATION)" = "true" ] && pass || fail "registration must be off"
 [ "$(ini service SHOW_REGISTRATION_BUTTON)" = "false" ] && pass || fail "the register button must be hidden"
 [ "$(ini database DB_TYPE)" = "sqlite3" ] && pass || fail "the database must be SQLite"
@@ -145,14 +159,14 @@ grep -q "gitea: { port: envPort('VALARK_GITEA_PORT', 3300)" "$ROOT/scripts/serve
 [ "$(stat -c %a "$INI")" = "600" ] && pass || fail "app.ini carries secrets: mode 600 (got $(stat -c %a "$INI"))"
 [ "$(stat -c %a "$T/state/services/gitea/secrets.env")" = "600" ] && pass || fail "secrets.env must be mode 600"
 key1=$(ini security SECRET_KEY)
-VALARK_GITEA_ROOT_URL='https://ark.lan:8443/some/path?x=1' bash "$SVC" config >/dev/null 2>&1
-[ "$(ini server ROOT_URL)" = "https://ark.lan:8443/app/gitea/" ] && [ "$(ini server DOMAIN)" = "ark.lan" ] \
+VALARK_GITEA_ROOT_URL='https://ark.example:8443/some/path?x=1' bash "$SVC" config >/dev/null 2>&1
+[ "$(ini server ROOT_URL)" = "https://ark.example:8443/app/gitea/" ] && [ "$(ini server DOMAIN)" = "ark.example" ] \
   && pass || fail "VALARK_GITEA_ROOT_URL keeps only the origin (got $(ini server ROOT_URL) / $(ini server DOMAIN))"
 [ -n "$key1" ] && [ "$(ini security SECRET_KEY)" = "$key1" ] && pass || fail "secrets must survive a rewrite"
-VALARK_GITEA_ROOT_URL=$'http://x.lan\nHTTP_ADDR = 0.0.0.0' VALARK_WEB_PORT="$WP" bash "$SVC" config >/dev/null 2>&1
+VALARK_GITEA_ROOT_URL=$'http://x.example\nHTTP_ADDR = 0.0.0.0' VALARK_WEB_PORT="$WP" bash "$SVC" config >/dev/null 2>&1
 grep -c '^HTTP_ADDR' "$INI" | grep -qx 1 && [ "$(ini server HTTP_ADDR)" = "127.0.0.1" ] && pass || fail "a multi-line ROOT_URL must not inject ini keys"
-VALARK_GITEA_ROOT_URL='http://evil host/' VALARK_WEB_PORT="$WP" bash "$SVC" config >/dev/null 2>&1
-[ "$(ini server ROOT_URL)" = "http://localhost:$WP/app/gitea/" ] && pass || fail "a malformed root url falls back to the default (got $(ini server ROOT_URL))"
+VALARK_GITEA_ROOT_URL='http://x.example bad/' VALARK_WEB_PORT="$WP" bash "$SVC" config >/dev/null 2>&1
+ini server ROOT_URL | grep -qE "$DEF_RE" && pass || fail "a malformed root url falls back to the default (got $(ini server ROOT_URL))"
 VALARK_GITEA_REQUIRE_SIGNIN=1 bash "$SVC" config >/dev/null 2>&1
 [ "$(ini service REQUIRE_SIGNIN_VIEW)" = "true" ] && pass || fail "VALARK_GITEA_REQUIRE_SIGNIN=1 must require sign-in"
 
@@ -167,7 +181,8 @@ echo "\$*" >> "$T/stub-argv.log"
 case "\$1" in
   --version) echo "gitea version 9.9.9 built with go1.99"; exit 0 ;;
   migrate) exit 0 ;;
-  admin) exit 0 ;;
+  admin) case " \$* " in *" --random-password "*) echo "generated random password is 'Gen3ratedPw42'" ;; esac
+         echo "New user has been successfully created!"; exit 0 ;;
   web)
     ini=""; while [ \$# -gt 0 ]; do [ "\$1" = --config ] && ini="\$2"; shift; done
     addr=\$(awk -F' = ' '\$1=="HTTP_ADDR"{print \$2}' "\$ini"); port=\$(awk -F' = ' '\$1=="HTTP_PORT"{print \$2}' "\$ini")
@@ -200,7 +215,10 @@ case "$c1" in *"--must-change-password=false"*) pass ;; *) fail "a login given a
 case "$c2" in *"--username bob"*) pass ;; *) fail "the second adduser must create bob ($c2)" ;; esac
 case "$c2" in *"--admin"*) fail "only the first login is the admin ($c2)" ;; *) pass ;; esac
 case "$c2" in *"--must-change-password=true"*) pass ;; *) fail "a generated password must be changed at first sign-in ($c2)" ;; esac
-tail -1 "$T/add2.out" | grep -qE "temporary password: [A-Za-z0-9]{20}" && pass || fail "a generated password is printed once ($(tail -1 "$T/add2.out"))"
+case "$c2" in *"--random-password"*) pass ;; *) fail "Gitea must generate the password (--random-password) ($c2)" ;; esac
+case "$c2" in *"--password "*) fail "a generated password must never be on the argv ($c2)" ;; *) pass ;; esac
+tail -1 "$T/add2.out" | grep -q "temporary password: Gen3ratedPw42 " && pass || fail "the generated password is printed once ($(tail -1 "$T/add2.out"))"
+grep -q 'Gen3ratedPw42' "$T/state/services/gitea/gitea.log" && fail "the generated password must not reach gitea.log" || pass
 VALARK_TOOLS_DIR="$SVC_TOOLS" bash "$SVC" adduser 'bad name;rm' >/dev/null 2>&1 && fail "adduser must refuse a bad username" || pass
 
 # --- 3. server.js: Gitea's user content is sandboxed -----------------------------------
@@ -216,13 +234,20 @@ class H(BaseHTTPRequestHandler):
         self.send_header("X-Stub-Path", self.path)
         self.send_header("X-Stub-Host", self.headers.get("Host", ""))
         self.send_header("X-Stub-Proto", self.headers.get("X-Forwarded-Proto", ""))
+        for h in ("X-Forwarded-For", "X-Real-IP", "X-Forwarded-Host", "X-Forwarded-Server", "Forwarded",
+                  "X-WEBAUTH-USER", "X-WEBAUTH-EMAIL", "Remote-User", "X_WEBAUTH_USER"):
+            self.send_header("X-Echo-" + h.replace("_", "-u-"), "[%s]" % self.headers.get(h, "-"))
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
-ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+import threading
+for port in sys.argv[1:]:
+    srv = ThreadingHTTPServer(("127.0.0.1", int(port)), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+threading.Event().wait()
 PY
-UP=$(free_port)
-python3 -I "$T/stub.py" "$UP" >"$T/stub.log" 2>&1 &
+UP=$(free_port); PP=$(free_port)
+python3 -I "$T/stub.py" "$UP" "$PP" >"$T/stub.log" 2>&1 &
 STUB_PID=$!
 mkdir -p "$T/srv/state" "$T/srv/content/zim" "$T/srv/models"
 "$NODE" -e 'const a=require(process.argv[1]);const d=process.argv[2];a.setPassword("testpass","admin",d);a.setUseMode("open",d);' \
@@ -230,7 +255,7 @@ mkdir -p "$T/srv/state" "$T/srv/content/zim" "$T/srv/models"
 PORT=$(free_port); B="http://127.0.0.1:$PORT"
 VALARK_TEST_NO_SPAWN=1 VALARK_COMMISSIONED=1 VALARK_BIND=127.0.0.1 VALARK_DISABLE_KIWIX=1 VALARK_WEB_PORT="$PORT" \
   VALARK_STATE_DIR="$T/srv/state" VALARK_CONTENT_DIR="$T/srv/content" VALARK_MODELS_DIR="$T/srv/models" \
-  VALARK_GITEA_PORT="$UP" "$NODE" "$ROOT/scripts/server.js" "$PORT" >"$T/srv.log" 2>&1 &
+  VALARK_GITEA_PORT="$UP" PASTE_PORT="$PP" "$NODE" "$ROOT/scripts/server.js" "$PORT" >"$T/srv.log" 2>&1 &
 SRV_PID=$!
 up=0; for i in $(seq 1 24); do
     sleep 0.5
@@ -260,12 +285,20 @@ else
              /app/gitea/api/v1/repos/alice/notes/raw/evil.html /app/gitea/api/v1/repos/alice/notes/media/x.html \
              /app/gitea/api/packages/alice/generic/pkg/1.0/evil.html /app/gitea/api/packages/alice/npm/pkg/-/pkg-1.0.tgz \
              /app/gitea/alice/notes.git/info/lfs/objects/abc /app/gitea/avatars/abc /app/gitea/repo-avatars/abc \
+             /app/gitea/alice/notes/info/lfs/objects/abc /app/gitea/v2/alice/img/blobs/sha256:abc /app/gitea/v2/ \
+             /app/gitea/alice/notes/commit/0a1b2c.patch /app/gitea/alice/notes/commit/0a1b2c.diff \
+             /app/gitea/alice/notes/pulls/3.patch /app/gitea/alice/notes/pulls/3.diff \
+             /app/gitea/alice/notes/compare/main...dev.patch /app/gitea/alice/notes/compare/main...dev.diff \
+             /app/gitea/api/v1/repos/alice/notes/git/commits/0a1b2c.diff /app/gitea/api/v1/repos/alice/notes/git/commits/0a1b2c.patch \
+             /app/gitea/alice.keys /app/gitea/alice.gpg /app/gitea/ALICE.KEYS \
              /app/gitea/ALICE/notes/RAW/branch/main/x.html /app/gitea/alice/notes/%72aw/branch/main/x.html; do
         sandboxed "$u"
     done
     for u in /app/gitea/ /app/gitea/explore/repos /app/gitea/user/login /app/gitea/alice /app/gitea/alice/notes \
              /app/gitea/alice/notes/src/branch/main/evil.html /app/gitea/alice/notes/issues/1 /app/gitea/alice/notes/releases \
-             /app/gitea/assets/css/index.css /app/gitea/assets/js/index.js /app/gitea/api/v1/repos/alice/notes; do
+             /app/gitea/assets/css/index.css /app/gitea/assets/js/index.js /app/gitea/api/v1/repos/alice/notes \
+             /app/gitea/alice/notes/commit/0a1b2c /app/gitea/alice/notes/pulls/3 /app/gitea/alice/notes/compare/main...dev \
+             /app/gitea/alice/notes/pulls/3/files /app/gitea/api/v1/repos/alice/notes/git/commits/0a1b2c; do
         not_sandboxed "$u"
     done
     h="$(hdrs /app/gitea/alice/notes/raw/branch/main/x)"
@@ -273,6 +306,21 @@ else
     h="$(hdrs /app/gitea/explore -H 'Host: ark.lan:3000' -H 'X-Forwarded-Proto: https')"
     echo "$h" | grep -q '^x-stub-host: ark.lan:3000$' && pass || fail "Gitea must see the browser's Host ($(echo "$h" | grep x-stub-host))"
     echo "$h" | grep -q '^x-stub-proto: http$' && pass || fail "X-Forwarded-Proto must be the listener's scheme, not the client's ($(echo "$h" | grep x-stub-proto))"
+    # Identity headers come from the proxy, never the client: every sub-app, not just Gitea.
+    forged=(-H 'X-Forwarded-For: 203.0.113.7' -H 'X-Real-IP: 203.0.113.7' -H 'X-Forwarded-Host: x.lan'
+            -H 'X-Forwarded-Server: x.lan' -H 'Forwarded: for=203.0.113.7;host=x.lan' -H 'X-WEBAUTH-USER: alice'
+            -H 'X-WEBAUTH-EMAIL: alice@x.lan' -H 'Remote-User: alice' -H 'X_WEBAUTH_USER: alice')
+    for u in /app/gitea/explore /app/paste/; do
+        h="$(hdrs "$u" "${forged[@]}")"
+        echo "$h" | grep -q '^x-echo-x-forwarded-for: \[127.0.0.1\]$' && pass \
+          || fail "$u: X-Forwarded-For must be the real peer only ($(echo "$h" | grep x-echo-x-forwarded-for))"
+        for k in x-real-ip x-forwarded-host x-forwarded-server forwarded x-webauth-user x-webauth-email remote-user x-u-webauth-u-user; do
+            echo "$h" | grep -q "^x-echo-$k: \[-\]$" && pass || fail "$u: a client's $k must be stripped ($(echo "$h" | grep "x-echo-$k"))"
+        done
+    done
+    h="$(hdrs /app/paste/ -H 'X-Forwarded-Proto: https')"
+    echo "$h" | grep -q '^x-stub-proto: $' && pass || fail "a client's X-Forwarded-Proto must not reach other sub-apps either"
+    grep -q 'x\[-_\]webauth' "$ROOT/scripts/server.js" && grep -q 'X_WEBAUTH_USER' "$T/stub.py" && pass || fail "underscore spellings must be covered"
     svc="$(curl -s --max-time 6 "$B/api/status/services")"
     printf '%s' "$svc" | python3 -I -c 'import json,sys; d=json.load(sys.stdin)["gitea"]; sys.exit(0 if d["path"]=="/app/gitea/" and d["account"]["signup"]=="host" else 1)' \
       && pass || fail "/api/status/services must list gitea (host-provisioned logins)"

@@ -199,16 +199,31 @@ Cargo, Go, Debian, OCI, generic), all from **Gitea**, one static Go binary with 
   off, so clones and pushes go over HTTP through the proxy. `ROOT_URL` carries `/app/gitea/`
   and the proxy strips that prefix. The proxy passes the browser's `Host` through (and sets
   `X-Forwarded-Proto` from the listener), so clone URLs and avatars point at the address
-  people actually used (`PUBLIC_URL_DETECTION = auto`); `VALARK_GITEA_ROOT_URL` is the fallback.
+  people actually used (`PUBLIC_URL_DETECTION = auto`).
+- **`ROOT_URL` (set `VALARK_GITEA_ROOT_URL` on a real box):** pages follow the browser, but
+  links made outside a browser request use `ROOT_URL`: webhook payloads, the push hints git
+  prints, and other absolute URLs Gitea stores or sends. Without the knob it defaults to the
+  box's own address the way the UI picks it: `<name>.local` while `state/mdns.json` says the
+  name is announced, else the LAN IP, on `VALARK_WEB_PORT`. That can change (DHCP, a renamed
+  box), so pin the address people use, e.g. `VALARK_GITEA_ROOT_URL=http://ark.example:3000`.
 - **Config:** `gitea.sh` regenerates `state/services/gitea/custom/conf/app.ini` (mode 600) on
   every start: SQLite, `INSTALL_LOCK`, `OFFLINE_MODE` (no CDN assets, Gravatar off), no
-  mailer, no update checker, no federation, Actions off, packages on. Secrets are generated
-  once into `secrets.env` (mode 600). `VALARK_GITEA_REQUIRE_SIGNIN=1` hides public repos from
+  mailer, no update checker, no federation, Actions off, packages on, header (reverse-proxy)
+  auth off, only loopback trusted as a proxy. Secrets are generated once into `secrets.env`
+  (mode 600); the data dir is mode 700 (`gitea.db` holds the password hashes). `VALARK_GITEA_REQUIRE_SIGNIN=1` hides public repos from
   signed-out visitors.
 - **Accounts:** self-registration is **off**. The host creates logins with
   `scripts/services/gitea.sh adduser <name> [password]`, or the Community page's admin-only
   "Create a login" form (`POST /api/service/adduser`). The **first** login created is the site
-  admin. Without a password, a one-time password is printed and must be changed at first sign-in.
+  admin. Without a password, Gitea generates one (`--random-password`, so it is never on a
+  command line), it is printed once and must be changed at first sign-in. A password the host
+  types is on Gitea's command line while `adduser` runs, as with chat and mail.
+- **Same-origin rich content (raises #327).** Gitea renders a lot of user-written content
+  inside its own pages: Markdown in READMEs, issues, PRs and wikis, rendered notebooks and
+  CSV, Mermaid diagrams, code previews. Its sanitizer is good, but those pages are not
+  sandboxed: they are Gitea's UI and share the Val Ark origin. A sanitizer bypass there would
+  run as the Val Ark UI, which is a larger surface than the other sub-apps, so #327 (each
+  sub-app on its own origin) matters more once Gitea is enabled.
 - **Not done yet (#346 follow-ups):** importing the mirrored git bundles
   (`data/source-repos.tsv`) as read-only Gitea mirrors, and seeding the package registries
   from the package caches. The registries start empty; publish to them with the usual
@@ -254,11 +269,15 @@ explicit and uniform across all the services:
   `/uploads/`, The Lounge's `/uploads/` and `/storage/`, alps' raw message parts, `/proxy`
   and `/bimi/avatar`, Gitea's raw and media files, attachments, release downloads,
   archives, raw wiki pages, `/render/`, `/api/packages/`, LFS objects and avatars (also
-  under `/api/v1/repos/`), and any sub-app response that carries `Content-Disposition`. An HTML
+  under `/api/v1/repos/`), the container registry (`/v2/`), commit/PR/compare `.patch` and
+  `.diff`, and `/{user}.keys` / `.gpg`, and any sub-app response that carries `Content-Disposition`. An HTML
   upload still opens, but as an opaque origin with no cookies, storage or API access. The
   sub-apps' own pages and assets are not sandboxed. The proxy keeps each sub-app's own CSP
   (only `frame-ancestors` is removed, so the frame works) and never forwards the Val Ark
-  session cookie. As a second line, `/api/*` refuses writes and script reads (`fetch`/XHR)
+  session cookie. It also drops a client's `X-Forwarded-*`, `Forwarded`, `X-Real-IP`,
+  `X-WEBAUTH-*` and `Remote-User` headers (any spelling with `_`) and sets `X-Forwarded-For`
+  to the real peer, for every sub-app and Kiwix, so an upstream that trusts loopback can't
+  be handed a forged client address or a header login. As a second line, `/api/*` refuses writes and script reads (`fetch`/XHR)
   from a page under `/app/` or `/kiwix/`. **Still true:** an XSS bug in a sub-app's own UI
   runs as the Val Ark origin; only a separate origin per app would close that.
 - **Data on the data disk.** All config, credentials, and message history live under the

@@ -28,7 +28,10 @@
 #     secrets.env (generated once, chmod 600), so the enforced keys can't drift.
 #
 # Knobs (.env): VALARK_GITEA_PORT (3300), VALARK_GITEA_ROOT_URL (the origin people use,
-# e.g. http://ark.example:3000; the /app/gitea/ path is always appended),
+# e.g. http://ark.example:3000; the /app/gitea/ path is always appended; default: the
+# box's <name>.local while it is announced, else its LAN IP, on VALARK_WEB_PORT. Pages
+# follow the browser's Host; ROOT_URL is what webhooks, push hints and other links made
+# outside a browser request use),
 # VALARK_GITEA_REQUIRE_SIGNIN (0: anyone on the LAN may browse public repos),
 # VALARK_GITEA_EMAIL_DOMAIN (valark.lan: placeholder addresses for adduser).
 ###############################################################################
@@ -60,13 +63,30 @@ _truthy() { case "${1:-}" in 1|[Tt]rue|[Yy]es|[Oo]n) return 0 ;; esac; return 1;
 
 # The origin people browse the Ark at (no path). Anything after the host is dropped:
 # Gitea must always live at /app/gitea/ because that is where the proxy mounts it.
+# The box's own address, the way server.js boxAddress() picks it: <label>.local while
+# state/mdns.json says our name is announced, else the first private LAN IPv4, else
+# localhost. Used only when VALARK_GITEA_ROOT_URL is unset.
+_box_host() {
+    local m="${STATE_DIR}/mdns.json" st label ip
+    if [ -f "$m" ]; then
+        st=$(sed -n 's/.*"state":"\([a-z]*\)".*/\1/p' "$m" | head -1)
+        label=$(sed -n 's/.*"label":"\([A-Za-z0-9-]*\)".*/\1/p' "$m" | head -1)
+        case "$st" in published|native) [ -n "$label" ] && { echo "${label}.local"; return; } ;; esac
+    fi
+    # The default route's source address (no packet is sent), then any private address.
+    ip=$( { ip -4 route get 192.0.2.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p'
+            hostname -I 2>/dev/null | tr ' ' '\n'; } \
+        | grep -E '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)' | head -1)
+    echo "${ip:-localhost}"
+}
 _root_url() {
-    local o="${VALARK_GITEA_ROOT_URL:-http://localhost:${VALARK_WEB_PORT:-3000}}"
+    local def="http://$(_box_host):${VALARK_WEB_PORT:-3000}"
+    local o="${VALARK_GITEA_ROOT_URL:-$def}"
     case "$o" in http://*|https://*) ;; *) o="http://${o}" ;; esac
     o=$(printf '%s' "$o" | head -1 | sed -E 's#^(https?://[^/?#]+).*#\1#')
     # Only a plain scheme://host[:port] may reach app.ini (no spaces, no injected lines).
     printf '%s' "$o" | grep -qE '^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?$' \
-        || o="http://localhost:${VALARK_WEB_PORT:-3000}"
+        || o="$def"
     printf '%s%s' "$o" "$PUBLIC_PATH"
 }
 _root_host() { _root_url | sed -E 's#^https?://(\[[^]]*\]|[^:/]+).*#\1#'; }
@@ -126,6 +146,8 @@ _ensure_secrets() {
 write_config() {
     _ensure_secrets
     mkdir -p "$(dirname "$INI")" "${DATA_DIR}/data" "${DATA_DIR}/repositories" "${DATA_DIR}/log" 2>/dev/null || true
+    # gitea.db holds the password hashes and sessions; repos may be private.
+    chmod 700 "$DATA_DIR" 2>/dev/null || true
     local signin=false; _truthy "${VALARK_GITEA_REQUIRE_SIGNIN:-0}" && signin=true
     local tmp="${INI}.tmp.$$"
     ( umask 077
@@ -161,6 +183,7 @@ ROOT = ${DATA_DIR}/repositories
 
 [security]
 INSTALL_LOCK = true
+REVERSE_PROXY_TRUSTED_PROXIES = 127.0.0.0/8,::1/128
 SECRET_KEY = ${GITEA_SECRET_KEY}
 INTERNAL_TOKEN = ${GITEA_INTERNAL_TOKEN}
 
@@ -169,6 +192,10 @@ JWT_SECRET = ${GITEA_JWT_SECRET}
 
 [service]
 DISABLE_REGISTRATION = true
+; The Val Ark proxy strips X-WEBAUTH-USER and sets X-Forwarded-For itself; header auth stays off.
+ENABLE_REVERSE_PROXY_AUTHENTICATION = false
+ENABLE_REVERSE_PROXY_AUTHENTICATION_API = false
+ENABLE_REVERSE_PROXY_AUTO_REGISTRATION = false
 SHOW_REGISTRATION_BUTTON = false
 ALLOW_ONLY_EXTERNAL_REGISTRATION = false
 REQUIRE_SIGNIN_VIEW = ${signin}
@@ -278,28 +305,38 @@ cmd_status() {
 }
 
 # adduser NAME [PASSWORD]: the first login created becomes the site admin. With no
-# password, one is generated and printed once (the person must change it at first sign-in).
+# password, Gitea generates one (--random-password, so it never sits in an argv) and it is
+# printed once; the person must change it at first sign-in. A password the host types is
+# passed on Gitea's argv for the moment the command runs, as chat.sh/mail.sh do (Gitea has
+# no stdin option for it).
 cmd_adduser() {
-    local name="${1:-}" pass="${2:-}" must=false admin=() role="user"
+    local name="${1:-}" pass="${2:-}" must=false admin=() role="user" pwarg out gen=""
     [ -n "$name" ] || { echo "usage: gitea.sh adduser <name> [password]" >&2; return 2; }
     printf '%s' "$name" | grep -qE '^[A-Za-z0-9._-]{1,32}$' || { _err "invalid username"; return 2; }
     _need_bin || return 1
     write_config || return 1
-    [ -n "$pass" ] || { pass="$(_rand 20)"; must=true; }
+    if [ -n "$pass" ]; then pwarg=(--password "$pass"); else pwarg=(--random-password); must=true; fi
     [ -f "$ADMIN_MARK" ] || { admin=(--admin); role="site admin"; }
     # Create/upgrade the SQLite schema first (idempotent): `admin user create` needs it.
     "$BIN" migrate --config "$INI" --work-path "$DATA_DIR" >>"$LOG_FILE" 2>&1 \
         || { _err "could not initialise the database (see $LOG_FILE)"; return 1; }
-    if ! "$BIN" admin user create --config "$INI" --work-path "$DATA_DIR" \
-            --username "$name" --password "$pass" \
+    # The output carries a generated password: keep it out of the log file.
+    if ! out=$("$BIN" admin user create --config "$INI" --work-path "$DATA_DIR" \
+            --username "$name" "${pwarg[@]}" \
             --email "${name}@${VALARK_GITEA_EMAIL_DOMAIN:-valark.lan}" \
-            --must-change-password="$must" "${admin[@]}" >>"$LOG_FILE" 2>&1; then
+            --must-change-password="$must" "${admin[@]}" 2>&1); then
+        printf '%s\n' "$out" | grep -vi 'password is' >> "$LOG_FILE"
         _err "could not create '${name}' (already exists? see $LOG_FILE)"
         return 1
     fi
     [ "$role" = "site admin" ] && : > "$ADMIN_MARK"
     if [ "$must" = true ]; then
-        _log "gitea ${role} '${name}' created - temporary password: ${pass} (change it at first sign-in at ${PUBLIC_PATH})"
+        gen=$(printf '%s\n' "$out" | sed -n "s/.*generated random password is '\(.*\)'.*/\1/p" | head -1)
+        if [ -z "$gen" ]; then
+            _err "'${name}' was created but Gitea did not report its password; set one: ${BIN} admin user change-password --config ${INI} -u ${name} -p <new>"
+            return 1
+        fi
+        _log "gitea ${role} '${name}' created - temporary password: ${gen} (change it at first sign-in at ${PUBLIC_PATH})"
     else
         _log "gitea ${role} '${name}' created - sign in at ${PUBLIC_PATH}"
     fi

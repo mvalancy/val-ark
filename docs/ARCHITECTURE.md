@@ -126,7 +126,7 @@ reserve (`max(VALARK_RESERVE_PCT%, VALARK_RESERVE_MIN_GB)`) and, if set, the
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/flow/fill-dark.svg">
-  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Four passes, most important first, until the disk reaches its reserve.">
+  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Essentials, then apps, the library, then models, until the disk reaches its reserve.">
 </picture>
 
 <details>
@@ -236,9 +236,10 @@ flowchart TD
     REFRESH --> LINK["4. Link check + repair<br/>tool/installer URLs, web-ui assets"]
     LINK --> INTEG["5. Integrity verify<br/>requeue corrupt/short files"]
     INTEG --> PINS["5b. Re-fill pinned requests<br/>user picks win before generic fill"]
-    PINS --> FILL["6. Bounded top-up fill<br/>librarian fill --time"]
-    FILL --> TOOLREF["6b. Weekly tool refresh<br/>mirrored apps to latest upstream"]
-    TOOLREF --> FUNC["7. Functional verification<br/>verify.sh: tools run, kiwix serves,<br/>tiny LLM infers, fleet reachable"]
+    PINS --> TOOLREF["5c. Weekly tool refresh<br/>mirrored apps to latest upstream"]
+    TOOLREF --> DEVSTACK["5d. Weekly dev-stack mirror<br/>release_mirror.py, reserve + budget"]
+    DEVSTACK --> FILL["6. Bounded top-up fill<br/>essentials, apps, library, then models"]
+    FILL --> FUNC["7. Functional verification<br/>verify.sh: tools run, kiwix serves,<br/>tiny LLM infers, fleet reachable"]
     FUNC --> UISMOKE["7b. UI smoke<br/>dynamic controls + back-to-ark nav"]
     UISMOKE --> MOD["7c. Moderation sweep<br/>quarantine flagged uploads"]
     MOD --> REPORT["8. Report + coordination<br/>librarian maintain"]
@@ -445,7 +446,7 @@ require a CUDA source build (no upstream binary) — see [PLATFORMS.md](PLATFORM
 | `scripts/lib/catalog.sh` | Build candidate catalog (models/installers + live ZIM) |
 | `scripts/lib/kiwix_catalog.py` | Fetch + parse the live Kiwix OPDS catalog |
 | `scripts/lib/planner.py` | Apply the priority model (essentials first) to produce the ordered plan |
-| `scripts/lib/{release,git_bundle,lastbook,references}_mirror.py`, `apt_offline.py`, `oci_pull.py` | Mirror CLIs: dev + security stack, git bundles and offline APT sets (standalone, run by hand); Lastbook, cad-agent references and container images (driven by `scripts/tools/*.sh`) (see [`scripts/lib/AGENTS.md`](../scripts/lib/AGENTS.md)) |
+| `scripts/lib/{release,git_bundle,lastbook,references}_mirror.py`, `apt_offline.py`, `oci_pull.py` | Mirror CLIs: dev + security stack (loop step 5d, before the fill), git bundles and offline APT sets (standalone, run by hand); Lastbook, cad-agent references and container images (driven by `scripts/tools/*.sh`) (see [`scripts/lib/AGENTS.md`](../scripts/lib/AGENTS.md)) |
 | `scripts/mirror-self.sh` | Package Val Ark's own source for LAN self-replication (`/bootstrap.sh`) |
 | `scripts/services/` | Community services (chat, mail, forum, paste, SeaweedFS) |
 | `scripts/download-tools.sh` | Mirror prebuilt tool binaries (per `scripts/tools/*.sh`) |

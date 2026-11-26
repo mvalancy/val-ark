@@ -9,9 +9,9 @@
 #      2g Tailscale userspace-networking check, 2h <name>.local over mDNS)
 #   3. refresh the live catalog  -> ZIM/content links self-heal (no stale dates)
 #   4. link check + repair        -> tool/installer URLs, web-ui assets, symlinks
-#   5. integrity verify           -> requeue corrupt/short downloads (5b re-fill pinned requests)
+#   5. integrity verify           -> requeue corrupt/short downloads (5b re-fill pinned requests,
+#      5c weekly refresh of mirrored tools, 5d weekly dev-stack mirror: apps before models, #347)
 #   6. top-up fill (bounded)      -> keep filling per the curation priority model
-#      (6b weekly refresh of mirrored tools)
 #   7. functional verification    -> tools run, kiwix serves, fleet reachable
 #      (7b UI smoke, 7c content-moderation sweep)
 #   8. health report + coordination drop (8b self-heal snapshot)
@@ -250,13 +250,42 @@ ensure_link_dhcp() {
 # shipped a release, only the changed artifacts download. Weekly by default
 # (VALARK_TOOL_REFRESH_DAYS, 0 = disabled); a failed/partial pass retries in a
 # day (downloads are idempotent + resumable, so retries just fill gaps).
+# Runs BEFORE the top-up fill (step 5c, #347): apps come before more models. It is
+# skipped (and retried next cycle) under the STOP flag or with less than 1 GiB of
+# budget left (the reserve / VALARK_MAX_GB), since the tool scripts size nothing.
+APPS_MIN_BUDGET=1073741824
+# True (0) when every phase-0 essentials row that fits is on disk: `librarian.sh essentials-done`
+# exits 0. Exit 1 (some still planned) or 2 (no catalog to judge by) holds the app mirrors back;
+# an essentials list that cannot be judged fails closed, the fill below makes progress either way.
+essentials_held() {
+    local rc=0
+    FORCE_COLOR=0 bash "$LIBRARIAN" essentials-done >/dev/null 2>&1 || rc=$?
+    return "$rc"
+}
 tool_refresh() {
     local days="${VALARK_TOOL_REFRESH_DAYS:-7}"
     [ "$days" = "0" ] && { log "tool refresh disabled"; return 0; }
-    local marker="${STATE_DIR}/tool-refresh.next" now due
+    [ -f "${STATE_DIR}/STOP" ] && { log "tool refresh skipped: STOP flag present"; return 0; }
+    local marker="${STATE_DIR}/tool-refresh.next" now due budget
     now=$(date +%s); due=$(cat "$marker" 2>/dev/null || echo 0)
+    case "$due" in ''|*[!0-9]*) due=0 ;; esac
     if [ "$now" -lt "$due" ]; then
         log "tool refresh not due yet ($(date -d "@$due" '+%F %H:%M' 2>/dev/null || echo soon))"
+        return 0
+    fi
+    budget=$(valark_budget_bytes 2>/dev/null); budget=${budget:-0}
+    # A bounded share like the dev stack: VALARK_TOOLS_PCT percent (default 25; 100 = no share cap) of
+    # budget + what the tools tree holds. The tool scripts size nothing, so the cap is a gate: once the
+    # tree holds its share, the refresh waits for room.
+    local held pct="${VALARK_TOOLS_PCT:-25}"
+    case "$pct" in ''|*[!0-9]*) pct=25 ;; esac
+    if [ "$pct" -lt 100 ]; then
+        held=$(du -sbL "$TOOLS_DIR" 2>/dev/null | cut -f1); held=${held:-0}
+        local cap=$(( (budget + held) / 100 * pct - held )); [ "$cap" -lt 0 ] && cap=0
+        [ "$cap" -lt "$budget" ] && budget=$cap
+    fi
+    if [ "$budget" -lt "$APPS_MIN_BUDGET" ]; then
+        log "${YELLOW}tool refresh skipped${NC}: $(valark_human "$budget") of budget left (reserve / VALARK_MAX_GB / VALARK_TOOLS_PCT)"
         return 0
     fi
     log "refreshing tool mirror to latest upstream versions (bounded $(( ${VALARK_TOOL_REFRESH_TIMEOUT:-7200} / 60 ))min)"
@@ -268,6 +297,71 @@ tool_refresh() {
         echo $(( now + 86400 )) > "$marker"
         log "${YELLOW}tool refresh incomplete — retrying in 1d (see tool-refresh.log)${NC}"
     fi
+}
+
+# --- step 5d: the developer + security stack, before the model fill (#347) ----
+# scripts/lib/release_mirror.py fetch over data/dev-stack.tsv (Gitea's other builds, Caddy,
+# Headscale, KeePassXC, compilers, Docker, ...) into DEVSTACK_DIR. Fail-soft and bounded:
+#   - on by default; VALARK_DEVSTACK=0 (or VALARK_DEVSTACK_REFRESH_DAYS=0) turns it off;
+#   - weekly (VALARK_DEVSTACK_REFRESH_DAYS, default 7); a run cut short by its time bound
+#     (VALARK_DEVSTACK_TIMEOUT, default 3600 s) continues next cycle (.parts resume); a run
+#     deferred by the disk or one with errors retries in a day;
+#   - budget = a bounded SHARE of the librarian's (valark_budget_bytes: the reserve and
+#     VALARK_MAX_GB, whose footprint counts DEVSTACK_DIR): VALARK_DEVSTACK_PCT percent
+#     (default 25; 100 = the whole budget) of budget + what the tree holds, optionally also
+#     capped by VALARK_DEVSTACK_MAX_GB for the whole tree. Never starts before the grid-down
+#     essentials are held (the loop gates 5c/5d on `librarian.sh essentials-done`); release_mirror.py also re-checks the reserve and the STOP flag every 256 MiB;
+#   - VALARK_DEVSTACK_GROUPS (comma list, e.g. python,toolchains,security) limits the groups;
+#   - GITHUB_TOKEN from .env lifts GitHub's 60 calls/hour anonymous limit (~250 per plan).
+devstack_mirror() {
+    [ "${VALARK_DEVSTACK:-1}" = "0" ] && { log "dev-stack mirror off (VALARK_DEVSTACK=0)"; return 0; }
+    local days="${VALARK_DEVSTACK_REFRESH_DAYS:-7}"
+    [ "$days" = "0" ] && { log "dev-stack mirror off (VALARK_DEVSTACK_REFRESH_DAYS=0)"; return 0; }
+    [ -f "${STATE_DIR}/STOP" ] && { log "dev-stack mirror skipped: STOP flag present"; return 0; }
+    command -v python3 >/dev/null 2>&1 || { log "${YELLOW}dev-stack mirror skipped${NC}: python3 not found"; return 0; }
+    local marker="${STATE_DIR}/devstack-refresh.next" now due budget held cap
+    now=$(date +%s); due=$(cat "$marker" 2>/dev/null || echo 0)
+    case "$due" in ''|*[!0-9]*) due=0 ;; esac
+    if [ "$now" -lt "$due" ]; then
+        log "dev-stack mirror not due yet ($(date -d "@$due" '+%F %H:%M' 2>/dev/null || echo soon))"
+        return 0
+    fi
+    budget=$(valark_budget_bytes 2>/dev/null); budget=${budget:-0}
+    held=$(du -sbL "$DEVSTACK_DIR" 2>/dev/null | cut -f1); held=${held:-0}
+    # A bounded share, never the whole budget (the stack is ~194 GB): VALARK_DEVSTACK_PCT of what
+    # the dev stack could hold in all (budget + what it holds now), default 25; 100 = no share cap.
+    local pct="${VALARK_DEVSTACK_PCT:-25}"
+    case "$pct" in ''|*[!0-9]*) pct=25 ;; esac
+    if [ "$pct" -lt 100 ]; then
+        cap=$(( (budget + held) / 100 * pct - held )); [ "$cap" -lt 0 ] && cap=0
+        [ "$cap" -lt "$budget" ] && budget=$cap
+    fi
+    case "${VALARK_DEVSTACK_MAX_GB:-}" in
+        ''|*[!0-9]*) ;;
+        *) cap=$(( VALARK_DEVSTACK_MAX_GB * 1073741824 - held )); [ "$cap" -lt 0 ] && cap=0
+           [ "$cap" -lt "$budget" ] && budget=$cap ;;
+    esac
+    if [ "$budget" -lt "$APPS_MIN_BUDGET" ]; then
+        log "${YELLOW}dev-stack mirror skipped${NC}: $(valark_human "$budget") of budget left (reserve / VALARK_MAX_GB / VALARK_DEVSTACK_PCT / VALARK_DEVSTACK_MAX_GB); retrying in 1d"
+        echo $(( now + 86400 )) > "$marker"
+        return 0
+    fi
+    local secs="${VALARK_DEVSTACK_TIMEOUT:-3600}" rc=0 g groups=()
+    for g in $(printf '%s' "${VALARK_DEVSTACK_GROUPS:-}" | tr ',' ' '); do groups+=(--group "$g"); done
+    [ -n "${GITHUB_TOKEN:-}" ] || log "${YELLOW}GITHUB_TOKEN not set${NC}: GitHub allows 60 anonymous calls/hour, so some dev-stack entries may not resolve (set it in .env)"
+    log "mirroring the dev stack to ${DEVSTACK_DIR} (bounded ${secs}s, budget $(valark_human "$budget"))"
+    mkdir -p "$DEVSTACK_DIR" "$LOG_DIR" 2>/dev/null
+    VALARK_STOP_FLAG="${STATE_DIR}/STOP" timeout "$secs" python3 "${_DIR}/lib/release_mirror.py" fetch \
+        --dest "$DEVSTACK_DIR" --budget "$budget" "${groups[@]}" >> "${LOG_DIR}/devstack.log" 2>&1 || rc=$?
+    local sumline; sumline=$(grep '^summary: ' "${LOG_DIR}/devstack.log" 2>/dev/null | tail -1)
+    [ "$rc" != "0" ] && [ -n "$sumline" ] && log "dev-stack mirror (exit $rc) ${sumline}"   # exit 1 must not hide deferred files (exit 3)
+    case "$rc" in
+        0)   echo $(( now + days * 86400 )) > "$marker"; log "${GREEN}dev-stack mirror complete${NC} (next in ${days}d)" ;;
+        124|137) echo "$now" > "$marker"; log "${YELLOW}dev-stack mirror hit its ${secs}s bound${NC}; it continues next cycle (.parts resume)" ;;
+        3)   echo $(( now + 86400 )) > "$marker"; log "${YELLOW}dev-stack mirror deferred${NC} (reserve, budget or STOP); retrying in 1d (see devstack.log)" ;;
+        *)   echo $(( now + 86400 )) > "$marker"; log "${YELLOW}dev-stack mirror incomplete (exit $rc)${NC}; retrying in 1d (see devstack.log)" ;;
+    esac
+    return 0
 }
 
 # Dynamic UI smoke — exercise the web UI's controls and the "back to the ark"
@@ -404,10 +498,21 @@ loop_once() {
     step "5b. re-fill pinned requests (user-requested items win before generic fill)"
     FORCE_COLOR=0 bash "$LIBRARIAN" pins --refill 2>&1 | tail -1 | sed 's/^/    /'
 
+    # Apps before more models (#347): the unplanned app mirrors run before the top-up fill,
+    # whose planner then takes apps, then library, then models.
+    # ...but only once the planner's phase-0 grid-down essentials that fit are held: on a small
+    # disk the app mirrors (the dev stack is ~194 GB) would otherwise fill it before the essentials.
+    if essentials_held; then
+        step "5c. tool refresh (weekly; keeps mirrored apps at latest upstream)"; tool_refresh
+
+        step "5d. dev-stack mirror (weekly; data/dev-stack.tsv, VALARK_DEVSTACK)"; devstack_mirror
+    else
+        step "5c/5d. tool refresh + dev-stack mirror: waiting for the grid-down essentials"
+        log "${YELLOW}tool refresh and dev-stack mirror held back${NC}: the essentials (librarian.sh essentials-done) are not all held yet; the fill below takes them first"
+    fi
+
     step "6. top-up fill (<=${FILL_SECONDS}s; skipped if a fill is already running)"
     FORCE_COLOR=0 bash "$LIBRARIAN" fill --time "$FILL_SECONDS" 2>&1 | tail -1 | sed 's/^/    /'
-
-    step "6b. tool refresh (weekly; keeps mirrored apps at latest upstream)"; tool_refresh
 
     step "7. functional verification"; FORCE_COLOR="${FORCE_COLOR:-1}" bash "$VERIFY" all 2>&1 | sed 's/^/    /'
 
@@ -523,6 +628,9 @@ data_disk_guard() {
     echo "${YELLOW}[$(date '+%F %T')] data disk not mounted${NC} at $DATA_ROOT — skipping cycle to avoid rebuilding state/content on the root fs. It converges on the next tick once the disk mounts. (If you deliberately switched to single-disk mode, remove ${VALARK_DATA_MARKER}.)" >&2
     return 1
 }
+
+# Sourced (tests/test-loop-apps-first.sh drives loop_once with stubs): define, never dispatch.
+[ "${BASH_SOURCE[0]}" != "$0" ] && return 0
 
 case "${1:-once}" in
     once)

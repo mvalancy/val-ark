@@ -284,7 +284,7 @@ and remain as reported until re-probed.
   iptables/ip6tables NAT `PREROUTING` `REDIRECT` to the web port is re-asserted every
   cycle on every real interface (LAN **and** tailnet; loopback untouched) — puts the
   unauthenticated web origin on a standard port.
-- `loop.sh` step 6b: weekly **unattended** tool refresh pulls latest upstream releases
+- `loop.sh` step 5c: weekly **unattended** tool refresh pulls latest upstream releases
   (`VALARK_TOOL_REFRESH_DAYS`, default 7) — raises the stakes of
   `supply-chain-no-checksum-1`, since fetches now happen with no operator watching.
 - New services/mirrors: a SeaweedFS launcher (`scripts/services/seaweedfs.sh`, binds

@@ -109,9 +109,10 @@ Full details: [LIBRARIAN.md](LIBRARIAN.md).
 ## What else works offline
 
 Beyond the tools, models and ZIM library, an Ark can rebuild and serve software with no
-internet at all. The APT, developer-stack and source-archive mirrors are standalone CLIs
-you run (or schedule) yourself — the loop does not run them; self-replication and Lastbook
-are kept current by the loop and the weekly tool refresh.
+internet at all. The loop keeps the developer + security stack current (step 5d, before
+the model fill; `VALARK_DEVSTACK=0` turns it off). The APT and source-archive mirrors are
+standalone CLIs you run (or schedule) yourself. Self-replication and Lastbook are kept
+current by the loop and the weekly tool refresh.
 
 - **Self-replication** — the loop keeps a full-history git bundle + tarball of Val Ark's
   own source under `<data>/sources/val-ark/` (`scripts/mirror-self.sh`), and the web

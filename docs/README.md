@@ -66,6 +66,7 @@ sync](#keeping-this-map-in-sync)).
 | [PLATFORMS.md](PLATFORMS.md) | Supported platforms and chips, including builds and the OpenWRT subset. |
 | [ARM64-NAS.md](ARM64-NAS.md) | ARM64 NAS appliances (chips such as the Rockchip RK3588): setup notes and gotchas. |
 | [HOW-IT-WORKS.md](HOW-IT-WORKS.md) | The picture book: ten animated diagrams in reading order, from one disk to a whole network, each linking to the guide that goes deeper. |
+| [SCREENSHOTS.md](SCREENSHOTS.md) | The web UI on a running Ark: home, software, library, models and a tool's page. |
 | [SERVING.md](SERVING.md) | The two ways to serve an Ark, static (any file share) or dynamic (the web server): how to choose, step-by-step setup, screenshots, security. |
 | [OFFLINE.md](OFFLINE.md) | Offline operation, P2P sync, and the NFS-shared mesh. |
 | [MODEL_INVENTORY.md](MODEL_INVENTORY.md) | Model families, tiers, and availability. |

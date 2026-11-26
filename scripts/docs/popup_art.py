@@ -508,6 +508,7 @@ DOC_TREE = ('Val Ark', 'README.md', [
     ('Docs map', 'docs/README.md', [
         ('Guides', None, [
             ('How it works, in pictures', 'docs/HOW-IT-WORKS.md', []),
+            ('Screenshots', 'docs/SCREENSHOTS.md', []),
             ('Static or dynamic serving', 'docs/SERVING.md', []),
             ('The Librarian', 'docs/LIBRARIAN.md', []),
             ('Tools catalog', 'docs/TOOLS.md', []),

@@ -72,7 +72,7 @@ One fact, one home. Change it in the owning doc; from any other doc, link — ne
 
 - **The loop writes `state/selfheal.json` + `state/heal-events.jsonl`, not `state/health.json`.** `state/health.json` is the **librarian's** `maintain` report (`scripts/librarian.sh`); the loop's self-heal snapshot is `selfheal.json` and its healed-events feed is `heal-events.jsonl` (`scripts/loop.sh`). Several docs have gotten this wrong — check any "loop writes health.json" claim. See [knowledge/gotchas.md](knowledge/gotchas.md#health--self-heal-phase-6).
 - **The tool count is duplicated across many files** (README, CLAUDE.md, ARCHITECTURE). Reference [TOOLS.md](TOOLS.md) / `scripts/tools/*.sh` as the source — don't restate a number that will drift.
-- **[SECURITY-AUDIT.md](SECURITY-AUDIT.md) is a dated point-in-time report.** Offline gaps live as `offline-gap` issues (epic #384), not in a doc. Their findings and line numbers reflect the tree as scanned; read the dated addendum for current status rather than "fixing" the frozen body.
+- **[SECURITY-AUDIT.md](SECURITY-AUDIT.md) is a dated point-in-time report.** Its findings and line numbers reflect the tree as scanned; read the dated addendum for current status rather than "fixing" the frozen body. Offline gaps live as `offline-gap` issues (epic #384), not in a doc.
 - **PUBLIC repo.** No host names, local IPs, tailnet names, creds, or host paths in any doc — roles and placeholders only.
 
 ## Related

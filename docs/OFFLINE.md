@@ -17,8 +17,10 @@ entirely offline and share between machines over the LAN.
 - Sync between machines over LAN — Syncthing P2P, or one NFS-exported shared mirror.
 - A 24/7 loop keeps the mirror current, intact, and verified.
 
-For what the mirror would still be missing if the internet went off today, see
-[OFFLINE-GAPS.md](OFFLINE-GAPS.md).
+What the mirror would still be missing if the internet went off today is tracked as GitHub
+issues labelled [`offline-gap`](https://github.com/mvalancy/val-ark/issues?q=label%3Aoffline-gap),
+gathered in the [burn-down epic](https://github.com/mvalancy/val-ark/issues/384) (apps first, then
+library content, then other content, then models).
 
 ## Where data lives (configurable)
 

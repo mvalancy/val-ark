@@ -68,7 +68,6 @@ sync](#keeping-this-map-in-sync)).
 | [HOW-IT-WORKS.md](HOW-IT-WORKS.md) | The picture book: ten animated diagrams in reading order, from one disk to a whole network, each linking to the guide that goes deeper. |
 | [SERVING.md](SERVING.md) | The two ways to serve an Ark, static (any file share) or dynamic (the web server): how to choose, step-by-step setup, screenshots, security. |
 | [OFFLINE.md](OFFLINE.md) | Offline operation, P2P sync, and the NFS-shared mesh. |
-| [OFFLINE-GAPS.md](OFFLINE-GAPS.md) | "Internet went off today" gap analysis: ranked missing tools, cold-start warnings, content roadmap. |
 | [MODEL_INVENTORY.md](MODEL_INVENTORY.md) | Model families, tiers, and availability. |
 | [AGENTS.md](AGENTS.md) | Operating notes for writing and maintaining these reference guides. |
 

@@ -14,7 +14,6 @@ Each file is either a **reference** (describes what the code *is* — keep it ma
 | [LIBRARIAN.md](LIBRARIAN.md) | Reference | The disk-fill/curation engine, the data-root/`.env` layout, and the 24/7 loop. **Canonical** for data root, priority model, and loop steps. |
 | [TOOLS.md](TOOLS.md) | Reference | Catalog of the mirrored tools and how to use them. **Canonical** for the tool set (source of truth is `scripts/tools/*.sh`). |
 | [MODEL_INVENTORY.md](MODEL_INVENTORY.md) | Reference | Model families, tiers, and availability. **Canonical** for models. |
-| [OFFLINE-GAPS.md](OFFLINE-GAPS.md) | Reference (dated) | "Internet went off today" gap analysis — a point-in-time report (Updated 2026-07-10). |
 | [SECURITY-AUDIT.md](SECURITY-AUDIT.md) | Reference (dated) | Security audit + posture — a point-in-time report (Audit date 2026-06-06; line numbers frozen, see its Addendum). **Canonical** for security posture. |
 | [COMMUNITY.md](COMMUNITY.md) | Both | Offline community services (chat, mail, boards, file drop) — reference for the services + guide to running them. **Canonical** for comms. |
 | [ENCRYPTION.md](ENCRYPTION.md) | Guide | The local CA + TLS for the offline LAN. **Canonical** for TLS/HTTPS (link here, don't re-explain). |
@@ -73,7 +72,7 @@ One fact, one home. Change it in the owning doc; from any other doc, link — ne
 
 - **The loop writes `state/selfheal.json` + `state/heal-events.jsonl`, not `state/health.json`.** `state/health.json` is the **librarian's** `maintain` report (`scripts/librarian.sh`); the loop's self-heal snapshot is `selfheal.json` and its healed-events feed is `heal-events.jsonl` (`scripts/loop.sh`). Several docs have gotten this wrong — check any "loop writes health.json" claim. See [knowledge/gotchas.md](knowledge/gotchas.md#health--self-heal-phase-6).
 - **The tool count is duplicated across many files** (README, CLAUDE.md, ARCHITECTURE). Reference [TOOLS.md](TOOLS.md) / `scripts/tools/*.sh` as the source — don't restate a number that will drift.
-- **[OFFLINE-GAPS.md](OFFLINE-GAPS.md) and [SECURITY-AUDIT.md](SECURITY-AUDIT.md) are dated point-in-time reports.** Their findings and line numbers reflect the tree as scanned; read the dated addendum for current status rather than "fixing" the frozen body.
+- **[SECURITY-AUDIT.md](SECURITY-AUDIT.md) is a dated point-in-time report.** Its findings and line numbers reflect the tree as scanned; read the dated addendum for current status rather than "fixing" the frozen body. Offline gaps live as `offline-gap` issues (epic #384), not in a doc.
 - **PUBLIC repo.** No host names, local IPs, tailnet names, creds, or host paths in any doc — roles and placeholders only.
 
 ## Related

@@ -1714,7 +1714,7 @@ test.describe('Val Ark - Community Hub', () => {
     await expect(page.locator('button:has-text("Create account")')).toHaveCount(1);
     // The service picker offers exactly the host-provisioned services.
     const opts = await page.locator('#signup-svc option').allInnerTexts();
-    expect(opts.map(o => o.toLowerCase())).toEqual(['chat', 'mail']);
+    expect(opts.map(o => o.toLowerCase())).toEqual(['chat', 'mail', 'git forge']);
     const fns = await page.evaluate(() => [typeof (window as any).createServiceAccount, typeof (window as any).isAdminHost]);
     expect(fns).toEqual(['function', 'function']);
   });

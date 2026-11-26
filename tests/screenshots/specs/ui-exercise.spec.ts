@@ -16,7 +16,7 @@ const BASE_URL = process.env.VALARK_TEST_URL || 'http://localhost:3001';
 // each renders inside the shell with the fixed nav whether or not the service is
 // up, so the back-to-ark header must survive there too.
 const ROUTES = ['#/', '#/tools', '#/models', '#/content', '#/quickstart', '#/glossary',
-  '#/app/chat', '#/app/mail', '#/app/forum', '#/app/paste'];
+  '#/app/chat', '#/app/mail', '#/app/forum', '#/app/paste', '#/app/gitea'];
 
 // Keep the browser hermetic + fast: stub download POSTs (so clicking a "mirror"
 // control can't start a real multi-GB download) and abort external requests (the

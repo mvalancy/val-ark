@@ -27,7 +27,9 @@
 #     server that ignores Range restarts the file; a 206 at the wrong offset restarts; an
 #     oversized .part is reset; a second run downloads nothing; volatile files re-download
 #     only when HEAD shows upstream changed; never writes outside --dest
-#   - exit codes 0 / 1 / 2 / 64; argparse errors are 64, not 2
+#   - disk guards (#347): the Val Ark reserve, --budget and the STOP flag defer files
+#     (exit 3, nothing downloaded); a budget spent mid-download keeps the .part
+#   - exit codes 0 / 1 / 2 / 3 / 64; argparse errors are 64, not 2
 ###############################################################################
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -153,6 +155,10 @@ for _ in $(seq 50); do curl -s "$B/ver.txt" >/dev/null 2>&1 && break; sleep 0.1;
 export VALARK_GH_API="$B/api" VALARK_GH_WEB="$B/web" VALARK_GNU_BASE="$B/gnu" VALARK_GO_JSON="$B/go.json" \
        VALARK_PYTHON_FTP="$B/py" VALARK_PYPI="$B/pypi" VALARK_PYPI_TOP="$B/top.json" VALARK_SNAP_API="$B/snap"
 run() { python3 -I "$PY" "$@"; }
+# fetch keeps the Val Ark reserve (#347): zero it so a small CI disk does not defer every file;
+# the reserve, budget and STOP guards have their own checks below.
+export VALARK_RESERVE_MIN_GB=0 VALARK_RESERVE_PCT=0
+unset VALARK_STOP_FLAG
 
 # --- the shipped catalog ----------------------------------------------------------------
 run plan --tsv /nonexistent >/dev/null 2>&1; check "unreadable --tsv -> 64" '[ $? -eq 64 ]'
@@ -436,6 +442,55 @@ check "safe() strips path separators from upstream names" 'python3 -I -c "
 import importlib.util,sys
 s=importlib.util.spec_from_file_location(\"rm\",\"$PY\");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 sys.exit(0 if m.row(\"u\",\"g\",\"../..\",\"a/b\")[1]==\"g/_/a-b\" else 1)"'
+
+# --- disk guards (#347): the reserve, --budget and the STOP flag defer (exit 3), keep .parts --
+G="$T/guard"
+run fetch --tsv "$T/c.tsv" --only o/tool --dest "$G" --budget x >/dev/null 2>&1; check "--budget not a number -> 64" '[ $? -eq 64 ]'
+: > "$T/access.log"
+run fetch --tsv "$T/c.tsv" --only o/tool --dest "$G" --budget 0 > "$T/g0" 2>&1; rc=$?
+check "--budget 0 -> exit 3, every file deferred, nothing downloaded" '[ $rc -eq 3 ] && grep -q "^deferred	" "$T/g0" && ! grep -q "^ok	" "$T/g0" && ! grep -Eq "^GET /(f|web)/" "$T/access.log"' || cat "$T/g0" >&2
+: > "$T/access.log"
+VALARK_RESERVE_MIN_GB=999999999 run fetch --tsv "$T/c.tsv" --only o/tool --dest "$G" > "$T/gr" 2>&1; rc=$?
+check "the Val Ark reserve -> exit 3, nothing downloaded" '[ $rc -eq 3 ] && grep -q "reserve" "$T/gr" && ! grep -Eq "^GET /(f|web)/" "$T/access.log"' || cat "$T/gr" >&2
+touch "$T/STOP"; : > "$T/access.log"
+VALARK_STOP_FLAG="$T/STOP" run fetch --tsv "$T/c.tsv" --only o/tool --dest "$G" > "$T/gs" 2>&1; rc=$?
+check "the STOP flag -> exit 3, nothing downloaded" '[ $rc -eq 3 ] && grep -q "STOP" "$T/gs" && ! grep -Eq "^GET /(f|web)/" "$T/access.log"' || cat "$T/gs" >&2
+rm -f "$T/STOP"
+run fetch --tsv "$T/c.tsv" --only o/tool --dest "$G" --budget 100000000 > "$T/gb" 2>&1; rc=$?
+check "a budget that fits -> 0, files land" '[ $rc -eq 0 ] && grep -q "^ok	" "$T/gb"' || cat "$T/gb" >&2
+# mid-download: the budget is re-checked while writing; the .part stays and resumes next run
+python3 -I - "$PY" "$T/c.tsv" "$T/guard2" > "$T/gm.out" 2>&1 <<'PYEOF'
+import importlib.util, sys, pathlib
+spec = importlib.util.spec_from_file_location("rm", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.RECHECK = 1                          # re-check after every chunk
+class Spent(m.Guard):                  # the budget runs out once the first bytes are written
+    def why(self, path, need=0):
+        return "this run's byte budget is spent" if self.added > 0 else None
+m.GUARD = Spent()
+rc = m.main(["fetch", "--tsv", sys.argv[2], "--only", "o/tool", "--dest", sys.argv[3]])
+parts = list(pathlib.Path(sys.argv[3]).rglob("*.part"))
+print("rc", rc, "parts", len(parts) > 0)
+PYEOF
+check "budget spent mid-download -> exit 3, the .part is kept" 'grep -q "rc 3 parts True" "$T/gm.out"' || cat "$T/gm.out" >&2
+
+# a body whose Content-Length (the planned size is unknown) exceeds the budget is deferred before
+# any byte is written: exit 3, the request was made, no .part, no file
+rm -rf "$T/cl"; : > "$T/access.log"
+run fetch --tsv "$T/edge.tsv" --dest "$T/cl" --budget 100 > "$T/cl.out" 2> "$T/cl.err"; rc=$?
+check "Content-Length over --budget -> exit 3, deferred" '[ $rc -eq 3 ] && grep -q "^deferred	" "$T/cl.out" && ! grep -q "^ok	" "$T/cl.out"' || { cat "$T/cl.out" "$T/cl.err" >&2; }
+check "the over-budget body is refused after the response headers (a GET was made)" 'grep -q "^GET /web/o/edge/archive/" "$T/access.log"'
+check "nothing written: no .part, no file" '[ -z "$(find "$T/cl" -type f 2>/dev/null)" ]'
+check "the summary line reports the deferred files" 'grep -q "^summary: .*deferred=[1-9]" "$T/cl.err"'
+
+# N5: a resolve failure (exit 1) must not hide that files were also deferred (exit 3): both are reported
+printf '900|gh|o/missing||dev-tools|404\n' > "$T/mix.tsv"; cat "$T/edge.tsv" >> "$T/mix.tsv"; rm -rf "$T/mx"
+run fetch --tsv "$T/mix.tsv" --dest "$T/mx" --budget 100 > "$T/mx.out" 2> "$T/mx.err"; rc=$?
+check "resolve failure + deferred files -> exit 1, summary names both" '[ $rc -eq 1 ] && grep -q "^summary: resolve_failures=1 fetch_errors=0 deferred=[1-9]" "$T/mx.err"' || cat "$T/mx.err" >&2
+
+# the STOP-flag early exit also prints the summary line (the loop reads it), with the resolve failure
+: > "$T/stopflag"
+VALARK_STOP_FLAG="$T/stopflag" run fetch --tsv "$T/mix.tsv" --dest "$T/sf" --budget 100 > "$T/sf.out" 2> "$T/sf.err"; rc=$?
+check "STOP flag + resolve failure -> exit 1, summary line names both" '[ $rc -eq 1 ] && grep -q "^summary: resolve_failures=1 fetch_errors=0 deferred=[1-9]" "$T/sf.err" && ! grep -q "^ok	" "$T/sf.out"' || cat "$T/sf.err" >&2
 
 echo "release-mirror: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

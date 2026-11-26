@@ -154,6 +154,14 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   item; a scouted repo with its own raw pipeline tag (`text-classification`, …) would get both.
   `hf_scout.py` maps tags onto the curated category words (or `scouted`), and the planner skips
   `model:scout-*` ids in phase 1 and in the sole-representative shield.
+- **A new candidate bucket picks its class** (#347). The planner plans class by class (apps,
+  library, models, bulk) from the bucket (`planner.py item_class`). A bucket it does not know lands
+  in `bulk`, after every model: give new app-like rows bucket `installers` and new reading rows
+  bucket `content`, or extend `item_class`.
+- **`release_mirror.py fetch` keeps the 50 GB reserve, even by hand** (#347). On a disk with less
+  than `max(2%, 50 GB)` free every file is deferred (exit 3, `deferred` rows). Set
+  `VALARK_RESERVE_MIN_GB` / `VALARK_RESERVE_PCT` for that run (the tests set both to 0), or fetch
+  to a bigger disk.
 
 - **`apt-get --print-uris` is a trap for offline .deb sets** (`scripts/lib/apt_offline.py`): (1) it
   prints only an **MD5** digest, so take SHA256 from the signed `*_Packages` lists; (2) its local
@@ -524,6 +532,12 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   And a sub-app's **web** port binds `127.0.0.1`, never `VALARK_BIND`: that knob is for
   protocol ports (mail, IRC), and owners set it to `0.0.0.0` for IMAP, which would put the
   web UI on the LAN around the proxy (`tests/test-service-binds.sh`).
+- **A sub-app that builds absolute URLs from Host sees the proxy's `127.0.0.1:<port>` (#346).**
+  `pipeProxy` rewrites Host for every upstream. Gitea (`PUBLIC_URL_DETECTION = auto`, its default)
+  then wrote `http://127.0.0.1:3300/app/gitea/...` into clone URLs and API avatar links, useless
+  to a LAN client. Its `APP_SERVICES` entry sets `preserveHost`: the browser's Host (already
+  passed `hostAllowed()`) goes through, and `X-Forwarded-Proto` comes from the listener, never
+  the client. Gitea's user-content routes are covered in `tests/test-gitea.sh`.
 - **Minting a login is an admin action → `POST /api/service/adduser` is admin‑gated.** LAN
   users self‑register on the forum, join chat with just a nickname, or ask the host; only the
   operator (localhost/admin) provisions **mail** logins. The UI hides the create form off‑admin

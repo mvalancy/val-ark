@@ -16,6 +16,22 @@ implementing the user's priority model:
      once that full variant is on disk the small copy is SUPERSEDED
      (--superseded lists it; librarian.sh fill removes it), so nothing is
      stored twice.
+  Then CLASS BY CLASS (#347): every candidate of one class is planned before any
+  candidate of the next, whatever the owner profile's weights say:
+
+       library  Kiwix ZIMs (books, references, videos), Lastbook (packs, maps, its
+                app installers) and the installers (data/installers.tsv: netboot,
+                OS images, router firmware, Jetson BSP, server sources). Installers
+                rank by value alongside the ZIMs, so a 32-64 GB disk still plans
+                ZIMs rather than spending its room on ~72 GB of ISOs/BSPs.
+       models   AI models beyond the phase-0 assistant (curated, scouted, the
+                Lastbook model)
+       bulk     anything else (datasets, other bulk rows)
+
+  so a model is planned only once every library item is planned, held, or
+  does not fit. Exception: the `ai` profile keeps ONE small curated model early
+  (EARLY_MODELS), right after the essentials. Within each class the passes are:
+
   1. DIVERSITY first  - one item (the smallest) from every category not yet on
      disk, before deepening any single category.
   2. SMALL VALUABLE   - then remaining items by value-per-byte (small + valuable
@@ -23,6 +39,8 @@ implementing the user's priority model:
      can't crowd out diversity.
   3. FILL REMAINING   - then the big flagships by intrinsic value until the
      fillable budget (avail - reserve) is exhausted.
+
+  The plan's phase column keeps 0-3 (the pass); the class follows from the bucket.
 
 Already-present items (verified on disk) are skipped and their categories count
 as covered. Cross-flavour dedup via a content key keeps us from grabbing both
@@ -61,6 +79,26 @@ CAPS = {
     "zim:wikipedia": 18,
 }
 CAP_DEFAULT = 12
+
+# Class order (#347): library (ZIMs, Lastbook, installers), then models, then bulk. (The apps
+# themselves - tool mirrors and the dev stack - are not planned here: the loop mirrors them first.) The owner profile only
+# weights values WITHIN a class; it never reorders the classes.
+CLASS_ORDER = ("library", "models", "bulk")
+# Profiles that keep N small curated models ahead of the library class (the one documented
+# exception to the class order). The model must be at most --small-max bytes.
+EARLY_MODELS = {"ai": 1}
+
+
+def item_class(c):
+    """library | models | bulk for a candidate (from its bucket and source). Installers are library."""
+    b = c["bucket"]
+    if b == "models":
+        return "models"
+    # Installers (OS images, Jetson BSPs: ~72 GB) are library, as the issue lists them: ranked by
+    # value with the ZIMs, so a 32-64 GB disk still plans ZIMs instead of spending it on ISOs.
+    if b in ("installers", "content") or c["source"] == "lastbook":
+        return "library"
+    return "bulk"
 
 
 def cap_for(cat):
@@ -328,7 +366,7 @@ def lb_satisfied(c):
     return False
 
 
-def plan(cands, budget, small_max, essentials=(), flavours=None):
+def plan(cands, budget, small_max, essentials=(), flavours=None, profile="balanced"):
     lb_prepare(list(cands) + list(flavours or []))
     present_cats = set()
     present_keys = set()
@@ -432,43 +470,62 @@ def plan(cands, budget, small_max, essentials=(), flavours=None):
         selected.append((c, phase))
         return True
 
-    # Phase 1: diversity - smallest unstarted item per uncovered category.
-    by_cat = {}
-    for c in pool:
-        by_cat.setdefault(c["category"], []).append(c)
     # Categories whose rows need something planned first (Lastbook maps / installers need a
     # pack) go after the others, so the pack can take its diversity slot before them.
-    def needs_first(cat):
-        return any(c["source"] == "lastbook" and lb_parse(c)[1] == "pack" for c in by_cat[cat])
-    for cat in sorted(by_cat, key=lambda k: (needs_first(k), k)):
-        if cat in taken_cats:
-            continue
-        # Scouted rows (hf_scout.py, ids model:scout-*) never take a diversity slot: they
-        # are guesses from popularity, and the smallest one would jump the curated work.
-        # The Lastbook model (17 GB) never takes a diversity slot either: it competes by value.
-        for c in sorted((x for x in by_cat[cat] if not is_scouted(x)
-                         and not (x["source"] == "lastbook" and lb_parse(x)[0] == "model")),
-                        key=lambda x: x["bytes"]):
-            if take(c, 1):
+    def needs_first(rows):
+        return any(c["source"] == "lastbook" and lb_parse(c)[1] == "pack" for c in rows)
+
+    def passes(cpool):
+        """Phases 1-3 over one class's pool."""
+        # Phase 1: diversity - smallest unstarted item per uncovered category.
+        by_cat = {}
+        for c in cpool:
+            by_cat.setdefault(c["category"], []).append(c)
+        for cat in sorted(by_cat, key=lambda k: (needs_first(by_cat[k]), k)):
+            if cat in taken_cats:
+                continue
+            # Scouted rows (hf_scout.py, ids model:scout-*) never take a diversity slot: they
+            # are guesses from popularity, and the smallest one would jump the curated work.
+            # The Lastbook model (17 GB) never takes a diversity slot either: it competes by value.
+            for c in sorted((x for x in by_cat[cat] if not is_scouted(x)
+                             and not (x["source"] == "lastbook" and lb_parse(x)[0] == "model")),
+                            key=lambda x: x["bytes"]):
+                if take(c, 1):
+                    break
+
+        # Phase 2: small valuable - value/byte desc, size-capped, per-category capped.
+        p2 = [c for c in cpool if c["id"] not in planned_ids and c["bytes"] <= small_max]
+        # Scouted rows (hf_scout.py) skip this phase: a tiny, high-value scouted speech/vision
+        # repo has ~30x the value per byte of a 2 GB curated model, so it would crowd curated
+        # items out here (and, by spending the budget, starve the curated items over small_max
+        # that only phase 3 considers). They compete in phase 3 by intrinsic value instead.
+        for c in sorted(p2, key=lambda x: (-density(x), x["bytes"])):
+            if is_scouted(c):
+                continue
+            if cat_count.get(c["category"], 0) >= cap_for(c["category"]):
+                continue
+            take(c, 2)
+
+        # Phase 3: fill remaining - intrinsic value desc (flagships), then small.
+        p3 = [c for c in cpool if c["id"] not in planned_ids]
+        for c in sorted(p3, key=lambda x: (-x["value"], x["bytes"])):
+            take(c, 3)
+
+    # The ai profile's early model(s): the most valuable small curated model(s), before the library.
+    early = EARLY_MODELS.get(profile, 0)
+    if early:
+        small_models = [c for c in pool if item_class(c) == "models" and not is_scouted(c)
+                        and c["source"] != "lastbook" and c["bytes"] <= small_max]
+        for c in sorted(small_models, key=lambda x: (-x["value"], x["bytes"])):
+            if early <= 0:
                 break
+            if take(c, 1):
+                early -= 1
 
-    # Phase 2: small valuable - value/byte desc, size-capped, per-category capped.
-    p2 = [c for c in pool if c["id"] not in planned_ids and c["bytes"] <= small_max]
-    # Scouted rows (hf_scout.py) skip this phase: a tiny, high-value scouted speech/vision
-    # repo has ~30x the value per byte of a 2 GB curated model, so it would crowd curated
-    # items out here (and, by spending the budget, starve the curated items over small_max
-    # that only phase 3 considers). They compete in phase 3 by intrinsic value instead.
-    for c in sorted(p2, key=lambda x: (-density(x), x["bytes"])):
-        if is_scouted(c):
-            continue
-        if cat_count.get(c["category"], 0) >= cap_for(c["category"]):
-            continue
-        take(c, 2)
-
-    # Phase 3: fill remaining - intrinsic value desc (flagships), then small.
-    p3 = [c for c in pool if c["id"] not in planned_ids]
-    for c in sorted(p3, key=lambda x: (-x["value"], x["bytes"])):
-        take(c, 3)
+    # Class by class (#347): library, models, bulk. A class is finished (every item
+    # planned, already held, or too big for what is left) before the next one starts.
+    for cls in CLASS_ORDER:
+        passes([c for c in pool if item_class(c) == cls])
 
     return selected, budget_left, len(present_cats), len(present_keys)
 
@@ -582,6 +639,8 @@ def main():
     ap.add_argument("--profile", default="balanced", help="owner profile; selects essentials whose focus includes it")
     ap.add_argument("--superseded", action="store_true",
                     help="list managed, unpinned small ZIM variants whose larger variant is complete on disk, then exit")
+    ap.add_argument("--essentials-unlisted", action="store_true",
+                    help="print the zim/lastbook essentials rows for --profile that match no candidate at all, then exit")
     ap.add_argument("--list-absent", action="store_true",
                     help="emit every not-yet-downloaded candidate (the web catalog), then exit")
     args = ap.parse_args()
@@ -604,6 +663,12 @@ def main():
             sys.stderr.write("planner: skipped %d model(s) larger than %s (small-models policy)\n"
                              % (len(oversized), _h(args.model_max_bytes)))
 
+    if args.essentials_unlisted:
+        for _rank, kind, pattern in load_essentials(args.essentials, args.profile):
+            if kind in ("zim", "lastbook") and not any(essential_match(c, kind, pattern) for c in raw):
+                sys.stdout.write("%s:%s\n" % (kind, pattern))
+        return 0
+
     if args.superseded:
         for c in superseded(raw, args.manifest, load_pins(args.pins)):
             sys.stdout.write("\t".join([c["id"], c["category"], c["dest"], str(c["bytes"]), str(c["value"])]) + "\n")
@@ -623,7 +688,7 @@ def main():
     if args.model_max_bytes > 0:
         raw = [c for c in raw if not (c["bucket"] == "models" and c["bytes"] > args.model_max_bytes)]
     essentials = load_essentials(args.essentials, args.profile)
-    selected, left, pcats, pkeys = plan(cands, args.budget, args.small_max, essentials, raw)
+    selected, left, pcats, pkeys = plan(cands, args.budget, args.small_max, essentials, raw, args.profile)
     total = sum(c["bytes"] for c, _ in selected)
     for c, phase in selected:
         emit(c, phase, sys.stdout)
@@ -637,8 +702,10 @@ def main():
             n /= 1024.0
     sys.stderr.write(
         "planner: %d candidates -> %d planned (%s), budget left %s | already-present: %d categories, %d items | "
-        "phase0(essentials)=%d phase1(diversity)=%d phase2(small-value)=%d phase3(fill)=%d\n"
-        % (len(cands), len(selected), h(total), h(left), pcats, pkeys, ph[0], ph[1], ph[2], ph[3]))
+        "phase0(essentials)=%d phase1(diversity)=%d phase2(small-value)=%d phase3(fill)=%d | "
+        "after essentials, by class: %s\n"
+        % (len(cands), len(selected), h(total), h(left), pcats, pkeys, ph[0], ph[1], ph[2], ph[3],
+           " ".join("%s=%d" % (k, sum(1 for c, p in selected if p and item_class(c) == k)) for k in CLASS_ORDER)))
     return 0
 
 

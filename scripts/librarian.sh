@@ -358,6 +358,33 @@ cmd_plan() {
     echo "  ── ${n} items, $(human "$tot") total ──"
 }
 
+# `librarian.sh essentials-done [BUDGET]`: exit 0 when every phase-0 (grid-down essentials) row
+# that fits the budget is already held, i.e. the planner has no phase-0 row left to fetch;
+# 1 while some are still planned; 2 when there is no catalog to judge by (offline, empty cache) or a
+# zim/lastbook essential has no candidate at all (a failed catalog fetch).
+# The loop gates the app mirrors (5c tool refresh, 5d dev stack) on this (#347).
+cmd_essentials_done() {
+    local budget="${1:-$(valark_budget_bytes)}" n0 cnt unl
+    ensure_state
+    catalog_refresh_zim >/dev/null 2>&1 || true
+    catalog_refresh_lastbook >/dev/null 2>&1 || true
+    gen_candidates > "${TMPDIR_VA}/plan-ess.cands"
+    # Fail closed on a PARTIAL catalog: a zim/lastbook essential with no candidate at all (neither held
+    # nor too big) means its catalog fetch failed, so "all held" cannot be judged.
+    unl=$(python3 "$PLANNER" --budget 0 --essentials "${DATA_DIR:-${PROJECT_ROOT}/data}/essentials.tsv" \
+        --profile "$(_valark_profile)" --essentials-unlisted < "${TMPDIR_VA}/plan-ess.cands" 2>/dev/null | head -3 | tr '\n' ' ')
+    [ -z "$unl" ] || { echo "essentials: no catalog entry for ${unl}(catalog fetch failed?)"; return 2; }
+    python3 "$PLANNER" --budget "$budget" \
+        --essentials "${DATA_DIR:-${PROJECT_ROOT}/data}/essentials.tsv" --profile "$(_valark_profile)" \
+        --model-max-bytes "$(valark_model_max_bytes)" < "${TMPDIR_VA}/plan-ess.cands" \
+        2> "${TMPDIR_VA}/plan-ess.summary" > "${TMPDIR_VA}/plan-ess.tsv"
+    cnt=$(sed -n 's/^planner: \([0-9]*\) candidates.*/\1/p' "${TMPDIR_VA}/plan-ess.summary" | head -1)
+    [ "${cnt:-0}" -gt 0 ] || { echo "essentials: no catalog to judge by"; return 2; }
+    n0=$(awk -F'\t' '$10==0' "${TMPDIR_VA}/plan-ess.tsv" | wc -l)
+    if [ "$n0" -eq 0 ]; then echo "essentials: all that fit are held"; return 0; fi
+    echo "essentials: ${n0} still to fetch"; return 1
+}
+
 cmd_fill() {
     local max_bytes=0 max_items=0 time_budget=0 budget=""
     while [ $# -gt 0 ]; do case "$1" in
@@ -763,6 +790,7 @@ cmd_site() {
 case "${1:-status}" in
     status)   cmd_status ;;
     plan)     shift; [ "$1" = "--budget" ] && cmd_plan "$2" || cmd_plan ;;
+    essentials-done) shift; cmd_essentials_done "$@" ;;
     fill)     shift; cmd_fill "$@" ;;
     verify)   cmd_verify ;;
     evict)    shift; cmd_evict "$@" ;;
@@ -780,5 +808,5 @@ case "${1:-status}" in
     unpin)    shift; cmd_unpin "$1" ;;
     pins)     shift; [ "$1" = "--refill" ] && cmd_pins_refill || cmd_pins ;;
     site)     shift; cmd_site "$@" ;;
-    *) echo "usage: librarian.sh {status|plan|fill|verify|evict|maintain|refresh|scout|catalog|request|pin|unpin|pins|site|lastbook-plan}"; exit 1 ;;
+    *) echo "usage: librarian.sh {status|plan|fill|verify|evict|maintain|refresh|scout|catalog|request|pin|unpin|pins|site|lastbook-plan|essentials-done}"; exit 1 ;;
 esac

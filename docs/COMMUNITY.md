@@ -18,13 +18,13 @@ of the dashboard.
 
 ## Contents
 
-- [The Four Services](#the-four-services)
+- [The Services](#the-services)
 - [Architecture](#architecture)
 - [Services](#services)
 - [Security Model](#security-model)
 - [Supervision & Configuration](#supervision--configuration)
 
-## The Four Services
+## The Services
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/flow/community-dark.svg">
@@ -37,6 +37,7 @@ of the dashboard.
 | `mail` | Mail | Local community email | maddy + alps (single static Go SMTP/IMAP binary) | `/app/mail/` | 1323 |
 | `forum` | Message Boards | Async threads, Q&A, announcements | NodeBB on the mirrored Redis (no Mongo) | `/app/forum/` | 4567 |
 | `paste` | Files & Pastebin | Snippets, file upload, URL shortener | MicroBin (one static Rust binary) | `/app/paste/` | 8085 |
+| `gitea` | Git Forge | Git hosting, issues, PRs, wikis, package registries | Gitea (one static Go binary, SQLite) | `/app/gitea/` | 3300 |
 
 ## Architecture
 
@@ -83,6 +84,7 @@ graph TB
         MAIL["mail<br/>maddy + alps<br/>web 127.0.0.1:1323"]
         FORUM["forum<br/>NodeBB on Redis<br/>127.0.0.1:4567"]
         PASTE["paste<br/>MicroBin<br/>127.0.0.1:8085"]
+        GITEA["gitea<br/>Gitea (SQLite)<br/>127.0.0.1:3300"]
     end
 
     subgraph Storage["Data Root (any disk)"]
@@ -96,6 +98,7 @@ graph TB
     PROXY -->|/app/mail/| MAIL
     PROXY -->|/app/forum/| FORUM
     PROXY -->|/app/paste/| PASTE
+    PROXY -->|/app/gitea/| GITEA
     SUP -.->|start/health| Services
     Services --> STATE
     TOOLS -.->|installed from| Services
@@ -180,6 +183,52 @@ that can be forced off.
   password (user `admin`), saved to `<dataDir>/credentials.txt` (chmod 600); override via
   `PASTE_AUTH_USER` / `PASTE_AUTH_PASSWORD` / `PASTE_ADMIN_PASSWORD`. Pastas default private.
 
+### Git Forge — `/app/gitea/` (port 3300)
+
+The forge that replaces GitHub the day it goes dark (#346): git hosting over HTTP, issues,
+pull requests with review, wikis, releases and built-in package registries (npm, PyPI,
+Cargo, Go, Debian, OCI, generic), all from **Gitea**, one static Go binary with SQLite.
+
+- **Mirror:** `scripts/tools/gitea.sh` fetches the official binaries from `dl.gitea.com`
+  (latest from its `version.json`, the pin offline) for linux-x86_64, linux-arm64,
+  macos-arm64 and windows-x64, checks each against upstream's `.sha256`, and writes an
+  `INSTALL.txt` beside it. It is version-gated, so the weekly loop refresh moves it to new
+  releases. `verify.sh` runs the host's copy with `--version`.
+- **Runtime deps:** `git` on the host (Gitea shells out to it). Gitea refuses to run as root.
+- **Bind:** always `127.0.0.1:3300` (`VALARK_GITEA_PORT`), whatever `VALARK_BIND` says; SSH is
+  off, so clones and pushes go over HTTP through the proxy. `ROOT_URL` carries `/app/gitea/`
+  and the proxy strips that prefix. The proxy passes the browser's `Host` through (and sets
+  `X-Forwarded-Proto` from the listener), so clone URLs and avatars point at the address
+  people actually used (`PUBLIC_URL_DETECTION = auto`).
+- **`ROOT_URL` (set `VALARK_GITEA_ROOT_URL` on a real box):** pages follow the browser, but
+  links made outside a browser request use `ROOT_URL`: webhook payloads, the push hints git
+  prints, and other absolute URLs Gitea stores or sends. Without the knob it defaults to the
+  box's own address the way the UI picks it: `<name>.local` while `state/mdns.json` says the
+  name is announced, else the LAN IP, on `VALARK_WEB_PORT`. That can change (DHCP, a renamed
+  box), so pin the address people use, e.g. `VALARK_GITEA_ROOT_URL=http://ark.example:3000`.
+- **Config:** `gitea.sh` regenerates `state/services/gitea/custom/conf/app.ini` (mode 600) on
+  every start: SQLite, `INSTALL_LOCK`, `OFFLINE_MODE` (no CDN assets, Gravatar off), no
+  mailer, no update checker, no federation, Actions off, packages on, header (reverse-proxy)
+  auth off, only loopback trusted as a proxy. Secrets are generated once into `secrets.env`
+  (mode 600); the data dir is mode 700 (`gitea.db` holds the password hashes). `VALARK_GITEA_REQUIRE_SIGNIN=1` hides public repos from
+  signed-out visitors.
+- **Accounts:** self-registration is **off**. The host creates logins with
+  `scripts/services/gitea.sh adduser <name> [password]`, or the Community page's admin-only
+  "Create a login" form (`POST /api/service/adduser`). The **first** login created is the site
+  admin. Without a password, Gitea generates one (`--random-password`, so it is never on a
+  command line), it is printed once and must be changed at first sign-in. A password the host
+  types is on Gitea's command line while `adduser` runs, as with chat and mail.
+- **Same-origin rich content (raises #327).** Gitea renders a lot of user-written content
+  inside its own pages: Markdown in READMEs, issues, PRs and wikis, rendered notebooks and
+  CSV, Mermaid diagrams, code previews. Its sanitizer is good, but those pages are not
+  sandboxed: they are Gitea's UI and share the Val Ark origin. A sanitizer bypass there would
+  run as the Val Ark UI, which is a larger surface than the other sub-apps, so #327 (each
+  sub-app on its own origin) matters more once Gitea is enabled.
+- **Not done yet (#346 follow-ups):** importing the mirrored git bundles
+  (`data/source-repos.tsv`) as read-only Gitea mirrors, and seeding the package registries
+  from the package caches. The registries start empty; publish to them with the usual
+  clients (`npm publish --registry …/app/gitea/api/packages/<owner>/npm/`, `twine`, `cargo`, …).
+
 ## Security Model
 
 > A full multi-agent security audit of Val Ark (repo secrets, the reverse proxy, service
@@ -189,7 +238,7 @@ that can be forced off.
 > permissions) and need operator action with `sudo` — start there.
 
 This layer is built for a **trusted offline LAN/mesh, not the internet**. The posture is
-explicit and uniform across all four services:
+explicit and uniform across all the services:
 
 - **LAN/mesh-only binding.** Web UIs always bind `127.0.0.1` and are reachable only
   through the Val Ark reverse proxy (one origin, over HTTP or the local-CA HTTPS
@@ -207,7 +256,9 @@ explicit and uniform across all four services:
   at runtime.**
 - **Auth required, always.** chat runs in private mode (login per user); mail mandates
   SASL/IMAP auth; forum requires login with a first-run admin; paste gates the whole
-  instance behind HTTP Basic plus a separate admin password. First-run credentials are
+  instance behind HTTP Basic plus a separate admin password; gitea has registration off
+  (the host creates logins), though public repos stay readable on the LAN unless
+  `VALARK_GITEA_REQUIRE_SIGNIN=1`. First-run credentials are
   generated and saved to chmod-600 files in each service's state dir (or pinned via env) —
   operators should rotate them after first login.
 - **Uploads can't act as the Val Ark UI (#317).** The sub-apps share the UI's origin, and
@@ -216,11 +267,17 @@ explicit and uniform across all four services:
   allow-popups allow-downloads`, no `allow-same-origin`, plus `nosniff`): MicroBin's
   `/file/`, `/secure_file/`, `/raw/` and `/archive/`, NodeBB's `/assets/uploads/` and
   `/uploads/`, The Lounge's `/uploads/` and `/storage/`, alps' raw message parts, `/proxy`
-  and `/bimi/avatar`, and any sub-app response that carries `Content-Disposition`. An HTML
+  and `/bimi/avatar`, Gitea's raw and media files, attachments, release downloads,
+  archives, raw wiki pages, `/render/`, `/api/packages/`, LFS objects and avatars (also
+  under `/api/v1/repos/`), the container registry (`/v2/`), commit/PR/compare `.patch` and
+  `.diff`, and `/{user}.keys` / `.gpg`, and any sub-app response that carries `Content-Disposition`. An HTML
   upload still opens, but as an opaque origin with no cookies, storage or API access. The
   sub-apps' own pages and assets are not sandboxed. The proxy keeps each sub-app's own CSP
   (only `frame-ancestors` is removed, so the frame works) and never forwards the Val Ark
-  session cookie. As a second line, `/api/*` refuses writes and script reads (`fetch`/XHR)
+  session cookie. It also drops a client's `X-Forwarded-*`, `Forwarded`, `X-Real-IP`,
+  `X-WEBAUTH-*` and `Remote-User` headers (any spelling with `_`) and sets `X-Forwarded-For`
+  to the real peer, for every sub-app and Kiwix, so an upstream that trusts loopback can't
+  be handed a forged client address or a header login. As a second line, `/api/*` refuses writes and script reads (`fetch`/XHR)
   from a page under `/app/` or `/kiwix/`. **Still true:** an XSS bug in a sub-app's own UI
   runs as the Val Ark origin; only a separate origin per app would close that.
 - **Data on the data disk.** All config, credentials, and message history live under the
@@ -249,15 +306,18 @@ service's process state, ports, data dir, and a liveness probe.
 |-----|---------|
 | `VALARK_BIND` | LAN bind address for the protocol ports only: mail IMAP/submission (default `0.0.0.0`) and native IRC (default `127.0.0.1`). The sub-apps' web UIs always bind `127.0.0.1`, whatever it says (#317). `127.0.0.1` = host-only. |
 | `VALARK_WEB_PORT` | The primary origin/port the shell + all `/app/<id>/` proxies are served on (default 3000; also reachable via `VALARK_WEB_EXTRA_PORTS`, the `VALARK_WEB_PUBLIC_PORT` redirect, and HTTPS on `VALARK_HTTPS_PORT`). |
-| `VALARK_SERVICES` | Space-separated enable list, e.g. `"chat mail forum paste"` (empty = none). |
+| `VALARK_SERVICES` | Space-separated enable list, e.g. `"chat mail forum paste gitea"` (empty = none). |
 | `VALARK_CHAT_ADMIN_USER` / `VALARK_CHAT_ADMIN_PASS` | Pin the chat admin login. |
 | `VALARK_FORUM_ADMIN_USERNAME` / `_PASSWORD` / `_EMAIL` | Unattended forum admin creation. |
 | `PASTE_AUTH_USER` / `PASTE_AUTH_PASSWORD` / `PASTE_ADMIN_PASSWORD` | Pin paste credentials. |
+| `VALARK_GITEA_ROOT_URL` | The Ark origin for Gitea's `ROOT_URL` fallback (e.g. `http://ark.example:3000`; `/app/gitea/` is appended). |
+| `VALARK_GITEA_REQUIRE_SIGNIN` | `1` = only signed-in users may browse the forge (default `0`). |
+| `VALARK_GITEA_EMAIL_DOMAIN` | Domain for the placeholder addresses `gitea.sh adduser` gives (default `valark.lan`). |
 
-Per-service internal ports keep their documented defaults (9000 / 1323 / 4567 / 8085) and
+Per-service internal ports keep their documented defaults (9000 / 1323 / 4567 / 8085 / 3300) and
 rarely need changing since they are localhost-only behind the proxy. When one is changed,
 `server.js` reads the same key as the service script, so the proxy follows it:
-`VALARK_CHAT_WEB_PORT`, `VALARK_MAIL_WEB_PORT`, `VALARK_FORUM_PORT`, `PASTE_PORT`.
+`VALARK_CHAT_WEB_PORT`, `VALARK_MAIL_WEB_PORT`, `VALARK_FORUM_PORT`, `PASTE_PORT`, `VALARK_GITEA_PORT`.
 
 ---
 

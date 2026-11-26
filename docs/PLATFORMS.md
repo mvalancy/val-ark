@@ -164,7 +164,7 @@ stable-diffusion.cpp (AVX2), Piper TTS, ONNX Runtime, FFmpeg, Vosk.
 
 On any platform, once tools are present, [`scripts/librarian.sh`](../scripts/librarian.sh)
 fills a disk of **any size** from live catalogs (Kiwix OPDS fetched live — never stale),
-in priority order: essentials → diversity → small-valuable → fill-remaining (`evict` and
+in priority order: essentials, then apps → library → models, each diversity → small-valuable → fill-remaining (`evict` and
 `request` trade up for better items when room is needed).
 Downloads use aria2 multi-connection (~3× faster) with curl fallback — resumable,
 size-verified, atomic, single-`flock`.

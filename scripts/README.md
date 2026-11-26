@@ -32,8 +32,8 @@ flowchart TD
     loop -->|2e| self[mirror-self.sh<br/>LAN self-replication]
     loop -->|7c| sweep[lib/mod-sweep.sh<br/>moderation sweep]
 
-    manual([run by hand]) --> rel[lib/release_mirror.py] --> devtsv[data/dev-stack.tsv]
-    manual --> apt[lib/apt_offline.py] --> apttsv[data/apt-sets.tsv]
+    loop -->|5d| rel[lib/release_mirror.py] --> devtsv[data/dev-stack.tsv]
+    manual([run by hand]) --> apt[lib/apt_offline.py] --> apttsv[data/apt-sets.tsv]
     manual --> gb[lib/git_bundle_mirror.py] --> srctsv[data/source-repos.tsv]
 
     lib -->|aria2 / curl| zim[content/zim ZIMs]
@@ -105,7 +105,7 @@ Shared library under `lib/` — sourced/required building blocks, not entry poin
 | `lib/tls.sh` | Offline local certificate authority (CA + server leaf) for LAN HTTPS with no internet |
 | `lib/jobs.js` | Download/mirror job manager behind `/api/status/downloads` + SSE: real-byte progress, honest terminal states, restart recovery |
 | `lib/tool-scan.js` | Mirrored-tool directory scan + per-platform mirror verification (sees through wrapper dirs) |
-| `lib/release_mirror.py` | Standalone: the current release of every `data/dev-stack.tsv` project, every platform (`plan` / `fetch`) |
+| `lib/release_mirror.py` | Loop step 5d (before the fill) or by hand: the current release of every `data/dev-stack.tsv` project, every platform (`plan` / `fetch`) |
 | `lib/hf_scout.py` | Weekly Hugging Face model scout: speech + vision models (any age, ≤ 6 GB) and new open models (≤ 10 GB) as `models-extra.tsv` rows, cached by `catalog.sh` and run by `librarian.sh scout` / `maintain` (bounded by `VALARK_SCOUT_TIMEOUT`, 30 min) |
 | `lib/static_site.py` | Static browse pages (`index.html` + `browse/`) for plain file shares: cards with pictures, descriptions, sizes and relative links; run by `librarian.sh site` / `maintain` |
 | `lib/apt_offline.py` | Standalone: dependency-complete offline APT sets from `data/apt-sets.tsv`, indexed as a flat repo |
@@ -117,7 +117,7 @@ Shared library under `lib/` — sourced/required building blocks, not entry poin
 ## Librarian (`librarian.sh`)
 
 Fills a disk of **any size** from live catalogs in priority order:
-`grid-down essentials → diversity → small-valuable → fill-remaining` (`fill` never evicts; it only drops a smaller copy once a fuller version of the same item is on disk; `evict` and `request` trade up when room is needed). Downloads prefer
+`grid-down essentials`, then apps → library → models → bulk, each `diversity → small-valuable → fill-remaining` (#347; `fill` never evicts; it only drops a smaller copy once a fuller version of the same item is on disk; `evict` and `request` trade up when room is needed). Downloads prefer
 **aria2** multi-connection (~3× faster on per-connection-throttled mirrors) with a
 curl fallback; both resume, retry, verify size, atomic-rename, and never abort on a
 single failure. A single `flock` prevents concurrent fills from racing.

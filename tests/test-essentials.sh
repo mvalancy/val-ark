@@ -216,5 +216,30 @@ EOS
 [ -n "$PR" ] || fail "real-prune fixture produced no results"
 while IFS= read -r l; do case "$l" in PASS) pass ;; FAIL:*) fail "${l#FAIL: }" ;; esac; done <<<"$PR"
 
+# --- librarian.sh essentials-done (#347 B1): the gate the loop puts before the app mirrors -------------
+ED="$T/ed"; mkdir -p "$ED/z"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' zim:water_en__eng content zim:other 600 $((20*MB)) zim https://x/w.zim "$ED/z/water.zim" water_en > "$ED/c.tsv"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' zim:huge_en__eng content zim:other 650 $((90000*MB)) zim https://x/h.zim "$ED/z/huge.zim" huge_en >> "$ED/c.tsv"
+printf '10|zim|water_en|all|water\n12|zim|huge_en|all|too big for the budget\n' > "$ED/ess.tsv"
+ess_done() {   # CANDIDATES-FILE BUDGET -> prints rc
+  bash -c '
+  TT="$2"; export VAL_ARK_DATA="$1" VAL_ARK_CONFIG="$2/none.env" FORCE_COLOR=0
+  . "$3/scripts/librarian.sh"; ensure_state
+  catalog_refresh_zim() { :; }; catalog_refresh_lastbook() { :; }
+  DATA_DIR="$2"; cp "$2/ess.tsv" "$2/essentials.tsv"
+  CF="$4"; gen_candidates() { cat "$CF"; }
+  cmd_essentials_done "$5" >"$2/ed.out" 2>"$2/ed.err"; echo $?' _ "$T/edroot" "$ED" "$ROOT" "$1" "$2"
+}
+mkdir -p "$T/edroot"
+[ "$(ess_done "$ED/c.tsv" $((10*1024*MB)))" = 1 ] && pass || fail "essentials-done: a missing essential that fits -> exit 1"
+head -c $((20*MB)) /dev/zero > "$ED/z/water.zim"
+[ "$(ess_done "$ED/c.tsv" $((10*1024*MB)))" = 0 ] && pass || fail "essentials-done: every essential that fits is held (the huge one does not fit) -> exit 0"
+: > "$ED/none.tsv"
+[ "$(ess_done "$ED/none.tsv" $((10*1024*MB)))" = 2 ] && pass || fail "essentials-done: no catalog -> exit 2 (cannot judge)"
+# a model-only catalog with ZIM essentials listed (the Kiwix fetch failed) -> exit 2, not "all held"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' hf:tiny models models:small 500 $((MB)) hf https://x/m.gguf "$ED/m.gguf" tiny > "$ED/model-only.tsv"
+r=$(ess_done "$ED/model-only.tsv" $((10*1024*MB))); [ "$r" = 2 ] && pass || { fail "essentials-done: model-only catalog but zim essentials listed -> exit 2 (got $r)"; cat "$ED/ed.out" "$ED/ed.err" >&2; }
+grep -q 'essentials-done) shift; cmd_essentials_done' "$ROOT/scripts/librarian.sh" && pass || fail "librarian.sh dispatches essentials-done"
+
 echo "essentials: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

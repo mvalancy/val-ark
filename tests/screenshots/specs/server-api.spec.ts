@@ -298,6 +298,7 @@ test.describe('Val Ark API Server', () => {
     expect(data.chat.account.signup).toBe('open');
     expect(data.mail.account.signup).toBe('host');
     expect(data.paste.account.signup).toBe('shared');
+    expect(data.gitea.account.signup).toBe('host');   // registration off; the host adds logins (#346)
   });
 
   // --- Community account provisioning: POST /api/service/adduser ------------------

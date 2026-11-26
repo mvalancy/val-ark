@@ -28,6 +28,7 @@ positives were removed.
 - [Addendum — 2026-07-10 (status update)](#addendum--2026-07-10-status-update-the-report-above-is-the-unedited-record)
 - [Addendum — 2026-11-25: library reads stay on the local network](#addendum--2026-11-25-library-reads-stay-on-the-local-network-297)
 - [Addendum — 2026-11-25: cross-site POSTs refused](#addendum--2026-11-25-cross-site-posts-refused-314)
+- [Addendum — 2026-11-25: Gitea joins the sub-apps](#addendum--2026-11-25-gitea-joins-the-sub-apps-346)
 
 ---
 
@@ -283,7 +284,7 @@ and remain as reported until re-probed.
   iptables/ip6tables NAT `PREROUTING` `REDIRECT` to the web port is re-asserted every
   cycle on every real interface (LAN **and** tailnet; loopback untouched) — puts the
   unauthenticated web origin on a standard port.
-- `loop.sh` step 6b: weekly **unattended** tool refresh pulls latest upstream releases
+- `loop.sh` step 5c: weekly **unattended** tool refresh pulls latest upstream releases
   (`VALARK_TOOL_REFRESH_DAYS`, default 7) — raises the stakes of
   `supply-chain-no-checksum-1`, since fetches now happen with no operator watching.
 - New services/mirrors: a SeaweedFS launcher (`scripts/services/seaweedfs.sh`, binds
@@ -409,3 +410,33 @@ URLs), tracked under #327.
 same-origin with the UI. Only the defence-in-depth Referer check above applies to them. ZIMs
 come from the curated Kiwix catalog, not from users, but a ZIM that carries hostile script
 could still drive the UI. Tracked under #327 with the sub-app origin split.
+
+## Addendum — 2026-11-25: Gitea joins the sub-apps (#346)
+
+Gitea (`scripts/services/gitea.sh`) is proxied at `/app/gitea/` like the other sub-apps, on
+`127.0.0.1` only, with registration off and the first host-created login as site admin.
+The review of #386 changed three shared things:
+
+- **Forwarding headers are the proxy's.** `pipeProxy` passed a client's `X-Forwarded-For`,
+  `X-Real-IP`, `X-Forwarded-Host`, `Forwarded` and `X-WEBAUTH-USER` through to every
+  upstream. Gitea trusts `X-Forwarded-For` from loopback (`REVERSE_PROXY_TRUSTED_PROXIES`), so
+  a LAN client could forge its logged address, and `X-WEBAUTH-USER` was one config change
+  (`ENABLE_REVERSE_PROXY_AUTHENTICATION`) away from logging in as anyone. The proxy now drops
+  `x-forwarded-*`, `forwarded`, `x-real-ip`, `x-webauth-*` and `remote-user` (underscore
+  spellings too) for every sub-app and Kiwix, and sets `X-Forwarded-For` to the real peer.
+  Gitea alone also gets the browser's Host and an `X-Forwarded-Proto` taken from the
+  listener. `gitea.sh` writes header auth off explicitly.
+- **More user-content routes are sandboxed:** Gitea's raw/media files, attachments,
+  release downloads, archives, raw wiki, `render`, `/api/packages/`, the container registry
+  `/v2/`, LFS objects (with or without `.git`), commit/PR/compare `.patch`/`.diff`,
+  `/{user}.keys` and `.gpg`, and avatars.
+- **Data at rest:** the Gitea data dir is mode 700 and `app.ini`/`secrets.env` are 600.
+
+`tests/test-gitea.sh` covers each route, the header stripping (an echo stub behind Gitea's
+and MicroBin's ports) and the modes.
+
+**Raises #327.** Gitea renders far more user-written content inside its own (unsandboxed)
+pages than the other sub-apps: Markdown in READMEs, issues, PRs and wikis, notebooks, CSV,
+Mermaid. Gitea sanitizes it, but a sanitizer bypass would run as the Val Ark origin and
+could drive the UI. Serving each sub-app from its own origin (#327) is the fix, and it
+matters more on a box that enables Gitea.

@@ -13,13 +13,19 @@ every platform, and AI models. Then it shares all of it on the local network, wi
 and message boards for the people nearby. It works on a disk of any size, and it keeps itself
 healthy around the clock.
 
-![The Val Ark web UI](docs/screenshots/web-ui/web-ui-full.png)
+## How it works
 
-| Software | Library |
-|---|---|
-| ![Software catalog](docs/screenshots/web-ui/software-page.png) | ![Wikipedia, StackExchange and more](docs/screenshots/web-ui/library-page.png) |
-| **Models** | **A tool's page** |
-| ![AI model families](docs/screenshots/web-ui/model-cards.png) | ![Tool detail](docs/screenshots/web-ui/tool-detail.png) |
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/flow/system-dark.svg">
+  <img src="docs/img/flow/system-light.svg" width="100%" alt="Animated diagram: How an Ark works, end to end. Fetch once from the internet, keep it healthy on one disk, share it on the LAN.">
+</picture>
+
+The Librarian fetches from live catalogs and plans what fits. The loop checks and repairs
+everything every 30 minutes. The disk is then shared two ways: a live web server, or static pages
+on any file share. [Architecture](docs/ARCHITECTURE.md) has the detail.
+
+See the web UI in [screenshots](docs/SCREENSHOTS.md), or the whole system in ten moving
+diagrams: [how it works, in pictures](docs/HOW-IT-WORKS.md).
 
 ## What's on an Ark
 
@@ -36,18 +42,9 @@ healthy around the clock.
   See [community](docs/COMMUNITY.md).
 
 The [Librarian](docs/LIBRARIAN.md) decides what fits: grid-down essentials first, then one of each
-kind, then the most value per byte, trading up as better items appear.
-
-## How it works
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/flow/system-dark.svg">
-  <img src="docs/img/flow/system-light.svg" width="100%" alt="Animated diagram: How an Ark works, end to end. Fetch once from the internet, keep it healthy on one disk, share it on the LAN.">
-</picture>
-
-The Librarian fetches from live catalogs and plans what fits. The loop checks and repairs
-everything every 30 minutes. The disk is then shared two ways: a live web server, or static pages
-on any file share. [Architecture](docs/ARCHITECTURE.md) has the detail.
+kind, then the most value per byte, trading up as better items appear. You steer it with a focus
+at setup, requests and pins, and a few limits: see
+[choosing what goes on your Ark](docs/CHOOSING-CONTENT.md).
 
 ## Get started
 

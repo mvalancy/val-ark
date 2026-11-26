@@ -100,7 +100,7 @@ The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
    (every phase-0 essentials row that fits is on disk; exit 1 = some still to fetch,
    exit 2 = no catalog to judge by). Until then the fill, which takes the essentials
    first, runs alone. The dev stack (~194 GB) gets a bounded **share** of the budget,
-   never all of it: `VALARK_DEVSTACK_PCT` percent (default 25; 100 = no share cap) of
+   never all of it (the tool refresh, step 5c, has the same kind of cap: `VALARK_TOOLS_PCT`, default 25, 100 = none): `VALARK_DEVSTACK_PCT` percent (default 25; 100 = no share cap) of
    the budget plus what the tree already holds, and `VALARK_DEVSTACK_MAX_GB` caps the
    whole tree on top. Both mirrors are time-bound, held to the reserve, and fail-soft.
    `release_mirror.py` ends with a `summary:` line (resolve failures, fetch errors,

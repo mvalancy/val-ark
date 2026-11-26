@@ -360,14 +360,24 @@ cmd_plan() {
 
 # `librarian.sh essentials-done [BUDGET]`: exit 0 when every phase-0 (grid-down essentials) row
 # that fits the budget is already held, i.e. the planner has no phase-0 row left to fetch;
-# 1 while some are still planned; 2 when there is no catalog to judge by (offline, empty cache).
+# 1 while some are still planned; 2 when there is no catalog to judge by (offline, empty cache) or a
+# zim/lastbook essential has no candidate at all (a failed catalog fetch).
 # The loop gates the app mirrors (5c tool refresh, 5d dev stack) on this (#347).
 cmd_essentials_done() {
-    local budget="${1:-$(valark_budget_bytes)}" n0 cnt
+    local budget="${1:-$(valark_budget_bytes)}" n0 cnt unl
     ensure_state
     catalog_refresh_zim >/dev/null 2>&1 || true
     catalog_refresh_lastbook >/dev/null 2>&1 || true
-    build_plan "$budget" "${TMPDIR_VA}/plan-ess.summary" > "${TMPDIR_VA}/plan-ess.tsv"
+    gen_candidates > "${TMPDIR_VA}/plan-ess.cands"
+    # Fail closed on a PARTIAL catalog: a zim/lastbook essential with no candidate at all (neither held
+    # nor too big) means its catalog fetch failed, so "all held" cannot be judged.
+    unl=$(python3 "$PLANNER" --budget 0 --essentials "${DATA_DIR:-${PROJECT_ROOT}/data}/essentials.tsv" \
+        --profile "$(_valark_profile)" --essentials-unlisted < "${TMPDIR_VA}/plan-ess.cands" 2>/dev/null | head -3 | tr '\n' ' ')
+    [ -z "$unl" ] || { echo "essentials: no catalog entry for ${unl}(catalog fetch failed?)"; return 2; }
+    python3 "$PLANNER" --budget "$budget" \
+        --essentials "${DATA_DIR:-${PROJECT_ROOT}/data}/essentials.tsv" --profile "$(_valark_profile)" \
+        --model-max-bytes "$(valark_model_max_bytes)" < "${TMPDIR_VA}/plan-ess.cands" \
+        2> "${TMPDIR_VA}/plan-ess.summary" > "${TMPDIR_VA}/plan-ess.tsv"
     cnt=$(sed -n 's/^planner: \([0-9]*\) candidates.*/\1/p' "${TMPDIR_VA}/plan-ess.summary" | head -1)
     [ "${cnt:-0}" -gt 0 ] || { echo "essentials: no catalog to judge by"; return 2; }
     n0=$(awk -F'\t' '$10==0' "${TMPDIR_VA}/plan-ess.tsv" | wc -l)

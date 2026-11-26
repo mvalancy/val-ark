@@ -639,6 +639,8 @@ def main():
     ap.add_argument("--profile", default="balanced", help="owner profile; selects essentials whose focus includes it")
     ap.add_argument("--superseded", action="store_true",
                     help="list managed, unpinned small ZIM variants whose larger variant is complete on disk, then exit")
+    ap.add_argument("--essentials-unlisted", action="store_true",
+                    help="print the zim/lastbook essentials rows for --profile that match no candidate at all, then exit")
     ap.add_argument("--list-absent", action="store_true",
                     help="emit every not-yet-downloaded candidate (the web catalog), then exit")
     args = ap.parse_args()
@@ -660,6 +662,12 @@ def main():
             cands = [c for c in cands if not (c["bucket"] == "models" and c["bytes"] > args.model_max_bytes)]
             sys.stderr.write("planner: skipped %d model(s) larger than %s (small-models policy)\n"
                              % (len(oversized), _h(args.model_max_bytes)))
+
+    if args.essentials_unlisted:
+        for _rank, kind, pattern in load_essentials(args.essentials, args.profile):
+            if kind in ("zim", "lastbook") and not any(essential_match(c, kind, pattern) for c in raw):
+                sys.stdout.write("%s:%s\n" % (kind, pattern))
+        return 0
 
     if args.superseded:
         for c in superseded(raw, args.manifest, load_pins(args.pins)):

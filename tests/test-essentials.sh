@@ -236,6 +236,9 @@ head -c $((20*MB)) /dev/zero > "$ED/z/water.zim"
 [ "$(ess_done "$ED/c.tsv" $((10*1024*MB)))" = 0 ] && pass || fail "essentials-done: every essential that fits is held (the huge one does not fit) -> exit 0"
 : > "$ED/none.tsv"
 [ "$(ess_done "$ED/none.tsv" $((10*1024*MB)))" = 2 ] && pass || fail "essentials-done: no catalog -> exit 2 (cannot judge)"
+# a model-only catalog with ZIM essentials listed (the Kiwix fetch failed) -> exit 2, not "all held"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' hf:tiny models models:small 500 $((MB)) hf https://x/m.gguf "$ED/m.gguf" tiny > "$ED/model-only.tsv"
+r=$(ess_done "$ED/model-only.tsv" $((10*1024*MB))); [ "$r" = 2 ] && pass || { fail "essentials-done: model-only catalog but zim essentials listed -> exit 2 (got $r)"; cat "$ED/ed.out" "$ED/ed.err" >&2; }
 grep -q 'essentials-done) shift; cmd_essentials_done' "$ROOT/scripts/librarian.sh" && pass || fail "librarian.sh dispatches essentials-done"
 
 echo "essentials: $PASS passed, $FAIL failed"

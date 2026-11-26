@@ -55,7 +55,7 @@ cat > "$H" <<EOF
 export VAL_ARK_DATA="$T/data" VAL_ARK_CONFIG="$T/empty.env" TRACE="$T/trace"
 mkdir -p "$T/data"; : > "$T/empty.env"
 unset VALARK_DEVSTACK VALARK_DEVSTACK_REFRESH_DAYS VALARK_DEVSTACK_MAX_GB VALARK_DEVSTACK_GROUPS \
-      VALARK_DEVSTACK_TIMEOUT VALARK_TOOL_REFRESH_DAYS VALARK_MAX_GB GITHUB_TOKEN _VALARK_ENV_LOADED
+      VALARK_DEVSTACK_TIMEOUT VALARK_TOOLS_PCT VALARK_TOOL_REFRESH_DAYS VALARK_MAX_GB GITHUB_TOKEN _VALARK_ENV_LOADED
 . "$ROOT/scripts/loop.sh"
 _DIR="$F"; LIBRARIAN="$F/librarian.sh"; VERIFY="$F/verify.sh"
 mkdir -p "\$STATE_DIR" "\$LOG_DIR"
@@ -111,6 +111,15 @@ grep -qE '^(devstack|tools)' "$T/trace" 2>/dev/null && fail "the STOP flag must 
 reset; ( . "$H"; STUB_BUDGET=$((GIB/2)); tool_refresh; devstack_mirror ) >/dev/null 2>&1
 grep -qE '^(devstack|tools)' "$T/trace" 2>/dev/null && fail "under 1 GiB of budget the app mirrors must not run" || pass
 N=$(nextin devstack-refresh.next); [ "$N" -gt 80000 ] && [ "$N" -le 86400 ] && pass || fail "a skipped (no room) dev stack retries in 1 day (got ${N}s)"
+
+# 5b. the tool refresh holds a bounded share (VALARK_TOOLS_PCT, 25) of budget + what its tree holds.
+reset; ( . "$H"; STUB_BUDGET=$((2*GIB)); mkdir -p "$TOOLS_DIR"; head -c 1048576 /dev/zero > "$TOOLS_DIR/held.bin"
+         VALARK_TOOLS_PCT=10; tool_refresh ) >/dev/null 2>&1
+grep -q '^tools' "$T/trace" 2>/dev/null && fail "VALARK_TOOLS_PCT=10 of ~2 GiB is under 1 GiB: the tool refresh must wait" || pass
+reset; ( . "$H"; STUB_BUDGET=$((2*GIB)); VALARK_TOOLS_PCT=100; tool_refresh ) >/dev/null 2>&1
+grep -q '^tools' "$T/trace" 2>/dev/null && pass || fail "VALARK_TOOLS_PCT=100: no share cap, the refresh runs"
+reset; ( . "$H"; STUB_BUDGET=$((8*GIB)); tool_refresh ) >/dev/null 2>&1
+grep -q '^tools' "$T/trace" 2>/dev/null && pass || fail "default 25% of 8 GiB (2 GiB) clears the 1 GiB floor: the refresh runs"
 
 # 6. VALARK_DEVSTACK_MAX_GB caps the budget by what the tree already holds; groups knob.
 reset; ( . "$H"; mkdir -p "$DEVSTACK_DIR"; head -c 1048576 /dev/zero > "$DEVSTACK_DIR/held.bin"

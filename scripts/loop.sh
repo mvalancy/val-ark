@@ -274,8 +274,18 @@ tool_refresh() {
         return 0
     fi
     budget=$(valark_budget_bytes 2>/dev/null); budget=${budget:-0}
+    # A bounded share like the dev stack: VALARK_TOOLS_PCT percent (default 25; 100 = no share cap) of
+    # budget + what the tools tree holds. The tool scripts size nothing, so the cap is a gate: once the
+    # tree holds its share, the refresh waits for room.
+    local held pct="${VALARK_TOOLS_PCT:-25}"
+    case "$pct" in ''|*[!0-9]*) pct=25 ;; esac
+    if [ "$pct" -lt 100 ]; then
+        held=$(du -sbL "$TOOLS_DIR" 2>/dev/null | cut -f1); held=${held:-0}
+        local cap=$(( (budget + held) / 100 * pct - held )); [ "$cap" -lt 0 ] && cap=0
+        [ "$cap" -lt "$budget" ] && budget=$cap
+    fi
     if [ "$budget" -lt "$APPS_MIN_BUDGET" ]; then
-        log "${YELLOW}tool refresh skipped${NC}: $(valark_human "$budget") of budget left (reserve / VALARK_MAX_GB)"
+        log "${YELLOW}tool refresh skipped${NC}: $(valark_human "$budget") of budget left (reserve / VALARK_MAX_GB / VALARK_TOOLS_PCT)"
         return 0
     fi
     log "refreshing tool mirror to latest upstream versions (bounded $(( ${VALARK_TOOL_REFRESH_TIMEOUT:-7200} / 60 ))min)"

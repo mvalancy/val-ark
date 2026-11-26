@@ -487,5 +487,10 @@ printf '900|gh|o/missing||dev-tools|404\n' > "$T/mix.tsv"; cat "$T/edge.tsv" >> 
 run fetch --tsv "$T/mix.tsv" --dest "$T/mx" --budget 100 > "$T/mx.out" 2> "$T/mx.err"; rc=$?
 check "resolve failure + deferred files -> exit 1, summary names both" '[ $rc -eq 1 ] && grep -q "^summary: resolve_failures=1 fetch_errors=0 deferred=[1-9]" "$T/mx.err"' || cat "$T/mx.err" >&2
 
+# the STOP-flag early exit also prints the summary line (the loop reads it), with the resolve failure
+: > "$T/stopflag"
+VALARK_STOP_FLAG="$T/stopflag" run fetch --tsv "$T/mix.tsv" --dest "$T/sf" --budget 100 > "$T/sf.out" 2> "$T/sf.err"; rc=$?
+check "STOP flag + resolve failure -> exit 1, summary line names both" '[ $rc -eq 1 ] && grep -q "^summary: resolve_failures=1 fetch_errors=0 deferred=[1-9]" "$T/sf.err" && ! grep -q "^ok	" "$T/sf.out"' || cat "$T/sf.err" >&2
+
 echo "release-mirror: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

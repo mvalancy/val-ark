@@ -17,6 +17,7 @@ later). See [README](README.md).
 | Date | Decision | Issue / Phase |
 |------|----------|---------------|
 | 2026‑11 | [Apps and the library before AI models: class order, app mirrors before the fill](#202611--apps-and-the-library-before-ai-models-class-order-app-mirrors-before-the-fill-347) | #347 |
+| 2026‑11 | [Offline gaps live in issues, not a doc](#202611--offline-gaps-live-in-issues-not-a-doc-384) | #384 |
 | 2026‑11 | [Setup keeps its promises: a .local name when avahi can, a first fill, the cron is the admin's call](#202611--setup-keeps-its-promises-a-local-name-when-avahi-can-a-first-fill-the-cron-is-the-admins-call-306) | #306 |
 | 2026‑11 | [Docs as a picture book: a short README and a generated docs tree](#202611--docs-as-a-picture-book-a-short-readme-and-a-generated-docs-tree-282) | #282 |
 | 2026‑11 | [Grid-down essentials tier + survival profile](#202611--grid-down-essentials-tier--survival-profile) | |
@@ -79,6 +80,29 @@ and other content".
   item is on disk); `evict` and `request` trade up. The APT sets and source bundles stay manual.
 - Tests: `tests/test-planner-classes.sh`, `tests/test-loop-apps-first.sh`, the guard checks in
   `tests/test-release-mirror.sh`.
+
+## 2026‑11 — Offline gaps live in issues, not a doc (#384)
+
+**Context.** docs/OFFLINE-GAPS.md (a July 2026 sweep) listed what the mirror would lack if the
+internet went off, but nothing tracked closing each gap. **Decision.** Every open or partial gap is an
+`offline-gap` issue with a priority label (`prio:apps` → `prio:library` → `prio:content` →
+`prio:later`), gathered in the burn-down epic #384, and the doc is removed. Owner priority
+(2026-11-25): apps and library content before any more AI models. **Why.** A tracker can be burned
+down; a frozen report drifts. The doc's "explicitly rejected" list is kept below so the reasons
+aren't lost.
+
+Rejected (and why), from the July sweep: Full PyPI mirror (42.3 TB), Docker Desktop (proprietary), HAProxy (source-only),
+nginx as a catalog binary (no portable builds — Caddy wins), GCC official
+binaries (don't exist — distro packages + `zig cc` + w64devkit), official
+LLVM tarballs (~5 GB, Windows 404 — Zig wins), rustup (a downloader — mirror
+static.rust-lang.org standalone installers), MariaDB (no arm64 bintar/macOS —
+MySQL 8.4 covers all 4), MinIO (duplicates SeaweedFS), Promtail (EOL —
+Telegraf ships logs to Loki), magic-wormhole (no portable binaries — croc),
+GnuPG portable (doesn't exist — age), Vaultwarden (Docker-only — KeePassXC),
+OSRM/Valhalla (Docker/source-only — GraphHopper's single JAR), tileserver-gl
+(npm native deps — go-pmtiles), Cura (Orca/Prusa cover it), Candle/LaserGRBL
+(unmaintained/Windows-only — Universal G-code Sender), standalone
+dnsmasq/unbound (apt-only — AdGuard Home).
 
 ## 2026‑11 — Setup keeps its promises: a .local name when avahi can, a first fill, the cron is the admin's call (#306)
 

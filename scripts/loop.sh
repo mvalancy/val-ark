@@ -254,6 +254,14 @@ ensure_link_dhcp() {
 # skipped (and retried next cycle) under the STOP flag or with less than 1 GiB of
 # budget left (the reserve / VALARK_MAX_GB), since the tool scripts size nothing.
 APPS_MIN_BUDGET=1073741824
+# True (0) when every phase-0 essentials row that fits is on disk: `librarian.sh essentials-done`
+# exits 0. Exit 1 (some still planned) or 2 (no catalog to judge by) holds the app mirrors back;
+# an essentials list that cannot be judged fails closed, the fill below makes progress either way.
+essentials_held() {
+    local rc=0
+    FORCE_COLOR=0 bash "$LIBRARIAN" essentials-done >/dev/null 2>&1 || rc=$?
+    return "$rc"
+}
 tool_refresh() {
     local days="${VALARK_TOOL_REFRESH_DAYS:-7}"
     [ "$days" = "0" ] && { log "tool refresh disabled"; return 0; }
@@ -288,9 +296,11 @@ tool_refresh() {
 #   - weekly (VALARK_DEVSTACK_REFRESH_DAYS, default 7); a run cut short by its time bound
 #     (VALARK_DEVSTACK_TIMEOUT, default 3600 s) continues next cycle (.parts resume); a run
 #     deferred by the disk or one with errors retries in a day;
-#   - budget = the librarian's (valark_budget_bytes: the reserve and VALARK_MAX_GB, whose
-#     footprint counts DEVSTACK_DIR), optionally capped by VALARK_DEVSTACK_MAX_GB for the
-#     whole tree; release_mirror.py also re-checks the reserve and the STOP flag every 256 MiB;
+#   - budget = a bounded SHARE of the librarian's (valark_budget_bytes: the reserve and
+#     VALARK_MAX_GB, whose footprint counts DEVSTACK_DIR): VALARK_DEVSTACK_PCT percent
+#     (default 25; 100 = the whole budget) of budget + what the tree holds, optionally also
+#     capped by VALARK_DEVSTACK_MAX_GB for the whole tree. Never starts before the grid-down
+#     essentials are held (the loop gates 5c/5d on `librarian.sh essentials-done`); release_mirror.py also re-checks the reserve and the STOP flag every 256 MiB;
 #   - VALARK_DEVSTACK_GROUPS (comma list, e.g. python,toolchains,security) limits the groups;
 #   - GITHUB_TOKEN from .env lifts GitHub's 60 calls/hour anonymous limit (~250 per plan).
 devstack_mirror() {
@@ -307,14 +317,22 @@ devstack_mirror() {
         return 0
     fi
     budget=$(valark_budget_bytes 2>/dev/null); budget=${budget:-0}
+    held=$(du -sbL "$DEVSTACK_DIR" 2>/dev/null | cut -f1); held=${held:-0}
+    # A bounded share, never the whole budget (the stack is ~194 GB): VALARK_DEVSTACK_PCT of what
+    # the dev stack could hold in all (budget + what it holds now), default 25; 100 = no share cap.
+    local pct="${VALARK_DEVSTACK_PCT:-25}"
+    case "$pct" in ''|*[!0-9]*) pct=25 ;; esac
+    if [ "$pct" -lt 100 ]; then
+        cap=$(( (budget + held) / 100 * pct - held )); [ "$cap" -lt 0 ] && cap=0
+        [ "$cap" -lt "$budget" ] && budget=$cap
+    fi
     case "${VALARK_DEVSTACK_MAX_GB:-}" in
         ''|*[!0-9]*) ;;
-        *) held=$(du -sbL "$DEVSTACK_DIR" 2>/dev/null | cut -f1); held=${held:-0}
-           cap=$(( VALARK_DEVSTACK_MAX_GB * 1073741824 - held )); [ "$cap" -lt 0 ] && cap=0
+        *) cap=$(( VALARK_DEVSTACK_MAX_GB * 1073741824 - held )); [ "$cap" -lt 0 ] && cap=0
            [ "$cap" -lt "$budget" ] && budget=$cap ;;
     esac
     if [ "$budget" -lt "$APPS_MIN_BUDGET" ]; then
-        log "${YELLOW}dev-stack mirror skipped${NC}: $(valark_human "$budget") of budget left (reserve / VALARK_MAX_GB / VALARK_DEVSTACK_MAX_GB); retrying in 1d"
+        log "${YELLOW}dev-stack mirror skipped${NC}: $(valark_human "$budget") of budget left (reserve / VALARK_MAX_GB / VALARK_DEVSTACK_PCT / VALARK_DEVSTACK_MAX_GB); retrying in 1d"
         echo $(( now + 86400 )) > "$marker"
         return 0
     fi
@@ -325,6 +343,8 @@ devstack_mirror() {
     mkdir -p "$DEVSTACK_DIR" "$LOG_DIR" 2>/dev/null
     VALARK_STOP_FLAG="${STATE_DIR}/STOP" timeout "$secs" python3 "${_DIR}/lib/release_mirror.py" fetch \
         --dest "$DEVSTACK_DIR" --budget "$budget" "${groups[@]}" >> "${LOG_DIR}/devstack.log" 2>&1 || rc=$?
+    local sumline; sumline=$(grep '^summary: ' "${LOG_DIR}/devstack.log" 2>/dev/null | tail -1)
+    [ "$rc" != "0" ] && [ -n "$sumline" ] && log "dev-stack mirror (exit $rc) ${sumline}"   # exit 1 must not hide deferred files (exit 3)
     case "$rc" in
         0)   echo $(( now + days * 86400 )) > "$marker"; log "${GREEN}dev-stack mirror complete${NC} (next in ${days}d)" ;;
         124|137) echo "$now" > "$marker"; log "${YELLOW}dev-stack mirror hit its ${secs}s bound${NC}; it continues next cycle (.parts resume)" ;;
@@ -470,9 +490,16 @@ loop_once() {
 
     # Apps before more models (#347): the unplanned app mirrors run before the top-up fill,
     # whose planner then takes apps, then library, then models.
-    step "5c. tool refresh (weekly; keeps mirrored apps at latest upstream)"; tool_refresh
+    # ...but only once the planner's phase-0 grid-down essentials that fit are held: on a small
+    # disk the app mirrors (the dev stack is ~194 GB) would otherwise fill it before the essentials.
+    if essentials_held; then
+        step "5c. tool refresh (weekly; keeps mirrored apps at latest upstream)"; tool_refresh
 
-    step "5d. dev-stack mirror (weekly; data/dev-stack.tsv, VALARK_DEVSTACK)"; devstack_mirror
+        step "5d. dev-stack mirror (weekly; data/dev-stack.tsv, VALARK_DEVSTACK)"; devstack_mirror
+    else
+        step "5c/5d. tool refresh + dev-stack mirror: waiting for the grid-down essentials"
+        log "${YELLOW}tool refresh and dev-stack mirror held back${NC}: the essentials (librarian.sh essentials-done) are not all held yet; the fill below takes them first"
+    fi
 
     step "6. top-up fill (<=${FILL_SECONDS}s; skipped if a fill is already running)"
     FORCE_COLOR=0 bash "$LIBRARIAN" fill --time "$FILL_SECONDS" 2>&1 | tail -1 | sed 's/^/    /'

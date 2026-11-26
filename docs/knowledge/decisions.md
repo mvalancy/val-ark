@@ -80,6 +80,11 @@ and other content".
   item is on disk); `evict` and `request` trade up. The APT sets and source bundles stay manual.
 - Tests: `tests/test-planner-classes.sh`, `tests/test-loop-apps-first.sh`, the guard checks in
   `tests/test-release-mirror.sh`.
+- **Review follow-up (B1/B2):** the loop gates steps 5c/5d on `librarian.sh essentials-done` and
+  gives the dev stack a bounded share (`VALARK_DEVSTACK_PCT`, default 25) of the budget;
+  installers are **library**, not apps (a 32-64 GB disk must still plan ZIMs). See
+  [LIBRARIAN.md](../LIBRARIAN.md#the-priority-model) for the models-vs-library note (N1), the
+  dev-stack storage choice (N2) and the long-cycle lock note (N3).
 
 ## 2026‑11 — Offline gaps live in issues, not a doc (#384)
 

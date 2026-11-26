@@ -28,8 +28,19 @@ Before any focus applies, the Librarian takes the **grid-down essentials** in
 [`data/essentials.tsv`](../data/essentials.tsv): safe water, field medicine, food, repair, a pocket
 Wikipedia, a tiny setup assistant and the network-boot images, each in its smallest version. Some
 rows only apply to one focus (Army field manuals, for example, only for *Grid-down survival*).
-Then it fills by kind and by value per byte until the disk reaches its reserve. The
-[Librarian guide](LIBRARIAN.md#the-priority-model) has the exact order, and
+Then it fills in this order, until the disk reaches its reserve:
+
+1. **Essentials**, as above.
+2. **Apps and tools**: the mirrored tools and the developer + security stack. They start
+   once the essentials are held, and the developer stack gets a bounded share of the disk
+   (25% by default, `VALARK_DEVSTACK_PCT`), never all of it.
+3. **The library**: Kiwix libraries (books, references, videos), Lastbook, **and the
+   installers** (OS images, router firmware, Jetson boards), ranked by value so a small
+   disk still gets its libraries.
+4. **AI models**, beyond the small assistant (the *AI* focus keeps one small model early).
+5. **Datasets** and everything else.
+
+The [Librarian guide](LIBRARIAN.md#the-priority-model) has the exact order, and
 [how it works, in pictures](HOW-IT-WORKS.md#2-filling-the-disk) shows it as a diagram.
 
 ## 3. Ask for something specific

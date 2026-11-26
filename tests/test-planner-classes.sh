@@ -1,6 +1,7 @@
 #!/bin/bash
 ###############################################################################
-# Test: the planner's CLASS ORDER (#347): apps and library before AI models.
+# Test: the planner's CLASS ORDER (#347): the library (ZIMs, Lastbook AND the installers) before AI
+# models. Installers are library, not apps: they rank by value with the ZIMs.
 # Offline, fixtures only (no catalog fetch, no downloads).
 #
 #  * after the phase-0 essentials, every app (installer) and library (ZIM,
@@ -59,7 +60,7 @@ cat > "$T/ess.tsv" <<'EOF'
 EOF
 plan() { python3 "$P" --essentials "$T/ess.tsv" "$@" < "$T/cands.tsv" 2>"$T/err"; }
 cls() {   # id bucket -> class (mirrors planner.item_class)
-  awk -F'\t' '{ c = ($2=="installers") ? "apps" : ($2=="models") ? "models" : ($2=="content" || $6=="lastbook") ? "library" : "bulk";
+  awk -F'\t' '{ c = ($2=="models") ? "models" : ($2=="content" || $2=="installers" || $6=="lastbook") ? "library" : "bulk";
                 print $1 "\t" c "\t" $10 }'
 }
 APPS_LIB="inst:netboot inst:alpine inst:ubuntu inst:gitea-src inst:openwrt zim:water_en zim:gutenberg_en zim:wikipedia_en zim:ted_en zim:devdocs_en lastbook:pack:small lastbook:map:ca"
@@ -67,7 +68,7 @@ APPS_LIB="inst:netboot inst:alpine inst:ubuntu inst:gitea-src inst:openwrt zim:w
 # order_ok FILE: no app after a library/model/bulk row, no library after a model/bulk, no model
 # after a bulk row (phase-0 rows and the ai early model are exempt via $2 = rows to skip).
 order_ok() {
-  awk -F'\t' -v skip="${2:-}" 'BEGIN { r["apps"]=1; r["library"]=2; r["models"]=3; r["bulk"]=4; split(skip, s, " "); for (k in s) sk[s[k]]=1 }
+  awk -F'\t' -v skip="${2:-}" 'BEGIN { r["library"]=2; r["models"]=3; r["bulk"]=4; split(skip, s, " "); for (k in s) sk[s[k]]=1 }
        $3 == 0 || ($1 in sk) { next }
        { if (r[$2] < hi) { print "out of order: " $1 " (" $2 ") after a later class"; bad=1 } if (r[$2] > hi) hi = r[$2] }
        END { exit bad }' "$1"
@@ -81,13 +82,13 @@ grep -q $'^model:assistant\tmodels\t0$' "$T/p1" && pass || fail "the essential a
 [ "$(head -1 "$T/p1" | cut -f1)" = "zim:water_en" ] && pass || fail "essentials lead the plan"
 awk -F'\t' '$3!=0 && $2=="models"' "$T/p1" | grep -q . && pass || fail "budget 5G: some models must be planned after the library"
 FIRST_MODEL=$(awk -F'\t' '$3!=0 && $2=="models" {print NR; exit}' "$T/p1")
-LAST_AL=$(awk -F'\t' '$3!=0 && ($2=="apps" || $2=="library") {n=NR} END {print n}' "$T/p1")
+LAST_AL=$(awk -F'\t' '$3!=0 && ($2=="library") {n=NR} END {print n}' "$T/p1")
 [ "$FIRST_MODEL" -gt "$LAST_AL" ] && pass || fail "first non-essential model (line $FIRST_MODEL) before the last app/library row (line $LAST_AL)"
 # datasets / bulk after the models
 BULK=$(awk -F'\t' '$2=="bulk" {print NR; exit}' "$T/p1")
 LAST_M=$(awk -F'\t' '$2=="models" {n=NR} END {print n}' "$T/p1")
 [ -n "$BULK" ] && [ "$BULK" -gt "$LAST_M" ] && pass || fail "bulk (datasets) must come after the models (bulk line '$BULK', last model $LAST_M)"
-grep -q 'by class: apps=' "$T/err" && pass || fail "planner summary must report the per-class counts"
+grep -q 'by class: library=' "$T/err" && pass || fail "planner summary must report the per-class counts"
 
 # 2. Diversity inside a class: the library's phase-1 rows cover each library category once,
 #    and the apps class does the same before its phase 2/3.
@@ -100,7 +101,7 @@ python3 "$P" --essentials "$T/ess.tsv" --budget $((5*GB)) < "$T/cands.tsv" 2>/de
 #    item would have fitted in what the apps + library passes left (budget minus essentials,
 #    apps and library planned). Checked over a sweep of budgets.
 starved() {   # BUDGET PLANFILE -> prints the app/library ids a model displaced
-  awk -F'\t' -v B="$1" 'FNR==NR { if ($3==0 || $2=="apps" || $2=="library") used[$1]=1; planned[$1]=1; next }
+  awk -F'\t' -v B="$1" 'FNR==NR { if ($3==0 || $2=="library") used[$1]=1; planned[$1]=1; next }
        ($1 in used) { spent += $5 } { c[$1]=$2; sz[$1]=$5 }
        END { for (k in c) if ((c[k]=="installers" || c[k]=="content") && !(k in planned) && sz[k] <= B - spent) print k }' "$2" "$T/cands.tsv"
 }
@@ -165,6 +166,30 @@ plan --budget $((5*GB)) | cls > "$T/p8"
 grep -q '^inst:' "$T/p8" && fail "held installers must not be re-planned" || pass
 order_ok "$T/p8" && pass || fail "with apps held: library still before models"
 rm -rf "$T/i"
+
+# 9. B2: installers are library, so on a 32-64 GB disk the ZIMs are still planned even when the
+#    installers (OS images, Jetson BSPs) total more than the disk.
+{
+  i jetson-bsp   os-install       990 $((30*GB))
+  i ubuntu-iso   os-install       980 $((25*GB))
+  i alpine-iso   os-install       970 $((20*GB))
+  z wikipedia_en wikipedia        900 $((1500*MB))
+  z gutenberg_en gutenberg        800 $((700*MB))
+  z devdocs_en   devdocs          720 $((30*MB))
+  z water_en     other            600 $((20*MB))
+} > "$T/big.tsv"
+for gb in 32 48 64; do
+  python3 "$P" --essentials "$T/ess.tsv" --budget $((gb*GB)) < "$T/big.tsv" 2>/dev/null | cut -f1 > "$T/p9"
+  for id in zim:wikipedia_en zim:gutenberg_en zim:devdocs_en zim:water_en; do
+    grep -qx "$id" "$T/p9" && pass || fail "${gb} GB disk with ~75 GB of installers: $id must still be planned"
+  done
+done
+python3 -I - "$ROOT/scripts/lib/planner.py" <<'PYEOF' && pass || fail "item_class: installers must be library"
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("pl", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+c = {"bucket": "installers", "source": "url"}
+sys.exit(0 if m.item_class(c) == "library" and "apps" not in m.CLASS_ORDER else 1)
+PYEOF
 
 echo "planner-classes: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

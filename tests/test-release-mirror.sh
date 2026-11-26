@@ -473,5 +473,19 @@ print("rc", rc, "parts", len(parts) > 0)
 PYEOF
 check "budget spent mid-download -> exit 3, the .part is kept" 'grep -q "rc 3 parts True" "$T/gm.out"' || cat "$T/gm.out" >&2
 
+# a body whose Content-Length (the planned size is unknown) exceeds the budget is deferred before
+# any byte is written: exit 3, the request was made, no .part, no file
+rm -rf "$T/cl"; : > "$T/access.log"
+run fetch --tsv "$T/edge.tsv" --dest "$T/cl" --budget 100 > "$T/cl.out" 2> "$T/cl.err"; rc=$?
+check "Content-Length over --budget -> exit 3, deferred" '[ $rc -eq 3 ] && grep -q "^deferred	" "$T/cl.out" && ! grep -q "^ok	" "$T/cl.out"' || { cat "$T/cl.out" "$T/cl.err" >&2; }
+check "the over-budget body is refused after the response headers (a GET was made)" 'grep -q "^GET /web/o/edge/archive/" "$T/access.log"'
+check "nothing written: no .part, no file" '[ -z "$(find "$T/cl" -type f 2>/dev/null)" ]'
+check "the summary line reports the deferred files" 'grep -q "^summary: .*deferred=[1-9]" "$T/cl.err"'
+
+# N5: a resolve failure (exit 1) must not hide that files were also deferred (exit 3): both are reported
+printf '900|gh|o/missing||dev-tools|404\n' > "$T/mix.tsv"; cat "$T/edge.tsv" >> "$T/mix.tsv"; rm -rf "$T/mx"
+run fetch --tsv "$T/mix.tsv" --dest "$T/mx" --budget 100 > "$T/mx.out" 2> "$T/mx.err"; rc=$?
+check "resolve failure + deferred files -> exit 1, summary names both" '[ $rc -eq 1 ] && grep -q "^summary: resolve_failures=1 fetch_errors=0 deferred=[1-9]" "$T/mx.err"' || cat "$T/mx.err" >&2
+
 echo "release-mirror: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

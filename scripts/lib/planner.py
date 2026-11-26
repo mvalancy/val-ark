@@ -19,15 +19,16 @@ implementing the user's priority model:
   Then CLASS BY CLASS (#347): every candidate of one class is planned before any
   candidate of the next, whatever the owner profile's weights say:
 
-       apps     installers (data/installers.tsv: netboot, OS images, router
-                firmware, Jetson BSP, server sources)
-       library  Kiwix ZIMs (books, references, videos) and Lastbook (packs, maps,
-                its app installers)
+       library  Kiwix ZIMs (books, references, videos), Lastbook (packs, maps, its
+                app installers) and the installers (data/installers.tsv: netboot,
+                OS images, router firmware, Jetson BSP, server sources). Installers
+                rank by value alongside the ZIMs, so a 32-64 GB disk still plans
+                ZIMs rather than spending its room on ~72 GB of ISOs/BSPs.
        models   AI models beyond the phase-0 assistant (curated, scouted, the
                 Lastbook model)
        bulk     anything else (datasets, other bulk rows)
 
-  so a model is planned only once every app and library item is planned, held, or
+  so a model is planned only once every library item is planned, held, or
   does not fit. Exception: the `ai` profile keeps ONE small curated model early
   (EARLY_MODELS), right after the essentials. Within each class the passes are:
 
@@ -79,22 +80,23 @@ CAPS = {
 }
 CAP_DEFAULT = 12
 
-# Class order (#347): apps, then library, then models, then bulk. The owner profile only
+# Class order (#347): library (ZIMs, Lastbook, installers), then models, then bulk. (The apps
+# themselves - tool mirrors and the dev stack - are not planned here: the loop mirrors them first.) The owner profile only
 # weights values WITHIN a class; it never reorders the classes.
-CLASS_ORDER = ("apps", "library", "models", "bulk")
-# Profiles that keep N small curated models ahead of the apps class (the one documented
+CLASS_ORDER = ("library", "models", "bulk")
+# Profiles that keep N small curated models ahead of the library class (the one documented
 # exception to the class order). The model must be at most --small-max bytes.
 EARLY_MODELS = {"ai": 1}
 
 
 def item_class(c):
-    """apps | library | models | bulk for a candidate (from its bucket and source)."""
+    """library | models | bulk for a candidate (from its bucket and source). Installers are library."""
     b = c["bucket"]
-    if b == "installers":
-        return "apps"
     if b == "models":
         return "models"
-    if b == "content" or c["source"] == "lastbook":
+    # Installers (OS images, Jetson BSPs: ~72 GB) are library, as the issue lists them: ranked by
+    # value with the ZIMs, so a 32-64 GB disk still plans ZIMs instead of spending it on ISOs.
+    if b in ("installers", "content") or c["source"] == "lastbook":
         return "library"
     return "bulk"
 
@@ -509,7 +511,7 @@ def plan(cands, budget, small_max, essentials=(), flavours=None, profile="balanc
         for c in sorted(p3, key=lambda x: (-x["value"], x["bytes"])):
             take(c, 3)
 
-    # The ai profile's early model(s): the most valuable small curated model(s), before apps.
+    # The ai profile's early model(s): the most valuable small curated model(s), before the library.
     early = EARLY_MODELS.get(profile, 0)
     if early:
         small_models = [c for c in pool if item_class(c) == "models" and not is_scouted(c)
@@ -520,7 +522,7 @@ def plan(cands, budget, small_max, essentials=(), flavours=None, profile="balanc
             if take(c, 1):
                 early -= 1
 
-    # Class by class (#347): apps, library, models, bulk. A class is finished (every item
+    # Class by class (#347): library, models, bulk. A class is finished (every item
     # planned, already held, or too big for what is left) before the next one starts.
     for cls in CLASS_ORDER:
         passes([c for c in pool if item_class(c) == cls])

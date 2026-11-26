@@ -56,22 +56,31 @@ The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
    that essential stays on its mini. This is on purpose: getting a critical copy
    onto the disk fast beats saving the mini's bytes (see
    [decisions](knowledge/decisions.md#mini-then-maxi)).
-1. **Then class by class: apps, library, models, bulk** (#347). Every candidate of
+1. **Then class by class: library, models, bulk** (#347). Every candidate of
    one class is planned before any candidate of the next:
 
    | Class | What | Candidates |
    |-------|------|------------|
-   | **apps** | software to install and run | `data/installers.tsv`: netboot, OS images, router firmware, Jetson BSP, server sources |
-   | **library** | things to read, watch and look up | Kiwix ZIMs (references, books, videos), Lastbook (packs, maps, its app installers) |
+   | **library** | things to read, watch, look up and install from | Kiwix ZIMs (references, books, videos), Lastbook (packs, maps, its app installers), and the **installers** in `data/installers.tsv` (netboot, OS images, router firmware, Jetson BSP, server sources). Installers rank by value beside the ZIMs, so on a 32-64 GB disk the ZIMs are still planned instead of ~72 GB of ISOs and BSPs taking it all. |
    | **models** | AI models beyond the phase-0 assistant | `data/models-extra.tsv`, the weekly scout, the Lastbook model |
    | **bulk** | everything else | datasets and other bulk rows |
 
-   So a model is planned only once every app and library item is planned, already on
-   disk, or too big for what is left. A library item too big for the rest does not
-   block a smaller model behind it. The owner profile (`knowledge`, `ai`, `tools`,
-   `survival`) weights values **inside** a class; it never reorders the classes. One
-   documented exception: the **`ai` profile keeps one small curated model early**,
+   (The **apps** themselves, the tool mirror and the developer stack, are not planner
+   candidates; see step 2.) A model is planned only once every library item is planned,
+   already on disk, or too big for what is left. A library item too big for the rest
+   does not block a smaller model behind it. The owner profile (`knowledge`, `ai`,
+   `tools`, `survival`) weights values **inside** a class; it never reorders the classes.
+   One documented exception: the **`ai` profile keeps one small curated model early**,
    right after the essentials (`EARLY_MODELS` in `planner.py`).
+
+   **Models and a library that is many TB (N1).** The library class is large, so on a
+   disk smaller than the whole library, models beyond the essentials and the `ai`
+   profile's early model are rarely planned: that is the order the owner chose
+   ("apps and library before any more AI models"). A box that should hold more models
+   either has a disk large enough for the library, or asks for models directly
+   (`librarian.sh request model <id>`: pinned, fetched now, never evicted). The
+   `ai` profile is the supported way to get a model early; to keep it simple there is
+   no per-class percentage.
 
    Within each class, the same three passes keep it diverse:
    1. **Diversity first** — one item (the *smallest*) from every category of the
@@ -84,10 +93,28 @@ The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
 
    The plan's phase column is still 0–3 (the pass); the class follows from the bucket,
    and the planner's summary line counts the rows per class.
-2. **Apps the planner does not size run first in the loop.** The tool mirror
-   (`scripts/tools/*.sh`) and the developer + security stack (`data/dev-stack.tsv`)
-   are not planner candidates. The loop runs them **before** its top-up fill (steps 5c
-   and 5d below), bounded in time, held to the reserve and the budget, and fail-soft.
+2. **Apps the planner does not size run in the loop, once the essentials are held.**
+   The tool mirror (`scripts/tools/*.sh`, step 5c) and the developer + security stack
+   (`data/dev-stack.tsv`, step 5d) are not planner candidates. The loop runs them
+   **before** its top-up fill, but only after `librarian.sh essentials-done` exits 0
+   (every phase-0 essentials row that fits is on disk; exit 1 = some still to fetch,
+   exit 2 = no catalog to judge by). Until then the fill, which takes the essentials
+   first, runs alone. The dev stack (~194 GB) gets a bounded **share** of the budget,
+   never all of it: `VALARK_DEVSTACK_PCT` percent (default 25; 100 = no share cap) of
+   the budget plus what the tree already holds, and `VALARK_DEVSTACK_MAX_GB` caps the
+   whole tree on top. Both mirrors are time-bound, held to the reserve, and fail-soft.
+   `release_mirror.py` ends with a `summary:` line (resolve failures, fetch errors,
+   deferred files) so an exit 1 never hides deferred files (exit 3); the loop logs it.
+   - **Storage of the dev stack (N2).** `DEVSTACK_DIR` (`<home>/dev-stack`) counts toward
+     the `VALARK_MAX_GB` footprint (the budget sees it) but is deliberately **not** in the
+     web server's `ARCHIVE_DIRS` and not a row in the storage UI: it is a mirror to copy
+     or serve from the disk or a file share, and exposing ~194 GB of third-party
+     binaries through the archive endpoint is a separate decision (follow-up).
+   - **Long cycles (N3).** A cycle that mirrors the tools and the dev stack (up to their
+     time bounds, 2 h and 1 h by default, then the fill) holds `loop.lock` that long, so
+     the next cron tick skips with "already running"; self-heal steps 1-5b run only once
+     per such cycle. Lower `VALARK_TOOL_REFRESH_TIMEOUT` / `VALARK_DEVSTACK_TIMEOUT` if
+     that matters; a cut-short mirror resumes next cycle.
 3. **Trade up, on request** — `fill` itself never evicts (it only drops a smaller copy once a
    fuller version of the same item is on disk, as in phase 0). When room is needed
    (`librarian.sh evict`, or a one-click `request` that has to fit under `VALARK_MAX_GB`),

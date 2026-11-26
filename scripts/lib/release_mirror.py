@@ -756,6 +756,7 @@ def main(argv=None):
     stop = os.environ.get("VALARK_STOP_FLAG")
     if a.cmd == "fetch" and stop and os.path.exists(stop):
         print("deferred: the STOP flag is set; nothing fetched", file=sys.stderr)
+        print(f"summary: resolve_failures={len(failures)} fetch_errors=0 deferred={len(rows)}", file=sys.stderr)
         return rc or 3
     if a.cmd == "plan":
         for r in rows:
@@ -781,6 +782,9 @@ def main(argv=None):
     if deferred:
         print(f"deferred {deferred} file(s) (STOP flag, the reserve or --budget); {GUARD.added} bytes added; "
               f"the .part files resume next run", file=sys.stderr)
+    # One line with every count: the exit status is the worst of them (1 > 2 > 3 by precedence
+    # below), so a resolve failure (1) must not hide that files were also deferred (3), or the reverse.
+    print(f"summary: resolve_failures={len(failures)} fetch_errors={bad} deferred={deferred}", file=sys.stderr)
     return rc or (2 if bad else 3 if deferred else 0)
 
 

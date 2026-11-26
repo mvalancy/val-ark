@@ -524,6 +524,12 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   And a sub-app's **web** port binds `127.0.0.1`, never `VALARK_BIND`: that knob is for
   protocol ports (mail, IRC), and owners set it to `0.0.0.0` for IMAP, which would put the
   web UI on the LAN around the proxy (`tests/test-service-binds.sh`).
+- **A sub-app that builds absolute URLs from Host sees the proxy's `127.0.0.1:<port>` (#346).**
+  `pipeProxy` rewrites Host for every upstream. Gitea (`PUBLIC_URL_DETECTION = auto`, its default)
+  then wrote `http://127.0.0.1:3300/app/gitea/...` into clone URLs and API avatar links, useless
+  to a LAN client. Its `APP_SERVICES` entry sets `preserveHost`: the browser's Host (already
+  passed `hostAllowed()`) goes through, and `X-Forwarded-Proto` comes from the listener, never
+  the client. Gitea's user-content routes are covered in `tests/test-gitea.sh`.
 - **Minting a login is an admin action → `POST /api/service/adduser` is admin‑gated.** LAN
   users self‑register on the forum, join chat with just a nickname, or ask the host; only the
   operator (localhost/admin) provisions **mail** logins. The UI hides the create form off‑admin

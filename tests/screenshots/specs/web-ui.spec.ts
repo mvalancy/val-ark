@@ -12,7 +12,7 @@ const TOOL_IDS = [
   'freecad', 'kicad', 'cad-agent', 'bambu-studio', 'godot', 'vlc', 'n8n',
   'influxdb', 'grafana', 'milvus', 'comfyui', 'seaweedfs', 'syncthing', 'coolify',
   'kiwix', 'tailscale', 'mosquitto', 'mqtt-explorer', 'redis',
-  'chat', 'mail', 'forum', 'paste',
+  'chat', 'mail', 'forum', 'paste', 'gitea',
   'postgresql', 'telegraf', 'btop', 'tmux', 'helix', 'vscodium',
   'sqlite', 'miniforge', 'python-standalone', 'dev-cli', 'claude-code',
   'audacity', 'kdenlive', 'gimp', 'inkscape', 'yt-dlp', 'open-webui', 'calibre'
@@ -1671,12 +1671,12 @@ test.describe('Val Ark - Community Hub', () => {
     await expect(page.locator('h1')).toContainText('Community');
   });
 
-  test('Community page lists the four LAN services', async ({ page }) => {
+  test('Community page lists the five LAN services', async ({ page }) => {
     await page.goto(`file://${WEB_UI}#/community`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('.community-card', { timeout: 5000 });
-    // chat, mail, forum, paste
-    await expect(page.locator('.community-card')).toHaveCount(4);
+    // chat, mail, forum, paste, gitea (git forge)
+    await expect(page.locator('.community-card')).toHaveCount(5);
   });
 
   test('Community is not a top-nav tab, but its footer link works', async ({ page }) => {
@@ -1701,6 +1701,7 @@ test.describe('Val Ark - Community Hub', () => {
     expect(body).toMatch(/nickname/i);            // chat is open — no account
     expect(body).toContain('mail.sh adduser');
     expect(body).toContain('paste.sh creds');
+    expect(body).toContain('gitea.sh adduser');   // the git forge is host-provisioned (#346)
   });
 
   test('Community page offers the host an inline create-account form (localhost/admin)', async ({ page }) => {
@@ -1713,7 +1714,7 @@ test.describe('Val Ark - Community Hub', () => {
     await expect(page.locator('button:has-text("Create account")')).toHaveCount(1);
     // The service picker offers exactly the host-provisioned services.
     const opts = await page.locator('#signup-svc option').allInnerTexts();
-    expect(opts.map(o => o.toLowerCase())).toEqual(['chat', 'mail']);
+    expect(opts.map(o => o.toLowerCase())).toEqual(['chat', 'mail', 'git forge']);
     const fns = await page.evaluate(() => [typeof (window as any).createServiceAccount, typeof (window as any).isAdminHost]);
     expect(fns).toEqual(['function', 'function']);
   });

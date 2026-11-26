@@ -1,6 +1,6 @@
 # scripts/services/ — Community hub LAN service runners
 
-Small, uniform launchers for the offline **Community** apps (chat, mail, forum, paste) that Val Ark
+Small, uniform launchers for the offline **Community** apps (chat, mail, forum, paste, gitea) that Val Ark
 reverse-proxies at `/app/<id>/`, plus the SeaweedFS storage backend — this is where you work when a
 community service won't start, misbehaves behind the proxy, or needs a new arch.
 
@@ -14,11 +14,12 @@ community service won't start, misbehaves behind the proxy, or needs a new arch.
 | `mail.sh` | maddy + alps | alps webmail `1323` (proxied); maddy SMTP `587`, IMAP `143`, MX `25` | `/app/mail/` | Local-community email (no outbound relay/federation); auth mandatory |
 | `forum.sh` | NodeBB + Redis | NodeBB `4567` (proxied); Redis `6379` | `/app/forum/` | Message-board forum (ActivityPub disabled); Redis-backed, self-registration at `/app/forum/register` |
 | `paste.sh` | MicroBin (single Rust binary) | `8085` (proxied) | `/app/paste/` | Pastebin + file-upload + URL-shortener; HTTP Basic + admin password |
+| `gitea.sh` | Gitea (single Go binary, SQLite) | `3300` (proxied, `VALARK_GITEA_PORT`) | `/app/gitea/` | Git forge + package registries; registration off, `adduser` (first login = site admin); `config` writes `app.ini` only |
 | `seaweedfs.sh` | SeaweedFS `weed` (all-in-one) | master `9333`, volume `8085`, filer `8889`, s3 `8333` | *(not proxied — backend infra)* | Object/blob storage node (master+volume+filer+S3) for the mesh |
 
 ## How to work here
 
-**Shared shape** (chat/mail/forum/paste): each is a standalone `start | stop | status` runner (most
+**Shared shape** (chat/mail/forum/paste/gitea): each is a standalone `start | stop | status` runner (most
 add `restart`), binds a **fixed** `127.0.0.1` port, keeps state under `STATE_DIR/services/<id>/`, and is
 **same-origin reverse-proxied** by `server.js`'s sub-app map (see `serviceEnabled(id)` and the `/app/<id>/`
 proxy). A service is **enabled** by listing its id in `VALARK_SERVICES` in `.env` (space-separated, e.g.
@@ -27,7 +28,8 @@ proxy). A service is **enabled** by listing its id in `VALARK_SERVICES` in `.env
 for enabled + mirrored services.
 
 - **Account seams differ per service:** `chat.sh adduser`, `mail.sh adduser` (also `creds`/`acct`), forum
-  self-registers (first-run admin auto-created), `paste.sh creds` (single shared Basic auth, no per-user).
+  self-registers (first-run admin auto-created), `paste.sh creds` (single shared Basic auth, no per-user),
+  `gitea.sh adduser` (registration off; the first login is the site admin).
 - **Bind address** comes from `VALARK_BIND` (default `127.0.0.1`); the proxy is the only public path, so
   keep services bound to localhost.
 - **SeaweedFS is the exception:** `start | status` only, runs in the **foreground** via `exec`, data lives at
@@ -38,7 +40,13 @@ for enabled + mirrored services.
 
 ## Gotchas
 
-- **Close fd 8 (`8>&-`) on every backgrounded daemon** — chat/mail/forum/paste all do. These runners are
+- **Gitea builds absolute URLs from the request's Host** (`PUBLIC_URL_DETECTION = auto`). The proxy
+  normally rewrites Host to `127.0.0.1:<port>`, which put that address into clone URLs and API
+  avatar links; `APP_SERVICES.gitea.preserveHost` passes the browser's (already vetted) Host and
+  sets `X-Forwarded-Proto` from the listener. Gitea's `[picture]` app.ini keys are deprecated
+  (admin panel now); `OFFLINE_MODE` already turns Gravatar off.
+
+- **Close fd 8 (`8>&-`) on every backgrounded daemon** — chat/mail/forum/paste/gitea all do. These runners are
   spawned from inside the loop's `run_locked` cycle, which holds `loop.lock` on **fd 8**; a detached child
   inherits that fd and shares the open-file-description holding the `flock`, so the lock would **never
   release** and every later self-heal cycle would deadlock. `loop.sh:ensure_services()` also closes fd 8 for

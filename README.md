@@ -42,7 +42,9 @@ diagrams: [how it works, in pictures](docs/HOW-IT-WORKS.md).
   See [community](docs/COMMUNITY.md).
 
 The [Librarian](docs/LIBRARIAN.md) decides what fits: grid-down essentials first, then one of each
-kind, then the most value per byte, trading up as better items appear.
+kind, then the most value per byte, trading up as better items appear. You steer it with a focus
+at setup, requests and pins, and a few limits: see
+[choosing what goes on your Ark](docs/CHOOSING-CONTENT.md).
 
 ## Get started
 

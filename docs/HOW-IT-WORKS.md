@@ -25,10 +25,10 @@ An Ark is one computer with one big disk. It downloads things once while it has 
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/flow/fill-dark.svg">
-  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Four passes, most important first, until the disk reaches its reserve.">
+  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Essentials, then apps, the library, then models, until the disk reaches its reserve.">
 </picture>
 
-The Librarian decides what fits. Grid-down essentials come first, then one of each kind, then the small and valuable, then big flagships until the disk reaches its reserve. Filling never evicts anything (it only drops a smaller copy once a fuller version of the same item is on disk); making room for something else only happens when someone asks for it.
+The Librarian decides what fits. Grid-down essentials come first, the tiny offline assistant included. Then apps and installers, then the library (Wikipedia and the other ZIMs, Lastbook's books and maps), and only then more AI models, then bulk data. Inside each of those it takes one of each kind, then the small and valuable, then big flagships, until the disk reaches its reserve. The loop also runs its weekly app mirrors (the tool mirror and the developer stack) before the top-up fill, so apps never wait behind models. Filling never evicts anything (it only drops a smaller copy once a fuller version of the same item is on disk); making room for something else only happens when someone asks for it.
 
 **More:** [The Librarian](LIBRARIAN.md)
 

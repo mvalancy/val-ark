@@ -27,9 +27,10 @@ healthy around the clock.
   read through Kiwix), chosen from the live Kiwix catalog. Also [Lastbook](https://lastbook.org),
   an offline survival library.
 - **Apps and tools** for Linux (x86_64 and arm64), macOS and Windows, from Blender and
-  Inkscape to llama.cpp. See the [tools catalog](docs/TOOLS.md). Mirrors you can run by hand add
-  a developer stack, offline APT repos and source archives
-  ([details](docs/LIBRARIAN.md#standalone-mirrors-run-by-hand-not-part-of-fill--the-loop)).
+  Inkscape to llama.cpp. See the [tools catalog](docs/TOOLS.md). The loop also mirrors a
+  developer + security stack, and mirrors you run by hand add offline APT repos and source
+  archives ([details](docs/LIBRARIAN.md#mirrors-outside-the-planner)). Apps and the library
+  fill the disk before more AI models.
 - **AI models:** language, speech, vision and image models, chosen for value per byte.
   See the [model inventory](docs/MODEL_INVENTORY.md).
 - **Community:** chat, mail, message boards and file sharing on the LAN, with no internet.

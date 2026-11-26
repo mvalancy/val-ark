@@ -16,6 +16,7 @@ later). See [README](README.md).
 
 | Date | Decision | Issue / Phase |
 |------|----------|---------------|
+| 2026‑11 | [Apps and the library before AI models: class order, app mirrors before the fill](#202611--apps-and-the-library-before-ai-models-class-order-app-mirrors-before-the-fill-347) | #347 |
 | 2026‑11 | [Setup keeps its promises: a .local name when avahi can, a first fill, the cron is the admin's call](#202611--setup-keeps-its-promises-a-local-name-when-avahi-can-a-first-fill-the-cron-is-the-admins-call-306) | #306 |
 | 2026‑11 | [Docs as a picture book: a short README and a generated docs tree](#202611--docs-as-a-picture-book-a-short-readme-and-a-generated-docs-tree-282) | #282 |
 | 2026‑11 | [Grid-down essentials tier + survival profile](#202611--grid-down-essentials-tier--survival-profile) | |
@@ -48,6 +49,36 @@ later). See [README](README.md).
 | — | [Earlier project facts (fleet, curation)](#earlier-project-facts-fleet-curation) | — |
 
 ---
+
+## 2026‑11 — Apps and the library before AI models: class order, app mirrors before the fill (#347)
+**Owner's call:** "prioritize downloading all apps and library content before any more AI models
+and other content".
+- **Class order in the planner.** After phase 0 (the grid-down essentials, which keep the tiny
+  assistant model), `planner.py` runs its passes class by class: **apps** (`installers` bucket),
+  **library** (`content` bucket: ZIMs, and every Lastbook row but its model), **models**
+  (`models` bucket: curated, scouted, the Lastbook model), **bulk** (anything else). Diversity,
+  small-valuable and fill still run, but inside each class. So no model beyond the essentials is
+  planned while an app or library item that fits is unplanned; a library item too big for the rest
+  does not block a smaller model. The Lastbook installers ride with the library (they need its
+  pack, which the apps class would plan too late).
+- **Profiles weight, never reorder.** The catalog's per-bucket profile multipliers still apply, but
+  only rank items inside a class. The one exception is the `ai` profile: one small (≤ `--small-max`)
+  curated model right after the essentials (`EARLY_MODELS`), so an AI-first box can talk early.
+- **Unplanned apps run first in the loop.** The tool mirror moved from step 6b (after the fill) to
+  5c, and the dev stack (`release_mirror.py fetch` over `data/dev-stack.tsv`, until now by hand
+  only) runs at 5d, both before the top-up fill. Both are bounded in time, skip under STOP or under
+  1 GiB of budget, and are fail-soft. The dev stack is weekly, on by default, `VALARK_DEVSTACK=0`
+  off, `VALARK_DEVSTACK_MAX_GB` / `_GROUPS` to limit it.
+- **Same disk rules for the dev stack.** `release_mirror.py fetch` now keeps the Val Ark reserve
+  (always, like the Lastbook mirror), takes `--budget BYTES` (the loop passes `valark_budget_bytes`,
+  so `VALARK_MAX_GB` holds) and stops at the STOP flag, re-checked every 256 MiB; deferred files keep
+  their `.part` and the run exits 3. `valark_data_used_bytes` now counts the dev-stack tree, so the
+  footprint cap sees it. Sizing it as planner candidates was rejected: a plan needs ~250 GitHub API
+  calls (and ~1000 PyPI calls for the wheelhouse), too slow and rate-limited for every fill.
+- **Unchanged:** `fill` never evicts (it only drops a smaller copy once a fuller version of the same
+  item is on disk); `evict` and `request` trade up. The APT sets and source bundles stay manual.
+- Tests: `tests/test-planner-classes.sh`, `tests/test-loop-apps-first.sh`, the guard checks in
+  `tests/test-release-mirror.sh`.
 
 ## 2026‑11 — Setup keeps its promises: a .local name when avahi can, a first fill, the cron is the admin's call (#306)
 

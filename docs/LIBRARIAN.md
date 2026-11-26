@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/popup/librarian-dark.svg">
-  <img src="img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Essentials first, then diversity, small and valuable, then fill the rest.">
+  <img src="img/popup/librarian-light.svg" width="100%" alt="Pop-up book scene: The Librarian fills the shelves. Essentials first, then apps, the library, then models.">
 </picture>
 
 # Librarian — scalable disk-fill, curation & self-healing
@@ -34,7 +34,7 @@ the web server and legacy scripts work unchanged. Resolution + disk math live in
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/flow/fill-dark.svg">
-  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Four passes, most important first, until the disk reaches its reserve.">
+  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Essentials, then apps, the library, then models, until the disk reaches its reserve.">
 </picture>
 
 The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
@@ -46,7 +46,7 @@ The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
    network-boot images. Each entry takes its **smallest** variant (mini/nopic ZIM)
    and an entry that does not fit is skipped, so a 2 GB stick still gets the most
    critical ~20 items and a big disk later upgrades to the full variants in
-   phases 1–3. Rows can target an owner profile (`focus`), e.g. Army field manuals
+   the passes below. Rows can target an owner profile (`focus`), e.g. Army field manuals
    only for `survival`.
    Once the full variant is complete on disk, the end of each `fill` removes the
    now-redundant small copy (managed + unpinned only; never while a STOP halted the
@@ -56,15 +56,39 @@ The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
    that essential stays on its mini. This is on purpose: getting a critical copy
    onto the disk fast beats saving the mini's bytes (see
    [decisions](knowledge/decisions.md#mini-then-maxi)).
-1. **Diversity first** — one item (the *smallest*) from every category before
-   deepening any single one. Guarantees breadth across ~40+ categories (22 ZIM
-   topics, 18 model categories, and netboot / OS-install / router-firmware /
-   jetson-bsp installers).
-2. **Small valuable files** — then items by **value ÷ byte**, capped per category
-   so a prolific category (devdocs, TED…) can't crowd out diversity.
-3. **Fill remaining space** — then the big flagships by intrinsic value (full
-   Wikipedia, large model quants, distro ISOs) until a reserve is reached.
-4. **Trade up, on request** — `fill` itself never evicts (it only drops a smaller copy once a
+1. **Then class by class: apps, library, models, bulk** (#347). Every candidate of
+   one class is planned before any candidate of the next:
+
+   | Class | What | Candidates |
+   |-------|------|------------|
+   | **apps** | software to install and run | `data/installers.tsv`: netboot, OS images, router firmware, Jetson BSP, server sources |
+   | **library** | things to read, watch and look up | Kiwix ZIMs (references, books, videos), Lastbook (packs, maps, its app installers) |
+   | **models** | AI models beyond the phase-0 assistant | `data/models-extra.tsv`, the weekly scout, the Lastbook model |
+   | **bulk** | everything else | datasets and other bulk rows |
+
+   So a model is planned only once every app and library item is planned, already on
+   disk, or too big for what is left. A library item too big for the rest does not
+   block a smaller model behind it. The owner profile (`knowledge`, `ai`, `tools`,
+   `survival`) weights values **inside** a class; it never reorders the classes. One
+   documented exception: the **`ai` profile keeps one small curated model early**,
+   right after the essentials (`EARLY_MODELS` in `planner.py`).
+
+   Within each class, the same three passes keep it diverse:
+   1. **Diversity first** — one item (the *smallest*) from every category of the
+      class before deepening any single one (ZIM topics, installer kinds, model
+      categories).
+   2. **Small valuable files** — then items by **value ÷ byte**, capped per category
+      so a prolific category (devdocs, TED…) can't crowd out diversity.
+   3. **Fill remaining space** — then the big flagships by intrinsic value (full
+      Wikipedia, distro ISOs, large model quants) until a reserve is reached.
+
+   The plan's phase column is still 0–3 (the pass); the class follows from the bucket,
+   and the planner's summary line counts the rows per class.
+2. **Apps the planner does not size run first in the loop.** The tool mirror
+   (`scripts/tools/*.sh`) and the developer + security stack (`data/dev-stack.tsv`)
+   are not planner candidates. The loop runs them **before** its top-up fill (steps 5c
+   and 5d below), bounded in time, held to the reserve and the budget, and fail-soft.
+3. **Trade up, on request** — `fill` itself never evicts (it only drops a smaller copy once a
    fuller version of the same item is on disk, as in phase 0). When room is needed
    (`librarian.sh evict`, or a one-click `request` that has to fit under `VALARK_MAX_GB`),
    the *lowest value/byte* managed, unpinned item goes first, never the sole
@@ -72,7 +96,8 @@ The disk fills in the order you'd curate by hand (`scripts/lib/planner.py`):
 
 Everything scales from live `df` headroom (`avail − max(2%, 50GB)`); there are no
 hardcoded sizes. On a shared disk an optional footprint cap bounds Val Ark itself:
-`VALARK_MAX_GB` caps its total usage (budget = min(headroom, cap − used)) and
+`VALARK_MAX_GB` caps its total usage (budget = min(headroom, cap − used); used counts
+the models, tools, content, sources, assets, installers, private and dev-stack trees) and
 `VALARK_MODEL_MAX_GB` skips any single model bigger than N GB. Same-content ZIM
 flavours (maxi/nopic/mini) collapse to the most complete one.
 
@@ -238,16 +263,17 @@ Rows are fetched with `hf download --include '*'` like any `repo` row; a whole-r
 counts as present only once it finished (`.valark-complete` stamp). Tests:
 `tests/test-hf-scout.sh`.
 
-### Standalone mirrors (run by hand, not part of `fill` / the loop)
+### Mirrors outside the planner
 
-These catalogs are read by their own CLIs, which you run (or schedule) yourself; `librarian.sh
-fill` and `loop.sh` do not plan them.
+These catalogs are read by their own CLIs; `librarian.sh fill` does not plan them. The loop
+runs the developer + security stack itself (step 5d, before the model fill, #347); the APT
+sets and the source bundles are still run by hand (or from your own cron).
 
 | Source | File | Notes |
 |--------|------|-------|
-| Developer + security stack | `data/dev-stack.tsv` | The kit to build, run and secure software offline: every supported Python (python.org installers + relocatable builds + a top-1000 PyPI wheelhouse), compilers (LLVM, GCC/GNU sources, MinGW, Go, Rust, JDK, CMake…), decompilers/RE (Ghidra, radare2/rizin/Cutter, x64dbg, jadx, ILSpy, Frida…), security tools (Nmap, Wireshark, ZAP, Metasploit, nuclei, Trivy, Zeek, Suricata, Kali ISOs…), containers + Kubernetes (Docker static, Podman, kubeadm/kubectl, MicroK8s snaps, k3s, Helm…), cloud/IaC, S3-compatible storage (MinIO source, SeaweedFS, RustFS, versitygw, rclone) and databases (Neo4j + Relate, Milvus, Qdrant, DuckDB, ClickHouse, Valkey, OpenSearch…). Current release of each, resolved live by `scripts/lib/release_mirror.py` (see below). |
-| Offline .deb sets | `data/apt-sets.tsv` | Server + developer/security package sets resolved with all dependencies per Ubuntu suite+arch by `scripts/lib/apt_offline.py build --suite noble --arch arm64 --set lamp --dest <dir>` → a flat local APT repo for a LAN with no internet. |
-| Upstream source repos | `data/source-repos.tsv` | Full-history git bundles of 200+ upstream repos via `scripts/lib/git_bundle_mirror.py plan\|mirror\|verify` (see [TOOLS.md](TOOLS.md#content-mirrors)). |
+| Developer + security stack (**loop step 5d**, `VALARK_DEVSTACK=0` turns it off) | `data/dev-stack.tsv` | The kit to build, run and secure software offline: every supported Python (python.org installers + relocatable builds + a top-1000 PyPI wheelhouse), compilers (LLVM, GCC/GNU sources, MinGW, Go, Rust, JDK, CMake…), decompilers/RE (Ghidra, radare2/rizin/Cutter, x64dbg, jadx, ILSpy, Frida…), security tools (Nmap, Wireshark, ZAP, Metasploit, nuclei, Trivy, Zeek, Suricata, Kali ISOs…), containers + Kubernetes (Docker static, Podman, kubeadm/kubectl, MicroK8s snaps, k3s, Helm…), cloud/IaC, S3-compatible storage (MinIO source, SeaweedFS, RustFS, versitygw, rclone) and databases (Neo4j + Relate, Milvus, Qdrant, DuckDB, ClickHouse, Valkey, OpenSearch…). Current release of each, resolved live by `scripts/lib/release_mirror.py` (see below). |
+| Offline .deb sets (by hand) | `data/apt-sets.tsv` | Server + developer/security package sets resolved with all dependencies per Ubuntu suite+arch by `scripts/lib/apt_offline.py build --suite noble --arch arm64 --set lamp --dest <dir>` → a flat local APT repo for a LAN with no internet. |
+| Upstream source repos (by hand) | `data/source-repos.tsv` | Full-history git bundles of 200+ upstream repos via `scripts/lib/git_bundle_mirror.py plan\|mirror\|verify` (see [TOOLS.md](TOOLS.md#content-mirrors)). |
 
 ### Developer + security stack (`release_mirror.py`)
 
@@ -263,6 +289,19 @@ python3 scripts/lib/release_mirror.py plan --group security      # one group (or
 GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/val-ark/dev-stack"
 ```
 
+- **From the loop (#347).** Step 5d runs `fetch --dest <data>/val-ark/dev-stack --budget <the
+  librarian's budget>` weekly (`VALARK_DEVSTACK_REFRESH_DAYS`, default 7), before the top-up
+  fill, bounded by `VALARK_DEVSTACK_TIMEOUT` (default 3600 s). A run cut short by the bound
+  continues next cycle (the `.part` files resume); a deferred or failed run retries in a day;
+  under 1 GiB of budget it is skipped. `VALARK_DEVSTACK_MAX_GB` caps the whole tree,
+  `VALARK_DEVSTACK_GROUPS` limits the groups, `VALARK_DEVSTACK=0` turns it off, and
+  `GITHUB_TOKEN` comes from `.env`. Its log is `state/logs/devstack.log`.
+- **Disk guards.** `fetch` keeps the Val Ark reserve (`VALARK_RESERVE_PCT` /
+  `VALARK_RESERVE_MIN_GB`, the fill's own rule, always on), stops at `--budget BYTES` (the loop
+  passes `valark_budget_bytes`, so `VALARK_MAX_GB` holds, and the footprint counts the
+  dev-stack tree) and at the STOP flag (`VALARK_STOP_FLAG`). It checks before each file and
+  every 256 MiB written; a deferred file keeps its `.part` and the run exits 3. A file of
+  unknown size can overshoot the budget by at most 256 MiB.
 - **Resume and verify.** `fetch` resumes `.part` files with Range. Before renaming a file into
   place it checks the length, then the upstream digest: sha256, or sha3-384 for snaps. The
   length comes from the planned size, or the server's `Content-Length` / `Content-Range` total
@@ -317,6 +356,7 @@ GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/
   - `0` complete;
   - `1` an entry failed to resolve, or nothing resolved (the rest are still planned and fetched);
   - `2` a download failed;
+  - `3` incomplete: files deferred by the reserve, `--budget` or the STOP flag (they resume next run);
   - `64` usage (a bad catalog row, kind or regex).
 
   The most severe wins. Every metadata request and download gets 4 attempts on DNS and
@@ -563,20 +603,26 @@ shows a hint linking to the static catalog, since the dynamic UI needs its serve
 12. **integrity verify** → requeue corrupt/short downloads,
 13. **re-fill pinned requests** — user-requested items that went missing come back
     before the generic fill,
-14. **top-up fill** (bounded; skipped if a fill already runs),
-15. **weekly tool refresh** — re-run the tool mirror so apps track their latest
+14. **weekly tool refresh** (step 5c) — re-run the tool mirror so apps track their latest
     upstream versions (`VALARK_TOOL_REFRESH_DAYS`, default 7; a failed pass
-    retries in a day),
-16. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
+    retries in a day). It runs **before** the fill (#347), and is skipped under the STOP
+    flag or with under 1 GiB of budget (the tool scripts size nothing),
+15. **weekly dev-stack mirror** (step 5d, #347) — `release_mirror.py fetch` over
+    `data/dev-stack.tsv`, bounded in time (`VALARK_DEVSTACK_TIMEOUT`) and by the fill's
+    budget, held to the reserve and the STOP flag, fail-soft; `VALARK_DEVSTACK=0` turns it
+    off (see [Developer + security stack](#developer--security-stack-release_mirrorpy)),
+16. **top-up fill** (bounded; skipped if a fill already runs): essentials, then apps,
+    library, models and bulk ([the priority model](#the-priority-model)),
+17. **functional verification** (`scripts/verify.sh`) — tools run, Kiwix serves a
     real ZIM, a tiny LLM infers, the web API answers, and each configured remote
     mesh node (`VALARK_FLEET` in `.env`) is reachable and sees the shared content,
-17. **UI smoke** — a Playwright pass over the dynamic controls (when installed),
-18. **moderation sweep** — screen plain-file community uploads on-device and
+18. **UI smoke** — a Playwright pass over the dynamic controls (when installed),
+19. **moderation sweep** — screen plain-file community uploads on-device and
     quarantine anything not cleanly allowed (`scripts/lib/mod-sweep.sh`, fail-closed),
-19. **report + coordination** — the librarian's `maintain` (writes
+20. **report + coordination** — the librarian's `maintain` (writes
     `state/health.json`: disk + per-category coverage) and a fleet coordination drop
     (`state/coordination/`),
-20. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
+21. **self-heal snapshot** — write `state/selfheal.json` (the loop's own cycle
     snapshot) and append any genuine repairs to `state/heal-events.jsonl` (the feed
     behind the Health page). This is **distinct from `state/health.json`**.
 

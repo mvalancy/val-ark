@@ -8,8 +8,15 @@ Commands (stdlib only):
         print TAB rows: url, dest (relative path), size (0 = unknown), digest (algo:hex,
         or '' when upstream publishes none), volatile (1 = the file name does not change
         between upstream versions). No downloads.
-  fetch --dest DIR [same filters]
+  fetch --dest DIR [--budget BYTES] [same filters]
         download every planned file under DIR, skipping files already complete.
+        Disk guards (#347), the same as the librarian fill's: a file is DEFERRED (its
+        .part kept, exit 3) when it would cut into the Val Ark reserve (max(
+        VALARK_RESERVE_PCT% of the disk, VALARK_RESERVE_MIN_GB GiB), always applied),
+        when this run's --budget bytes are spent (the loop passes the librarian's budget,
+        which holds VALARK_MAX_GB), or when the STOP flag ($VALARK_STOP_FLAG) exists.
+        Checked before each file and every 256 MiB written; a file of unknown size may
+        overshoot the budget by at most that much.
 
 Catalog schema (pipe-delimited): rank|kind|ref|match|group|note (match may contain '|':
 everything between ref and the last two fields is the match)
@@ -60,8 +67,9 @@ sidecar; a server refusing HEAD means re-download) and re-downloaded when upstre
 outside --dest.
 
 Exit codes: 0 complete · 1 an entry failed to resolve, or nothing resolved (the other
-entries are still planned and fetched) · 2 a download failed · 64 usage (bad option, an
-unreadable --tsv, a bad catalog row, kind or regex). The most severe wins (64 > 1 > 2 > 0).
+entries are still planned and fetched) · 2 a download failed · 3 incomplete: files deferred
+by the reserve, --budget or the STOP flag (they resume next run) · 64 usage (bad option, an
+unreadable --tsv, a bad catalog row, kind or regex). The most severe wins (64 > 1 > 2 > 3 > 0).
 """
 import argparse, concurrent.futures, gzip, hashlib, http.client, json, os, re, sys, threading, time, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
@@ -531,6 +539,66 @@ class Retry(OSError):
 CRANGE = re.compile(r"bytes (\d+)-(\d+)/(\d+|\*)")
 
 
+class Deferred(Exception):
+    """Stop this file now and keep its .part (it resumes next run): the STOP flag, the Val Ark
+    reserve, or this run's --budget (#347)."""
+
+
+def _fs(path):
+    """(free, total) bytes of the filesystem holding path (its nearest existing ancestor)."""
+    d = Path(path).absolute()
+    while not d.exists() and d != d.parent:
+        d = d.parent
+    st = os.statvfs(d)
+    return st.f_bavail * st.f_frsize, st.f_blocks * st.f_frsize
+
+
+def reserve_bytes(total):
+    """The Val Ark reserve, as valark-env.sh and the librarian fill compute it:
+    max(VALARK_RESERVE_PCT% of the disk, VALARK_RESERVE_MIN_GB GiB)."""
+    def num(k, d):
+        v = os.environ.get(k, d)
+        return int(v) if str(v).isdigit() else int(d)
+    return max(total * num("VALARK_RESERVE_PCT", "2") // 100, num("VALARK_RESERVE_MIN_GB", "50") * 1073741824)
+
+
+def headroom(path):
+    """Bytes that may still be written on path's filesystem before the reserve (never negative)."""
+    free, total = _fs(path)
+    return max(0, free - reserve_bytes(total))
+
+
+RECHECK = 256 << 20  # re-check STOP / the reserve / the budget every 256 MiB written
+
+
+class Guard:
+    """Disk guards for fetch: the STOP flag (VALARK_STOP_FLAG), the Val Ark reserve (always),
+    and an optional byte budget for this run (--budget; the loop passes the librarian's
+    budget, so VALARK_MAX_GB holds too). `added` counts the bytes this run wrote."""
+
+    def __init__(self, budget=None):
+        self.budget, self.added = budget, 0
+
+    def why(self, path, need=0):
+        stop = os.environ.get("VALARK_STOP_FLAG")
+        if stop and os.path.exists(stop):
+            return "the STOP flag is set"
+        room = headroom(path)
+        if room <= 0 or need > room:
+            return "the disk reached the Val Ark reserve"
+        if self.budget is not None and (self.added >= self.budget or self.added + need > self.budget):
+            return "this run's byte budget is spent"
+        return None
+
+    def check(self, path, need=0):
+        w = self.why(path, need)
+        if w:
+            raise Deferred(w)
+
+
+GUARD = Guard()
+
+
 def stamp(headers):
     """What identifies the remote file's current version, for volatile rows."""
     return {k: headers.get(k) for k in ("Content-Length", "ETag", "Last-Modified") if headers.get(k)}
@@ -592,9 +660,18 @@ def download(url, dest, size, digest, volatile):
             mode, have = "wb", 0
             total = int(r.headers["Content-Length"]) if (r.headers.get("Content-Length") or "").isdigit() else None
         expected = size or total
+        if expected:  # the size is known now (Content-Length): the rest must fit
+            GUARD.check(dest.parent, expected - have)
         with part.open(mode) as f:
+            since = 0
             for chunk in iter(lambda: r.read(8 << 20), b""):
                 f.write(chunk)
+                GUARD.added += len(chunk)
+                since += len(chunk)
+                if since >= RECHECK:  # keep the .part: it resumes next run
+                    since = 0
+                    f.flush()
+                    GUARD.check(dest.parent)
         got = part.stat().st_size
         if expected and got < expected:  # connection dropped: keep the .part and resume
             raise Retry(f"{dest.name}: {got} of {expected} bytes")
@@ -634,6 +711,9 @@ def current(url, dest, size, digest, volatile):
 def fetch_one(url, dest, size, digest, volatile=False):
     if current(url, dest, size, digest, volatile):
         return "skip"
+    part = dest.with_name(dest.name + ".part")
+    have = part.stat().st_size if part.exists() and size else 0
+    GUARD.check(dest.parent, max(0, size - have) if size else 0)  # STOP / reserve / budget
     dest.parent.mkdir(parents=True, exist_ok=True)
     for attempt in range(TRIES):
         try:
@@ -652,11 +732,15 @@ def main(argv=None):
     ap.add_argument("--group", action="append", default=[])
     ap.add_argument("--only", action="append", default=[], help="catalog ref to include (repeatable)")
     ap.add_argument("--dest")
+    ap.add_argument("--budget", help="fetch: bytes this run may add (the loop passes the librarian's budget)")
     ap.error = lambda msg: (_ for _ in ()).throw(Usage(msg))
     try:
         a = ap.parse_args(argv)
         if a.cmd == "fetch" and not a.dest:
             raise Usage("fetch needs --dest")
+        if a.budget is not None and not str(a.budget).isdigit():
+            raise Usage("--budget must be a whole number of bytes")
+        GUARD.budget = int(a.budget) if a.budget is not None else None
         entries = [e for e in load(a.tsv) if (not a.group or e["group"] in a.group) and (not a.only or e["ref"] in a.only)]
         if not entries:
             raise Usage("no catalog entries match the filters")
@@ -669,13 +753,17 @@ def main(argv=None):
     rc = 1 if failures else 0
     if not rows:
         return 1
+    stop = os.environ.get("VALARK_STOP_FLAG")
+    if a.cmd == "fetch" and stop and os.path.exists(stop):
+        print("deferred: the STOP flag is set; nothing fetched", file=sys.stderr)
+        return rc or 3
     if a.cmd == "plan":
         for r in rows:
             print("\t".join(map(str, r)))
         print(f"planned {len(rows)} files, {sum(r[2] for r in rows) / 1e9:.1f} GB known size, {len(failures)} entries failed", file=sys.stderr)
         return rc
     base = Path(a.dest).resolve()
-    bad = 0
+    bad = deferred = 0
     for url, dest, size, digest, volatile in rows:
         target = (base / dest).resolve()
         if base not in target.parents:  # dest is built from upstream names: never escape --dest
@@ -684,10 +772,16 @@ def main(argv=None):
             continue
         try:
             print(f"{fetch_one(url, target, size, digest, volatile)}\t{dest}")
+        except Deferred as e:
+            print(f"deferred\t{dest}\t{e}")
+            deferred += 1
         except Exception as e:
             print(f"ERROR fetch {dest}: {e}", file=sys.stderr)
             bad += 1
-    return rc or (2 if bad else 0)
+    if deferred:
+        print(f"deferred {deferred} file(s) (STOP flag, the reserve or --budget); {GUARD.added} bytes added; "
+              f"the .part files resume next run", file=sys.stderr)
+    return rc or (2 if bad else 3 if deferred else 0)
 
 
 if __name__ == "__main__":

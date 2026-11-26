@@ -53,7 +53,7 @@ One fact, one home. Change it in the owning doc; from any other doc, link — ne
 | Fact / concept | Canonical owner | Notes |
 |----------------|-----------------|-------|
 | Data root + `.env` layout | [LIBRARIAN.md](LIBRARIAN.md) | "Where data lives" section. |
-| Curation priority model | [LIBRARIAN.md](LIBRARIAN.md) | essentials → diversity → small-valuable → fill; `evict` / `request` trade up (fill never evicts; it only drops a smaller copy once a fuller version of the same item is on disk). |
+| Curation priority model | [LIBRARIAN.md](LIBRARIAN.md) | essentials, then apps → library → models → bulk (#347), each diversity → small-valuable → fill; `evict` / `request` trade up (fill never evicts; it only drops a smaller copy once a fuller version of the same item is on disk). |
 | 24/7 loop steps + `state/selfheal.json` / `state/heal-events.jsonl` | [LIBRARIAN.md](LIBRARIAN.md) | Keep [ARCHITECTURE.md](ARCHITECTURE.md)'s Self-Healing Loop diagram **in sync** with it. |
 | CUDA / Metal source build | [PLATFORMS.md](PLATFORMS.md) | GPU llama.cpp / whisper.cpp / sd.cpp on aarch64. |
 | Tool catalog | [TOOLS.md](TOOLS.md) | Backed by `scripts/tools/*.sh`. |

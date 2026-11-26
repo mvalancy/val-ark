@@ -113,7 +113,7 @@ SCENES = {
         links=[(0, 1, 'side'), (0, 2, 'arc'), (1, 3, 'arc'), (2, 3, 'side'), (2, 4, 'arc'), (4, 5, 'side')],
         used=['docs/ARCHITECTURE.md']),
     'librarian': dict(chapter='Chapter 2', title='The Librarian fills the shelves',
-        sub='Essentials first, then diversity, small and valuable, then fill the rest.', backdrop='shelf',
+        sub='Essentials first, then apps, the library, then models.', backdrop='shelf',
         cards=[('shield', 'Essentials', '0'), ('cube', 'Diversity', '1'), ('leaf', 'Small + valuable', '2'),
                ('disk', 'Fill the rest', '3'), ('magnifier', 'Trade up', None)],
         links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side')],

@@ -124,7 +124,9 @@ catalog_refresh_scout() {
 # The commissioning wizard stores a profile in settings.json; VALARK_PROFILE overrides.
 # knowledge favours the Library, ai favours models, tools favours apps, survival
 # (grid-down) favours practical references + installers over big models; balanced is
-# neutral. Whatever the profile, data/essentials.tsv is planned first (planner phase 0). Applied as a per-bucket multiplier on each candidate's value, so the box
+# neutral. Whatever the profile, data/essentials.tsv is planned first (planner phase 0), and the
+# planner's class order (apps, library, models, bulk; #347) holds: a weight only ranks items
+# WITHIN a class (the ai profile alone keeps one small model early, planner.py EARLY_MODELS). Applied as a per-bucket multiplier on each candidate's value, so the box
 # fills according to what the owner asked for (planner still sorts by value/bytes).
 _valark_profile() {
     if [ -n "${VALARK_PROFILE:-}" ]; then echo "$VALARK_PROFILE"; return; fi

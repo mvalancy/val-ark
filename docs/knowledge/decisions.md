@@ -77,6 +77,10 @@ The Software page's way of doing that is the "Adding a New Tool" checklist: a `T
 - **Guides are data, served by key.** The guide endpoint only answers for a key computed from
   the list, so a request can never name a path. The page renders a guide as escaped text with
   a few markdown marks.
+- **A run check is hostile-input handling.** It runs a downloaded program: only the named
+  members are unpacked as plain files under a size limit, the program gets a clean
+  environment, a timeout that ends in KILL and no network where `unshare` allows, and its
+  output reaches `verify.json` as printable ASCII. A PASS is cached per file for a week.
 - **Not done here.** No logos or screenshots for these cards; no Ark-run services (registry,
   Headscale, croc relay); no DuckDB extension mirror. Those stay in their own issues.
 

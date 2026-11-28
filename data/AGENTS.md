@@ -93,8 +93,8 @@ value|id|category|repo|file|format|gated|bytes|dest|note
   JavaScript regex over the file names of the newest mirrored version; only files for the host
   platform are tried, so it just has to pick the right archive (it may contain `|`). `binary`
   is the program's path inside the archive (`*` wildcards allowed; only that member is
-  unpacked; further space-separated members are unpacked with it), or `.` when the file is the
-  program (bare, `.bz2` or `.xz`). `args` are space-separated. `expect` is a `grep -E` regex
+  unpacked, as a plain file: naming a folder unpacks nothing; further space-separated members
+  are unpacked with it), or `.` when the file is the program (bare, `.bz2` or `.xz`). `args` are space-separated. `expect` is a `grep -E` regex
   for the output and must not contain `|`. No row for GUI or installer apps.
 - `dev-stack-guides`: plain text with light markdown only (`#` / `##` headings, `-` lists,
   fenced code, `` `code` ``, `**bold**`); the web UI escapes everything else. Start with

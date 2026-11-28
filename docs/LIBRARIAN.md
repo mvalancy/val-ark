@@ -304,6 +304,11 @@ sets and the source bundles are still run by hand (or from your own cron).
 
 ### Developer + security stack (`release_mirror.py`)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/story/wall-dark.svg">
+  <img src="img/story/wall-light.svg" width="100%" alt="Storybook scene: The tool wall. A workshop pegboard. Tools hang in six groups, each on a hook with a guide tag: Containers (Docker Engine, Compose + Buildx, Registry); Web and network (Caddy, Headscale, Gitea); Build (CMake + Ninja, Go, JDK + Git for Windows); Storage and backup (rclone, restic, age + croc); Monitoring (Prometheus, node_exporter, Alertmanager); Data and everyday (DuckDB, KeePassXC + Ventoy). A green lamp on a name plate means the tool has a run check; a ring means guide only (JDK, Git for Windows, KeePassXC and Ventoy: a window app, another system, or too big to try). On the bench below: a note, one list (data/dev-stack.tsv, a line per project; add a line and its card appears in Library, Developer stack; none is hand-made); and a test box marked &quot;Does it run?&quot; with a lit lamp: the newest copy for this box is unpacked on the bench, run with a time limit, then thrown away; nothing is installed; a pass is remembered for a week and a failure shows on the Health page.">
+</picture>
+
 `data/dev-stack.tsv` lists upstream projects, not files: each row names a resolver `kind`
 (GitHub latest release, a directory index, a GNU package, go.dev, python.org, PyPI, the PyPI
 top-N list, a URL template, or a snap) and `release_mirror.py` turns it into the current files
@@ -343,8 +348,9 @@ GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/
   from the list: `server.js` joins `data/dev-stack.tsv` with the tree (`GET /api/devstack`,
   `scripts/lib/devstack.js`: name, note, group, versions held, files with sizes, and the
   platforms read from the file names) and serves the files at `/api/archive/dev-stack/...`,
-  behind the same read wall and realpath containment as every other download. A project that
-  is not on disk yet shows as "Not mirrored yet". The storage breakdown counts the tree.
+  behind the same read wall and realpath containment as every other download, with HTTP
+  Range so a dropped download resumes. Mirrored projects come first; one that is not on
+  disk yet shows as "Not mirrored yet". The storage breakdown counts the tree.
   Nothing is added to `web-ui/index.html` for a new row.
 - **Offline guides.** `data/dev-stack-guides/<key>.md` is a short plain-language guide for a
   project: what it is for with the internet gone, how to install it from the mirrored files
@@ -356,12 +362,27 @@ GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/
   changes; `--guides DIR` points at another folder).
 - **Run checks.** `data/dev-stack-checks.tsv` names, per project, which file to take for the
   host platform, the program inside it, its arguments and the output to expect.
-  `verify.sh` (`verify_devstack`) takes the newest mirrored version, unpacks only that
-  program into a temp dir, runs it with a 30 s timeout and `HOME` set to the temp dir, and
-  records PASS / FAIL / SKIP per project in `state/verify.json` (component `apps`). It
-  installs nothing and needs no network. A project that is mirrored but has no build for
-  this box's platform is a SKIP; one that is not mirrored is not reported. GUI and installer
-  apps (KeePassXC, Ventoy) and Windows-only ones (Git for Windows) have no check row.
+  `verify.sh` (`verify_devstack`) records PASS / FAIL / SKIP per project in
+  `state/verify.json` (component `apps`). It installs nothing.
+  - **Which file.** The newest mirrored version: the highest version folder, or, for an
+    index row (the Docker static engine), the files whose name carries the highest version,
+    since old releases stay beside the new one in that folder.
+  - **Unpacking.** Only the archive members the row names, and only as plain files (a name
+    that is a folder brings nothing with it), into a temp dir. No unpacked file may grow
+    past `VALARK_DEVSTACK_CHECK_MAX_MB` (default 2048).
+  - **Running.** A timeout (`VALARK_DEVSTACK_CHECK_TIMEOUT`, default 30 s) that ends in
+    KILL, a clean environment (`PATH=/usr/bin:/bin`, `HOME` = the temp dir), stdin closed,
+    and an empty network namespace when `unshare -rn` works on the box (it is skipped
+    where user namespaces are restricted). The program's first output line is kept in a
+    FAIL's label as printable ASCII only.
+  - **Not every cycle.** A PASS is remembered per file (path, size, mtime and the check row)
+    in `state/devstack-checks.tsv` for `VALARK_DEVSTACK_CHECK_DAYS` (default 7), so a loop
+    cycle doesn't unpack every archive again. A FAIL or SKIP is tried again each time.
+  - **SKIP, not reported, FAIL.** Mirrored but no build for this box's platform, a missing
+    `timeout` / `unzip`, or an archive that will not unpack: SKIP with the reason. Not
+    mirrored: not reported. A check file that cannot be read: FAIL. A killed run removes
+    its temp dir. GUI and installer apps (KeePassXC, Ventoy), Windows-only ones (Git for
+    Windows) and the JDK have no check row.
 - **Volatile rows.** These are files whose name stays the same across upstream versions:
   `=latest` templates such as the Metasploit installers, `SHA256SUMS`, and `current/`
   directories. Those with a digest (the Kali ISOs) are checked against this run's digest,

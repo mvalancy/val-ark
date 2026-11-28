@@ -25,6 +25,16 @@ http:
 
 Start it: `./registry serve config.yml`
 
+As written, anyone on the LAN can push to it and overwrite an image: there is no login.
+Once your images are loaded, make it read-only by adding this under `storage:` and
+restarting it (or let only your own machines reach port 5000 with a firewall rule):
+
+```
+  maintenance:
+    readonly:
+      enabled: true
+```
+
 ## Let Docker use it
 
 Without TLS, each client must be told the registry is trusted. In `/etc/docker/daemon.json`

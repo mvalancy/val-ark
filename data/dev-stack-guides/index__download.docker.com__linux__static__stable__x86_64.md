@@ -11,11 +11,13 @@ Linux only. Take the folder for your CPU: `x86_64` (Intel/AMD) or `aarch64` (ARM
 ```
 tar xzvf docker-<version>.tgz
 sudo cp docker/* /usr/local/bin/
+sudo groupadd docker
 sudo dockerd &
 sudo docker version
 ```
 
-`dockerd` is the engine; it runs as root and must stay running. It needs `iptables`
+`dockerd` is the engine; it runs as root and must stay running. Create the `docker` group
+first: the engine gives that group its control socket when it starts. It needs `iptables`
 (in the Ark's offline APT sets if your system lacks it).
 
 To start it at boot, create `/etc/systemd/system/docker.service`:
@@ -37,7 +39,8 @@ WantedBy=multi-user.target
 ```
 
 Then `sudo systemctl daemon-reload && sudo systemctl enable --now docker`.
-To use Docker without `sudo`: `sudo groupadd docker; sudo usermod -aG docker $USER`, then log in again.
+To use Docker without `sudo`: `sudo usermod -aG docker $USER`, then log in again. Anyone in
+that group can become root on the machine through Docker, so add only people you would give `sudo`.
 
 `docker-rootless-extras-<version>.tgz` holds the extra programs for rootless mode.
 

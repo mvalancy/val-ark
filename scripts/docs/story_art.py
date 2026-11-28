@@ -641,6 +641,82 @@ def stars(t, theme, h):
     return ''.join(p)
 
 
+WALL = (  # (group, accent, ((icon, name, has a run check), ...)): every project with an offline guide
+    ('Containers', 2, (('cube', 'Docker Engine', True), ('gear', 'Compose + Buildx', True), ('server', 'Registry', True))),
+    ('Web and network', 5, (('globe', 'Caddy', True), ('wifi', 'Headscale', True), ('terminal', 'Gitea', True))),
+    ('Build', 0, (('wrench', 'CMake + Ninja', True), ('chip', 'Go', True), ('key', 'JDK + Git for Windows', False))),
+    ('Storage and backup', 1, (('disk', 'rclone', True), ('shield', 'restic', True), ('lock', 'age + croc', True))),
+    ('Monitoring', 3, (('eye', 'Prometheus', True), ('spark', 'node_exporter', True), ('mail', 'Alertmanager', True))),
+    ('Data and everyday', 7, (('magnifier', 'DuckDB', True), ('paste', 'KeePassXC + Ventoy', False))),
+)
+
+
+def wall(t, theme, h):
+    """The developer stack as a workshop tool wall: tools hang in groups, each with a guide tag."""
+    rnd = random.Random(131)
+    ink, lamp = '#2a1a04', ACCENTS[1]
+    p = [sky(t, h, rnd, theme, None, stars=0),
+         f'<defs><pattern id="pegs" width="22" height="22" patternUnits="userSpaceOnUse">'
+         f'<circle cx="11" cy="11" r="2.3" fill="{t["wood2"]}" opacity=".55"/></pattern></defs>',
+         '<g clip-path="url(#page)">',
+         f'<rect y="610" width="{W}" height="{h - 610}" fill="{t["ground"]}"/>',
+         # the pegboard and its frame
+         f'<rect x="48" y="104" width="1104" height="388" rx="10" fill="{t["wood2"]}"/>',
+         f'<rect x="60" y="116" width="1080" height="364" rx="4" fill="{t["wood"]}"/>',
+         f'<rect x="60" y="116" width="1080" height="364" rx="4" fill="url(#pegs)"/>']
+    for i, (group, ai, tools) in enumerate(WALL):
+        a, cx = ACCENTS[ai], 150 + i * 180
+        p.append(f'<rect x="{cx - 80}" y="126" width="160" height="26" rx="13" fill="{a}"/>'
+                 f'<text x="{cx}" y="144" class="sm m" style="fill:#fff">{esc(group)}</text>')
+        for j, (ic, name, runs) in enumerate(tools):
+            y = 206 + j * 104
+            dot = (f'<circle cx="{cx - 74}" cy="{y + 43}" r="5" fill="{lamp}"/>' if runs else
+                   f'<circle cx="{cx - 74}" cy="{y + 43}" r="4.2" fill="none" stroke="{ink}" stroke-width="1.6"/>')
+            p.append(
+                # the hook, the tool on its painted outline, and its name plate
+                f'<path d="M{cx} {y - 40}v8" stroke="{t["ink"]}" stroke-width="4" stroke-linecap="round"/>'
+                f'<circle cx="{cx}" cy="{y - 41}" r="3.5" fill="{t["ink"]}"/>'
+                f'<rect x="{cx - 30}" y="{y - 30}" width="60" height="56" rx="12" fill="{t["cream"]}" stroke="{a}" stroke-width="2.5"/>'
+                + icon(ic, cx, y - 2, .95, a) +
+                f'<rect x="{cx - 84}" y="{y + 32}" width="168" height="22" rx="4" fill="{t["cream"]}"/>{dot}'
+                f'<text x="{cx + 7}" y="{y + 48}" class="sm m" style="fill:{ink}">{esc(name)}</text>'
+                # the guide tag, hanging from the same hook on a string
+                f'<g class="sway" style="animation-delay:-{(i * 3 + j) * .7:.1f}s;animation-duration:{5 + (i + j) % 3}s">'
+                f'<path d="M{cx} {y - 41}q22 4 38 17" fill="none" stroke="{t["ink"]}" stroke-width="1.2"/>'
+                f'<path d="M{cx + 34} {y - 24}l8 -8h40v26h-40z" fill="{t["cream"]}" stroke="{a}" stroke-width="1.5"/>'
+                f'<circle cx="{cx + 41}" cy="{y - 20}" r="1.8" fill="{a}"/>'
+                f'<text x="{cx + 63}" y="{y - 15}" class="xs m" style="fill:{ink};font-weight:600">guide</text></g>')
+    # the key to the lamps, on the free peg space of the last column
+    kx, ky = 150 + 5 * 180, 206 + 2 * 104
+    p.append(f'<rect x="{kx - 84}" y="{ky - 34}" width="168" height="88" rx="6" fill="{t["cream"]}"/>'
+             f'<circle cx="{kx - 66}" cy="{ky - 16}" r="5" fill="{lamp}"/><text x="{kx - 52}" y="{ky - 11}" class="sm" style="fill:{ink}">has a run check</text>'
+             f'<circle cx="{kx - 66}" cy="{ky + 6}" r="4.2" fill="none" stroke="{ink}" stroke-width="1.6"/>'
+             f'<text x="{kx - 52}" y="{ky + 11}" class="sm" style="fill:{ink}">guide only:</text>'
+             f'<text x="{kx - 52}" y="{ky + 28}" class="xs" style="fill:{ink}">a window app, another</text>'
+             f'<text x="{kx - 52}" y="{ky + 43}" class="xs" style="fill:{ink}">system, or too big to try</text>')
+    # the bench: the list every card comes from, the test box with its lamp, and what the test does
+    p.append(f'<rect x="40" y="598" width="1120" height="12" rx="3" fill="{t["wood2"]}"/>'
+             f'<g transform="rotate(-1.5 200 556)"><rect x="64" y="515" width="300" height="80" fill="#000" opacity=".2"/>'
+             f'<rect x="60" y="511" width="300" height="80" fill="{t["cream"]}"/>'
+             f'<text x="74" y="531" class="ch" style="fill:#b45309">One list</text>'
+             f'<text x="74" y="551" class="sm" style="fill:{ink}">data/dev-stack.tsv: a line per project.</text>'
+             f'<text x="74" y="568" class="cp" style="fill:{ink}">Add a line and its card appears in</text>'
+             f'<text x="74" y="584" class="cp" style="fill:{ink}">Library, Developer stack. None is hand-made.</text></g>')
+    p.append(f'<rect x="412" y="530" width="190" height="68" rx="8" fill="{t["wall"]}" stroke="{t["ink"]}" stroke-width="2.5"/>'
+             f'<text x="507" y="558" class="lb m">Does it run?</text>'
+             f'<text x="507" y="578" class="xs m">the test bench</text>'
+             f'<path d="M602 564h26" stroke="{t["ink"]}" stroke-width="3"/>'
+             f'<circle cx="652" cy="564" r="26" fill="{lamp}" opacity=".25" class="pulse"/>'
+             f'<circle cx="652" cy="564" r="15" fill="{lamp}" stroke="{t["ink"]}" stroke-width="2.5"/>'
+             f'<path d="M645 564l5 5 9 -10" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>')
+    for k, line in enumerate(('The newest copy for this box is unpacked on the bench,',
+                              'run with a time limit, then thrown away. Nothing is installed.',
+                              'A pass is remembered for a week; a failure shows on the Health page.')):
+        p.append(text(702, 540 + k * 22, 'it h' if k < 2 else 'cp h', line))
+    p.append('</g>')
+    return ''.join(p)
+
+
 SCENES = {
     'voyage': dict(
         chapter='Chapter 1', title='One Ark, end to end', h=560, draw=voyage,
@@ -715,6 +791,17 @@ SCENES = {
              'copies itself). From that source a new machine installs with curl bootstrap.sh, offline, and becomes another '
              'Ark, which fills up when it is online. No internet between them.',
         used=['docs/HOW-IT-WORKS.md']),
+    'wall': dict(
+        chapter='The developer stack', title='The tool wall', h=640, draw=wall,
+        desc='A workshop pegboard. Tools hang in six groups, each on a hook with a guide tag: '
+             + '; '.join(f'{group} ({", ".join(name for _, name, _ in tools)})' for group, _, tools in WALL)
+             + '. A green lamp on a name plate means the tool has a run check; a ring means guide only (JDK, Git for '
+               'Windows, KeePassXC and Ventoy: a window app, another system, or too big to try). On the bench below: a note, one list '
+               '(data/dev-stack.tsv, a line per project; add a line and its card appears in Library, Developer stack; '
+               'none is hand-made); and a test box marked "Does it run?" with a lit lamp: the newest copy for this box '
+               'is unpacked on the bench, run with a time limit, then thrown away; nothing is installed; a pass is '
+               'remembered for a week and a failure shows on the Health page.',
+        used=['docs/LIBRARIAN.md']),
 }
 
 

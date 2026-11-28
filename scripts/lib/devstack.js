@@ -14,12 +14,13 @@
 //   index     <group>/<host>/<dir path>/<file>          (no version dir)
 //   pypi-top  <group>/pypi/<project>/...                (counted, not listed)
 //
-// Cheap on a big tree: every read is one directory with an entry cap, nothing recurses
+// Cheap on a big tree: every listing read is one directory with an entry cap, nothing recurses
 // beyond the layout above, all I/O is async, and symlinks are never followed.
 'use strict';
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
+const crypto = require('crypto');
 
 const PLATFORMS = ['linux-x86_64', 'linux-arm64', 'macos-arm64', 'windows-x64', 'source'];
 const ARCHIVE_PREFIX = '/api/archive/dev-stack/';
@@ -27,12 +28,21 @@ const MAX_ENTRIES = 500;    // entries read from any one directory
 const MAX_VERSIONS = 3;     // newest versions listed per project
 const MAX_FILES = 200;      // files listed per version
 const POOL = 16;            // projects scanned at once
-// Files the mirror writes for itself, not for people.
-const SIDECAR = /^\.|\.part$|\.verified$|\.source\.json$|^INSTALL\.txt$/;
+// A name with a control character is never listed: /api/archive refuses to serve one.
+const CONTROL = /[\x00-\x1f\x7f]/;
+const MAX_COUNT = 100000;   // pypi-top: project folders counted (names only, never listed)
+// Files the mirror writes for itself, not for people (static_site.py SKIP, plus our stamps).
+const SIDECAR = /^\.|\.part$|\.tmp(-\d+)?$|\.oversize-\d+$|\.verified$|\.source\.json$|^INSTALL\.txt$/;
 
-// release_mirror.py safe(): one path component built from an upstream name.
+// release_mirror.py safe(): one path component built from an upstream name, long names
+// shortened the same way (a hash keeps distinct names distinct).
 function safe(part) {
-    return String(part).replace(/[^A-Za-z0-9._+@=-]/g, '-').replace(/^[.-]+|[.-]+$/g, '') || '_';
+    let s = String(part).replace(/[^A-Za-z0-9._+@=-]/gu, '-').replace(/^[.-]+|[.-]+$/g, '') || '_';
+    if (s.length > 180) {
+        const ext = (/(\.[A-Za-z][A-Za-z0-9]{0,7}){1,2}$/.exec(s) || [''])[0];
+        s = s.slice(0, 167 - ext.length) + '-' + crypto.createHash('sha256').update(s).digest('hex').slice(0, 12) + ext;
+    }
+    return s;
 }
 
 // The stable id of a catalog row: the guide file name, the ?ref= of the guide endpoint and
@@ -92,8 +102,16 @@ function projectPath(row) {
 // under the group, which names the OS / CPU for index and template rows and the project
 // for the rest (git-for-windows, mingw-builds-binaries).
 function inferPlatform(name, dir = '') {
-    return platformOf(name) || (dir ? platformOf(dir + name) : '');
+    for (const text of dir ? [name, dir + name] : [name]) {
+        const p = platformOf(text);
+        if (p !== null) return p;
+    }
+    return PLAIN_TARBALL.test(name) ? 'source' : '';
 }
+// <project>-<version>.tar.* with no OS or CPU in its name or folders: the source release
+// (gcc-15.1.0.tar.xz, cmake-4.5.1.tar.gz, nmap-7.98.tar.bz2).
+const PLAIN_TARBALL = /-v?\d+(\.\d+)*\.tar\.(gz|xz|bz2|lz|zst)$/;
+// A platform, '' for "not one of ours", or null when the text names no OS at all.
 function platformOf(name) {
     const n = String(name).toLowerCase();
     if (/\.(sha\d*|sha256sum|asc|sig|pem|sbom|json|txt|md|yml|yaml|cert|pub|minisig|intoto\.jsonl)$/.test(n)) return '';
@@ -104,7 +122,7 @@ function platformOf(name) {
     if (/(^|[^a-z])win(dows|64)?(?![a-z])|msvc|mingw|\.(exe|msi|msix)$/.test(n)) return arm ? '' : 'windows-x64';
     if (/darwin|(^|[^a-z])(mac(os|osx)?|osx|apple)(?![a-z])|\.(dmg|pkg)$/.test(n)) return (x64 && !arm) ? '' : 'macos-arm64';
     if (/linux|musl|\.(appimage|deb|rpm|snap)$/.test(n)) return arm ? 'linux-arm64' : 'linux-x86_64';
-    return '';
+    return null;
 }
 
 // release_mirror.py vkey(): numeric parts compare numerically ('1.10' > '1.9').
@@ -130,7 +148,7 @@ async function readDir(dir) {
     try { d = await fsp.opendir(dir); } catch (_) { return out; }
     try {
         for await (const e of d) {
-            if (!SIDECAR.test(e.name)) out.push(e);
+            if (!SIDECAR.test(e.name) && !CONTROL.test(e.name)) out.push(e);
             if (out.length >= MAX_ENTRIES) break;
         }
     } catch (_) { /* a directory that vanished mid-read: what we have is enough */ }
@@ -138,11 +156,12 @@ async function readDir(dir) {
 }
 
 // Files under one version dir: `depth` more directory levels (0 for every kind but template).
-async function listFiles(dir, rel, depth, files) {
+// `keep(name)` drops files before they are counted or stat'ed (index rows: old versions).
+async function listFiles(dir, rel, depth, files, keep) {
     for (const e of (await readDir(dir)).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
         if (e.isDirectory()) {
-            if (depth > 0) await listFiles(path.join(dir, e.name), [...rel, e.name], depth - 1, files);
-        } else if (e.isFile()) {
+            if (depth > 0) await listFiles(path.join(dir, e.name), [...rel, e.name], depth - 1, files, keep);
+        } else if (e.isFile() && (!keep || keep(e.name))) {
             if (files.length >= MAX_FILES) { files.truncated = true; return; }
             let size = 0;
             try { size = (await fsp.stat(path.join(dir, e.name))).size; } catch (_) { continue; }
@@ -162,15 +181,18 @@ async function scanProject(base, realBase, row) {
     let real; try { real = await fsp.realpath(dir); } catch (_) { return p; }
     if (!real.startsWith(realBase + path.sep)) return p;
     if (row.kind === 'pypi-top') {
-        p.packages = (await readDir(dir)).filter((e) => e.isDirectory()).length;
+        p.packages = await countDirs(dir);
         p.mirrored = p.packages > 0;
         return p;
     }
-    let versions;
+    let versions, keep;
     if (row.kind === 'index') {
-        // No version dir: the version is in the file name, read back with the row's own
-        // (?P<v>...) group when it has one.
-        versions = [{ version: '', dir, rel }];
+        // No version dir, so releases pile up side by side and the version is only in the
+        // file name. Read it back with the row's own (?P<v>...) group and keep the newest
+        // version's files (plus files the group does not match, such as SHA256SUMS).
+        const v = indexVersions(row.match, (await readDir(dir)).filter((e) => e.isFile()).map((e) => e.name));
+        versions = [{ version: v.newest, dir, rel }];
+        keep = (name) => v.of(name) === undefined || v.of(name) === v.newest;
     } else {
         const held = (await readDir(dir)).filter((e) => e.isDirectory()).map((e) => e.name)
             .sort(versionCompare).reverse();
@@ -179,9 +201,8 @@ async function scanProject(base, realBase, row) {
     }
     for (const v of versions) {
         const files = [];
-        await listFiles(v.dir, v.rel, row.kind === 'template' ? 3 : 0, files);
+        await listFiles(v.dir, v.rel, row.kind === 'template' ? 3 : 0, files, keep);
         if (!files.length) continue;
-        if (row.kind === 'index') v.version = indexVersion(row.match, files);
         p.versions.push({ version: v.version, bytes: files.reduce((s, f) => s + f.size, 0),
                           files, truncated: !!files.truncated });
     }
@@ -192,11 +213,23 @@ async function scanProject(base, realBase, row) {
     return p;
 }
 
-function indexVersion(match, files) {
-    let rx;
-    try { rx = new RegExp(match.replace(/\(\?P</g, '(?<')); } catch (_) { return ''; }
-    const found = files.map((f) => (rx.exec(f.name) || {}).groups).map((g) => g && g.v).filter(Boolean);
-    return found.sort(versionCompare).pop() || '';
+// An index row's versions: of(name) = the name's (?P<v>...) capture (undefined when the row
+// has no such group or the name does not match), newest = the highest capture ('' if none).
+function indexVersions(match, names) {
+    let rx = null;
+    try { rx = new RegExp(match.replace(/\(\?P</g, '(?<')); } catch (_) { /* a regex only Python reads: no versions */ }
+    const of = (name) => { const m = rx && rx.exec(name); return (m && m.groups && m.groups.v) || undefined; };
+    return { of, newest: names.map(of).filter(Boolean).sort(versionCompare).pop() || '' };
+}
+
+// How many folders a directory holds: names only, so a wheelhouse of thousands stays cheap.
+async function countDirs(dir) {
+    let n = 0, d;
+    try { d = await fsp.opendir(dir); } catch (_) { return 0; }
+    try {
+        for await (const e of d) { if (e.isDirectory() && !SIDECAR.test(e.name) && ++n >= MAX_COUNT) break; }
+    } catch (_) { /* vanished mid-read */ }
+    return n;
 }
 
 // { groups, projects } for every catalog row, in catalog order. Never throws: an unreadable
@@ -251,7 +284,8 @@ async function checks(checksPath, tsvPath, base, platform) {
         const p = projects.find((x) => x.ref === f[0]);
         if (!p || !p.mirrored) continue;
         let rx; try { rx = new RegExp(f.slice(1, -3).join('|')); } catch (_) { rx = null; }
-        const hit = rx && p.versions[0].files.find((x) => x.platform === platform && rx.test(x.name));
+        const newest = (p.versions[0] || { files: [] }).files;   // pypi-top is mirrored with no versions listed
+        const hit = rx && newest.find((x) => x.platform === platform && rx.test(x.name));
         lines.push(hit
             ? ['run', p.name, path.join(base, ...hit.url.slice(ARCHIVE_PREFIX.length).split('/').map(decodeURIComponent)), ...f.slice(-3)]
             : ['skip', p.name]);
@@ -259,7 +293,7 @@ async function checks(checksPath, tsvPath, base, platform) {
     return lines.map((l) => l.join('\x1f'));
 }
 
-module.exports = { PLATFORMS, parseTsv, refKey, projectPath, inferPlatform, versionCompare, listing, guide, checks };
+module.exports = { PLATFORMS, safe, parseTsv, refKey, projectPath, inferPlatform, versionCompare, listing, guide, checks };
 
 // CLI: devstack.js checks <checks.tsv> <dev-stack.tsv> <dev-stack dir> <platform>
 if (require.main === module) {

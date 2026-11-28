@@ -3590,6 +3590,9 @@ function router() {
     // '#/route#anchor' links jump to their section after render; plain routes reset to top.
     const anchorEl = getAnchor() && document.getElementById(getAnchor());
     if (anchorEl) anchorEl.scrollIntoView(); else window.scrollTo(0, 0);
+    // On a phone the Library sub-nav scrolls sideways: centre the current tab in it.
+    const libNav = document.querySelector('.library-nav'), libTab = libNav && libNav.querySelector('.lib-tab.active');
+    if (libTab) libNav.scrollLeft += libTab.getBoundingClientRect().left - libNav.getBoundingClientRect().left - (libNav.clientWidth - libTab.offsetWidth) / 2;
 
     // Rebind search if present
     const searchInput = document.getElementById('searchInput');
@@ -4139,12 +4142,22 @@ const _DEVSTACK_CSS = `<style>
 .ds-files summary{cursor:pointer;color:var(--text-muted,#8a8f98)}
 .ds-files ul{margin:.4rem 0 0;padding-left:1.1rem}
 .ds-files li{word-break:break-all;margin:.15rem 0}
-.ds-guide{max-width:78ch;line-height:1.55}
+.ds-files a,.ds-guide a{color:var(--accent,#4da6ff)}
+.ds-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.ds-chips .tag{white-space:nowrap}
+.ds-guide{max-width:78ch;line-height:1.55;overflow-wrap:anywhere}
+.ds-guide code{overflow-wrap:anywhere}
 .ds-guide h2{font-size:1.25em;margin:1.2rem 0 .5rem}
 .ds-guide h3{font-size:1.05em;margin:1.1rem 0 .4rem}
 .ds-guide pre{background:var(--bg-secondary,#12161d);border:1px solid var(--border,#2a2d34);border-radius:8px;padding:.7rem .9rem;overflow-x:auto;font-size:.88rem}
 .ds-guide ul{padding-left:1.2rem}
 .ds-guide li{margin:.25rem 0}
+.ds-table .pkg-name{overflow-wrap:anywhere}
+@media (max-width:600px){
+  .ds-table th:nth-child(2),.ds-table td:nth-child(2){display:none}
+  .ds-table th,.ds-table td{padding:.5rem .45rem}
+  .ds-table .pkg-name{font-size:.85rem}
+}
 </style>`;
 const _DS_PLATFORM = { 'linux-x86_64': 'Linux x86_64', 'linux-arm64': 'Linux ARM64', 'macos-arm64': 'macOS', 'windows-x64': 'Windows', source: 'Source' };
 const _DS_CARD_FILES = 12;      // files listed on a card; the detail view lists them all
@@ -4154,9 +4167,12 @@ const _devstackGuides = {};     // key -> guide text, or false when there is non
 function _devstackKey(route) {
     try { return decodeURIComponent(route.slice('/devstack/'.length)); } catch (_) { return ''; }
 }
+let _devstackLoading = false;
 function loadDevstack(key) {
-    if (!_devstackData) {
+    if (!_devstackData && !_devstackLoading) {
+        _devstackLoading = true;
         fetch('/api/devstack').then(r => r.ok ? r.json() : false).catch(() => false).then(d => {
+            _devstackLoading = false;
             _devstackData = d; if (getRoute().startsWith('/devstack')) scheduleRender();
         });
     }
@@ -4167,6 +4183,8 @@ function loadDevstack(key) {
     }
 }
 function setDevstackGroup(group) { _devstackGroup = group; router(); }
+// The list could not be read (server restarting, signed out): try again from the page.
+function retryDevstack() { _devstackData = null; loadDevstack(_devstackKey(getRoute())); router(); }
 // A click anywhere on a card opens its detail view, except on its own links and file list.
 function devstackCardClick(ev, card) {
     if (!ev.target.closest('a, details')) window.location.hash = card.dataset.href;
@@ -4180,12 +4198,12 @@ function _devstackChips(p) {
     return html;
 }
 function _devstackFileItem(f) {
-    return `<li><a href="${escAttr(f.url)}" download>${esc(f.name)}</a> <span style="color:var(--text-muted)">${esc(formatBytes(f.size))}</span></li>`;
+    return `<li><a href="${escAttr(f.url)}" download data-known="1">${esc(f.name)}</a> <span style="color:var(--text-muted)">${esc(formatBytes(f.size))}</span></li>`;
 }
 // What both views show until the list is loaded (null once it is).
 function _devstackPending() {
     if (_devstackData) return null;
-    if (_devstackData === false || !_apiAvailable) return '<p class="activity-empty" id="devstack-list">The developer stack list needs the Val Ark server (open this page from the Ark, signed in if it asks).</p>';
+    if (_devstackData === false) return '<p class="activity-empty" id="devstack-list">The developer stack list needs the Val Ark server (open this page from the Ark, signed in if it asks). <button class="cat-btn" id="devstack-retry" onclick="retryDevstack()">Try again</button></p>';
     return '<p class="activity-empty" id="devstack-list">Loading the list…</p>';
 }
 function renderDevstack() {
@@ -4197,7 +4215,6 @@ function renderDevstack() {
     const pending = _devstackPending();
     if (pending) return html + pending + '</div>';
     const all = _devstackData.projects || [];
-    const held = all.filter(p => p.mirrored).length;
     html += `<div class="search-bar">
         <span class="search-icon">&#x1F50D;</span>
         <input type="text" id="searchInput" placeholder="Search the developer stack..." aria-label="Search the developer stack">
@@ -4209,10 +4226,13 @@ function renderDevstack() {
         html += `<button class="cat-btn ${_devstackGroup === g ? 'active' : ''}" aria-pressed="${_devstackGroup === g}" data-group="${escAttr(g)}" onclick="setDevstackGroup(this.dataset.group)">${esc(g === 'all' ? 'All' : g)} (${n})</button>`;
     }
     html += '</div>';
-    html += `<p style="color:var(--text-muted);font-size:.85em;margin-bottom:16px" id="devstack-count">${held} of ${all.length} projects mirrored on this box</p>`;
+    // What the box holds comes first; inside each half the list keeps its own order.
+    const inGroup = all.filter(p => _devstackGroup === 'all' || p.group === _devstackGroup);
+    const shown = [...inGroup.filter(p => p.mirrored), ...inGroup.filter(p => !p.mirrored)];
+    const held = inGroup.filter(p => p.mirrored).length;
+    html += `<p style="color:var(--text-muted);font-size:.85em;margin-bottom:16px" id="devstack-count">${held} of ${inGroup.length} ${_devstackGroup === 'all' ? '' : esc(_devstackGroup) + ' '}projects mirrored on this box</p>`;
     html += '<div class="cards-grid" id="devstack-list">';
-    for (const p of all) {
-        if (_devstackGroup !== 'all' && p.group !== _devstackGroup) continue;
+    for (const p of shown) {
         const href = '#/devstack/' + encodeURIComponent(p.key);
         let files = '';
         const v = p.versions[0];
@@ -4225,7 +4245,7 @@ function renderDevstack() {
         html += `<div class="card ds-card${p.mirrored ? '' : ' ds-absent'}" data-key="${escAttr(p.key)}" data-href="${escAttr(href)}" data-search="${escAttr((p.name + ' ' + p.ref + ' ' + p.note + ' ' + p.group).toLowerCase())}" onclick="devstackCardClick(event, this)">
             <h3><a href="${escAttr(href)}">${esc(p.name)}</a></h3>
             <div class="card-desc">${esc(p.note)}</div>
-            <div class="card-meta">${_devstackChips(p)}</div>
+            <div class="card-meta ds-chips">${_devstackChips(p)}</div>
             ${files}
         </div>`;
     }
@@ -4241,7 +4261,7 @@ function renderDevstackDetail(key) {
     if (!p) return html + '<p class="activity-empty" id="devstack-detail">That project is not in the developer stack list.</p></div>';
     html += `<div id="devstack-detail"><h1>${esc(p.name)}</h1>
         <p style="color:var(--text-secondary);max-width:70ch">${esc(p.note)}</p>
-        <div class="card-meta" style="margin:12px 0 20px">${_devstackChips(p)}</div>`;
+        <div class="ds-chips" style="margin:12px 0 20px">${_devstackChips(p)}</div>`;
     const guide = _devstackGuides[key];
     // The guide opens with its own "# Name" title; the page already has one.
     if (guide) html += `<div class="ds-guide" id="devstack-guide">${renderGuideText(guide.replace(/^# .*\n+/, ''))}</div>`;
@@ -4253,13 +4273,13 @@ function renderDevstackDetail(key) {
         html += `<p class="activity-empty">${Number(p.packages).toLocaleString()} packages, in the box’s <code>dev-stack/${esc(p.group)}/pypi</code> folder. Install with <code>pip install --no-index --find-links &lt;that folder&gt; &lt;name&gt;</code>.</p>`;
     }
     for (const v of p.versions) {
-        html += `<div class="pkg-wrap" style="margin-bottom:16px"><table class="pkg-table"><thead><tr>
+        html += `<div class="pkg-wrap" style="margin-bottom:16px"><table class="pkg-table ds-table"><thead><tr>
             <th>${esc(v.version || 'File')}</th><th>Platform</th><th class="pkg-size">Size</th><th></th></tr></thead><tbody>`;
         for (const f of v.files) {
             html += `<tr class="pkg-row"><td class="pkg-name" style="word-break:break-all">${esc(f.name)}</td>
                 <td>${esc(_DS_PLATFORM[f.platform] || '—')}</td>
                 <td class="pkg-size">${esc(formatBytes(f.size))}</td>
-                <td><a class="pkg-dl" href="${escAttr(f.url)}" download>Download</a></td></tr>`;
+                <td><a class="pkg-dl" href="${escAttr(f.url)}" download data-known="1">Download</a></td></tr>`;
         }
         html += '</tbody></table></div>';
         if (v.truncated) html += '<p class="pkg-note">Only the first files are listed; the rest are in the same folder on the box.</p>';

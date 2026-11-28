@@ -11,16 +11,16 @@ One program per platform: `headscale_<version>_linux_amd64`, `_linux_arm64` or
 
 ```
 sudo install headscale_*_linux_amd64 /usr/local/bin/headscale
-sudo mkdir -p /etc/headscale /var/lib/headscale /var/run/headscale
+sudo mkdir -p /etc/headscale /var/lib/headscale
 headscale version
 ```
 
 ## A minimal config
 
-Save as `/etc/headscale/config.yaml` (every setting is explained in `config-example.yaml`,
-inside the source tarball beside the programs). Clients must reach `server_url`, so use the
-server's LAN name or address. An empty `derp.urls` plus the built-in relay means nothing
-points at the internet.
+Save as `/etc/headscale/config.yaml`. Every setting is explained in `config-example.yaml`,
+at the top of `headscale-<version>-source.tar.gz` in the same folder. Clients must reach
+`server_url`, so use the server's LAN name or address. An empty `derp.urls` plus the built-in
+relay means nothing points at the internet.
 
 ```
 server_url: https://<ark>:8443
@@ -40,6 +40,7 @@ derp:
     region_name: "Ark relay"
     stun_listen_addr: "0.0.0.0:3478"
     private_key_path: /var/lib/headscale/derp_server_private.key
+    automatically_add_embedded_derp_region: true
     ipv4: <the server's LAN address>
   urls: []
 database:
@@ -50,7 +51,7 @@ dns:
   magic_dns: true
   base_domain: ark.internal
   override_local_dns: false
-unix_socket: /var/run/headscale/headscale.sock
+unix_socket: /var/lib/headscale/headscale.sock
 ```
 
 The built-in relay needs HTTPS: use a certificate from your local CA and trust that CA on

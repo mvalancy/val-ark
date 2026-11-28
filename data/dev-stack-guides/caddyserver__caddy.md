@@ -47,4 +47,5 @@ Browsers warn until they trust Caddy's root certificate. On the Caddy machine it
 - Windows (admin prompt): `certutil -addstore -f Root root.crt`
 - Firefox keeps its own list: Settings, Certificates, Import.
 
-`caddy trust` does the same for the machine Caddy runs on. Never copy the root *key*.
+`caddy trust` does the same for the machine Caddy runs on. Copy only `root.crt`; the
+`root.key` beside it must never leave the Caddy machine.

@@ -82,10 +82,10 @@ The box itself is always the Admin. People on your network get what the Use Mode
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/story/trail-dark.svg">
-  <img src="img/story/trail-light.svg" width="100%" alt="Storybook scene: The trail to a working Ark. A trail of eight stepping stones across the hills, the setup screens in order: 1 Welcome (in any browser); 2 Claim code (from another device); 3 Name it (a name for the box); 4 Admin passcode (optional); 5 Focus (survival, AI, tools…); 6 Recovery card (print or save it); 7 Filling (by the 24/7 loop); 8 Open mode (change it later). A few screens in a browser, then the Ark fills itself.">
+  <img src="img/story/trail-light.svg" width="100%" alt="Storybook scene: The trail to a working Ark. A trail of eight stepping stones across the hills, the setup screens in order: 1 Welcome (in any browser); 2 Setup code (shown on the box); 3 Name it (a name for the box); 4 Admin passcode (you can skip it); 5 Who can use it (open, or signed in); 6 Focus (survival, AI, tools…); 7 Ready to go (review, then Set up); 8 All set (save the recovery card). The setup code step is skipped on the box itself. At the flag the first fill starts; install the loop to keep it filling and healthy around the clock.">
 </picture>
 
-A few screens in a browser: name the box, optionally set a passcode, pick a focus, and save the recovery card. Then the 24/7 loop fills the disk on its own, once it is installed (`./scripts/loop.sh install 30`).
+A few screens in a browser: name the box, optionally set a passcode, choose who can use it, pick a focus, and save the recovery card. Then the first fill starts, and the 24/7 loop keeps the disk filling once it is installed (`./scripts/loop.sh install 30`).
 
 **More:** [First-boot setup](design/commissioning.md)
 
@@ -93,7 +93,7 @@ A few screens in a browser: name the box, optionally set a passcode, pick a focu
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/story/cork-dark.svg">
-  <img src="img/story/cork-light.svg" width="100%" alt="Storybook scene: The village noticeboard. A cork noticeboard with a note pinned for each community service: Chat (rooms in the browser IRC underneath); Mail (webmail on the box the Admin adds logins); Boards (a forum for the whole network); File drop (share a note or a file by link); Git forge (host your code with Gitea). A wider note says how they switch on: name them in .env, or press Start on the Community page; the loop starts the ones you named and keeps them running; each runs on the box and opens inside the web UI, for your network only.">
+  <img src="img/story/cork-light.svg" width="100%" alt="Storybook scene: The village noticeboard. A cork noticeboard with a note pinned for each community service: Chat (rooms in the browser IRC underneath); Mail (webmail on the box the Admin adds logins); Boards (a forum for the whole network); File drop (share a note or a file by link); Git forge (host your code with Gitea). A wider note says how they switch on: name the ones you want in .env (VALARK_SERVICES); the loop starts them and keeps them running, and Start on the Community page starts one now; each runs on the box and opens inside the web UI, for your network only.">
 </picture>
 
 Chat, mail, message boards, a file drop and a git forge run on the box and open inside the web UI. Turn them on in `.env`, and the loop keeps them running.
@@ -104,10 +104,10 @@ Chat, mail, message boards, a file drop and a git forge run on the box and open 
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/story/belt-dark.svg">
-  <img src="img/story/belt-light.svg" width="100%" alt="Storybook scene: The sorting machine. A conveyor belt carries new files from the uploads folder through a scanner: a local model that checks text and images on the box, with nothing sent anywhere. Clean files leave by the upper chute and stay shared. Files that are flagged, that the model is unsure about, or that hit an error leave by the lower chute into quarantine: set aside, not deleted, until the Admin reviews them and removes or dismisses each.">
+  <img src="img/story/belt-light.svg" width="100%" alt="Storybook scene: The sorting machine. A conveyor belt carries new files from the uploads folder (a folder you choose) through a scanner: a local model that checks text and images on the box, with nothing sent anywhere. Clean files leave by the upper chute and stay shared. Files that are flagged, that the model is unsure about, or that hit an error leave by the lower chute into quarantine: set aside, not deleted, until the Admin reviews them and removes or dismisses each. The file drop and mail keep their own stores, which this does not sweep.">
 </picture>
 
-Files in the uploads folder are checked on the box by a local model, with nothing sent anywhere. Anything flagged or uncertain is set aside until the Admin reviews it.
+Files in the uploads folder are checked on the box by a local model, with nothing sent anywhere. Anything flagged or uncertain is set aside until the Admin reviews it. The uploads folder is one you choose; the file drop and mail keep their own stores, which this does not sweep.
 
 **More:** [Safety and moderation](design/safety-moderation.md)
 

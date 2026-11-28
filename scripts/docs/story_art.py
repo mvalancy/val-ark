@@ -471,11 +471,11 @@ def smooth(pts):
     return ''.join(d)
 
 
-TRAIL = (  # (x, y, icon, label, caption): the setup screens, in order
-    (110, 440, 'house', 'Welcome', 'in any browser'), (252, 352, 'key', 'Claim code', 'from another device'),
-    (392, 250, 'board', 'Name it', 'a name for the box'), (540, 304, 'lock', 'Admin passcode', 'optional'),
-    (672, 420, 'leaf', 'Focus', 'survival, AI, tools…'), (822, 396, 'paste', 'Recovery card', 'print or save it'),
-    (944, 286, 'disk', 'Filling', 'by the 24/7 loop'), (1086, 212, 'globe', 'Open mode', 'change it later'),
+TRAIL = (  # (x, y, icon, label, caption): the setup screens, in order (_setupSteps in web-ui/index.html)
+    (110, 440, 'house', 'Welcome', 'in any browser'), (252, 352, 'key', 'Setup code', 'shown on the box'),
+    (392, 250, 'board', 'Name it', 'a name for the box'), (540, 304, 'lock', 'Admin passcode', 'you can skip it'),
+    (672, 420, 'wifi', 'Who can use it', 'open, or signed in'), (822, 396, 'leaf', 'Focus', 'survival, AI, tools…'),
+    (944, 286, 'check', 'Ready to go', 'review, then Set up'), (1086, 212, 'paste', 'All set', 'save the recovery card'),
 )
 
 
@@ -503,7 +503,7 @@ def trail(t, theme, h):
              f'<path d="M{fx + 35} {fy - 62}l34 11-34 11Z" fill="{t["roof"]}" class="sway"/>')
     p.append(f'<g class="go" style="offset-path:path(\'{d}\');animation-duration:18s">'
              f'<circle r="11" fill="{t["lit"]}" stroke="{t["ink"]}" stroke-width="2.5"/><circle r="22" fill="{t["glow"]}" opacity=".3"/></g>')
-    p.append(text(1144, 520, 'it h e', 'A few screens in a browser. Then the Ark fills itself.'))
+    p.append(text(1144, 520, 'it h e', 'The first fill starts at the flag. Install the loop to keep it filling.'))
     p.append('</g>')
     return ''.join(p)
 
@@ -538,8 +538,8 @@ def cork(t, theme, h):
     p.append(f'<g transform="rotate(-.6 600 440)"><rect x="234" y="375" width="740" height="118" fill="#000" opacity=".2"/>'
              f'<rect x="230" y="370" width="740" height="118" fill="{t["cream"]}"/>'
              f'<text x="600" y="402" class="ch m" style="fill:#b45309">How they switch on</text>'
-             f'<text x="600" y="430" class="lb m" style="fill:{ink}">Name them in .env, or press Start on the Community page.</text>'
-             f'<text x="600" y="453" class="cp m" style="fill:{ink}">The loop starts the ones you named and keeps them running.</text>'
+             f'<text x="600" y="430" class="lb m" style="fill:{ink}">Name the ones you want in .env (VALARK_SERVICES).</text>'
+             f'<text x="600" y="453" class="cp m" style="fill:{ink}">The loop starts them and keeps them running; Start on the Community page starts one now.</text>'
              f'<text x="600" y="473" class="cp m" style="fill:{ink}">Each one runs on the box and opens inside the web UI, for your network only.</text>'
              f'<circle cx="250" cy="382" r="7" fill="{ACCENTS[2]}" stroke="{ink}" stroke-width="1.5"/>'
              f'<circle cx="950" cy="382" r="7" fill="{ACCENTS[1]}" stroke="{ink}" stroke-width="1.5"/></g>')
@@ -564,8 +564,9 @@ def belt(t, theme, h):
         p.append(f'<g class="go" style="offset-path:path(\'{run}\');animation-duration:8s;animation-delay:{k * 2}s">'
                  f'<path d="M-13-18h18l8 8v28h-26Z" fill="{t["cream"]}" stroke="{t["line"]}" stroke-width="2"/>'
                  f'<path d="M-7-4h14M-7 3h14M-7 10h8" stroke="{t["line"]}" stroke-width="2"/></g>')
-    p.append(text(150, 222, 'lb h m', 'The uploads folder') + text(150, 241, 'cp h m', 'only files that are new'))
+    p.append(text(150, 222, 'lb h m', 'The uploads folder') + text(150, 241, 'cp h m', 'a folder you choose; new files only'))
     p.append(f'<path d="M150 250V282" class="ld"/>')
+    p.append(text(290, 404, 'xs h m', 'The file drop and mail keep their own') + text(290, 419, 'xs h m', 'stores, which this does not sweep.'))
     # the scanner: an arch the belt runs through, with a lamp
     p.append(f'<path d="M520 470V250a90 90 0 0 1 180 0V470Z" fill="{t["wall"]}" stroke="{t["ink"]}" stroke-width="3.5"/>'
              f'<path d="M548 356V280a62 62 0 0 1 124 0v76Z" fill="{t["halo"]}" stroke="{t["line"]}" stroke-width="2"/>'
@@ -687,22 +688,24 @@ SCENES = {
         chapter='Chapter 7', title='The trail to a working Ark', h=560, draw=trail,
         desc='A trail of eight stepping stones across the hills, the setup screens in order: '
              + '; '.join(f'{i + 1} {label} ({cap})' for i, (_, _, _, label, cap) in enumerate(TRAIL))
-             + '. A few screens in a browser, then the Ark fills itself.',
+             + '. The setup code step is skipped on the box itself. At the flag the first fill starts; install the loop to '
+               'keep it filling and healthy around the clock.',
         used=['docs/HOW-IT-WORKS.md']),
     'cork': dict(
         chapter='Chapter 8', title='The village noticeboard', h=560, draw=cork,
         desc='A cork noticeboard with a note pinned for each community service: '
              + '; '.join(f'{title} ({l1} {l2})' for _, title, l1, l2, _, _ in NOTES)
-             + '. A wider note says how they switch on: name them in .env, or press Start on the Community page; the loop '
-               'starts the ones you named and keeps them running; each runs on the box and opens inside the web UI, for '
+             + '. A wider note says how they switch on: name the ones you want in .env (VALARK_SERVICES); the '
+               'loop starts them and keeps them running, and Start on the Community page starts one now; each runs on the box and opens inside the web UI, for '
                'your network only.',
         used=['docs/HOW-IT-WORKS.md']),
     'belt': dict(
         chapter='Chapter 9', title='The sorting machine', h=560, draw=belt,
-        desc='A conveyor belt carries new files from the uploads folder through a scanner: a local model that checks text '
+        desc='A conveyor belt carries new files from the uploads folder (a folder you choose) through a scanner: a local model that checks text '
              'and images on the box, with nothing sent anywhere. Clean files leave by the upper chute and stay shared. '
              'Files that are flagged, that the model is unsure about, or that hit an error leave by the lower chute into '
-             'quarantine: set aside, not deleted, until the Admin reviews them and removes or dismisses each.',
+             'quarantine: set aside, not deleted, until the Admin reviews them and removes or dismisses each. '
+             'The file drop and mail keep their own stores, which this does not sweep.',
         used=['docs/HOW-IT-WORKS.md']),
     'stars': dict(
         chapter='Chapter 10', title='The constellation', h=600, draw=stars,

@@ -116,7 +116,7 @@ DIAGRAMS = {
         edges=[('tap', 'gate', '', 0), ('gate', 'mode', '', 0), ('mode', 'job', 'checked id', 0),
                ('job', 'pin', 'request', 0), ('pin', 'room', '', 0), ('room', 'dl', '', 0),
                ('dl', 'lib', '', 0), ('job', 'activity', 'progress', 0)],
-        used=['docs/ARCHITECTURE.md', 'docs/design/downloads-monitoring.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/ARCHITECTURE.md', 'docs/design/downloads-monitoring.md']),
     'access': dict(
         title='Who can do what',
         sub='The box is always the Admin; the LAN gets what the Use Mode allows; the internet gets no library.',
@@ -129,14 +129,14 @@ DIAGRAMS = {
             'net': (178, 460, 'globe', 'The internet', 'everyone else', 2),
             'admin': (566, 190, 'key', 'Admin', 'box, or passcode', 3),
             'mode': (566, 330, 'lock', 'Use Mode', 'Open, or sign in', 4),
-            'block': (566, 460, 'shield', 'Refused', 'no reads, no changes', 5),
+            'block': (566, 460, 'shield', 'Refused', 'no library, no changes', 5),
             'set': (988, 190, 'gear', 'Settings, repair', 'moderation, accounts', 6),
             'use': (988, 330, 'book', 'Browse, request', 'library, downloads', 7),
         },
         edges=[('box', 'admin', 'always', 0), ('lan', 'admin', 'passcode', 0), ('lan', 'mode', '', 0),
                ('net', 'block', '', 0), ('admin', 'set', '', 0), ('admin', 'use', '', 0),
                ('mode', 'use', 'Open: anyone here', 0)],
-        used=['docs/design/access-identity.md', 'docs/SERVING.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/design/access-identity.md', 'docs/SERVING.md']),
     'fleet': dict(
         title='One Ark, many machines',
         sub='Share one Ark across the LAN, or set up new ones from it, without the internet.',
@@ -228,7 +228,7 @@ DIAGRAMS = {
         },
         edges=[('disk', 'site', '', 0), ('site', 'share', 'static', 0), ('share', 'lap', '', 0),
                ('disk', 'srv', '', 0), ('srv', 'live', 'dynamic', 0), ('live', 'ppl', '', 0)],
-        used=['docs/SERVING.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/SERVING.md']),
 }
 
 

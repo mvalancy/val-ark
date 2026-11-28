@@ -7,7 +7,7 @@
 
 [Back to Docs](README.md) | [Back to Project Root](../README.md)
 
-Ten short chapters, one picture each, and every picture moves. The first three are storybook
+Ten short chapters, one picture each, and every picture moves. The first six are storybook
 scenes; the rest are diagrams whose dots travel along the arrows to show what flows where. Each
 chapter links to the guide that goes deeper, where the precise diagram lives.
 
@@ -47,19 +47,19 @@ Every 30 minutes, and after a reboot, the loop walks the same round: check the d
 ## 4. Two ways to open it
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="img/flow/serving-dark.svg">
-  <img src="img/flow/serving-light.svg" width="100%" alt="Animated diagram: Two ways to open an Ark. Static pages on any file share, or the live web server. Both work fully offline.">
+  <source media="(prefers-color-scheme: dark)" srcset="img/story/book-dark.svg">
+  <img src="img/story/book-light.svg" width="100%" alt="Storybook scene: Two ways in. An open book. Left page, the side door: the Librarian writes plain HTML pages onto the data disk; open them on any device from an SMB or NFS share or a USB stick, with no server needed; read-only, to browse the catalog and copy what you need. Right page, the front door: with the Ark switched on, its web server shows the whole library in a browser to phones and laptops nearby; request more and ask the assistant, plus chat and mail if those services are switched on; open to your LAN and tailnet, never to the internet. Both work with no internet at all.">
 </picture>
 
-The same disk can be read two ways. Static pages need nothing but a file share. The live web server adds the library reader (Wikipedia and friends, with full-text search), requests, chat and mail. Use either, or both at once.
+The same disk can be read two ways. Static pages need nothing but a file share. The live web server adds the library reader (Wikipedia and friends, with full-text search), requests and the assistant, plus chat and mail if you switch those services on. Use either, or both at once.
 
 **More:** [Serving: static or dynamic](SERVING.md)
 
 ## 5. Asking for something new
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="img/flow/request-dark.svg">
-  <img src="img/flow/request-light.svg" width="100%" alt="Animated diagram: What happens when you tap Request. From one tap on any device to a file on the disk, with live progress on the way.">
+  <source media="(prefers-color-scheme: dark)" srcset="img/story/strip-dark.svg">
+  <img src="img/story/strip-light.svg" width="100%" alt="Storybook scene: One tap, four panels. A four-panel comic strip. 1: You tap Request (on any device nearby): one tap, on something, the Ark does not have yet. 2: Three questions (the web server checks first): on the LAN or tailnet?, within the rate limit?, allowed by the Use Mode?. 3: Pinned, then fitted (the librarian takes the job): pinned: never evicted, room is made only if it won't fit. 4: It lands (watch it on the activity page): resumable, size-checked, the loop keeps it there.">
 </picture>
 
 Tap Request on any device on the network. The server checks who you are and what you asked for, the Librarian pins it and makes room only if it won't fit, and the Activity page shows the download as it happens.
@@ -69,11 +69,11 @@ Tap Request on any device on the network. The server checks who you are and what
 ## 6. Who can do what
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="img/flow/access-dark.svg">
-  <img src="img/flow/access-light.svg" width="100%" alt="Animated diagram: Who can do what. The box is always the Admin; the LAN gets what the Use Mode allows; the internet gets no library.">
+  <source media="(prefers-color-scheme: dark)" srcset="img/story/island-dark.svg">
+  <img src="img/story/island-light.svg" width="100%" alt="Storybook scene: The island and the sea. A map of an island. In the middle a keep: the box itself, always the Admin. Around it, inside a wall, your network (the LAN and your tailnet): people browse and read the library and request more with one tap, both if the Use Mode allows; the admin passcode opens the keep for settings, repair and moderation. Outside the wall is the sea, the internet: ships come near and are refused: no library and no changes. A sign gives the Use Mode: Open, Passworded or Accounts; the Admin chooses who gets in, and a new box starts Open.">
 </picture>
 
-The box itself is always the Admin. People on your network get what the Use Mode allows: open to everyone, or behind a passcode. The internet gets no library and can change nothing.
+The box itself is always the Admin. People on your network get what the Use Mode allows: open to everyone, behind one shared passcode, or with an account each. The internet gets no library and can change nothing.
 
 **More:** [Access and identity](design/access-identity.md)
 

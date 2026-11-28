@@ -388,8 +388,8 @@ grep -q '^verify_devstack() {' "$H" && grep -q '^write_report() {' "$H" && pass 
 # vrun TREE PLATFORM [VAR=value ...]: one verify_devstack run + report, short timeout
 vrun() { local tree="$1" plat="$2"; shift 2
          ( cd "$T" && env HOME="$T/vhome" PATH="$(dirname "$NODE"):$PATH" TMPDIR="$T/vtmp" VAL_ARK_DATA="$T/vdata" VALARK_STATE_DIR="$T/vstate" \
-             CALLER_LOG="$T/caller.log" VALARK_DEVSTACK_CHECK_TIMEOUT=2 VALARK_DEVSTACK_DIR="$tree" "$@" bash "$H" "$plat" ) > "$T/v.out" 2>&1; }
-vrun "$V" linux-x86_64
+             CALLER_LOG="$T/caller.log" VALARK_DEVSTACK_CHECK_TIMEOUT="${VT:-2}" VALARK_DEVSTACK_DIR="$tree" "$@" bash "$H" "$plat" ) > "$T/v.out" 2>&1; }
+VT=10 vrun "$V" linux-x86_64     # long enough that a healthy stub never times out on a busy runner; the TERM-ignoring one costs 15 s, once
 J="$T/vstate/verify.json"
 has() { grep -F -- "$1" "$J" | grep -qF -- "$2"; }
 check "verify_devstack returns 0 with failures present (it never stops the loop)" 'grep -qx "rc=0" "$T/v.out"' || cat "$T/v.out" >&2
@@ -426,6 +426,9 @@ sys.exit(0 if (d[\"pass\"], d[\"fail\"], d[\"skip\"]) == (c.count(\"PASS\"), c.c
 check "programs ran with HOME in the temp dir; nothing left in TMPDIR or the real HOME dir" '[ ! -e "$T/vhome/ran-here" ] && [ -z "$(ls -A "$T/vtmp")" ]'
 check "nothing was installed: the tree is untouched" '[ ! -x "$V/cloud/juanfont/headscale/v0.29.8/headscale_0.29.8_linux_amd64" ] && [ -z "$(find "$V" -newer "$H" -type f)" ]'
 rm -rf "$V/storage/schollz"     # the TERM-ignoring stub costs 7 s a run: once is enough
+# From here the runs count how often a stub ran, so a stub must never time out: on a busy CI
+# runner a 2 s limit sometimes did, the PASS was not cached, and every later count was one off.
+VT=60
 # the PASS cache: a pass is kept per file; a FAIL is tried again; a changed file or an old entry re-runs
 CACHE="$T/vstate/devstack-checks.tsv"
 check "a PASS is recorded per file (path, size, mtime, ctime, time, check row); a FAIL is not" 'F="$V/cloud/caddyserver/caddy/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz" awk -F"\t" "\$1 == ENVIRON[\"F\"] && \$2 > 0 && \$3 > 0 && \$4 > 0 && \$5 > 0 && index(\$6, \"caddy|version|\") == 1 { ok = 1 } END { exit !ok }" "$CACHE" && ! grep -q "age-v1.3.2\|docker-29" "$CACHE"'
@@ -439,9 +442,15 @@ check "an entry older than 7 days is run again" '[ "$(wc -l < "$T/runs-caddy")" 
 chmod 600 "$V/cloud/caddyserver/caddy/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz"; vrun "$V" linux-x86_64      # ctime moves, size and mtime do not
 check "a file whose ctime changed (same size and mtime) is run again" '[ "$(wc -l < "$T/runs-caddy")" -eq 4 ]'
 vrun "$V" linux-x86_64
-check "(and is cached again afterwards)" '[ "$(wc -l < "$T/runs-caddy")" -eq 4 ]'
+check "(and is cached again afterwards)" '[ "$(wc -l < "$T/runs-caddy")" -eq 4 ]' || {
+    # what the cache and the report held when the count was wrong (CI only fails here)
+    echo "FAIL: diag runs=$(wc -l < "$T/runs-caddy") now=$(date +%s) stat=$(stat -c '%s %Y %Z %a' "$V/cloud/caddyserver/caddy/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz" | tr '\t' ' ')"
+    sed "s|$T|T|g" "$CACHE" | tr '\t' ' ' | sed 's/^/FAIL: diag cache: /'
+    grep -F "dev-stack caddy" "$J" | sed "s|$T|T|g; s/^/FAIL: diag report: /"
+}
 awk -F'\t' -v OFS='\t' '{ $5 = $5 + 86400; print }' "$CACHE" > "$CACHE.old" && mv "$CACHE.old" "$CACHE"; vrun "$V" linux-x86_64
 check "an entry stamped in the future is not trusted: run again" '[ "$(wc -l < "$T/runs-caddy")" -eq 5 ]'
+VT=2
 sed 's/^caddyserver\/caddy|\(.*\)|version|/caddyserver\/caddy|\1|version --json|/' "$DATA/dev-stack-checks.tsv" > "$T/checks-changed.tsv"
 vrun "$V" linux-x86_64 VALARK_DEVSTACK_CHECKS="$T/checks-changed.tsv"
 check "a changed check row is run again (the stub rejects the new arguments: FAIL, and the pass is dropped)" 'has "\"status\": \"FAIL\"" "dev-stack caddy (" && ! grep -q "caddy_2.0.0" "$CACHE"'

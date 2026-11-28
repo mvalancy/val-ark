@@ -222,6 +222,11 @@ you hit (and solve) something the diff alone wouldn't explain. See [README](READ
   come from local TSVs, not the OPDS feed, so **refresh only when the CONTENT bucket is requested**
   (`content` | `all`). Lesson: a "browse" endpoint must never synchronously pay a live multi‑fetch a
   warm cache normally hides — reproduce cache‑miss timing the way CI (empty state) hits it.
+- **A tight time limit in a test that counts runs is a flake on CI.** `test-devstack-ui.sh` ran its
+  stub programs under a 2 s limit and then counted how often each ran (the PASS cache). On a busy
+  runner one stub timed out, its PASS was not cached, and every later count was one off; it passed
+  on the PR and failed on the next run of the same tree (0.1.40's version PR). Keep the short limit
+  for the one case that tests the limit, and give every counting run a generous one.
 
 - **"Mirroring… ✓ complete" with the badge still *Not Mirrored* — the piper‑tts "fake download"
   (and a job layer that could not tell success from failure).** Reproduced on the aarch64 NAS and

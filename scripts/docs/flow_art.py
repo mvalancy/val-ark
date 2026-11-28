@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Animated "how it works" diagrams for the Val Ark docs (the picture book's explainer pages).
+"""Animated "how it works" diagrams for the Val Ark docs (the precise view, for the reference guides).
 
 Where popup_art.py draws one pop-up scene at the top of each guide, this draws the
 system itself: boxes for the parts, arrows for what flows between them, and dots that
@@ -55,7 +55,7 @@ DIAGRAMS = {
                ('lib', 'disk', 'downloads', 0), ('loop', 'disk', 'repairs', 0), ('loop', 'lib', 'tops up', 0),
                ('loop', 'site', 'rewrites', 0), ('disk', 'srv', '', 0), ('disk', 'site', 'served from', 0),
                ('srv', 'people', 'web UI', 0), ('site', 'share', 'plain HTML', 0)],
-        used=['docs/ARCHITECTURE.md', 'README.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/ARCHITECTURE.md', 'README.md']),
     'fill': dict(
         title='How the Librarian fills a disk',
         sub='Essentials, then apps, the library, then models, until the disk reaches its reserve.',
@@ -66,8 +66,8 @@ DIAGRAMS = {
             'cat': (143, 200, 'globe', 'Catalogs', 'Kiwix, models, ISOs', 0),
             'cand': (143, 360, 'board', 'Candidates', 'size and value', 1),
             'p0': (390, 200, 'leaf', '0 Essentials', 'water, medicine', 2),
-            'p1': (610, 200, 'cube', '1 Apps', 'installers first', 3),
-            'p2': (830, 200, 'book', '2 Library', 'ZIMs, Lastbook', 4),
+            'p1': (610, 200, 'cube', '1 Apps', 'tools, dev stack', 3),
+            'p2': (830, 200, 'book', '2 Library', 'ZIMs, Lastbook, ISOs', 4),
             'p3': (390, 360, 'brain', '3 Models', 'then bulk', 5),
             'dl': (610, 360, 'play', 'Download', 'each class diverse first', 7),
             'disk': (1068, 200, 'server', 'Data disk', 'stops at the reserve', 0),
@@ -75,7 +75,7 @@ DIAGRAMS = {
         },
         edges=[('cat', 'cand', '', 0), ('cand', 'p0', '', 0), ('p0', 'p1', '', 0), ('p1', 'p2', '', 0),
                ('p2', 'p3', '', 'elbow'), ('p3', 'dl', '', 0), ('dl', 'disk', '', 0), ('trade', 'disk', 'evicts', 0)],
-        used=['docs/LIBRARIAN.md', 'docs/ARCHITECTURE.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/LIBRARIAN.md', 'docs/ARCHITECTURE.md']),
     'heal-loop': dict(
         title='The self-healing loop',
         sub='Every 30 minutes, and after a reboot, the Ark checks itself and fixes what it can.',
@@ -89,13 +89,13 @@ DIAGRAMS = {
             'links': (0, 0, 'magnifier', 'Fix dead links', 'tool, installer URLs', 5),
             'verify': (0, 0, 'check', 'Check files', 'sizes, re-fetch short', 6),
             'tools': (0, 0, 'cube', 'Update apps', 'tools, dev stack', 0),
-            'fill': (0, 0, 'play', 'Top up', 'apps, library, models', 7),
+            'fill': (0, 0, 'play', 'Top up', 'essentials, library, models', 7),
             'run': (0, 0, 'flask', 'Does it run?', 'tools, LLM, API, UI', 1),
             'mod': (0, 0, 'shield', 'Safety sweep', 'new uploads', 2),
             'report': (0, 0, 'eye', 'Report', 'Health page, events', 3),
         },
         centre=('gear', 'loop.sh', 'every 30 min'),
-        used=['docs/ARCHITECTURE.md', 'docs/design/errors-selfheal.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/ARCHITECTURE.md', 'docs/design/errors-selfheal.md']),
     'request': dict(
         title='What happens when you tap Request',
         sub='From one tap on any device to a file on the disk, with live progress on the way.',
@@ -402,10 +402,6 @@ def main(argv):
             print(f'stale or missing: docs/img/flow/{n}')
         for n in extra:
             print(f'not produced by the generator: docs/img/flow/{n}')
-        for d, spec in DIAGRAMS.items():   # every diagram belongs in the picture book too
-            if 'docs/HOW-IT-WORKS.md' not in spec['used']:
-                print(f'{d}: add docs/HOW-IT-WORKS.md to used= (the picture book shows every diagram)')
-                bad.append(d)
         unused = [(d, md) for d, spec in DIAGRAMS.items() for md in spec['used']
                   if f'flow/{d}-light.svg' not in ((ROOT / md).read_text(errors='replace') if (ROOT / md).is_file() else '')]
         for d, md in unused:

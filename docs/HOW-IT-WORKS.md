@@ -1,20 +1,21 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="img/popup/how-it-works-dark.svg">
-  <img src="img/popup/how-it-works-light.svg" width="100%" alt="Pop-up book scene: How it works, in pictures. Ten moving diagrams, in reading order, from one disk to a whole network.">
+  <img src="img/popup/how-it-works-light.svg" width="100%" alt="Pop-up book scene: How it works, in pictures. Ten moving pictures, in reading order, from one disk to a whole network.">
 </picture>
 
 # Val Ark — How It Works, in Pictures
 
 [Back to Docs](README.md) | [Back to Project Root](../README.md)
 
-Ten short chapters, one picture each. Every picture moves: the dots travel along the arrows to
-show what flows where. Each chapter links to the guide that goes deeper.
+Ten short chapters, one picture each, and every picture moves. The first three are storybook
+scenes; the rest are diagrams whose dots travel along the arrows to show what flows where. Each
+chapter links to the guide that goes deeper, where the precise diagram lives.
 
 ## 1. The whole thing on one page
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="img/flow/system-dark.svg">
-  <img src="img/flow/system-light.svg" width="100%" alt="Animated diagram: How an Ark works, end to end. Fetch once from the internet, keep it healthy on one disk, share it on the LAN.">
+  <source media="(prefers-color-scheme: dark)" srcset="img/story/voyage-dark.svg">
+  <img src="img/story/voyage-light.svg" width="100%" alt="Storybook scene: One Ark, end to end. A landscape. On the left a cloud, the internet while it lasts, rains books (Wikipedia and more), AI models, and apps and installers into an ark on a hill. On the Ark the Librarian picks what fits, one disk holds it all, and the loop mends it every 30 minutes. A road leads down to a village, your network, which gets the web UI in any browser and plain pages on a file share, with no internet needed.">
 </picture>
 
 An Ark is one computer with one big disk. It downloads things once while it has internet: reference libraries like Wikipedia, AI models, apps and installers. Then it keeps them healthy and shares them with everyone nearby, internet or not.
@@ -24,8 +25,8 @@ An Ark is one computer with one big disk. It downloads things once while it has 
 ## 2. Filling the disk
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="img/flow/fill-dark.svg">
-  <img src="img/flow/fill-light.svg" width="100%" alt="Animated diagram: How the Librarian fills a disk. Essentials, then apps, the library, then models, until the disk reaches its reserve.">
+  <source media="(prefers-color-scheme: dark)" srcset="img/story/hold-dark.svg">
+  <img src="img/story/hold-light.svg" width="100%" alt="Storybook scene: Filling the hold. A ship's hold in cutaway, filling from the keel up. 1: grid-down essentials (water, medicine, a pocket Wikipedia, a tiny assistant). 2: apps and tools, mirrored next, each within a share of the space. 3: the library (Wikipedia and other ZIMs, Lastbook, installers). 4: AI models, after the whole library is planned. The top stays empty: the reserve, 2% of the disk or 50 GB, whichever is larger. A crane lowers crates in: one of each kind first, then the most value per byte. Ask for something specific and the lowest-value unpinned item is removed to make room.">
 </picture>
 
 The Librarian decides what fits. Grid-down essentials come first, the tiny offline assistant included. Then apps and installers, then the library (Wikipedia and the other ZIMs, Lastbook's books and maps), and only then more AI models, then bulk data. Inside each of those it takes one of each kind, then the small and valuable, then big flagships, until the disk reaches its reserve. The loop also runs its weekly app mirrors (the tool mirror and the developer stack) before the top-up fill, so apps never wait behind models. Filling never evicts anything (it only drops a smaller copy once a fuller version of the same item is on disk); making room for something else only happens when someone asks for it.
@@ -35,8 +36,8 @@ The Librarian decides what fits. Grid-down essentials come first, the tiny offli
 ## 3. Keeping it healthy
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="img/flow/heal-loop-dark.svg">
-  <img src="img/flow/heal-loop-light.svg" width="100%" alt="Animated diagram: The self-healing loop. Every 30 minutes, and after a reboot, the Ark checks itself and fixes what it can.">
+  <source media="(prefers-color-scheme: dark)" srcset="img/story/watch-dark.svg">
+  <img src="img/story/watch-light.svg" width="100%" alt="Storybook scene: The night watch. A watchman with a lantern walks a wall of twelve towers every 30 minutes and after every reboot, lighting each as it is checked: Disk check (mounted, writable); Repair layout (folders, symlinks); Keep it up (server, apps, network); Copy itself (for new nodes); Refresh (live catalogs); Fix dead links (tool, installer URLs); Check files (sizes, re-fetch short); Update apps (tools, dev stack); Top up (apps, library, models); Does it run? (tools, LLM, API, UI); Safety sweep (new uploads); Report (Health page, events).">
 </picture>
 
 Every 30 minutes, and after a reboot, the loop walks the same circle: check the disk, repair the layout, keep the web server and apps up, copy its own source for new machines, refresh catalogs, fix dead links, check files, top up, update apps, test that things run, sweep new uploads, and report what it did.

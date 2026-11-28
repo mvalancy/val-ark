@@ -442,7 +442,12 @@ check "an entry older than 7 days is run again" '[ "$(wc -l < "$T/runs-caddy")" 
 chmod 600 "$V/cloud/caddyserver/caddy/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz"; vrun "$V" linux-x86_64      # ctime moves, size and mtime do not
 check "a file whose ctime changed (same size and mtime) is run again" '[ "$(wc -l < "$T/runs-caddy")" -eq 4 ]'
 vrun "$V" linux-x86_64
-check "(and is cached again afterwards)" '[ "$(wc -l < "$T/runs-caddy")" -eq 4 ]'
+check "(and is cached again afterwards)" '[ "$(wc -l < "$T/runs-caddy")" -eq 4 ]' || {
+    # what the cache and the report held when the count was wrong (CI only fails here)
+    echo "FAIL: diag runs=$(wc -l < "$T/runs-caddy") now=$(date +%s) stat=$(stat -c '%s %Y %Z %a' "$V/cloud/caddyserver/caddy/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz" | tr '\t' ' ')"
+    sed "s|$T|T|g" "$CACHE" | tr '\t' ' ' | sed 's/^/FAIL: diag cache: /'
+    grep -F "dev-stack caddy" "$J" | sed "s|$T|T|g; s/^/FAIL: diag report: /"
+}
 awk -F'\t' -v OFS='\t' '{ $5 = $5 + 86400; print }' "$CACHE" > "$CACHE.old" && mv "$CACHE.old" "$CACHE"; vrun "$V" linux-x86_64
 check "an entry stamped in the future is not trusted: run again" '[ "$(wc -l < "$T/runs-caddy")" -eq 5 ]'
 VT=2

@@ -66,6 +66,10 @@ def css(t):
 .bob{{animation:bob 6s ease-in-out infinite}}
 .wave{{animation:wave 7s linear infinite}}
 .win{{animation:win 24s linear infinite both}}
+.pop{{transform-box:fill-box;transform-origin:50% 50%;animation:pop .6s cubic-bezier(.3,1.4,.5,1) both}}
+.bar{{transform-box:fill-box;transform-origin:0 50%;animation:bar 5s ease-in-out infinite}}
+.ring{{animation:ring 2.4s ease-out infinite}}
+.sway{{transform-box:fill-box;transform-origin:50% 0;animation:sway 5s ease-in-out infinite alternate}}
 @keyframes go{{0%{{offset-distance:0%;opacity:0}}8%,90%{{opacity:1}}100%{{offset-distance:100%;opacity:0}}}}
 @keyframes drift{{to{{transform:translateX(26px)}}}}
 @keyframes tw{{50%{{opacity:.25}}}}
@@ -74,6 +78,10 @@ def css(t):
 @keyframes rise{{from{{transform:scaleY(0)}}}}
 @keyframes bob{{50%{{transform:translateY(46px)}}}}
 @keyframes wave{{to{{transform:translateX(-80px)}}}}
+@keyframes pop{{from{{transform:scale(.3);opacity:0}}}}
+@keyframes bar{{0%{{transform:scaleX(.04)}}70%,100%{{transform:none}}}}
+@keyframes ring{{0%{{opacity:0}}30%{{opacity:1}}100%{{opacity:.15}}}}
+@keyframes sway{{from{{transform:rotate(-4deg)}}to{{transform:rotate(4deg)}}}}
 @keyframes win{{0%,30%,100%{{opacity:.28}}3%,14%{{opacity:1}}}}
 @media (prefers-reduced-motion:reduce){{*{{animation:none!important}}.go{{display:none}}}}
 @supports not (offset-path:path('M0 0')){{.go{{display:none}}}}
@@ -99,6 +107,8 @@ def sky(t, h, rnd, theme, orb, stars=46, horizon=.55):
             x, y, r = rnd.uniform(20, W - 20), rnd.uniform(14, h * horizon), rnd.choice((1, 1, 1.4, 1.9))
             p.append(f'<circle cx="{x:.0f}" cy="{y:.0f}" r="{r}" fill="{t["glow"]}" class="tw" '
                      f'style="animation-delay:-{rnd.uniform(0, 4):.1f}s"/>')
+    if not orb:
+        return ''.join(p)
     ox, oy, r = orb
     p.append(f'<circle cx="{ox}" cy="{oy}" r="{r * 1.7:.0f}" fill="{t["orb"]}" opacity=".16" class="pulse"/>'
              f'<circle cx="{ox}" cy="{oy}" r="{r}" fill="{t["orb"]}"/>')
@@ -291,6 +301,166 @@ def watch(t, theme, h):
     return ''.join(p)
 
 
+def laptop(x, y, w, t, screen=''):
+    """A laptop whose screen's top-left is (x, y); screen content is drawn in screen coordinates."""
+    hgt = w * .62
+    return (f'<rect x="{x - 5}" y="{y - 5}" width="{w + 10}" height="{hgt + 10}" rx="7" fill="{t["ink"]}"/>'
+            f'<rect x="{x}" y="{y}" width="{w}" height="{hgt:.0f}" rx="3" fill="{t["halo"]}"/>'
+            f'<g transform="translate({x} {y})">{screen}</g>'
+            f'<path d="M{x - 22} {y + hgt + 5:.0f}h{w + 44}l-8 11h-{w + 28}Z" fill="{t["ink"]}"/>')
+
+
+def book(t, theme, h):
+    """Chapter 4: two ways in, as the two facing pages of an open book."""
+    rnd = random.Random(41)
+    p = [sky(t, h, rnd, theme, None, stars=0), '<g clip-path="url(#page)">']
+    # the book: cover, two pages, the gutter and a ribbon
+    p.append(f'<rect x="52" y="112" width="1096" height="424" rx="14" fill="{t["wood2"]}"/>'
+             f'<path d="M70 124C240 108 470 112 600 134V522C470 500 240 496 70 512Z" fill="{t["wall"]}" stroke="{t["line"]}" stroke-width="1.5"/>'
+             f'<path d="M1130 124C960 108 730 112 600 134V522C730 500 960 496 1130 512Z" fill="{t["wall"]}" stroke="{t["line"]}" stroke-width="1.5"/>'
+             f'<path d="M600 134V522" stroke="{t["line"]}" stroke-width="3" opacity=".6"/>'
+             f'<path d="M560 130C580 132 590 134 600 138V522C590 512 580 508 560 506Z" fill="{t["wall2"]}" opacity=".7"/>'
+             f'<path d="M640 130C620 132 610 134 600 138V522C610 512 620 508 640 506Z" fill="{t["wall2"]}" opacity=".7"/>'
+             f'<path d="M593 132v414l7-9 7 9V132Z" fill="{t["roof"]}"/>')
+    # left page: plain pages on a file share
+    p.append(text(112, 176, 'ch', 'The side door') + text(112, 204, 'it', 'Plain pages, on any file share', ' style="font-size:21px"'))
+    arc = 'M186 300C240 200 330 200 392 262'
+    p.append(icon('disk', 160, 306, 1.5, ACCENTS[5]) + f'<path d="{arc}" class="ld"/>')
+    for k in range(3):
+        p.append(f'<g class="go" style="offset-path:path(\'{arc}\');animation-duration:6s;animation-delay:{k * 2:.0f}s">'
+                 f'<path d="M-9-12h13l5 5v19h-18Z" fill="{t["cream"]}" stroke="{t["line"]}" stroke-width="1.5"/>'
+                 f'<path d="M-5-3h10M-5 2h10M-5 7h6" stroke="{t["line"]}" stroke-width="1.5"/></g>')
+    rows = ''.join(f'<rect x="12" y="{14 + i * 19}" width="12" height="12" rx="2" fill="{ACCENTS[i]}"/>'
+                   f'<rect x="32" y="{17 + i * 19}" width="{(86, 64, 96, 52)[i]}" height="6" rx="3" fill="{t["muted"]}"/>' for i in range(4))
+    p.append(laptop(372, 244, 150, t, rows))
+    p.append(f'<path d="M334 330h30v14h-30Z" fill="{t["muted"]}"/><path d="M318 326h18v22h-18Z" fill="{t["roof"]}"/>')
+    p.append(text(160, 362, 'sm m', 'The data disk') + text(440, 386, 'sm m', 'Any device: a share or a USB stick'))
+    for i, s in enumerate(('The Librarian writes plain HTML pages onto the disk.',
+                           'Open them from SMB, NFS or USB. No server needed.',
+                           'Read-only: browse the catalog and copy what you need.')):
+        p.append(text(112, 428 + i * 22, 'cp', s))
+    # right page: the live web server
+    p.append(text(650, 176, 'ch', 'The front door') + text(650, 204, 'it', 'The live web UI, on your network', ' style="font-size:21px"'))
+    p.append(icon('ark', 716, 300, 1.7, ACCENTS[0]))
+    for k in range(3):
+        r = 40 + k * 16
+        p.append(f'<path d="M{716 + r * .707:.0f} {296 - r * .707:.0f}A{r} {r} 0 0 1 {716 + r * .707:.0f} {296 + r * .707:.0f}" fill="none" '
+                 f'stroke="{ACCENTS[0]}" stroke-width="3" stroke-linecap="round" class="ring" style="animation-delay:{k * .4:.1f}s"/>')
+    ui = (''.join(f'<circle cx="{16 + i * 14}" cy="12" r="4" fill="{t["muted"]}"/>' for i in range(4))
+          + f'<rect x="10" y="24" width="52" height="42" rx="4" fill="{ACCENTS[2]}" opacity=".5"/>'
+            f'<rect x="68" y="24" width="52" height="42" rx="4" fill="{ACCENTS[3]}" opacity=".5"/>'
+            f'<rect x="74" y="52" width="40" height="9" rx="4" fill="{t["lit"]}" class="tw"/>')
+    p.append(f'<rect x="866" y="244" width="50" height="92" rx="8" fill="{t["ink"]}"/><rect x="871" y="252" width="40" height="72" rx="3" fill="{t["halo"]}"/>'
+             f'<rect x="877" y="260" width="28" height="22" rx="3" fill="{ACCENTS[1]}" opacity=".5"/>'
+             f'<rect x="877" y="290" width="28" height="9" rx="4" fill="{t["lit"]}" class="tw" style="animation-delay:-2s"/>')
+    p.append(laptop(950, 250, 130, t, ui))
+    p.append(text(716, 386, 'sm m', 'The Ark, switched on') + text(970, 386, 'sm m', 'Phones and laptops nearby'))
+    for i, s in enumerate(('The web server shows the whole library in a browser.',
+                           'Request more, chat, send mail, ask the assistant.',
+                           'Open to your LAN and tailnet, never to the internet.')):
+        p.append(text(650, 428 + i * 22, 'cp', s))
+    p.append('</g>')
+    p.append(text(1144, 82, 'it h e', 'Both work with no internet at all.'))
+    return ''.join(p)
+
+
+STRIP = (  # (narration, title, lines, accent)
+    ('On any device nearby', 'You tap Request', ('one tap, on something', 'the Ark does not have yet'), 2),
+    ('The web server checks first', 'Three questions', ('on the LAN or tailnet?', 'within the rate limit?', 'allowed by the Use Mode?'), 1),
+    ('The Librarian takes the job', 'Pinned, then fitted', ('pinned: never evicted', "room is made only if it won't fit"), 0),
+    ('Watch it on the Activity page', 'It lands', ('resumable, size-checked', 'the loop keeps it there'), 5),
+)
+
+
+def strip(t, theme, h):
+    """Chapter 5: one request, told as a four-panel comic strip."""
+    rnd = random.Random(53)
+    p = [sky(t, h, rnd, theme, None, stars=0), '<g clip-path="url(#page)">']
+    pw, ph, top = 262, 392, 124
+    for i, (nar, title, lines, ai) in enumerate(STRIP):
+        x = 44 + i * (pw + 21.3)
+        a = ACCENTS[ai]
+        cx = x + pw / 2
+        g = [f'<rect x="{x:.0f}" y="{top}" width="{pw}" height="{ph}" rx="6" fill="{t["wall"]}" stroke="{t["ink"]}" stroke-width="3.5"/>',
+             f'<rect x="{x + 12:.0f}" y="{top - 12}" width="{pw - 60}" height="30" rx="3" fill="{t["cream"]}" stroke="{t["ink"]}" stroke-width="2"/>',
+             f'<text x="{x + 22:.0f}" y="{top + 8}" class="sm" style="fill:#2a1a04">{esc(nar)}</text>',
+             f'<circle cx="{x + pw - 22:.0f}" cy="{top + 4}" r="17" fill="{a}" stroke="{t["ink"]}" stroke-width="2.5"/>',
+             f'<text x="{x + pw - 22:.0f}" y="{top + 10}" class="lb m" style="fill:#fff">{i + 1}</text>']
+        py = top + 150
+        if i == 0:    # a phone with a Request button, and the tap
+            g.append(f'<rect x="{cx - 48:.0f}" y="{py - 96}" width="96" height="176" rx="14" fill="{t["ink"]}"/>'
+                     f'<rect x="{cx - 40:.0f}" y="{py - 82}" width="80" height="148" rx="5" fill="{t["halo"]}"/>'
+                     + icon('book', cx, py - 44, .9, a) +
+                     f'<rect x="{cx - 30:.0f}" y="{py - 12}" width="60" height="7" rx="3" fill="{t["muted"]}"/>'
+                     f'<rect x="{cx - 30:.0f}" y="{py + 2}" width="42" height="7" rx="3" fill="{t["muted"]}"/>'
+                     f'<rect x="{cx - 32:.0f}" y="{py + 26}" width="64" height="24" rx="12" fill="{t["lit"]}"/>'
+                     f'<text x="{cx:.0f}" y="{py + 43}" class="sm m" style="fill:#2a1a04">Request</text>'
+                     f'<circle cx="{cx + 22:.0f}" cy="{py + 44}" r="15" fill="none" stroke="{a}" stroke-width="3" class="pulse"/>')
+        elif i == 1:  # the gate: a shield and three ticks
+            g.append(icon('shield', cx, py - 40, 2.3, a))
+            for k in range(3):
+                g.append(f'<g class="tw" style="animation-delay:-{k * 1.3:.1f}s">' + icon('check', cx - 44 + k * 44, py + 52, .7, a) + '</g>')
+        elif i == 2:  # a crate with a pin through its tag, on a shelf with a gap closing
+            g.append(f'<path d="M{x + 30:.0f} {py + 62}H{x + pw - 30:.0f}" stroke="{t["ink"]}" stroke-width="5" stroke-linecap="round"/>'
+                     f'<rect x="{cx - 96:.0f}" y="{py + 6}" width="44" height="54" rx="3" fill="{t["wall2"]}" stroke="{t["line"]}" stroke-width="2"/>'
+                     f'<rect x="{cx + 52:.0f}" y="{py - 4}" width="44" height="64" rx="3" fill="{t["wall2"]}" stroke="{t["line"]}" stroke-width="2"/>'
+                     f'<rect x="{cx - 40:.0f}" y="{py - 20}" width="80" height="80" rx="4" fill="{t["wood"]}" stroke="{t["wood2"]}" stroke-width="3"/>'
+                     f'<path d="M{cx - 40:.0f} {py - 20}l80 80M{cx + 40:.0f} {py - 20}l-80 80" stroke="{t["wood2"]}" stroke-width="2.5"/>'
+                     f'<g class="sway"><path d="M{cx:.0f} {py - 78}v52" stroke="{t["ink"]}" stroke-width="3" stroke-linecap="round"/>'
+                     f'<circle cx="{cx:.0f}" cy="{py - 84}" r="13" fill="{t["roof"]}" stroke="{t["ink"]}" stroke-width="2.5"/></g>')
+        else:         # the download bar, then the book on its shelf
+            g.append(icon('book', cx, py - 44, 1.9, a) +
+                     f'<rect x="{cx - 92:.0f}" y="{py + 26}" width="184" height="20" rx="10" fill="{t["halo"]}" stroke="{t["ink"]}" stroke-width="2.5"/>'
+                     f'<rect x="{cx - 88:.0f}" y="{py + 30}" width="176" height="12" rx="6" fill="{a}" class="bar"/>')
+        g.append(text(cx, top + 266, 'it m', title, ' style="font-size:20px"'))
+        for k, s in enumerate(lines):
+            g.append(text(cx, top + 296 + k * 21, 'cp m', s))
+        tilt = (-1.2, .9, -.7, 1.1)[i]
+        p.append(f'<g transform="rotate({tilt} {cx:.0f} {top + ph / 2})"><g class="pop" style="animation-delay:{.2 + i * .5:.1f}s">{"".join(g)}</g></g>')
+    p.append('</g>')
+    return ''.join(p)
+
+
+def island(t, theme, h):
+    """Chapter 6: who can do what, as a map. The keep, the walled land, and the sea outside."""
+    rnd = random.Random(67)
+    cx, cy = 600, 326
+    wave = ''.join('q20-10 40 0t40 0' for _ in range(17))
+    p = [sky(t, h, rnd, theme, None, stars=0), '<g clip-path="url(#page)">',
+         f'<rect width="{W}" height="{h}" fill="{t["water"]}"/>']
+    for y, d in ((150, 9), (250, 12), (372, 8), (470, 11), (556, 10)):
+        p.append(f'<path d="M-80 {y}{wave}" fill="none" stroke="{t["water2"]}" stroke-width="3" class="wave" style="animation-duration:{d}s"/>')
+    # ships from the internet come near, find no way in, and sail off
+    for k, d in enumerate(('M-20 190C200 190 250 250 230 330S120 470 -30 500', 'M1220 170C1010 190 950 250 968 330S1080 470 1230 520')):
+        for j in range(2):
+            p.append(f'<g class="go" style="offset-path:path(\'{d}\');animation-duration:16s;animation-delay:{k * 3 + j * 8}s">'
+                     f'<path d="M-15 6h30l-6 9h-18Z" fill="{t["wood2"]}"/><path d="M0 4V-18l13 18Z" fill="{t["cream"]}" stroke="{t["line"]}"/></g>')
+    # the land inside the wall, and the keep
+    p.append(f'<ellipse cx="{cx}" cy="{cy}" rx="344" ry="226" fill="{t["cream"]}" opacity=".5"/>'
+             f'<ellipse cx="{cx}" cy="{cy}" rx="330" ry="214" fill="{t["near"]}" stroke="{t["wall2"]}" stroke-width="12"/>'
+             f'<ellipse cx="{cx}" cy="{cy}" rx="330" ry="214" fill="none" stroke="{t["line"]}" stroke-width="2" stroke-dasharray="14 8"/>')
+    p.append(f'<ellipse cx="{cx}" cy="{cy}" rx="128" ry="92" fill="{t["wall"]}" stroke="{t["line"]}" stroke-width="3"/>'
+             f'<ellipse cx="{cx}" cy="{cy}" rx="150" ry="110" fill="none" stroke="{t["lit"]}" stroke-width="2.5" opacity=".7" class="pulse"/>'
+             + icon('ark', cx, cy - 34, 1.25, ACCENTS[0])
+             + text(cx, cy + 14, 'lb m', 'The box itself') + text(cx, cy + 33, 'cp m', 'always the Admin'))
+    # the keep's gate, where a passcode lets the network in as Admin
+    p.append(f'<path d="M{cx - 16} {cy + 100}v-18a16 16 0 0 1 32 0v18Z" fill="{t["wood2"]}" stroke="{t["line"]}" stroke-width="2"/>'
+             + icon('key', cx, cy + 128, .6, ACCENTS[6]) + text(cx, cy + 158, 'sm h m', 'In with the admin passcode')
+             + text(cx, cy + 174, 'xs h m', 'settings, repair, moderation'))
+    p.append(text(cx, cy - 150, 'ch h m', 'Your network') + text(cx, cy - 130, 'cp h m', 'the LAN and your tailnet'))
+    for x, ic, a, l1, l2 in ((372, 'book', 2, 'Browse and read', 'the whole library'), (836, 'play', 1, 'Request more', 'one tap, if the mode allows')):
+        p.append(icon(ic, x, cy - 30, 1.0, ACCENTS[a]) + text(x, cy + 8, 'sm h m', l1) + text(x, cy + 25, 'xs h m', l2))
+    for i, (x, y, dl) in enumerate(((318, cy + 104, 0), (452, cy + 150, 1.5), (760, cy + 152, .7), (884, cy + 104, 2.2))):
+        p.append(house(x, y, 40, 32, t, dl))
+    # the sea, and the rule of the house
+    p.append(text(120, 290, 'ch h m', 'The internet') + text(120, 311, 'lb h m', 'Refused') + text(120, 330, 'cp h m', 'no reads, no changes'))
+    p.append(f'<rect x="968" y="90" width="196" height="92" rx="8" fill="{t["wall"]}" stroke="{t["line"]}" stroke-width="2"/>'
+             + text(1066, 114, 'ch m', 'Use Mode') + text(1066, 138, 'sm m', 'Open · Passworded · Accounts')
+             + text(1066, 157, 'xs m', 'the Admin chooses who gets in;') + text(1066, 172, 'xs m', 'a new box starts Open'))
+    p.append('</g>')
+    return ''.join(p)
+
+
 SCENES = {
     'voyage': dict(
         chapter='Chapter 1', title='One Ark, end to end', h=560, draw=voyage,
@@ -312,6 +482,27 @@ SCENES = {
         chapter='Chapter 3', title='The night watch', h=520, draw=watch,
         desc='A watchman with a lantern walks a wall of twelve towers every 30 minutes and after every reboot, lighting '
              'each as it is checked: ' + '; '.join(f'{label} ({cap})' for _, label, cap in WATCH) + '.',
+        used=['docs/HOW-IT-WORKS.md']),
+    'book': dict(
+        chapter='Chapter 4', title='Two ways in', h=560, draw=book,
+        desc='An open book. Left page, the side door: the Librarian writes plain HTML pages onto the data disk; open them '
+             'on any device from an SMB or NFS share or a USB stick, with no server needed; read-only, to browse the '
+             'catalog and copy what you need. Right page, the front door: with the Ark switched on, its web server shows '
+             'the whole library in a browser to phones and laptops nearby; request more, chat, send mail, ask the '
+             'assistant; open to your LAN and tailnet, never to the internet. Both work with no internet at all.',
+        used=['docs/HOW-IT-WORKS.md']),
+    'strip': dict(
+        chapter='Chapter 5', title='One tap, four panels', h=560, draw=strip,
+        desc='A four-panel comic strip. ' + ' '.join(
+            f'{i + 1}: {title} ({nar.lower()}): {", ".join(lines)}.' for i, (nar, title, lines, _) in enumerate(STRIP)),
+        used=['docs/HOW-IT-WORKS.md']),
+    'island': dict(
+        chapter='Chapter 6', title='The island and the sea', h=600, draw=island,
+        desc='A map of an island. In the middle a keep: the box itself, always the Admin. Around it, inside a wall, your '
+             'network (the LAN and your tailnet): people browse and read the whole library and request more with one tap, '
+             'if the Use Mode allows; the admin passcode opens the keep for settings, repair and moderation. Outside the '
+             'wall is the sea, the internet: ships come near and are refused, with no reads and no changes. A sign gives '
+             'the Use Mode: Open, Passworded or Accounts; the Admin chooses who gets in, and a new box starts Open.',
         used=['docs/HOW-IT-WORKS.md']),
 }
 

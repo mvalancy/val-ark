@@ -20,6 +20,10 @@
 .bob{animation:bob 6s ease-in-out infinite}
 .wave{animation:wave 7s linear infinite}
 .win{animation:win 24s linear infinite both}
+.pop{transform-box:fill-box;transform-origin:50% 50%;animation:pop .6s cubic-bezier(.3,1.4,.5,1) both}
+.bar{transform-box:fill-box;transform-origin:0 50%;animation:bar 5s ease-in-out infinite}
+.ring{animation:ring 2.4s ease-out infinite}
+.sway{transform-box:fill-box;transform-origin:50% 0;animation:sway 5s ease-in-out infinite alternate}
 @keyframes go{0%{offset-distance:0%;opacity:0}8%,90%{opacity:1}100%{offset-distance:100%;opacity:0}}
 @keyframes drift{to{transform:translateX(26px)}}
 @keyframes tw{50%{opacity:.25}}
@@ -28,6 +32,10 @@
 @keyframes rise{from{transform:scaleY(0)}}
 @keyframes bob{50%{transform:translateY(46px)}}
 @keyframes wave{to{transform:translateX(-80px)}}
+@keyframes pop{from{transform:scale(.3);opacity:0}}
+@keyframes bar{0%{transform:scaleX(.04)}70%,100%{transform:none}}
+@keyframes ring{0%{opacity:0}30%{opacity:1}100%{opacity:.15}}
+@keyframes sway{from{transform:rotate(-4deg)}to{transform:rotate(4deg)}}
 @keyframes win{0%,30%,100%{opacity:.28}3%,14%{opacity:1}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}.go{display:none}}
 @supports not (offset-path:path('M0 0')){.go{display:none}}

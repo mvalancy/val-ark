@@ -171,6 +171,8 @@ echo old-engine > "$D/containers/download.docker.com/linux/static/stable/aarch64
 echo old-extras > "$D/containers/download.docker.com/linux/static/stable/aarch64/docker-rootless-extras-28.9.9.tgz"
 echo sums > "$D/containers/download.docker.com/linux/static/stable/aarch64/SHA256SUMS"
 printf 'x' > "$C/v2.0.0/$(printf 'new\nline.zip')"                            # a control character in a file name
+mkdir -p "$D/cloud/quo\"te\\dir" "$D/cloud/目录"                              # a quote + a backslash; non-Latin-1 names
+echo quoted > "$D/cloud/quo\"te\\dir/f.txt"; echo unicode-folder > "$D/cloud/目录/a.txt"; echo unicode-file > "$D/cloud/文件.txt"
 mkdir -p "$D/os-images/big"; head -c 80000000 /dev/urandom > "$D/os-images/big/blob.bin"   # more than loopback TCP buffers hold
 
 # --- server ------------------------------------------------------------------------------
@@ -254,6 +256,29 @@ check "Range: 206 with exactly the bytes asked for" '[ "$c" = 206 ] && [ "$(wc -
 check "Range: Content-Range names the slice and the whole" 'curl -s -D - -o /dev/null -r 2990- "$U/caddy_2.0.0_linux_amd64.tar.gz" | tr -d "\r" | grep -qi "^content-range: bytes 2990-2999/3000$"'
 head -c 1000 "$C/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz" > "$T/resume.bin"; curl -s --max-time 8 -C - -o "$T/resume.bin" "$U/caddy_2.0.0_linux_amd64.tar.gz"
 check "Range: an interrupted download resumes to the same bytes" 'cmp -s "$T/resume.bin" "$C/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz"'
+# validators: a resume is only spliced onto the file it started from (If-Range)
+curl -s -D "$T/h.txt" -o /dev/null --max-time 8 "$U/caddy_2.0.0_linux_amd64.tar.gz"
+ETAG="$(tr -d '\r' < "$T/h.txt" | sed -n 's/^[Ee][Tt]ag: //p')"; LM="$(tr -d '\r' < "$T/h.txt" | sed -n 's/^[Ll]ast-[Mm]odified: //p')"
+check "a file download carries a weak ETag and Last-Modified" '[[ "$ETAG" == W/\"*\" ]] && [ -n "$LM" ]'
+c=$(curl -s -o "$T/ir.bin" -w '%{http_code}' --max-time 8 -r 10-19 -H "If-Range: $ETAG" "$U/caddy_2.0.0_linux_amd64.tar.gz")
+check "If-Range with the current ETag: the range is honoured (206)" '[ "$c" = 206 ] && [ "$(wc -c < "$T/ir.bin")" -eq 10 ]'
+c=$(curl -s -o "$T/ir.bin" -w '%{http_code}' --max-time 8 -r 10-19 -H "If-Range: $LM" "$U/caddy_2.0.0_linux_amd64.tar.gz")
+check "If-Range with the current Last-Modified date: 206" '[ "$c" = 206 ] && [ "$(wc -c < "$T/ir.bin")" -eq 10 ]'
+c=$(curl -s -o "$T/ir.bin" -w '%{http_code}' --max-time 8 -r 10-19 -H 'If-Range: W/"dead-beef"' "$U/caddy_2.0.0_linux_amd64.tar.gz")
+check "If-Range with another ETag: the whole file (200), not a slice" '[ "$c" = 200 ] && cmp -s "$T/ir.bin" "$C/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz"'
+cp "$C/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz" "$T/orig.bin"; head -c 3000 /dev/urandom > "$C/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz"; touch -d '2031-01-01' "$C/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz"
+c=$(curl -s -o "$T/ir.bin" -w '%{http_code}' --max-time 8 -r 1000- -H "If-Range: $ETAG" "$U/caddy_2.0.0_linux_amd64.tar.gz")
+check "a replaced file (same size): a resume with the old ETag restarts with the new file" '[ "$c" = 200 ] && cmp -s "$T/ir.bin" "$C/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz" && ! cmp -s "$T/ir.bin" "$T/orig.bin"'
+c=$(gcode "$B/styles.css"); curl -s -D "$T/hs.txt" -o /dev/null "$B/styles.css"
+check "static files keep their headers (type, cache, ranges) and gain the validators" '[ "$c" = 200 ] && tr -d "\r" < "$T/hs.txt" | grep -qi "^content-type: text/css" && grep -qi "^cache-control: no-cache" "$T/hs.txt" && grep -qi "^accept-ranges: bytes" "$T/hs.txt" && grep -qi "^etag: W/" "$T/hs.txt"'
+# names a header cannot carry as they are: an ASCII stand-in plus filename*=UTF-8''...
+curl -s -D "$T/hu.txt" -o "$T/u.bin" --max-time 6 "$B/api/archive/dev-stack/cloud/%E6%96%87%E4%BB%B6.txt"
+check "a non-Latin-1 file name downloads (it used to throw in the header and hang)" '[ "$(cat "$T/u.bin")" = unicode-file ] && tr -d "\r" < "$T/hu.txt" | grep -qi "^content-disposition: attachment; filename=\"__.txt\"; filename\*=UTF-8'"''"'%E6%96%87%E4%BB%B6.txt$"'
+curl -s --max-time 10 "$B/api/archive/dev-stack/cloud/%E7%9B%AE%E5%BD%95" | tar -tzf - > "$T/tar-u.list" 2>/dev/null
+check "a non-Latin-1 folder name downloads as a tar.gz with its files" 'grep -q "/a.txt$" "$T/tar-u.list"'
+curl -s --max-time 10 "$B/api/archive/dev-stack/cloud/quo%22te%5Cdir" | tar -xzOf - > "$T/tar-q.out" 2>/dev/null
+check "a folder with a quote and a backslash in its name still has its files in the tar" 'grep -qx quoted "$T/tar-q.out"'
+check "...and its header holds a safe stand-in name" 'curl -s -D - -o /dev/null --max-time 10 "$B/api/archive/dev-stack/cloud/quo%22te%5Cdir" | tr -d "\r" | grep -qi "^content-disposition: attachment; filename=\"quo_te_dir.tar.gz\"; filename\*=UTF-8'"''"'quo%22te%5Cdir.tar.gz$"'
 c=$(gcode -r 5000- "$U/caddy_2.0.0_linux_amd64.tar.gz"); [ "$c" = "416" ] && pass || fail "a range past the end must be 416 (got $c)"
 # a control character in the path: a clean 404 at once (it used to throw in the header and hang)
 for p in "cloud/caddyserver/caddy/v2.0.0/new%0Aline.zip" "cloud/a%0Db" "cloud/caddyserver/caddy/v2.0.0/x%1F"; do
@@ -273,7 +298,16 @@ if start "$T/state" "VALARK_MAX_ARCHIVE_TAR=5 VALARK_MAX_ARCHIVE_TAR_PER_IP=1"; 
     kill "$SLOW_PID" 2>/dev/null; wait "$SLOW_PID" 2>/dev/null
     c=503; for i in $(seq 1 20); do c=$(gcode "$B/api/archive/dev-stack/cloud/caddyserver/caddy/v1.9.0"); [ "$c" = 200 ] && break; sleep 0.3; done
     [ "$c" = "200" ] && pass || fail "the slot is free again once the first stream ends (got $c)"
+    # with one slot per client, a request that failed to release it would lock the next one out
+    for i in 1 2 3; do
+        c=$(curl -s -o "$T/slot.tgz" -w '%{http_code}' --max-time 10 "$B/api/archive/dev-stack/cloud/%E7%9B%AE%E5%BD%95")
+        [ "$c" = 200 ] && tar -tzf "$T/slot.tgz" 2>/dev/null | grep -q "/a.txt$" && pass || fail "non-Latin-1 folder download #$i must succeed and free its tar slot (got $c)"
+    done
+    c=$(gcode "$B/api/archive/dev-stack/cloud/quo%22te%5Cdir"); [ "$c" = "200" ] && pass || fail "the tar slot count is back to zero afterwards (got $c)"
 else fail "server (tar caps) did not start"; fi
+if start "$T/state" "VALARK_MAX_ARCHIVE_TAR=-3 VALARK_MAX_ARCHIVE_TAR_PER_IP=0"; then
+    c=$(gcode "$B/api/archive/dev-stack/cloud/caddyserver/caddy/v1.9.0"); [ "$c" = "200" ] && pass || fail "a zero or negative tar cap is clamped to 1, not 'no downloads' (got $c)"
+else fail "server (clamped tar caps) did not start"; fi
 rm -rf "$D/os-images/big"
 c=$(gcode "$B/api/archive/constructor/x"); [ "$c" = "404" ] && pass || fail "an object-prototype name is not an archive dir (got $c)"
 
@@ -348,16 +382,18 @@ stub "$V/dev-tools/keepassxreboot/keepassxc/2.8.0/KeePassXC-2.8.0-x86_64.AppImag
 
 H="$T/verify-harness.sh"
 { sed -e 's|^_LIB=.*|_LIB="'"$ROOT"'/scripts/lib"|' -e '/^case "\${1:-all}" in/,$d' "$ROOT/scripts/verify.sh"   # the harness is not in scripts/
-  echo 'verify_devstack "$1"; echo "rc=$?"; write_report'; } > "$H"
+  echo 'trap '"'"'echo caller-exit >> "$CALLER_LOG"'"'"' EXIT'
+  echo 'verify_devstack "$1"; echo "rc=$?"; trap -p EXIT TERM INT > "$CALLER_LOG.after"; write_report'; } > "$H"
 grep -q '^verify_devstack() {' "$H" && grep -q '^write_report() {' "$H" && pass || fail "harness must hold the real verify_devstack + write_report"
 # vrun TREE PLATFORM [VAR=value ...]: one verify_devstack run + report, short timeout
 vrun() { local tree="$1" plat="$2"; shift 2
          ( cd "$T" && env HOME="$T/vhome" PATH="$(dirname "$NODE"):$PATH" TMPDIR="$T/vtmp" VAL_ARK_DATA="$T/vdata" VALARK_STATE_DIR="$T/vstate" \
-             VALARK_DEVSTACK_CHECK_TIMEOUT=2 VALARK_DEVSTACK_DIR="$tree" "$@" bash "$H" "$plat" ) > "$T/v.out" 2>&1; }
+             CALLER_LOG="$T/caller.log" VALARK_DEVSTACK_CHECK_TIMEOUT=2 VALARK_DEVSTACK_DIR="$tree" "$@" bash "$H" "$plat" ) > "$T/v.out" 2>&1; }
 vrun "$V" linux-x86_64
 J="$T/vstate/verify.json"
 has() { grep -F -- "$1" "$J" | grep -qF -- "$2"; }
 check "verify_devstack returns 0 with failures present (it never stops the loop)" 'grep -qx "rc=0" "$T/v.out"' || cat "$T/v.out" >&2
+check "the caller's traps are back after the run (its EXIT trap still set and still run; no TERM / INT trap left)" 'grep -q "caller-exit" "$T/caller.log.after" && [ "$(wc -l < "$T/caller.log.after")" -eq 1 ] && [ "$(grep -c caller-exit "$T/caller.log")" -eq 1 ]'
 check "verify.json is valid JSON" 'python3 -I -c "import json,sys; json.load(open(sys.argv[1]))" "$J"'
 check "PASS: tar.gz member (newest version)" 'has "\"status\": \"PASS\", \"comp\": \"apps\"" "tool runs: dev-stack caddy (caddy_2.0.0_linux_amd64.tar.gz)"'
 check "PASS: wildcard member, output on stderr" 'has "\"status\": \"PASS\"" "tool runs: dev-stack prometheus ("'
@@ -392,14 +428,20 @@ check "nothing was installed: the tree is untouched" '[ ! -x "$V/cloud/juanfont/
 rm -rf "$V/storage/schollz"     # the TERM-ignoring stub costs 7 s a run: once is enough
 # the PASS cache: a pass is kept per file; a FAIL is tried again; a changed file or an old entry re-runs
 CACHE="$T/vstate/devstack-checks.tsv"
-check "a PASS is recorded per file (path, size, mtime, time, check row); a FAIL is not" 'F="$V/cloud/caddyserver/caddy/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz" awk -F"\t" "\$1 == ENVIRON[\"F\"] && \$2 > 0 && \$3 > 0 && \$4 > 0 && index(\$5, \"caddy|version|\") == 1 { ok = 1 } END { exit !ok }" "$CACHE" && ! grep -q "age-v1.3.2\|docker-29" "$CACHE"'
+check "a PASS is recorded per file (path, size, mtime, ctime, time, check row); a FAIL is not" 'F="$V/cloud/caddyserver/caddy/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz" awk -F"\t" "\$1 == ENVIRON[\"F\"] && \$2 > 0 && \$3 > 0 && \$4 > 0 && \$5 > 0 && index(\$6, \"caddy|version|\") == 1 { ok = 1 } END { exit !ok }" "$CACHE" && ! grep -q "age-v1.3.2\|docker-29" "$CACHE"'
 vrun "$V" linux-x86_64
 check "second run: the cached PASS is reported without running the program again" '[ "$(wc -l < "$T/runs-caddy")" -eq 1 ] && has "\"status\": \"PASS\"" "tool runs: dev-stack caddy (caddy_2.0.0_linux_amd64.tar.gz)"'
 check "second run: a FAIL is tried again" '[ "$(wc -l < "$T/runs-age")" -eq 2 ] && has "\"status\": \"FAIL\"" "dev-stack age ("'
 touch -d '2020-01-02 03:04:05' "$V/cloud/caddyserver/caddy/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz"; vrun "$V" linux-x86_64
 check "a changed file (mtime) is run again" '[ "$(wc -l < "$T/runs-caddy")" -eq 2 ]'
-awk -F'\t' -v OFS='\t' '{ $4 = $4 - 8 * 86400; print }' "$CACHE" > "$CACHE.old" && mv "$CACHE.old" "$CACHE"; vrun "$V" linux-x86_64
+awk -F'\t' -v OFS='\t' '{ $5 = $5 - 8 * 86400; print }' "$CACHE" > "$CACHE.old" && mv "$CACHE.old" "$CACHE"; vrun "$V" linux-x86_64
 check "an entry older than 7 days is run again" '[ "$(wc -l < "$T/runs-caddy")" -eq 3 ]'
+chmod 600 "$V/cloud/caddyserver/caddy/v2.0.0/caddy_2.0.0_linux_amd64.tar.gz"; vrun "$V" linux-x86_64      # ctime moves, size and mtime do not
+check "a file whose ctime changed (same size and mtime) is run again" '[ "$(wc -l < "$T/runs-caddy")" -eq 4 ]'
+vrun "$V" linux-x86_64
+check "(and is cached again afterwards)" '[ "$(wc -l < "$T/runs-caddy")" -eq 4 ]'
+awk -F'\t' -v OFS='\t' '{ $5 = $5 + 86400; print }' "$CACHE" > "$CACHE.old" && mv "$CACHE.old" "$CACHE"; vrun "$V" linux-x86_64
+check "an entry stamped in the future is not trusted: run again" '[ "$(wc -l < "$T/runs-caddy")" -eq 5 ]'
 sed 's/^caddyserver\/caddy|\(.*\)|version|/caddyserver\/caddy|\1|version --json|/' "$DATA/dev-stack-checks.tsv" > "$T/checks-changed.tsv"
 vrun "$V" linux-x86_64 VALARK_DEVSTACK_CHECKS="$T/checks-changed.tsv"
 check "a changed check row is run again (the stub rejects the new arguments: FAIL, and the pass is dropped)" 'has "\"status\": \"FAIL\"" "dev-stack caddy (" && ! grep -q "caddy_2.0.0" "$CACHE"'
@@ -418,22 +460,35 @@ vrun "$V2" linux-x86_64 VALARK_DEVSTACK_CHECK_MAX_MB=1
 check "SKIP: a file that unpacks past the cap" 'has "\"status\": \"SKIP\"" "dev-stack restic: could not be unpacked" && [ -z "$(ls -A "$T/vtmp")" ]'
 vrun "$V2" linux-x86_64
 check "...and the same file runs under the default cap" 'has "\"status\": \"PASS\"" "tool runs: dev-stack restic ("'
+# a program that prints its version and leaves a detached child holding its output open:
+# the check must end when the program does, not when the child does
+V4="$T/vds4"; mkdir -p "$V4/cloud/go-gitea/gitea/v1.0.0"
+stub "$V4/cloud/go-gitea/gitea/v1.0.0/gitea-1.0.0-linux-amd64" 'echo "Gitea version 1.0.0 (stub)"; setsid sleep 25.37 & exit 0'
+SECONDS=0; vrun "$V4" linux-x86_64; TOOK=$SECONDS
+check "a detached child cannot hold a check open (returned in ${TOOK}s, PASS on the program's own exit)" '[ "$TOOK" -lt 12 ] && has "\"status\": \"PASS\"" "tool runs: dev-stack gitea ("' || cat "$T/v.out" >&2
+pkill -f 'sleep 25\.37' 2>/dev/null
+# the size limit is set inside _devstack_program only: the calling shell can still write big files
+{ sed -n '/^_devstack_program() {/,/^}/p' "$ROOT/scripts/verify.sh"
+  echo 'VALARK_DEVSTACK_CHECK_MAX_MB=1 _devstack_program "$1" . "$2" > /dev/null; head -c 3000000 /dev/zero > "$2/big" && echo big-ok'; } > "$T/ulimit.sh"
+mkdir -p "$T/ul"; bash "$T/ulimit.sh" "$V/cloud/juanfont/headscale/v0.29.8/headscale_0.29.8_linux_amd64" "$T/ul" > "$T/ulimit.out" 2>&1
+check "the unpack size limit does not leak into the shell that called _devstack_program" 'grep -qx big-ok "$T/ulimit.out" && [ "$(wc -c < "$T/ul/big")" -eq 3000000 ] && [ -x "$T/ul/program" ]' || cat "$T/ulimit.out" >&2
 # a killed run leaves no temp dir behind (TERM lands once the running program's timeout ends)
 V3="$T/vds3"; mkdir -p "$V3/storage/schollz/croc/v11.0.0" "$W/croc3"
 stub "$W/croc3/croc" 'touch "'"$T"'/croc3-started"; sleep 30'
 tar -czf "$V3/storage/schollz/croc/v11.0.0/croc_v11.0.0_Linux-64bit.tar.gz" -C "$W/croc3" croc
 rm -f "$J"
-( cd "$T" && exec env HOME="$T/vhome" PATH="$(dirname "$NODE"):$PATH" TMPDIR="$T/vtmp" VAL_ARK_DATA="$T/vdata" VALARK_STATE_DIR="$T/vstate" \
+: > "$T/caller.log"
+( cd "$T" && exec env HOME="$T/vhome" PATH="$(dirname "$NODE"):$PATH" TMPDIR="$T/vtmp" VAL_ARK_DATA="$T/vdata" VALARK_STATE_DIR="$T/vstate" CALLER_LOG="$T/caller.log" \
     VALARK_DEVSTACK_CHECK_TIMEOUT=3 VALARK_DEVSTACK_DIR="$V3" bash "$H" linux-x86_64 ) > "$T/v.out" 2>&1 & VPID=$!
 for i in $(seq 1 50); do [ -e "$T/croc3-started" ] && break; sleep 0.1; done
 check "(the run is in flight, with its temp dir)" '[ -e "$T/croc3-started" ] && [ -n "$(ls -A "$T/vtmp")" ]'
 kill -TERM "$VPID" 2>/dev/null; wait "$VPID"; rc=$?
-check "a killed run exits 143, writes no report and removes its temp dir" '[ $rc -eq 143 ] && [ ! -e "$J" ] && [ -z "$(ls -A "$T/vtmp")" ]'
+check "a killed run exits 143, writes no report, removes its temp dir and still runs the caller's EXIT trap" '[ $rc -eq 143 ] && [ ! -e "$J" ] && [ -z "$(ls -A "$T/vtmp")" ] && [ "$(grep -c caller-exit "$T/caller.log")" -eq 1 ]'
 # a host without timeout(1): one SKIP that says so
 NT="$T/no-timeout-bin"; mkdir -p "$NT"
 IFS=: read -ra _dirs <<< "$(dirname "$NODE"):$PATH"
 for d in "${_dirs[@]}"; do for f in "$d"/*; do n="${f##*/}"; [ "$n" != timeout ] && [ -x "$f" ] && [ ! -d "$f" ] && [ ! -e "$NT/$n" ] && ln -s "$f" "$NT/$n" 2>/dev/null; done; done
-( cd "$T" && env -i HOME="$T/vhome" PATH="$NT" TMPDIR="$T/vtmp" VAL_ARK_DATA="$T/vdata" VALARK_STATE_DIR="$T/vstate" VALARK_DEVSTACK_DIR="$V2" bash "$H" linux-x86_64 ) > "$T/v.out" 2>&1
+( cd "$T" && env -i HOME="$T/vhome" PATH="$NT" TMPDIR="$T/vtmp" VAL_ARK_DATA="$T/vdata" VALARK_STATE_DIR="$T/vstate" CALLER_LOG="$T/caller.log" VALARK_DEVSTACK_DIR="$V2" bash "$H" linux-x86_64 ) > "$T/v.out" 2>&1
 check "no timeout(1): SKIP with that reason, nothing run" 'has "\"status\": \"SKIP\"" "dev-stack run checks: timeout(1) not found" && ! grep -q "could not be unpacked\|tool runs" "$J"' || cat "$T/v.out" >&2
 # the other platform: duckdb's arm64 file is now the one tried (junk -> could not be unpacked), caddy has no arm64 build
 vrun "$V" linux-arm64

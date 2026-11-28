@@ -245,10 +245,13 @@ const sseByIp = new Map();   // clientIp -> live stream count
 // well under the bucket, pin every core for hours on multi-GB trees), so cap the number of
 // concurrent tar spawns globally (mirrors the MAX_SSE_CONNECTIONS 503 pattern). Single-file
 // downloads don't spawn tar and are unaffected — the first-class tool-download path stays open.
-const MAX_ARCHIVE_TAR = Number(process.env.VALARK_MAX_ARCHIVE_TAR) || 3;
+// A whole number from the environment, never under 1 (0 or a negative must not switch a
+// cap off or lock every download out); unset or junk = the default.
+const posInt = (v, d) => { const n = Math.floor(Number(v)); return v === undefined || v === '' || !Number.isFinite(n) ? d : Math.max(1, n); };
+const MAX_ARCHIVE_TAR = posInt(process.env.VALARK_MAX_ARCHIVE_TAR, 3);
 let archiveTarInFlight = 0;
 // One client may not hold every slot: it gets at most MAX_ARCHIVE_TAR - 1 (never under 1).
-const MAX_ARCHIVE_TAR_PER_IP = Number(process.env.VALARK_MAX_ARCHIVE_TAR_PER_IP) || Math.max(1, MAX_ARCHIVE_TAR - 1);
+const MAX_ARCHIVE_TAR_PER_IP = posInt(process.env.VALARK_MAX_ARCHIVE_TAR_PER_IP, Math.max(1, MAX_ARCHIVE_TAR - 1));
 const archiveTarByIp = new Map();   // clientIp -> directory tar streams running
 
 function broadcastSSE(event, data) {
@@ -1784,14 +1787,21 @@ function realpathWithin(target, baseDir) {
 // ZIMs, installers, dev-stack archives) and interrupted downloads must be resumable
 // (curl -C -, wget -c, browser resume). Single-range only; malformed ranges fall through
 // to a normal 200. Shared by serveStatic and serveArchive.
+// A validator pair (Last-Modified + a weak ETag of size and mtime) lets a client resume
+// safely: with If-Range, a range is honoured only while the file is still the one it began
+// downloading; once the file was replaced it gets the whole new file (200), never a splice.
 function sendFile(res, req, filePath, stat, headers) {
-    const baseHeaders = { ...headers, 'Accept-Ranges': 'bytes', ...SECURITY_HEADERS };
+    const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+    const lastModified = new Date(Math.floor(stat.mtimeMs / 1000) * 1000).toUTCString();
+    const baseHeaders = { ...headers, 'Accept-Ranges': 'bytes', 'Last-Modified': lastModified, 'ETag': etag, ...SECURITY_HEADERS };
+    const ifRange = req && req.headers && req.headers['if-range'];
+    const sameFile = !ifRange || ifRange === etag || ifRange === lastModified;
     const pipe = (opts) => {
         const stream = fs.createReadStream(filePath, opts);
         stream.on('error', () => { try { res.destroy(); } catch (_) {} });
         stream.pipe(res);
     };
-    const m = req && req.headers && req.headers.range
+    const m = sameFile && req && req.headers && req.headers.range
         && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
     if (m && (m[1] !== '' || m[2] !== '')) {
         let start, end;
@@ -1845,6 +1855,17 @@ function escapeHtml(s) {
 // visitors pull app binaries per platform. A file streams as an attachment; a
 // directory streams as a gzipped tar (via system `tar`, zero-dep). Only paths
 // inside the allowed data dirs are served; traversal is rejected.
+// Content-Disposition for a download. Header values must be Latin-1 and the quoted name may
+// not hold a quote or a backslash, so `filename` is an ASCII stand-in and `filename*`
+// (RFC 5987) carries the real name, percent-encoded, for every current browser and curl.
+function contentDisposition(name) {
+    const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, '_');
+    let star = '';
+    try { star = `; filename*=UTF-8''${encodeURIComponent(name).replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())}`; }
+    catch (_) { /* a lone surrogate: the ASCII name alone */ }
+    return `attachment; filename="${ascii}"${star}`;
+}
+
 // Each served name maps to its directory: the repo-root trees (symlinks onto the data
 // disk), and the developer stack, which has no repo symlink and lives at DEVSTACK_DIR.
 const ARCHIVE_DIRS = Object.assign(Object.create(null),
@@ -1869,19 +1890,21 @@ function serveArchive(res, req, relPath) {
 
     fs.stat(target, (err, stat) => {
         if (err) return send404(res);
-        const base = path.basename(target).replace(/["\\]/g, '_');   // quoted in the header below
+        const base = path.basename(target);
+        const isDir = stat.isDirectory();
+        const disposition = contentDisposition(base + (isDir ? '.tar.gz' : ''));
         // HEAD preflight (the UI probes availability before downloading) — answer the
         // headers without spawning a tar / opening the file for every probe.
         if (req && req.method === 'HEAD') {
             res.writeHead(200, {
-                'Content-Type': stat.isDirectory() ? 'application/gzip' : 'application/octet-stream',
-                'Content-Disposition': `attachment; filename="${base}${stat.isDirectory() ? '.tar.gz' : ''}"`,
-                ...(stat.isDirectory() ? {} : { 'Content-Length': stat.size, 'Accept-Ranges': 'bytes' }),
+                'Content-Type': isDir ? 'application/gzip' : 'application/octet-stream',
+                'Content-Disposition': disposition,
+                ...(isDir ? {} : { 'Content-Length': stat.size, 'Accept-Ranges': 'bytes' }),
                 ...SECURITY_HEADERS,
             });
             return res.end();
         }
-        if (stat.isDirectory()) {
+        if (isDir) {
             // Cap concurrent tar+gzip streams so a few cheap GETs can't pin every core on
             // large trees (a whole served dir, the ~194 GB dev stack included, is a legal
             // target and streams without buffering): MAX_ARCHIVE_TAR in all, fewer per client.
@@ -1898,20 +1921,26 @@ function serveArchive(res, req, relPath) {
                 const n = (archiveTarByIp.get(tarIp) || 1) - 1;
                 if (n <= 0) archiveTarByIp.delete(tarIp); else archiveTarByIp.set(tarIp, n);
             };
-            res.writeHead(200, {
-                'Content-Type': 'application/gzip',
-                'Content-Disposition': `attachment; filename="${base}.tar.gz"`,
-                ...SECURITY_HEADERS,
-            });
-            const tar = spawn('tar', ['-czf', '-', '-C', path.dirname(target), base]);
-            tar.stdout.pipe(res);
-            tar.on('error', () => { releaseTar(); try { res.destroy(); } catch (_) {} });
-            tar.on('close', releaseTar);          // normal exit, error, or req-close kill — always freed
-            req.on('close', () => { try { tar.kill(); } catch (_) {} });
+            try {   // nothing below may leave the slot taken: a throw here used to lock the client out
+                res.writeHead(200, {
+                    'Content-Type': 'application/gzip',
+                    'Content-Disposition': disposition,
+                    ...SECURITY_HEADERS,
+                });
+                // tar gets the folder's real name (the header's is a sanitised copy)
+                const tar = spawn('tar', ['-czf', '-', '-C', path.dirname(target), '--', base]);
+                tar.stdout.pipe(res);
+                tar.on('error', () => { releaseTar(); try { res.destroy(); } catch (_) {} });
+                tar.on('close', releaseTar);          // normal exit, error, or req-close kill — always freed
+                req.on('close', () => { try { tar.kill(); } catch (_) {} });
+            } catch (e) {
+                releaseTar();
+                try { res.destroy(); } catch (_) {}
+            }
         } else {
             sendFile(res, req, target, stat, {
                 'Content-Type': 'application/octet-stream',
-                'Content-Disposition': `attachment; filename="${base}"`,
+                'Content-Disposition': disposition,
             });
         }
     });

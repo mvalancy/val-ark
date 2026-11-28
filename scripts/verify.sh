@@ -145,17 +145,35 @@ _devstack_program() {
     echo "could not be unpacked"; return 1
 }
 
-_DEVSTACK_TMP=""    # verify_devstack's temp dir, removed by its EXIT trap if the run is killed
+_DEVSTACK_TMP=""      # verify_devstack's temp dir while it runs
+_DEVSTACK_TRAPS=""    # the caller's EXIT / TERM / INT traps, put back when it ends
+# Every way out of verify_devstack: remove the temp dir and give the caller its traps back.
+_devstack_end() {
+    [ -n "$_DEVSTACK_TMP" ] && rm -rf "$_DEVSTACK_TMP"
+    _DEVSTACK_TMP=""
+    [ -n "$_DEVSTACK_TRAPS" ] && eval "$_DEVSTACK_TRAPS"
+    _DEVSTACK_TRAPS=""
+}
+# The shell is exiting (killed, or the caller exited) mid-run: clean up, then run the EXIT
+# trap the caller had set, which ours stood in for.
+_devstack_exit() {
+    _devstack_end
+    eval "set -- $(trap -p EXIT)"
+    [ "$#" -ge 3 ] && [ "$3" != _devstack_exit ] && eval "$3"
+}
 verify_devstack() {
     # The developer stack's run checks (#397): for each data/dev-stack-checks.tsv row whose
     # project is mirrored, lib/devstack.js names the newest version's file for THIS platform.
     # Its program is pulled into a temp dir and run there: a timeout that ends in KILL, a clean
-    # environment (minimal PATH, HOME = the temp dir), stdin closed, and no network where
-    # unshare(1) can give it an empty network namespace. PASS / FAIL / SKIP per project.
-    # A PASS is remembered per file (path + size + mtime + the check row) in
+    # environment (minimal PATH, HOME = the temp dir), stdin closed, output to a file (so a
+    # child the program leaves behind cannot hold the check open), and, where unshare(1) can
+    # give them, an empty network namespace and a PID namespace that dies with the program.
+    # PASS / FAIL / SKIP per project.
+    # A PASS is remembered per file (path + size + mtime + ctime + the check row) in
     # STATE_DIR/devstack-checks.tsv for VALARK_DEVSTACK_CHECK_DAYS (default 7), so a loop
     # cycle does not unpack every archive again; a FAIL or SKIP is tried again each time.
     # Nothing is installed or fetched, and a tree that is not mirrored has nothing to check.
+    # The caller's EXIT / TERM / INT traps are back in place when this returns.
     # Test seam: VALARK_DEVSTACK_CHECKS = another check file.
     local platform="$1" data="${_LIB}/../../data" node t n=0 to plan
     [ -d "$DEVSTACK_DIR" ] || return 0
@@ -164,15 +182,15 @@ verify_devstack() {
     to=$(command -v timeout 2>/dev/null)
     [ -n "$to" ] || { skip "dev-stack run checks: timeout(1) not found"; return 0; }
     t=$(mktemp -d "${TMPDIR:-/tmp}/valark-verify-devstack.XXXXXX") || return 0
+    _DEVSTACK_TRAPS="trap - EXIT TERM INT; $(trap -p EXIT TERM INT)"
     _DEVSTACK_TMP="$t"
-    trap '[ -n "$_DEVSTACK_TMP" ] && rm -rf "$_DEVSTACK_TMP"' EXIT
-    trap 'exit 143' TERM; trap 'exit 130' INT
+    trap _devstack_exit EXIT; trap 'exit 143' TERM; trap 'exit 130' INT
     if ! plan=$("$node" "${_LIB}/devstack.js" checks "${VALARK_DEVSTACK_CHECKS:-$data/dev-stack-checks.tsv}" "$data/dev-stack.tsv" "$DEVSTACK_DIR" "$platform" 2>"$t/plan.err"); then
         bad "dev-stack run checks could not be planned ($(head -1 "$t/plan.err" | LC_ALL=C tr -cd '\40-\176' | cut -c1-120))"
-        rm -rf "${t:?}"; _DEVSTACK_TMP=""; return 0
+        _devstack_end; return 0
     fi
     local jail=(); local us; us=$(command -v unshare 2>/dev/null)
-    [ -n "$us" ] && "$us" -rn true 2>/dev/null && jail=("$us" -rn)
+    [ -n "$us" ] && "$us" -rn --pid --fork --kill-child true 2>/dev/null && jail=("$us" -rn --pid --fork --kill-child)
     local cache="${STATE_DIR}/devstack-checks.tsv" secs="${VALARK_DEVSTACK_CHECK_TIMEOUT:-30}" now fresh
     now=$(date +%s); fresh=$(( now - ${VALARK_DEVSTACK_CHECK_DAYS:-7} * 86400 ))
     local status name file bin args expect d exe out rc label st spec at
@@ -181,19 +199,24 @@ verify_devstack() {
         [ -n "$status" ] || continue
         if [ "$status" != run ]; then skip "tool present: dev-stack $name has no $platform build to run"; continue; fi
         label="tool runs: dev-stack $name (${file##*/})"
-        st=$(stat -c '%s %Y' "$file" 2>/dev/null || stat -f '%z %m' "$file" 2>/dev/null); spec="$bin|$args|$expect"
-        # a PASS for this exact file and check row, young enough: keep it (with its own date)
-        at=$(F="$file" S="${st% *}" M="${st#* }" SPEC="$spec" MIN="$fresh" awk -F'\t' \
-            '$1==ENVIRON["F"] && $2==ENVIRON["S"] && $3==ENVIRON["M"] && $5==ENVIRON["SPEC"] && $4+0>=ENVIRON["MIN"]+0 {print $4; exit}' "$cache" 2>/dev/null)
-        if [ -n "$at" ]; then
-            chk "$label"; printf '%s\t%s\t%s\t%s\t%s\n' "$file" "${st% *}" "${st#* }" "$at" "$spec" >> "$t/cache.new"; continue
+        # size, mtime, ctime: a file swapped in with its old mtime restored still has a new ctime
+        st=$(stat -c $'%s\t%Y\t%Z' "$file" 2>/dev/null || stat -f $'%z\t%m\t%c' "$file" 2>/dev/null); spec="$bin|$args|$expect"
+        # a PASS for this exact file and check row, young enough and not from the future: keep it
+        at=$(F="$file" ST="$st" SPEC="$spec" MIN="$fresh" NOW="$now" awk -F'\t' \
+            '$1==ENVIRON["F"] && ($2 "\t" $3 "\t" $4)==ENVIRON["ST"] && $6==ENVIRON["SPEC"] && $5+0>=ENVIRON["MIN"]+0 && $5+0<=ENVIRON["NOW"]+0 {print $5; exit}' "$cache" 2>/dev/null)
+        if [ -n "$at" ] && [ -n "$st" ]; then
+            chk "$label"; printf '%s\t%s\t%s\t%s\n' "$file" "$st" "$at" "$spec" >> "$t/cache.new"; continue
         fi
         n=$((n+1)); d="$t/$n"; mkdir -p "$d"
         if exe=$(_devstack_program "$file" "$bin" "$d"); then
+            # Output goes to a file, not a pipe: a pipe would be held open by any child the
+            # program left running, and the check would wait for it long past the timeout.
             # shellcheck disable=SC2086  # args is a space-separated list from our own TSV
-            out=$(cd "$d" && env -i PATH=/usr/bin:/bin HOME="$d" TMPDIR="$d" "${jail[@]}" "$to" -k 5 "$secs" "$exe" $args 2>&1 </dev/null | head -c 65536); rc=$?
+            ( cd "$d" && ulimit -f 65536 2>/dev/null
+              env -i PATH=/usr/bin:/bin HOME="$d" TMPDIR="$d" "${jail[@]}" "$to" -k 5 "$secs" "$exe" $args > "$t/out" 2>&1 </dev/null ); rc=$?
+            out=$(head -c 65536 "$t/out" 2>/dev/null)
             if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -Eqa -- "$expect"; then
-                chk "$label"; printf '%s\t%s\t%s\t%s\t%s\n' "$file" "${st% *}" "${st#* }" "$now" "$spec" >> "$t/cache.new"
+                chk "$label"; [ -n "$st" ] && printf '%s\t%s\t%s\t%s\n' "$file" "$st" "$now" "$spec" >> "$t/cache.new"
             else
                 # the program's own words go into the label: printable ASCII only
                 bad "tool present but won't run: dev-stack $name (${file##*/}: $(printf '%s' "$out" | head -1 | LC_ALL=C tr -cd '\40-\176' | cut -c1-120))"
@@ -205,7 +228,7 @@ verify_devstack() {
     done <<< "$plan"
     mkdir -p "$STATE_DIR" 2>/dev/null
     mv -f "$t/cache.new" "$cache" 2>/dev/null
-    rm -rf "${t:?}"; _DEVSTACK_TMP=""
+    _devstack_end
 }
 
 verify_local() {

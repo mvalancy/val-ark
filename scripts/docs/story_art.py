@@ -641,78 +641,114 @@ def stars(t, theme, h):
     return ''.join(p)
 
 
-WALL = (  # (group, accent, ((icon, name, has a run check), ...)): every project with an offline guide
-    ('Containers', 2, (('cube', 'Docker Engine', True), ('gear', 'Compose + Buildx', True), ('server', 'Registry', True))),
-    ('Web and network', 5, (('globe', 'Caddy', True), ('wifi', 'Headscale', True), ('terminal', 'Gitea', True))),
-    ('Build', 0, (('wrench', 'CMake + Ninja', True), ('chip', 'Go', True), ('key', 'JDK + Git for Windows', False))),
-    ('Storage and backup', 1, (('disk', 'rclone', True), ('shield', 'restic', True), ('lock', 'age + croc', True))),
-    ('Monitoring', 3, (('eye', 'Prometheus', True), ('spark', 'node_exporter', True), ('mail', 'Alertmanager', True))),
-    ('Data and everyday', 7, (('magnifier', 'DuckDB', True), ('paste', 'KeePassXC + Ventoy', False))),
+# The developer stack's projects that have an offline guide, under the group names the page
+# filters by (data/dev-stack.tsv): (group, ((icon, name, has a run check), ...)).
+SHEET = (
+    ('containers', (('cube', 'Docker Engine', True), ('gear', 'Compose', True), ('wrench', 'Buildx', True), ('server', 'Registry', True))),
+    ('cloud', (('globe', 'Caddy', True), ('wifi', 'Headscale', True), ('terminal', 'Gitea', True), ('lock', 'age', True),
+               ('eye', 'Prometheus', True), ('spark', 'node_exporter', True), ('mail', 'Alertmanager', True))),
+    ('toolchains', (('map', 'CMake', True), ('play', 'Ninja', True), ('key', 'Git for Windows', False), ('chip', 'Go', True),
+                    ('flask', 'Temurin JDK', False))),
+    ('storage', (('disk', 'rclone', True), ('shield', 'restic', True), ('paste', 'croc', True))),
+    ('databases', (('magnifier', 'DuckDB', True),)),
+    ('dev-tools', (('book', 'KeePassXC', False), ('board', 'Ventoy', False))),
 )
+BLUE = {   # the sheet's own palette: a blueprint by night, a pale cyanotype by day
+    'dark': dict(paper='#123a6b', paper2='#0e2f58', grid='#2a5590', grid2='#3a6aa8', ink='#eef5ff', soft='#b9d2f2',
+                 note='#fde68a', lamp='#4ade80', lampink='#052e14'),
+    'light': dict(paper='#e2eef9', paper2='#d3e4f4', grid='#c3d8ec', grid2='#a9c6e2', ink='#123f73', soft='#3c648f',
+                  note='#9a3412', lamp='#15803d', lampink='#ffffff'),
+}
 
 
-def wall(t, theme, h):
-    """The developer stack as a workshop tool wall: tools hang in groups, each with a guide tag."""
-    rnd = random.Random(131)
-    ink, lamp = '#2a1a04', ACCENTS[1]
-    p = [sky(t, h, rnd, theme, None, stars=0),
-         f'<defs><pattern id="pegs" width="22" height="22" patternUnits="userSpaceOnUse">'
-         f'<circle cx="11" cy="11" r="2.3" fill="{t["wood2"]}" opacity=".55"/></pattern></defs>',
+def blueprint(t, theme, h):
+    """The developer stack as a blueprint: every guided project drawn as a part, group by group."""
+    c = BLUE[theme]
+    ink, soft = c['ink'], c['soft']
+    mono = "font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace"
+    p = [f'<defs><clipPath id="page"><rect width="{W}" height="{h}" rx="18"/></clipPath>'
+         f'<pattern id="g1" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="{c["grid"]}" stroke-width="1"/></pattern>'
+         f'<pattern id="g5" width="100" height="100" patternUnits="userSpaceOnUse"><path d="M100 0H0V100" fill="none" stroke="{c["grid2"]}" stroke-width="1.4"/></pattern></defs>'
+         f'<style>.dr{{stroke-dasharray:1;animation:dr 2.6s ease-out both}}@keyframes dr{{from{{stroke-dashoffset:1}}}}'
+         f'.bl{{fill:none;stroke:{ink};stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}}'
+         f'.bt{{font:600 12px system-ui,sans-serif;fill:{ink}}}.bs{{font:11px system-ui,sans-serif;fill:{soft}}}'
+         f'.bg{{font:700 13px ui-monospace,Menlo,Consolas,monospace;fill:{ink};letter-spacing:.06em}}'
+         f'.bn{{font:italic 13px Georgia,serif;fill:{c["note"]}}}</style>',
          '<g clip-path="url(#page)">',
-         f'<rect y="610" width="{W}" height="{h - 610}" fill="{t["ground"]}"/>',
-         # the pegboard and its frame
-         f'<rect x="48" y="104" width="1104" height="388" rx="10" fill="{t["wood2"]}"/>',
-         f'<rect x="60" y="116" width="1080" height="364" rx="4" fill="{t["wood"]}"/>',
-         f'<rect x="60" y="116" width="1080" height="364" rx="4" fill="url(#pegs)"/>']
-    for i, (group, ai, tools) in enumerate(WALL):
-        a, cx = ACCENTS[ai], 150 + i * 180
-        p.append(f'<rect x="{cx - 80}" y="126" width="160" height="26" rx="13" fill="{a}"/>'
-                 f'<text x="{cx}" y="144" class="sm m" style="fill:#fff">{esc(group)}</text>')
-        for j, (ic, name, runs) in enumerate(tools):
-            y = 206 + j * 104
-            dot = (f'<circle cx="{cx - 74}" cy="{y + 43}" r="5" fill="{lamp}"/>' if runs else
-                   f'<circle cx="{cx - 74}" cy="{y + 43}" r="4.2" fill="none" stroke="{ink}" stroke-width="1.6"/>')
-            p.append(
-                # the hook, the tool on its painted outline, and its name plate
-                f'<path d="M{cx} {y - 40}v8" stroke="{t["ink"]}" stroke-width="4" stroke-linecap="round"/>'
-                f'<circle cx="{cx}" cy="{y - 41}" r="3.5" fill="{t["ink"]}"/>'
-                f'<rect x="{cx - 30}" y="{y - 30}" width="60" height="56" rx="12" fill="{t["cream"]}" stroke="{a}" stroke-width="2.5"/>'
-                + icon(ic, cx, y - 2, .95, a) +
-                f'<rect x="{cx - 84}" y="{y + 32}" width="168" height="22" rx="4" fill="{t["cream"]}"/>{dot}'
-                f'<text x="{cx + 7}" y="{y + 48}" class="sm m" style="fill:{ink}">{esc(name)}</text>'
-                # the guide tag, hanging from the same hook on a string
-                f'<g class="sway" style="animation-delay:-{(i * 3 + j) * .7:.1f}s;animation-duration:{5 + (i + j) % 3}s">'
-                f'<path d="M{cx} {y - 41}q22 4 38 17" fill="none" stroke="{t["ink"]}" stroke-width="1.2"/>'
-                f'<path d="M{cx + 34} {y - 24}l8 -8h40v26h-40z" fill="{t["cream"]}" stroke="{a}" stroke-width="1.5"/>'
-                f'<circle cx="{cx + 41}" cy="{y - 20}" r="1.8" fill="{a}"/>'
-                f'<text x="{cx + 63}" y="{y - 15}" class="xs m" style="fill:{ink};font-weight:600">guide</text></g>')
-    # the key to the lamps, on the free peg space of the last column
-    kx, ky = 150 + 5 * 180, 206 + 2 * 104
-    p.append(f'<rect x="{kx - 84}" y="{ky - 34}" width="168" height="88" rx="6" fill="{t["cream"]}"/>'
-             f'<circle cx="{kx - 66}" cy="{ky - 16}" r="5" fill="{lamp}"/><text x="{kx - 52}" y="{ky - 11}" class="sm" style="fill:{ink}">has a run check</text>'
-             f'<circle cx="{kx - 66}" cy="{ky + 6}" r="4.2" fill="none" stroke="{ink}" stroke-width="1.6"/>'
-             f'<text x="{kx - 52}" y="{ky + 11}" class="sm" style="fill:{ink}">guide only:</text>'
-             f'<text x="{kx - 52}" y="{ky + 28}" class="xs" style="fill:{ink}">a window app, another</text>'
-             f'<text x="{kx - 52}" y="{ky + 43}" class="xs" style="fill:{ink}">system, or too big to try</text>')
-    # the bench: the list every card comes from, the test box with its lamp, and what the test does
-    p.append(f'<rect x="40" y="598" width="1120" height="12" rx="3" fill="{t["wood2"]}"/>'
-             f'<g transform="rotate(-1.5 200 556)"><rect x="64" y="515" width="300" height="80" fill="#000" opacity=".2"/>'
-             f'<rect x="60" y="511" width="300" height="80" fill="{t["cream"]}"/>'
-             f'<text x="74" y="531" class="ch" style="fill:#b45309">One list</text>'
-             f'<text x="74" y="551" class="sm" style="fill:{ink}">data/dev-stack.tsv: a line per project.</text>'
-             f'<text x="74" y="568" class="cp" style="fill:{ink}">Add a line and its card appears in</text>'
-             f'<text x="74" y="584" class="cp" style="fill:{ink}">Library, Developer stack. None is hand-made.</text></g>')
-    p.append(f'<rect x="412" y="530" width="190" height="68" rx="8" fill="{t["wall"]}" stroke="{t["ink"]}" stroke-width="2.5"/>'
-             f'<text x="507" y="558" class="lb m">Does it run?</text>'
-             f'<text x="507" y="578" class="xs m">the test bench</text>'
-             f'<path d="M602 564h26" stroke="{t["ink"]}" stroke-width="3"/>'
-             f'<circle cx="652" cy="564" r="26" fill="{lamp}" opacity=".25" class="pulse"/>'
-             f'<circle cx="652" cy="564" r="15" fill="{lamp}" stroke="{t["ink"]}" stroke-width="2.5"/>'
-             f'<path d="M645 564l5 5 9 -10" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>')
-    for k, line in enumerate(('The newest copy for this box is unpacked on the bench,',
-                              'run with a time limit, then thrown away. Nothing is installed.',
-                              'A pass is remembered for a week; a failure shows on the Health page.')):
-        p.append(text(702, 540 + k * 22, 'it h' if k < 2 else 'cp h', line))
+         f'<rect width="{W}" height="{h}" fill="{c["paper"]}"/><rect width="{W}" height="{h}" fill="url(#g1)"/>'
+         f'<rect width="{W}" height="{h}" fill="url(#g5)"/>',
+         # the title strip behind the chapter heading, and the drafting border
+         f'<rect x="0" y="0" width="{W}" height="100" fill="{c["paper2"]}" opacity=".9"/>',
+         f'<rect x="22" y="104" width="1156" height="{h - 126}" class="bl dr" pathLength="1" style="stroke-width:2.4"/>'
+         f'<rect x="30" y="112" width="1140" height="{h - 142}" class="bl" style="stroke-width:.8"/>']
+
+    def part(cx, y, ic, name, runs, k):
+        """One part: its outline, a centre line, its name and its run-check lamp."""
+        lamp = (f'<circle cx="{cx + 30}" cy="{y - 24}" r="9" fill="{c["lamp"]}" opacity=".3" class="pulse" style="animation-delay:-{k * .37:.1f}s"/>'
+                f'<circle cx="{cx + 30}" cy="{y - 24}" r="5" fill="{c["lamp"]}" stroke="{ink}" stroke-width="1.2"/>' if runs else
+                f'<circle cx="{cx + 30}" cy="{y - 24}" r="5" fill="none" stroke="{ink}" stroke-width="1.2" stroke-dasharray="2 2"/>')
+        return (f'<path d="M{cx - 34} {y}H{cx + 34}M{cx} {y - 34}V{y + 34}" stroke="{soft}" stroke-width=".8" stroke-dasharray="7 3 1 3" fill="none"/>'
+                f'<circle cx="{cx}" cy="{y}" r="28" class="bl dr" pathLength="1" style="animation-delay:{k * .06:.2f}s"/>'
+                + icon(ic, cx, y, .8, ink) + lamp +
+                f'<text x="{cx}" y="{y + 50}" class="bt m" style="font-size:11px">{esc(name)}</text>')
+
+    def group(x0, x1, y0, name, tools, k0):
+        """A group's frame, its name as the page's filter shows it, its parts and a dimension line."""
+        n, y1 = len(tools), y0 + 176
+        out = [f'<path d="M{x0 + 8} {y0 + 12}V{y1}H{x1 - 8}V{y0 + 12}" class="bl dr" pathLength="1" style="stroke-dasharray:1;opacity:.75"/>'
+               f'<rect x="{x0 + 8}" y="{y0}" width="{len(name) * 8.4 + 14:.0f}" height="24" fill="{c["paper2"]}" stroke="{ink}" stroke-width="1.4"/>'
+               f'<text x="{x0 + 15}" y="{y0 + 17}" class="bg" style="letter-spacing:0">{esc(name)}</text>']
+        for i, (ic, nm, runs) in enumerate(tools):
+            out.append(part(x0 + 50 + i * 100, y0 + 76, ic, nm, runs, k0 + i))
+        dy, a, b2 = y0 + 152, x0 + 22, x1 - 22
+        label = f'{n} guide' + ('' if n == 1 else 's')
+        half = len(label) * 3.4 + 8
+        mid = (a + b2) / 2
+        arrows = f'M{a} {dy}H{mid - half:.0f}M{mid + half:.0f} {dy}H{b2}M{a + 7} {dy - 4}l-7 4l7 4M{b2 - 7} {dy - 4}l7 4l-7 4' if n > 1 else ''
+        out.append(f'<path d="M{a} {dy - 6}v12M{b2} {dy - 6}v12{arrows}" class="bl" style="stroke-width:1.1"/>'
+                   f'<text x="{mid:.0f}" y="{dy + 4}" class="bs m" style="fill:{ink}">{label}</text>')
+        return ''.join(out)
+
+    # two rows of eleven 100 px bays: 4 + 7, then 5 + 3 + 1 + 2
+    rows, k = ((126, SHEET[:2]), (322, SHEET[2:])), 0
+    for y0, groups in rows:
+        x = 50
+        for name, tools in groups:
+            p.append(group(x, x + len(tools) * 100, y0, name, tools, k))
+            x += len(tools) * 100
+            k += len(tools)
+    # callouts on the first part: what the lamp and the dimension line stand for
+    p.append(f'<path d="M133 175l45 -33h150" class="bl dr" pathLength="1" style="stroke:{c["note"]};stroke-width:1.2"/>'
+             f'<text x="184" y="137" class="bn">run check: the lamp is lit</text>'
+             f'<path d="M1012 480l20 38h112" class="bl dr" pathLength="1" style="stroke:{c["note"]};stroke-width:1.2"/>'
+             f'<text x="1040" y="513" class="bn">one guide per part</text>')
+    # detail A: the test bench
+    by = 520
+    p.append(f'<text x="50" y="{by + 14}" class="bg">DETAIL A: the test bench, "does it run?"</text>'
+             f'<rect x="50" y="{by + 26}" width="120" height="56" class="bl dr" pathLength="1"/>'
+             f'<text x="110" y="{by + 50}" class="bt m">newest copy</text><text x="110" y="{by + 66}" class="bs m">for this box</text>'
+             f'<path d="M170 {by + 54}H214M206 {by + 49}l8 5l-8 5" class="bl"/>'
+             f'<rect x="216" y="{by + 26}" width="150" height="56" class="bl dr" pathLength="1" style="stroke-dasharray:1"/>'
+             f'<text x="291" y="{by + 50}" class="bt m">unpacked on the bench</text><text x="291" y="{by + 66}" class="bs m">run with a time limit</text>'
+             f'<path d="M366 {by + 54}H410M402 {by + 49}l8 5l-8 5" class="bl"/>'
+             f'<circle cx="438" cy="{by + 54}" r="24" fill="{c["lamp"]}" opacity=".28" class="pulse"/>'
+             f'<circle cx="438" cy="{by + 54}" r="14" fill="{c["lamp"]}" stroke="{ink}" stroke-width="1.6"/>'
+             f'<path d="M431 {by + 54}l5 5l9 -10" fill="none" stroke="{c["lampink"]}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>'
+             f'<text x="476" y="{by + 44}" class="bt">then thrown away.</text>'
+             f'<text x="476" y="{by + 61}" class="bs">Nothing is installed. A pass is kept</text>'
+             f'<text x="476" y="{by + 76}" class="bs">a week; a failure shows on Health.</text>')
+    # the key, and the title block in the corner
+    p.append(f'<circle cx="60" cy="{by + 104}" r="5" fill="{c["lamp"]}" stroke="{ink}" stroke-width="1.2"/>'
+             f'<text x="72" y="{by + 108}" class="bs" style="fill:{ink}">has a run check</text>'
+             f'<circle cx="190" cy="{by + 104}" r="5" fill="none" stroke="{ink}" stroke-width="1.2" stroke-dasharray="2 2"/>'
+             f'<text x="202" y="{by + 108}" class="bs" style="fill:{ink}">guide only: a window app, another system, or too big to try</text>')
+    tx, ty = 716, by + 8
+    p.append(f'<rect x="{tx}" y="{ty}" width="440" height="104" fill="{c["paper2"]}" class="bl" style="fill:{c["paper2"]};stroke-width:2"/>'
+             f'<path d="M{tx} {ty + 30}H{tx + 440}M{tx} {ty + 56}H{tx + 440}M{tx + 96} {ty + 30}V{ty + 104}M{tx} {ty + 80}H{tx + 440}" class="bl" style="stroke-width:1"/>'
+             f'<text x="{tx + 220}" y="{ty + 20}" class="bg m">VAL ARK: DEVELOPER STACK</text>'
+             f'<text x="{tx + 10}" y="{ty + 47}" class="bs">SHEET</text><text x="{tx + 106}" y="{ty + 47}" class="bt" style="{mono}">data/dev-stack.tsv</text>'
+             f'<text x="{tx + 10}" y="{ty + 72}" class="bs">SCALE</text><text x="{tx + 106}" y="{ty + 72}" class="bt">one line per project</text>'
+             f'<text x="{tx + 10}" y="{ty + 96}" class="bs">NOTE</text><text x="{tx + 106}" y="{ty + 96}" class="bt">add a line: its card appears. None is hand-made.</text>')
     p.append('</g>')
     return ''.join(p)
 
@@ -791,16 +827,18 @@ SCENES = {
              'copies itself). From that source a new machine installs with curl bootstrap.sh, offline, and becomes another '
              'Ark, which fills up when it is online. No internet between them.',
         used=['docs/HOW-IT-WORKS.md']),
-    'wall': dict(
-        chapter='The developer stack', title='The tool wall', h=640, draw=wall,
-        desc='A workshop pegboard. Tools hang in six groups, each on a hook with a guide tag: '
-             + '; '.join(f'{group} ({", ".join(name for _, name, _ in tools)})' for group, _, tools in WALL)
-             + '. A green lamp on a name plate means the tool has a run check; a ring means guide only (JDK, Git for '
-               'Windows, KeePassXC and Ventoy: a window app, another system, or too big to try). On the bench below: a note, one list '
-               '(data/dev-stack.tsv, a line per project; add a line and its card appears in Library, Developer stack; '
-               'none is hand-made); and a test box marked "Does it run?" with a lit lamp: the newest copy for this box '
-               'is unpacked on the bench, run with a time limit, then thrown away; nothing is installed; a pass is '
-               'remembered for a week and a failure shows on the Health page.',
+    'blueprint': dict(
+        chapter='The developer stack', title='The parts sheet', h=680, draw=blueprint,
+        desc='A blueprint: a blue drafting sheet with a fine grid. Every developer-stack project that has an offline '
+             'guide is drawn as a part in outline (white on blue in the dark theme, blue on a pale cyanotype in the light one), '
+             'under the group name the page filters by: '
+             + '; '.join(f'{group} ({", ".join(name for _, name, _ in tools)})' for group, tools in SHEET)
+             + '. A dimension line under each group counts its guides. A lit lamp beside a part means it has a run '
+               'check; a dashed ring means guide only (Temurin JDK, Git for Windows, KeePassXC and Ventoy: a window app, '
+               'another system, or too big to try). Detail A is the test bench, "does it run?": the newest copy for '
+               'this box is unpacked on the bench, run with a time limit, then thrown away; nothing is installed; a pass '
+               'is remembered for a week and a failure shows on the Health page. The title block in the corner names the '
+               'sheet, data/dev-stack.tsv, one line per project: add a line and its card appears; none is hand-made.',
         used=['docs/LIBRARIAN.md']),
 }
 

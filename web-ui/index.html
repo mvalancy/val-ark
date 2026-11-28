@@ -4238,7 +4238,7 @@ function renderDevstack() {
         const v = p.versions[0];
         if (v) {
             const more = v.files.length - _DS_CARD_FILES;
-            files = `<details class="ds-files"><summary>${v.files.length}${v.truncated ? '+' : ''} files · ${esc(formatBytes(v.bytes))}</summary><ul>
+            files = `<details class="ds-files"><summary>${v.files.length}${v.truncated ? '+' : ''} ${v.files.length === 1 && !v.truncated ? 'file' : 'files'} · ${esc(formatBytes(v.bytes))}</summary><ul>
                 ${v.files.slice(0, _DS_CARD_FILES).map(_devstackFileItem).join('')}
                 ${more > 0 ? `<li><a href="${escAttr(href)}">${more} more…</a></li>` : ''}</ul></details>`;
         }
@@ -4259,7 +4259,7 @@ function renderDevstackDetail(key) {
     const pending = _devstackPending();
     if (pending) return html + pending + '</div>';
     if (!p) return html + '<p class="activity-empty" id="devstack-detail">That project is not in the developer stack list.</p></div>';
-    html += `<div id="devstack-detail"><h1>${esc(p.name)}</h1>
+    html += `<div id="devstack-detail"><h1 style="overflow-wrap:anywhere">${esc(p.name)}</h1>
         <p style="color:var(--text-secondary);max-width:70ch">${esc(p.note)}</p>
         <div class="ds-chips" style="margin:12px 0 20px">${_devstackChips(p)}</div>`;
     const guide = _devstackGuides[key];

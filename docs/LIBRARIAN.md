@@ -305,8 +305,8 @@ sets and the source bundles are still run by hand (or from your own cron).
 ### Developer + security stack (`release_mirror.py`)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="img/story/wall-dark.svg">
-  <img src="img/story/wall-light.svg" width="100%" alt="Storybook scene: The tool wall. A workshop pegboard. Tools hang in six groups, each on a hook with a guide tag: Containers (Docker Engine, Compose + Buildx, Registry); Web and network (Caddy, Headscale, Gitea); Build (CMake + Ninja, Go, JDK + Git for Windows); Storage and backup (rclone, restic, age + croc); Monitoring (Prometheus, node_exporter, Alertmanager); Data and everyday (DuckDB, KeePassXC + Ventoy). A green lamp on a name plate means the tool has a run check; a ring means guide only (JDK, Git for Windows, KeePassXC and Ventoy: a window app, another system, or too big to try). On the bench below: a note, one list (data/dev-stack.tsv, a line per project; add a line and its card appears in Library, Developer stack; none is hand-made); and a test box marked &quot;Does it run?&quot; with a lit lamp: the newest copy for this box is unpacked on the bench, run with a time limit, then thrown away; nothing is installed; a pass is remembered for a week and a failure shows on the Health page.">
+  <source media="(prefers-color-scheme: dark)" srcset="img/story/blueprint-dark.svg">
+  <img src="img/story/blueprint-light.svg" width="100%" alt="Storybook scene: The parts sheet. A blueprint: a blue drafting sheet with a fine grid. Every developer-stack project that has an offline guide is drawn as a part in outline (white on blue in the dark theme, blue on a pale cyanotype in the light one), under the group name the page filters by: containers (Docker Engine, Compose, Buildx, Registry); cloud (Caddy, Headscale, Gitea, age, Prometheus, node_exporter, Alertmanager); toolchains (CMake, Ninja, Git for Windows, Go, Temurin JDK); storage (rclone, restic, croc); databases (DuckDB); dev-tools (KeePassXC, Ventoy). A dimension line under each group counts its guides. A lit lamp beside a part means it has a run check; a dashed ring means guide only (Temurin JDK, Git for Windows, KeePassXC and Ventoy: a window app, another system, or too big to try). Detail A is the test bench, &quot;does it run?&quot;: the newest copy for this box is unpacked on the bench, run with a time limit, then thrown away; nothing is installed; a pass is remembered for a week and a failure shows on the Health page. The title block in the corner names the sheet, data/dev-stack.tsv, one line per project: add a line and its card appears; none is hand-made.">
 </picture>
 
 `data/dev-stack.tsv` lists upstream projects, not files: each row names a resolver `kind`
@@ -349,7 +349,8 @@ GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/
   `scripts/lib/devstack.js`: name, note, group, versions held, files with sizes, and the
   platforms read from the file names) and serves the files at `/api/archive/dev-stack/...`,
   behind the same read wall and realpath containment as every other download, with HTTP
-  Range so a dropped download resumes. Mirrored projects come first; one that is not on
+  Range, a weak ETag and `If-Range`, so a dropped download resumes and one of a file that
+  was replaced meanwhile starts over. Mirrored projects come first; one that is not on
   disk yet shows as "Not mirrored yet". The storage breakdown counts the tree.
   Nothing is added to `web-ui/index.html` for a new row.
 - **Offline guides.** `data/dev-stack-guides/<key>.md` is a short plain-language guide for a
@@ -372,11 +373,12 @@ GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/
     past `VALARK_DEVSTACK_CHECK_MAX_MB` (default 2048).
   - **Running.** A timeout (`VALARK_DEVSTACK_CHECK_TIMEOUT`, default 30 s) that ends in
     KILL, a clean environment (`PATH=/usr/bin:/bin`, `HOME` = the temp dir), stdin closed,
-    and an empty network namespace when `unshare -rn` works on the box (it is skipped
-    where user namespaces are restricted). The program's first output line is kept in a
+    output to a file (a child the program leaves behind cannot hold the check open), and,
+    when `unshare` works on the box, an empty network namespace and a PID namespace that
+    dies with the program (skipped where user namespaces are restricted). The program's first output line is kept in a
     FAIL's label as printable ASCII only.
-  - **Not every cycle.** A PASS is remembered per file (path, size, mtime and the check row)
-    in `state/devstack-checks.tsv` for `VALARK_DEVSTACK_CHECK_DAYS` (default 7), so a loop
+  - **Not every cycle.** A PASS is remembered per file (path, size, mtime, ctime and the check
+    row; never one stamped in the future) in `state/devstack-checks.tsv` for `VALARK_DEVSTACK_CHECK_DAYS` (default 7), so a loop
     cycle doesn't unpack every archive again. A FAIL or SKIP is tried again each time.
   - **SKIP, not reported, FAIL.** Mirrored but no build for this box's platform, a missing
     `timeout` / `unzip`, or an archive that will not unpack: SKIP with the reason. Not

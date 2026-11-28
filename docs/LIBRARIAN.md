@@ -339,6 +339,29 @@ GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/
 - **What gets skipped.** Files already complete are skipped. Nothing is written outside `--dest`.
 - **Layout.** Versioned rows land at `<group>/<project>/<version>/<file>`, so a new release sits
   beside the old one. Index rows land at `<group>/<host>/<dir path>/<file>`.
+- **In the web UI (#397).** **Library ▸ Developer stack** shows one card per row, generated
+  from the list: `server.js` joins `data/dev-stack.tsv` with the tree (`GET /api/devstack`,
+  `scripts/lib/devstack.js`: name, note, group, versions held, files with sizes, and the
+  platforms read from the file names) and serves the files at `/api/archive/dev-stack/...`,
+  behind the same read wall and realpath containment as every other download. A project that
+  is not on disk yet shows as "Not mirrored yet". The storage breakdown counts the tree.
+  Nothing is added to `web-ui/index.html` for a new row.
+- **Offline guides.** `data/dev-stack-guides/<key>.md` is a short plain-language guide for a
+  project: what it is for with the internet gone, how to install it from the mirrored files
+  on each platform, and the first steps offline. The key is `<owner>__<repo>` for a GitHub
+  row and `<kind>__<ref slug>` for the others (`go`, `index__download.docker.com__...`); a
+  file holding only `see: <key>` shares another project's guide. The card's detail view shows
+  the guide (`GET /api/devstack/guide?ref=<key>`, which answers for catalog keys only), and
+  `fetch` writes it beside the project's files as `INSTALL.txt` (rewritten only when the text
+  changes; `--guides DIR` points at another folder).
+- **Run checks.** `data/dev-stack-checks.tsv` names, per project, which file to take for the
+  host platform, the program inside it, its arguments and the output to expect.
+  `verify.sh` (`verify_devstack`) takes the newest mirrored version, unpacks only that
+  program into a temp dir, runs it with a 30 s timeout and `HOME` set to the temp dir, and
+  records PASS / FAIL / SKIP per project in `state/verify.json` (component `apps`). It
+  installs nothing and needs no network. A project that is mirrored but has no build for
+  this box's platform is a SKIP; one that is not mirrored is not reported. GUI and installer
+  apps (KeePassXC, Ventoy) and Windows-only ones (Git for Windows) have no check row.
 - **Volatile rows.** These are files whose name stays the same across upstream versions:
   `=latest` templates such as the Metasploit installers, `SHA256SUMS`, and `current/`
   directories. Those with a digest (the Kali ISOs) are checked against this run's digest,

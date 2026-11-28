@@ -1,8 +1,8 @@
 # data/ — the catalog TSVs
 
 Pipe-delimited (`|`) catalogs that decide what to mirror: the librarian's fill reads `installers.tsv`,
-`models-extra.tsv` and `essentials.tsv`; the standalone mirror CLIs (run by hand, outside the fill)
-read `dev-stack.tsv`, `apt-sets.tsv` and `source-repos.tsv`. Edit here to add
+`models-extra.tsv` and `essentials.tsv`; the mirror CLIs outside the fill read `dev-stack.tsv` (run
+by the loop's step 5d), `apt-sets.tsv` and `source-repos.tsv` (run by hand). Edit here to add
 freely-redistributable install media or a small high-value model; the header comment inside each
 file is the canonical schema.
 
@@ -17,6 +17,8 @@ file is the canonical schema.
 | `essentials.tsv` | Grid-down **essentials**, ranked: what the box must hold first if the internet disappears (water, medicine, food, shelter, a pocket encyclopedia + small assistant, repair/power/radio, netboot). The planner takes these in rank order before any other phase, smallest variant first. Schema `rank\|kind\|match\|focus\|note` (`kind` = zim/model/inst, `focus` = `all` or profiles). |
 | `models-extra.tsv` | Curated small, high-value models that broaden modality diversity (embeddings, rerankers, tiny VLMs, OCR, speech, safety, plus setup-assistant chat LLMs). |
 | `dev-stack.tsv` | The developer + security stack: projects (not files) whose **current release** `scripts/lib/release_mirror.py` resolves live for every platform: Python, compilers, decompilers, security tools, containers/Kubernetes, cloud, S3 storage, databases, everyday CLI tools. Schema `rank\|kind\|ref\|match\|group\|note`; `match` is a regex and may contain `\|` (ref, group and note never do). |
+| `dev-stack-guides/<key>.md` | Offline guides for dev-stack projects (#397): what it is for with the internet gone, install per platform from the mirrored files, first steps offline. Shown on the project's card in **Library ▸ Developer stack** and written beside its files as `INSTALL.txt` by `release_mirror.py fetch`. |
+| `dev-stack-checks.tsv` | Run checks for dev-stack projects (#397): which mirrored file to take for the host platform, the program inside, its arguments and the expected output. Read by `scripts/lib/devstack.js checks` for `verify.sh` (`verify_devstack`). Schema `ref\|file\|binary\|args\|expect`. |
 | `static-descriptions.json` | Descriptions for the static browse pages (`scripts/lib/static_site.py`) where nothing else has one: `zim` = Kiwix project → sentence template (`{topic}`, `{lang}`, `{flavour}`, `{topic_in}`, `{topic_on}`, `{topic_paren}`, `{site}`), `tools` = folder name → sentence (Tools & apps and Software releases only). Optional: anything missing still gets a generated sentence. |
 | `source-repos.tsv` | Curated upstream source repos (`value\|owner/repo\|group`, ~240: toolchains/OS, firmware, containers, CAD, robotics, Jetson, ML, LLM inference, LAMP/LAN servers, self-hosted apps) mirrored as full-history git bundles by `scripts/lib/git_bundle_mirror.py`. |
 
@@ -46,6 +48,17 @@ with `source:X` (tests/test-server-stack.sh checks it).
 rank|kind|ref|match|group|note
 ```
 
+`dev-stack-checks.tsv`:
+
+```
+ref|file|binary|args|expect
+```
+
+`dev-stack-guides/<key>.md`: one file per project, named by the row's key. `key` is
+`<owner>__<repo>` for a `gh` row, the kind alone for `go`, and `<kind>__<ref slug>` otherwise
+(the ref without its URL scheme, `/` written `__`, other unusual characters `-`), e.g.
+`caddyserver__caddy.md`, `go.md`, `index__download.docker.com__linux__static__stable__x86_64.md`.
+
 `essentials.tsv`:
 
 ```
@@ -74,7 +87,20 @@ value|id|category|repo|file|format|gated|bytes|dest|note
   `kind` picks the resolver (`gh | index | gnu | go | python | pypi | pypi-top | template | snap`, see
   the header of `scripts/lib/release_mirror.py`); `match` is a regex for most kinds and may contain
   `|`, because everything between `ref` and the last two fields is the match. `ref`, `group` and
-  `note` must not contain `|`.
+  `note` must not contain `|`. The `note` is also the project's description on its
+  Developer stack card, so write it for a person.
+- `dev-stack-checks`: `ref` is the project's `ref` in `dev-stack.tsv`, exactly. `file` is a
+  JavaScript regex over the file names of the newest mirrored version; only files for the host
+  platform are tried, so it just has to pick the right archive (it may contain `|`). `binary`
+  is the program's path inside the archive (`*` wildcards allowed; only that member is
+  unpacked; further space-separated members are unpacked with it), or `.` when the file is the
+  program (bare, `.bz2` or `.xz`). `args` are space-separated. `expect` is a `grep -E` regex
+  for the output and must not contain `|`. No row for GUI or installer apps.
+- `dev-stack-guides`: plain text with light markdown only (`#` / `##` headings, `-` lists,
+  fenced code, `` `code` ``, `**bold**`); the web UI escapes everything else. Start with
+  `# Name`, keep it to about 60 lines, and write only commands you ran against the mirrored
+  build or are sure of from the project's own documentation. A file whose whole body is `see: <key>` shares that key's
+  guide (the two Docker engine rows, the two Temurin rows).
 
 ## Consumers (change a column position → breakage)
 
@@ -85,7 +111,13 @@ value|id|category|repo|file|format|gated|bytes|dest|note
 - `scripts/loop.sh` — link-checks the `url` field on the self-heal cycle.
 - `scripts/lib/apt_offline.py` — reads `apt-sets.tsv` (`sets` / `resolve` / `fetch` / `index` / `build`).
 - `scripts/lib/release_mirror.py` — reads `dev-stack.tsv` (`plan` / `fetch`); `tests/test-release-mirror.sh`
-  checks that every row parses and that no kind+ref+match appears twice.
+  checks that every row parses and that no kind+ref+match appears twice. `fetch` also reads
+  `dev-stack-guides/` (`guide_key`) to write each project's `INSTALL.txt`.
+- `scripts/lib/devstack.js` — reads `dev-stack.tsv`, `dev-stack-guides/` and `dev-stack-checks.tsv` for
+  `server.js` (`/api/devstack`, the guide endpoint) and `verify.sh`. Its `refKey` and
+  `release_mirror.py`'s `guide_key` are the same rule in two languages, and its `projectPath` follows
+  `release_mirror.py`'s dest layout: change them together (`tests/test-devstack-ui.sh` compares the keys
+  of every row and checks every guide and check row against the catalog).
 
 `#` and blank lines are skipped by every consumer.
 

@@ -33,7 +33,7 @@ Then it fills in this order, until the disk reaches its reserve:
 1. **Essentials**, as above.
 2. **Apps and tools**: the mirrored tools and the developer + security stack. They start
    once the essentials are held, and the developer stack gets a bounded share of the disk
-   (25% by default, `VALARK_DEVSTACK_PCT`), never all of it.
+   (25% by default, `VALARK_DEVSTACK_PCT`), never all of it. Browse it under **Library ▸ Developer stack**.
 3. **The library**: Kiwix libraries (books, references, videos), Lastbook, **and the
    installers** (OS images, router firmware, Jetson boards), ranked by value so a small
    disk still gets its libraries.

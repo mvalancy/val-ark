@@ -102,11 +102,11 @@ test.describe('Legacy deep links still render (no Home fallback) (#61 / #91)', (
   });
 });
 
-test.describe('Library sub-nav consolidates the four browse surfaces (#61 / #91)', () => {
-  const SUB_TABS = ['Software', 'AI Models', 'Offline Library', 'Downloads'];
+test.describe('Library sub-nav consolidates the browse surfaces (#61 / #91 / #397)', () => {
+  const SUB_TABS = ['Software', 'AI Models', 'Offline Library', 'Developer stack', 'Downloads'];
 
-  for (const route of ['#/tools', '#/models', '#/content', '#/packages']) {
-    test(`sub-nav shows the four surfaces on ${route}`, async ({ page }) => {
+  for (const route of ['#/tools', '#/models', '#/content', '#/devstack', '#/packages']) {
+    test(`sub-nav shows every surface on ${route}`, async ({ page }) => {
       await page.goto(`file://${WEB_UI}${route}`);
       await page.waitForSelector('.library-nav', { timeout: 10000 });
       const tabs = page.locator('.library-nav .lib-tab');
@@ -121,6 +121,7 @@ test.describe('Library sub-nav consolidates the four browse surfaces (#61 / #91)
     await page.waitForSelector('.library-nav', { timeout: 10000 });
     await expect(page.locator('.library-nav a:has-text("AI Models")')).toHaveAttribute('href', '#/models');
     await expect(page.locator('.library-nav a:has-text("Offline Library")')).toHaveAttribute('href', '#/content');
+    await expect(page.locator('.library-nav a:has-text("Developer stack")')).toHaveAttribute('href', '#/devstack');
     await expect(page.locator('.library-nav a:has-text("Downloads")')).toHaveAttribute('href', '#/packages');
     // Clicking a sub-tab navigates and re-highlights.
     await page.click('.library-nav a:has-text("Downloads")');

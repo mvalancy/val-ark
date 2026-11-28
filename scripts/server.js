@@ -12,7 +12,7 @@
 //   L205–222   Status Cache — invalidateCache + status/SSE memo
 //   L223–347   Download Manager — broadcastSSE + jobManager (lib/jobs.js) / startFromDesc / cancel / retry (SSE)
 //   L348–526   Status Helpers (cached) — getDisk/Tools/Content/Models (/api/status/*)
-//   L527–976   Packages manifest — getPackages (/api/packages) + storage/catalog helpers
+//   L527–976   Packages manifest — getPackages (/api/packages) + storage/catalog helpers + getDevstack (/api/devstack)
 //   L977–1573  Request Handling — auth/CORS helpers + handleAPI (~48 /api/… routes)
 //   L1574–2863 Static File Serving — serveStatic / serveArchive (Range) / pipeProxy
 //   L2864–2944 TLS / local-CA — cert/key, /ca.crt, serveBootstrap (/bootstrap.sh)
@@ -29,6 +29,7 @@ const { execSync, execFile, execFileSync, spawn, spawnSync } = require('child_pr
 const { parseCatalogTSV } = require('./lib/catalog-parse');
 const { createJobManager, bestReason } = require('./lib/jobs');
 const { shallowDirInfo, scanToolDir, verifyToolMirror } = require('./lib/tool-scan');
+const devstack = require('./lib/devstack');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -99,9 +100,11 @@ const MODEL_ROOT = (() => {
 // <VALARK_HOME>/state, physically separate from the content/model libraries.
 const auth = require('./lib/auth');
 const commission = require('./lib/commission');
-const STATE_DIR = process.env.VALARK_STATE_DIR
-    || (process.env.VALARK_HOME ? path.join(process.env.VALARK_HOME, 'state')
-        : path.join(DATA_ROOT === ROOT ? ROOT : path.join(DATA_ROOT, 'val-ark'), 'state'));
+const VALARK_HOME = process.env.VALARK_HOME || (DATA_ROOT === ROOT ? ROOT : path.join(DATA_ROOT, 'val-ark'));
+const STATE_DIR = process.env.VALARK_STATE_DIR || path.join(VALARK_HOME, 'state');
+// The developer stack (data/dev-stack.tsv, mirrored by lib/release_mirror.py), where
+// valark-env.sh puts it: VALARK_DEVSTACK_DIR, else <VALARK_HOME>/dev-stack.
+const DEVSTACK_DIR = cfg('VALARK_DEVSTACK_DIR') || path.join(VALARK_HOME, 'dev-stack');
 
 // Grandfather existing installs: a box set up the old way (before the wizard) already
 // holds mirrored tools/content/models — don't hijack a working Ark with first-boot
@@ -891,6 +894,7 @@ async function computeStorage() {
         { key: 'tools',      label: 'Software & Tools',        color: '#4ade80', dir: path.join(ROOT, 'tools') },
         { key: 'installers', label: 'OS Installers',           color: '#fbbf24', dir: path.join(ROOT, 'installers') },
         { key: 'sources',    label: 'Source Code',             color: '#f472b6', dir: path.join(ROOT, 'sources') },
+        { key: 'devstack',   label: 'Developer Stack',         color: '#22d3ee', dir: DEVSTACK_DIR },
     ];
     const categories = [];
     for (const d of defs) {
@@ -913,6 +917,23 @@ function getStorageStatus() {
     // lightweight "computing" placeholder (the UI shows its static estimate until
     // real numbers land, then refines).
     return _storageCache.data || { categories: [], total: 0, zimCount: 0, disk: getDiskStatus(), computing: true };
+}
+
+// The developer stack for Library ▸ Developer stack (#397): every data/dev-stack.tsv row
+// joined with what DEVSTACK_DIR holds (lib/devstack.js: async, bounded reads). Cached like
+// the other status helpers; concurrent requests share one scan.
+const DEVSTACK_GUIDES = path.join(ROOT, 'data', 'dev-stack-guides');
+let _devstackCache = { data: null, ts: 0 };
+let _devstackComputing = null;
+function getDevstack() {
+    if (_devstackCache.data && (Date.now() - _devstackCache.ts) < CACHE_TTL) return Promise.resolve(_devstackCache.data);
+    if (!_devstackComputing) {
+        _devstackComputing = devstack.listing(path.join(ROOT, 'data', 'dev-stack.tsv'), DEVSTACK_GUIDES, DEVSTACK_DIR)
+            .catch(() => ({ groups: [], projects: [] }))
+            .then((data) => { _devstackCache = { data, ts: Date.now() }; return data; })
+            .finally(() => { _devstackComputing = null; });
+    }
+    return _devstackComputing;
 }
 
 // Catalog of downloadable-but-absent resources (live Kiwix OPDS for content, the
@@ -1138,6 +1159,7 @@ function isReadGated(urlPath) {
     // The packages manifest enumerates the library (what's on the box) → gate it
     // like the archive/catalog reads it points at, not like the open UI shell.
     if (urlPath === '/api/packages') return true;
+    if (urlPath === '/api/devstack' || urlPath === '/api/devstack/guide') return true;   // same: what the dev-stack tree holds
     if (urlPath === '/kiwix' || urlPath.startsWith('/kiwix/')) return true;
     if (/^\/app\//.test(urlPath)) return true;
     // The raw data/content trees the static router serves straight from ROOT (the
@@ -1456,6 +1478,19 @@ function handleAPI(req, res, urlPath) {
                 // like the library it enumerates (see isReadGated). Distinct from
                 // /api/catalog/* (the upstream not-yet-downloaded browse feed).
                 return sendJSON(res, req, getPackages());
+            case '/api/devstack':
+                return getDevstack().then((d) => sendJSON(res, req, d));
+            case '/api/devstack/guide': {
+                // ?ref= is only ever compared with the catalog's own keys (never used as a path).
+                let ref = '';
+                try { ref = new URL(req.url, 'http://localhost').searchParams.get('ref') || ''; } catch (_) {}
+                return getDevstack().then(async (d) => {
+                    const p = d.projects.find((x) => x.key === ref);
+                    const text = p ? await devstack.guide(DEVSTACK_GUIDES, p.key, new Set(d.projects.map((x) => x.key))) : null;
+                    if (text === null) return sendJSON(res, req, { error: 'No guide for that project' }, 404);
+                    sendJSON(res, req, { key: p.key, name: p.name, guide: text });
+                });
+            }
             case '/api/downloads/stream': {
                 // SSE connection limits: a global pool cap AND a per-IP cap, so one peer
                 // can't monopolise the progress stream for every other client/tab.
@@ -1805,19 +1840,24 @@ function escapeHtml(s) {
 // visitors pull app binaries per platform. A file streams as an attachment; a
 // directory streams as a gzipped tar (via system `tar`, zero-dep). Only paths
 // inside the allowed data dirs are served; traversal is rejected.
-const ARCHIVE_DIRS = ['tools', 'models', 'content', 'sources', 'assets', 'installers'];
+// Each served name maps to its directory: the repo-root trees (symlinks onto the data
+// disk), and the developer stack, which has no repo symlink and lives at DEVSTACK_DIR.
+const ARCHIVE_DIRS = Object.assign(Object.create(null),
+    Object.fromEntries(['tools', 'models', 'content', 'sources', 'assets', 'installers'].map((d) => [d, path.join(ROOT, d)])),
+    { 'dev-stack': DEVSTACK_DIR });
 function serveArchive(res, req, relPath) {
     let clean;
     try { clean = decodeURIComponent(relPath); } catch (_) { clean = relPath; }
     clean = path.normalize(clean).replace(/^([/\\]|\.\.[/\\]?)+/, '');
     const top = clean.split(/[/\\]/)[0];
-    if (!ARCHIVE_DIRS.includes(top)) return send404(res);
-    const target = path.join(ROOT, clean);
-    if (!isPathSafe(target, path.join(ROOT, top))) return send404(res);
+    const topDir = ARCHIVE_DIRS[top];
+    if (!topDir) return send404(res);
+    const target = path.join(topDir, clean.slice(top.length));
+    if (!isPathSafe(target, topDir)) return send404(res);
     // Beyond the lexical check: an in-tree symlink could point outside ROOT and
     // fs.stat would follow it. Require the realpath to stay within the (realpathed)
     // top-level served dir before serving. Dangling links → null → 404. (#101)
-    if (realpathWithin(target, path.join(ROOT, top)) === null) return send404(res);
+    if (realpathWithin(target, topDir) === null) return send404(res);
 
     fs.stat(target, (err, stat) => {
         if (err) return send404(res);

@@ -109,6 +109,57 @@ verify_gitea() {
     fi
 }
 
+# Put the program a dev-stack check names into DIR and print its path. Only the named archive
+# members are unpacked ('*' wildcards allowed; the first is the program, any others are files
+# it cannot start without); a bare, .bz2 or .xz file is the program itself.
+_devstack_program() {
+    local file="$1" dir="$3" exe bin members
+    read -ra members <<< "$2"; bin="${members[0]}"
+    case "$file" in
+        *.tar.gz|*.tgz|*.tar.xz|*.tar.bz2)   # GNU tar needs --wildcards, bsdtar matches patterns as-is
+            timeout 300 tar -xf "$file" -C "$dir" --wildcards "${members[@]}" 2>/dev/null || \
+            timeout 300 tar -xf "$file" -C "$dir" "${members[@]}" 2>/dev/null ;;
+        *.zip) timeout 300 unzip -qo "$file" "${members[@]}" -d "$dir" 2>/dev/null ;;
+        *.bz2) timeout 300 bunzip2 -c "$file" > "$dir/program" 2>/dev/null ;;
+        *.xz)  timeout 300 xz -dc "$file" > "$dir/program" 2>/dev/null ;;
+        *)     cp "$file" "$dir/program" 2>/dev/null ;;
+    esac || return 1
+    [ "$bin" = . ] && bin=program
+    exe=$(find "$dir" -type f -name "${bin##*/}" 2>/dev/null | head -1)
+    [ -n "$exe" ] && chmod +x "$exe" 2>/dev/null && echo "$exe"
+}
+
+verify_devstack() {
+    # The developer stack's run checks (#397): for each data/dev-stack-checks.tsv row whose
+    # project is mirrored, lib/devstack.js names the newest version's file for THIS platform;
+    # its program is pulled into a temp dir and run there with a timeout, HOME pointed at the
+    # temp dir, stdin closed. PASS / FAIL / SKIP per project. Nothing is installed or fetched,
+    # and a tree that is not mirrored here has nothing to check.
+    local platform="$1" data="${_LIB}/../../data" node t n=0
+    [ -d "$DEVSTACK_DIR" ] || return 0
+    node="$HOME/.local/node/bin/node"; [ -x "$node" ] || node="$(command -v node 2>/dev/null)"
+    [ -n "$node" ] || { skip "dev-stack run checks: node not found"; return 0; }
+    t=$(mktemp -d "${TMPDIR:-/tmp}/valark-verify-devstack.XXXXXX") || return 0
+    local status name file bin args expect d exe out rc
+    while IFS=$'\x1f' read -r status name file bin args expect; do
+        if [ "$status" != run ]; then skip "tool present: dev-stack $name has no $platform build to run"; continue; fi
+        n=$((n+1)); d="$t/$n"; mkdir -p "$d"
+        if exe=$(_devstack_program "$file" "$bin" "$d"); then
+            # shellcheck disable=SC2086  # args is a space-separated list from our own TSV
+            out=$(cd "$d" && HOME="$d" timeout 30 "$exe" $args 2>&1 </dev/null); rc=$?
+            if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -Eq -- "$expect"; then
+                chk "tool runs: dev-stack $name (${file##*/})"
+            else
+                bad "tool present but won't run: dev-stack $name (${file##*/}: $(printf '%s' "$out" | head -1 | cut -c1-120))"
+            fi
+        else
+            skip "tool present: dev-stack $name could not be unpacked to run (${file##*/})"
+        fi
+        rm -rf "${d:?}"
+    done < <("$node" "${_LIB}/devstack.js" checks "$data/dev-stack-checks.tsv" "$data/dev-stack.tsv" "$DEVSTACK_DIR" "$platform" 2>/dev/null)
+    rm -rf "${t:?}"
+}
+
 verify_local() {
     echo "── local functional checks ──"
     local td; td=$(native_tools_dir)
@@ -131,6 +182,7 @@ verify_local() {
     done
     [ "$any_tool" = 0 ] && skip "no native tool binaries in $td yet"
     verify_gitea "$td"
+    verify_devstack "${td##*/}"
 
     # 1b) cad-agent's mirrored wheelhouse installs OFFLINE (pip --no-index) into a
     # throwaway venv and the CLI runs. Core package only: the full extras set is

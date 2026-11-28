@@ -16,6 +16,7 @@ later). See [README](README.md).
 
 | Date | Decision | Issue / Phase |
 |------|----------|---------------|
+| 2026‑11 | [Dev-stack apps get generated cards + guides + checks, not hand-written TOOLS entries](#202611--dev-stack-apps-get-generated-cards--guides--checks-not-hand-written-tools-entries-397) | #397 |
 | 2026‑11 | [Apps and the library before AI models: class order, app mirrors before the fill](#202611--apps-and-the-library-before-ai-models-class-order-app-mirrors-before-the-fill-347) | #347 |
 | 2026‑11 | [Offline gaps live in issues, not a doc](#202611--offline-gaps-live-in-issues-not-a-doc-384) | #384 |
 | 2026‑11 | [Setup keeps its promises: a .local name when avahi can, a first fill, the cron is the admin's call](#202611--setup-keeps-its-promises-a-local-name-when-avahi-can-a-first-fill-the-cron-is-the-admins-call-306) | #306 |
@@ -50,6 +51,34 @@ later). See [README](README.md).
 | — | [Earlier project facts (fleet, curation)](#earlier-project-facts-fleet-curation) | — |
 
 ---
+
+## 2026‑11 — Dev-stack apps get generated cards + guides + checks, not hand-written TOOLS entries (#397)
+**Context:** fifteen `offline-gap` issues each asked for the same three things for an app
+`data/dev-stack.tsv` already mirrors: a Software card, an install hint and a check that it runs.
+The Software page's way of doing that is the "Adding a New Tool" checklist: a `TOOLS` entry, a
+`TOOL_META` entry, a logo, a screenshot, a tool script and a spec id, per app.
+- **Decision.** Dev-stack apps do not get `TOOLS` entries. **Library ▸ Developer stack** is
+  generated: `GET /api/devstack` (`scripts/lib/devstack.js`) joins the list with what the box
+  holds, and the page draws one card per row. The install hint is a guide file
+  (`data/dev-stack-guides/<key>.md`), shown on the card and written beside the files as
+  `INSTALL.txt` by `release_mirror.py`. The run check is a row in `data/dev-stack-checks.tsv`,
+  run by `verify.sh verify_devstack`.
+- **Why.** The list has about 230 projects and changes by one line at a time. Hand-written cards
+  would mean six files per app in an 8,000-line page, a second mirror script for files the loop
+  already fetches, and a card that goes stale when a release renames its assets. A generated
+  card cannot disagree with the disk: versions, files, sizes and platforms are read from it.
+- **What a row still needs by hand.** Only prose that cannot be generated: the `note`
+  (the card's description), a guide when the app is worth one, and a check row when it has a
+  command line. A guide stays short and holds only commands its author ran against the
+  mirrored build or is sure of from the project's documentation.
+- **One reader of the layout per language.** `devstack.js` follows `release_mirror.py`'s dest
+  layout and key rule; `verify.sh` asks `devstack.js` which file to run rather than learning
+  the layout a third time. A test compares the keys of every row across the two.
+- **Guides are data, served by key.** The guide endpoint only answers for a key computed from
+  the list, so a request can never name a path. The page renders a guide as escaped text with
+  a few markdown marks.
+- **Not done here.** No logos or screenshots for these cards; no Ark-run services (registry,
+  Headscale, croc relay); no DuckDB extension mirror. Those stay in their own issues.
 
 ## 2026‑11 — Apps and the library before AI models: class order, app mirrors before the fill (#347)
 **Owner's call:** "prioritize downloading all apps and library content before any more AI models

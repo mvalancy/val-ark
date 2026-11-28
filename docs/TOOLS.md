@@ -173,6 +173,24 @@ and run GPU inference on the served models over the network. The 24/7 verify loo
 
 ---
 
+## Developer stack
+
+The developer + security stack (`data/dev-stack.tsv`, about 230 projects: compilers, Docker,
+Caddy, Headscale, Prometheus, databases, backup and security tools) is **not** in the tables
+above and has no `TOOLS` entry. Its cards under **Library ▸ Developer stack** are generated
+from the list and from what the box holds, so adding a row is all it takes to get a card
+([LIBRARIAN.md](LIBRARIAN.md#developer--security-stack-release_mirrorpy)).
+
+| To add | Where | Schema |
+|--------|-------|--------|
+| A project | `data/dev-stack.tsv` | `rank\|kind\|ref\|match\|group\|note` (the note is the card's description) |
+| Its offline guide (card detail + `INSTALL.txt` beside the files) | `data/dev-stack-guides/<key>.md` | plain text with light markdown, about 60 lines at most |
+| Its run check (`verify.sh`, Health page) | `data/dev-stack-checks.tsv` | `ref\|file\|binary\|args\|expect` |
+
+Guides exist today for Gitea, the Docker static engine, Compose, Buildx, the registry
+(distribution), Caddy, Headscale, Git for Windows, CMake, Ninja, KeePassXC, rclone, restic,
+age, croc, Prometheus, node_exporter, Alertmanager, DuckDB, Go, the Temurin JDK and Ventoy.
+
 ## Content mirrors
 
 Tool scripts that mirror a content release rather than an app, so they have no Software card.
@@ -269,7 +287,9 @@ hint says so and points at the x86_64 AppImage or OrcaSlicer (which ships arm64 
 There is **no upstream prebuilt aarch64 CUDA binary** for llama.cpp, whisper.cpp, or
 stable-diffusion.cpp, so GPU acceleration on Jetson / GB10 requires a source build.
 `scripts/download-tools.sh` clones the source repos; you then compile with the right
-acceleration flag for your platform:
+acceleration flag for your platform. A box with no CMake gets it, and Ninja, from
+**Library ▸ Developer stack** (`dev-stack/toolchains/Kitware/CMake/` and
+`dev-stack/toolchains/ninja-build/ninja/` on the disk; each has an `INSTALL.txt`):
 
 | Platform | Flag | Notes |
 |----------|------|-------|

@@ -153,7 +153,7 @@ DIAGRAMS = {
         },
         edges=[('ark', 'src', 'copies itself', 0), ('ark', 'peer', 'P2P sync', 0), ('ark', 'mesh', 'NFS export', 0),
                ('ark', 'laptop', 'file share', 0), ('src', 'new', 'installs offline', 0), ('new', 'ark2', '', 0)],
-        used=['docs/OFFLINE.md', 'docs/ARCHITECTURE.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/OFFLINE.md', 'docs/ARCHITECTURE.md']),
     'community': dict(
         title='The village square',
         sub='Chat, mail, boards and file drops run on the box and open inside the web UI.',
@@ -173,7 +173,7 @@ DIAGRAMS = {
         edges=[('env', 'loop', '', 0), ('env', 'start', 'enables', 0), ('start', 'svc', '', 0), ('loop', 'svc', '', 0),
                ('acct', 'svc', '', 0), ('svc', 'proxy', '', 0),
                ('proxy', 'chat', '', 0), ('proxy', 'board', '', 0)],
-        used=['docs/COMMUNITY.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/COMMUNITY.md']),
     'moderation': dict(
         title='Keeping shared files safe',
         sub='Files in the uploads folder are checked on the box by a local model. Doubtful ones wait for the Admin.',
@@ -192,7 +192,7 @@ DIAGRAMS = {
         edges=[('up', 'sweep', '', 0), ('sweep', 'model', '', 0), ('model', 'hold', '', 0),
                ('hold', 'quar', 'flagged or unsure', 0), ('model', 'shared', 'clean', 0),
                ('quar', 'review', '', 0)],
-        used=['docs/design/safety-moderation.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/design/safety-moderation.md']),
     'setup': dict(
         title='Setting up a new box',
         sub='A few screens in a browser. Then the 24/7 loop fills the disk on its own.',
@@ -210,7 +210,7 @@ DIAGRAMS = {
         },
         edges=[('welcome', 'claim', '', 0), ('claim', 'name', '', 0), ('name', 'pass', '', 0),
                ('pass', 'focus', '', 0), ('focus', 'card', '', 'elbow'), ('card', 'fill', '', 0), ('fill', 'open', '', 0)],
-        used=['docs/design/commissioning.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/design/commissioning.md']),
     'serving': dict(
         title='Two ways to open an Ark',
         sub='Static pages on any file share, or the live web server. Both work fully offline.',

@@ -461,6 +461,185 @@ def island(t, theme, h):
     return ''.join(p)
 
 
+def smooth(pts):
+    """A smooth path through the points (Catmull-Rom, as cubic Béziers)."""
+    d = [f'M{pts[0][0]} {pts[0][1]}']
+    for i in range(len(pts) - 1):
+        p0, p1, p2, p3 = pts[max(i - 1, 0)], pts[i], pts[i + 1], pts[min(i + 2, len(pts) - 1)]
+        d.append(f'C{p1[0] + (p2[0] - p0[0]) / 6:.0f} {p1[1] + (p2[1] - p0[1]) / 6:.0f} '
+                 f'{p2[0] - (p3[0] - p1[0]) / 6:.0f} {p2[1] - (p3[1] - p1[1]) / 6:.0f} {p2[0]} {p2[1]}')
+    return ''.join(d)
+
+
+TRAIL = (  # (x, y, icon, label, caption): the setup screens, in order
+    (110, 440, 'house', 'Welcome', 'in any browser'), (252, 352, 'key', 'Claim code', 'from another device'),
+    (392, 250, 'board', 'Name it', 'a name for the box'), (540, 304, 'lock', 'Admin passcode', 'optional'),
+    (672, 420, 'leaf', 'Focus', 'survival, AI, tools…'), (822, 396, 'paste', 'Recovery card', 'print or save it'),
+    (944, 286, 'disk', 'Filling', 'by the 24/7 loop'), (1086, 212, 'globe', 'Open mode', 'change it later'),
+)
+
+
+def trail(t, theme, h):
+    """Chapter 7: setting up a new box, as a trail of stepping stones across the hills."""
+    rnd = random.Random(71)
+    p = [sky(t, h, rnd, theme, (160, 150, 24), stars=36, horizon=.3), '<g clip-path="url(#page)">',
+         f'<path d="M0 300C180 210 330 170 520 230S860 120 1200 150V{h}H0Z" fill="{t["far"]}"/>',
+         f'<path d="M0 420C240 330 420 470 660 400S1000 300 1200 330V{h}H0Z" fill="{t["near"]}"/>',
+         f'<path d="M0 520C300 480 560 540 820 500S1080 470 1200 480V{h}H0Z" fill="{t["ground"]}"/>']
+    for x, y, k in ((60, 300, .9), (330, 420, 1.1), (470, 170, .8), (760, 250, 1), (890, 480, 1.2), (1150, 330, .9), (610, 500, 1)):
+        p.append(icon('tree', x, y, k, t['ground'] if y < 320 else t['far']))
+    d = smooth([(x, y) for x, y, *_ in TRAIL])
+    p.append(f'<path d="{d}" fill="none" stroke="{t["cream"]}" stroke-width="16" stroke-linecap="round" opacity=".75"/>'
+             f'<path d="{d}" fill="none" stroke="{t["line"]}" stroke-width="2.5" stroke-dasharray="3 9" stroke-linecap="round"/>')
+    for i, (x, y, ic, label, cap) in enumerate(TRAIL):
+        a = ACCENTS[i % len(ACCENTS)]
+        p.append(f'<g class="pop" style="animation-delay:{.2 + i * .25:.2f}s"><ellipse cx="{x}" cy="{y + 6}" rx="34" ry="12" fill="#000" opacity=".18"/>'
+                 f'<circle cx="{x}" cy="{y}" r="30" fill="{t["wall"]}" stroke="{a}" stroke-width="4"/>' + icon(ic, x, y, .78, a) +
+                 f'<circle cx="{x - 26}" cy="{y - 24}" r="11" fill="{a}"/><text x="{x - 26}" y="{y - 20}" class="sm m" style="fill:#fff">{i + 1}</text></g>')
+        ly = y + 54 if i != 2 else y - 58
+        p.append(text(x, ly, 'lb h m', label) + text(x, ly + 18, 'cp h m', cap))
+    fx, fy = TRAIL[-1][0], TRAIL[-1][1]
+    p.append(f'<path d="M{fx + 34} {fy + 4}V{fy - 62}" stroke="{t["ink"]}" stroke-width="3" stroke-linecap="round"/>'
+             f'<path d="M{fx + 35} {fy - 62}l34 11-34 11Z" fill="{t["roof"]}" class="sway"/>')
+    p.append(f'<g class="go" style="offset-path:path(\'{d}\');animation-duration:18s">'
+             f'<circle r="11" fill="{t["lit"]}" stroke="{t["ink"]}" stroke-width="2.5"/><circle r="22" fill="{t["glow"]}" opacity=".3"/></g>')
+    p.append(text(1144, 520, 'it h e', 'A few screens in a browser. Then the Ark fills itself.'))
+    p.append('</g>')
+    return ''.join(p)
+
+
+NOTES = (  # (icon, title, line 1, line 2, accent, tilt)
+    ('chat', 'Chat', 'rooms in the browser', 'IRC underneath', 2, -3), ('mail', 'Mail', 'webmail on the box', 'the Admin adds logins', 0, 2),
+    ('board', 'Boards', 'a forum for the', 'whole network', 3, -1.5), ('paste', 'File drop', 'share a note or', 'a file by link', 5, 2.5),
+    ('terminal', 'Git forge', 'host your code', 'with Gitea', 1, -2),
+)
+
+
+def cork(t, theme, h):
+    """Chapter 8: the community services, as notes pinned to the village noticeboard."""
+    rnd = random.Random(83)
+    ink = '#2a1a04'
+    p = [sky(t, h, rnd, theme, None, stars=0), '<g clip-path="url(#page)">',
+         f'<rect x="52" y="108" width="1096" height="428" rx="10" fill="{t["wood2"]}"/>',
+         f'<rect x="68" y="124" width="1064" height="396" rx="4" fill="{t["wood"]}"/>']
+    for _ in range(90):   # cork speckle
+        p.append(f'<circle cx="{rnd.uniform(76, 1124):.0f}" cy="{rnd.uniform(132, 512):.0f}" r="{rnd.choice((1.5, 2, 3))}" fill="{t["wood2"]}" opacity=".45"/>')
+    for i, (ic, title, l1, l2, ai, tilt) in enumerate(NOTES):
+        x, y, a = 96 + i * 206, 150 + (i % 2) * 10, ACCENTS[ai]
+        cx = x + 90
+        p.append(f'<g transform="rotate({tilt} {cx} {y})"><g class="sway" style="animation-delay:-{i * 1.1:.1f}s;animation-duration:{6 + i}s">'
+                 f'<rect x="{x + 4}" y="{y + 5}" width="180" height="176" fill="#000" opacity=".2"/>'
+                 f'<rect x="{x}" y="{y}" width="180" height="176" fill="{t["cream"]}"/><rect x="{x}" y="{y}" width="180" height="8" fill="{a}"/>'
+                 + icon(ic, cx, y + 58, 1.15, a) +
+                 f'<text x="{cx}" y="{y + 112}" class="it m" style="font-size:22px;fill:{ink}">{esc(title)}</text>'
+                 f'<text x="{cx}" y="{y + 137}" class="cp m" style="fill:{ink}">{esc(l1)}</text>'
+                 f'<text x="{cx}" y="{y + 155}" class="cp m" style="fill:{ink}">{esc(l2)}</text>'
+                 f'<circle cx="{cx}" cy="{y + 4}" r="8" fill="{t["roof"]}" stroke="{ink}" stroke-width="1.5"/></g></g>')
+    p.append(f'<g transform="rotate(-.6 600 440)"><rect x="234" y="375" width="740" height="118" fill="#000" opacity=".2"/>'
+             f'<rect x="230" y="370" width="740" height="118" fill="{t["cream"]}"/>'
+             f'<text x="600" y="402" class="ch m" style="fill:#b45309">How they switch on</text>'
+             f'<text x="600" y="430" class="lb m" style="fill:{ink}">Name them in .env, or press Start on the Community page.</text>'
+             f'<text x="600" y="453" class="cp m" style="fill:{ink}">The loop starts the ones you named and keeps them running.</text>'
+             f'<text x="600" y="473" class="cp m" style="fill:{ink}">Each one runs on the box and opens inside the web UI, for your network only.</text>'
+             f'<circle cx="250" cy="382" r="7" fill="{ACCENTS[2]}" stroke="{ink}" stroke-width="1.5"/>'
+             f'<circle cx="950" cy="382" r="7" fill="{ACCENTS[1]}" stroke="{ink}" stroke-width="1.5"/></g>')
+    p.append('</g>')
+    return ''.join(p)
+
+
+def belt(t, theme, h):
+    """Chapter 9: moderation as a sorting machine. A belt, a scanner, and two ways out."""
+    rnd = random.Random(97)
+    good, bad = ACCENTS[1], ACCENTS[4]
+    p = [sky(t, h, rnd, theme, None, stars=0), '<g clip-path="url(#page)">',
+         f'<rect y="470" width="{W}" height="{h - 470}" fill="{t["ground"]}"/>']
+    # the belt, its rollers and its legs
+    p.append(f'<path d="M150 356V470M430 356V470" stroke="{t["line"]}" stroke-width="8"/>'
+             f'<rect x="70" y="318" width="470" height="38" rx="19" fill="{t["wall2"]}" stroke="{t["ink"]}" stroke-width="3"/>')
+    for x in range(92, 530, 44):
+        p.append(f'<g transform="translate({x} 337)"><g class="spin" style="animation-duration:3s"><circle r="11" fill="{t["wall"]}" stroke="{t["ink"]}" stroke-width="2"/>'
+                 f'<path d="M-11 0H11" stroke="{t["ink"]}" stroke-width="2"/></g></g>')
+    run = 'M60 296H560'
+    for k in range(4):
+        p.append(f'<g class="go" style="offset-path:path(\'{run}\');animation-duration:8s;animation-delay:{k * 2}s">'
+                 f'<path d="M-13-18h18l8 8v28h-26Z" fill="{t["cream"]}" stroke="{t["line"]}" stroke-width="2"/>'
+                 f'<path d="M-7-4h14M-7 3h14M-7 10h8" stroke="{t["line"]}" stroke-width="2"/></g>')
+    p.append(text(150, 222, 'lb h m', 'The uploads folder') + text(150, 241, 'cp h m', 'only files that are new'))
+    p.append(f'<path d="M150 250V282" class="ld"/>')
+    # the scanner: an arch the belt runs through, with a lamp
+    p.append(f'<path d="M520 470V250a90 90 0 0 1 180 0V470Z" fill="{t["wall"]}" stroke="{t["ink"]}" stroke-width="3.5"/>'
+             f'<path d="M548 356V280a62 62 0 0 1 124 0v76Z" fill="{t["halo"]}" stroke="{t["line"]}" stroke-width="2"/>'
+             + icon('chip', 610, 296, 1.2, ACCENTS[3]) +
+             f'<circle cx="610" cy="190" r="9" fill="{t["lit"]}" class="tw" style="animation-duration:1.6s"/>'
+             f'<rect x="548" y="386" width="124" height="56" rx="6" fill="{t["wall2"]}"/>'
+             + text(610, 409, 'sm m', 'A local model') + text(610, 427, 'xs m', 'text and images'))
+    p.append(text(610, 136, 'it h m', 'Checked on the box.') + text(610, 156, 'it h m', 'Nothing is sent anywhere.'))
+    # two ways out
+    up, down = 'M700 290C780 290 800 214 880 214', 'M700 330C780 330 800 420 880 420'
+    p.append(f'<path d="{up}" fill="none" stroke="{good}" stroke-width="5" stroke-linecap="round" opacity=".55"/>'
+             f'<path d="{down}" fill="none" stroke="{bad}" stroke-width="5" stroke-linecap="round" opacity=".55"/>')
+    for k in range(2):
+        p.append(f'<circle r="7" fill="{good}" class="go" style="offset-path:path(\'{up}\');animation-duration:4s;animation-delay:{k * 2}s"/>'
+                 f'<circle r="7" fill="{bad}" class="go" style="offset-path:path(\'{down}\');animation-duration:4s;animation-delay:{1 + k * 2}s"/>')
+    p.append(text(790, 236, 'xs h m', 'clean') + text(784, 398, 'xs h m', 'flagged, unsure') + text(784, 412, 'xs h m', 'or an error'))
+    p.append(f'<path d="M884 242H1010" stroke="{t["ink"]}" stroke-width="5" stroke-linecap="round"/>'
+             + ''.join(f'<path d="M{x}-14h12l6 6v20h-18Z" transform="translate(0 222)" fill="{t["cream"]}" stroke="{good}" stroke-width="2"/>' for x in (896, 926, 956))
+             + icon('check', 1040, 216, .8, good) + text(950, 268, 'lb h m', 'Stays shared') + text(950, 287, 'cp h m', 'nothing found'))
+    p.append(f'<rect x="892" y="386" width="92" height="70" rx="6" fill="{t["wall2"]}" stroke="{bad}" stroke-width="3"/>'
+             + icon('lock', 938, 420, .95, bad) + text(938, 480, 'lb h m', 'Quarantine') + text(938, 499, 'cp h m', 'set aside, not deleted'))
+    p.append(f'<path d="M990 420H1082" class="ld"/>' + icon('eye', 1118, 420, 1.1, ACCENTS[6])
+             + text(1118, 480, 'lb h m', 'The Admin') + text(1118, 499, 'cp h m', 'removes or dismisses'))
+    p.append('</g>')
+    return ''.join(p)
+
+
+STARS = dict(  # id -> (x, y, size, label, caption, label side)
+    ark=(250, 300, 26, 'The Ark', 'one data disk', 'w'), src=(250, 480, 13, 'Its own source', 'a bundle and bootstrap.sh', 'w'),
+    peer=(600, 170, 15, 'A syncing peer', 'Syncthing copies models, content', 'e'),
+    gpu=(700, 300, 15, 'A GPU machine', 'runs the models over NFS', 'e'),
+    laptop=(590, 430, 15, 'Any laptop', 'static pages from a share', 'e'),
+    new=(820, 520, 15, 'A new machine', 'installs from the Ark, offline', 'e'),
+    ark2=(1050, 400, 22, 'Another Ark', 'fills up when it is online', 's'),
+)
+LINKS = (('ark', 'src', 'copies itself'), ('ark', 'peer', 'P2P sync'), ('ark', 'gpu', 'NFS export'),
+         ('ark', 'laptop', 'file share'), ('src', 'new', 'curl bootstrap.sh'), ('new', 'ark2', ''))
+
+
+def stars(t, theme, h):
+    """Chapter 10: one Ark and the machines around it, as a constellation on a star chart."""
+    rnd = random.Random(101)
+    p = [sky(t, h, rnd, theme, None, stars=120, horizon=1), '<g clip-path="url(#page)">']
+    if theme == 'light':   # a paper chart: faint grid and ink dots instead of a night sky
+        p.append(''.join(f'<path d="M{x} 0V{h}" stroke="{t["line"]}" stroke-width="1" opacity=".18"/>' for x in range(100, W, 100))
+                 + ''.join(f'<path d="M0 {y}H{W}" stroke="{t["line"]}" stroke-width="1" opacity=".18"/>' for y in range(100, h, 100)))
+        for _ in range(70):
+            p.append(f'<circle cx="{rnd.uniform(20, W - 20):.0f}" cy="{rnd.uniform(14, h - 14):.0f}" r="1.5" fill="{t["line"]}" opacity=".5"/>')
+    p.append(f'<ellipse cx="640" cy="330" rx="520" ry="230" fill="none" stroke="{t["line"]}" stroke-width="1.5" stroke-dasharray="2 10" opacity=".7"/>')
+    for a, b, label in LINKS:
+        (x1, y1, *_), (x2, y2, *_) = STARS[a], STARS[b]
+        d = f'M{x1} {y1}L{x2} {y2}'
+        p.append(f'<path d="{d}" stroke="{t["lit"]}" stroke-width="2" opacity=".65" fill="none"/>')
+        for k in range(2):
+            p.append(f'<circle r="4" fill="{t["glow"]}" class="go" style="offset-path:path(\'{d}\');animation-duration:6s;animation-delay:{k * 3 + len(label) * .1:.1f}s"/>')
+        if label:
+            p.append(text((x1 + x2) / 2 + 8, (y1 + y2) / 2 - 8, 'xs h', label, ' style="font-style:italic"'))
+    for i, (sid, (x, y, r, label, cap, side)) in enumerate(STARS.items()):
+        a = ACCENTS[0] if sid.startswith('ark') else t['lit']
+        q = r * .22
+        p.append(f'<circle cx="{x}" cy="{y}" r="{r * 1.5:.0f}" fill="{a}" opacity=".2" class="pulse" style="animation-delay:-{i * .6:.1f}s"/>'
+                 f'<path d="M{x} {y - r}Q{x + q} {y - q} {x + r} {y}Q{x + q} {y + q} {x} {y + r}Q{x - q} {y + q} {x - r} {y}Q{x - q} {y - q} {x} {y - r}Z" '
+                 f'fill="{a}" stroke="{t["ink"]}" stroke-width="1.2"/>')
+        if side == 'w':
+            p.append(text(x - r - 14, y - 2, 'lb h e', label) + text(x - r - 14, y + 16, 'cp h e', cap))
+        elif side == 'e':
+            p.append(text(x + r + 14, y - 2, 'lb h', label) + text(x + r + 14, y + 16, 'cp h', cap))
+        else:
+            p.append(text(x, y + r + 26, 'lb h m', label) + text(x, y + r + 44, 'cp h m', cap))
+    p.append(text(1144, 82, 'it h e', 'No internet between them.'))
+    p.append('</g>')
+    return ''.join(p)
+
+
 SCENES = {
     'voyage': dict(
         chapter='Chapter 1', title='One Ark, end to end', h=560, draw=voyage,
@@ -503,6 +682,35 @@ SCENES = {
              'both if the Use Mode allows; the admin passcode opens the keep for settings, repair and moderation. Outside the '
              'wall is the sea, the internet: ships come near and are refused: no library and no changes. A sign gives '
              'the Use Mode: Open, Passworded or Accounts; the Admin chooses who gets in, and a new box starts Open.',
+        used=['docs/HOW-IT-WORKS.md']),
+    'trail': dict(
+        chapter='Chapter 7', title='The trail to a working Ark', h=560, draw=trail,
+        desc='A trail of eight stepping stones across the hills, the setup screens in order: '
+             + '; '.join(f'{i + 1} {label} ({cap})' for i, (_, _, _, label, cap) in enumerate(TRAIL))
+             + '. A few screens in a browser, then the Ark fills itself.',
+        used=['docs/HOW-IT-WORKS.md']),
+    'cork': dict(
+        chapter='Chapter 8', title='The village noticeboard', h=560, draw=cork,
+        desc='A cork noticeboard with a note pinned for each community service: '
+             + '; '.join(f'{title} ({l1} {l2})' for _, title, l1, l2, _, _ in NOTES)
+             + '. A wider note says how they switch on: name them in .env, or press Start on the Community page; the loop '
+               'starts the ones you named and keeps them running; each runs on the box and opens inside the web UI, for '
+               'your network only.',
+        used=['docs/HOW-IT-WORKS.md']),
+    'belt': dict(
+        chapter='Chapter 9', title='The sorting machine', h=560, draw=belt,
+        desc='A conveyor belt carries new files from the uploads folder through a scanner: a local model that checks text '
+             'and images on the box, with nothing sent anywhere. Clean files leave by the upper chute and stay shared. '
+             'Files that are flagged, that the model is unsure about, or that hit an error leave by the lower chute into '
+             'quarantine: set aside, not deleted, until the Admin reviews them and removes or dismisses each.',
+        used=['docs/HOW-IT-WORKS.md']),
+    'stars': dict(
+        chapter='Chapter 10', title='The constellation', h=600, draw=stars,
+        desc='A star chart. The brightest star is the Ark, with one data disk. Lines join it to the machines around it: '
+             'a syncing peer (Syncthing copies models and content, P2P), a GPU machine (runs the models over an NFS '
+             'export), any laptop (static pages from a file share), and its own source (a bundle and bootstrap.sh, which it '
+             'copies itself). From that source a new machine installs with curl bootstrap.sh, offline, and becomes another '
+             'Ark, which fills up when it is online. No internet between them.',
         used=['docs/HOW-IT-WORKS.md']),
 }
 

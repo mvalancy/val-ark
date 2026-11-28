@@ -23,11 +23,16 @@ A new box must be *findable* without knowing an IP:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../img/flow/setup-dark.svg">
-  <img src="../img/flow/setup-light.svg" width="100%" alt="Animated diagram: Setting up a new box. A few screens in a browser. Then the 24/7 loop fills the disk on its own.">
+  <img src="../img/flow/setup-light.svg" width="100%" alt="Animated diagram: Setting up a new box. A few screens in a browser. Then the first fill starts; the 24/7 loop keeps it going.">
 </picture>
 
 Each screen: one question, a smart default already filled, a big **Continue**, and an
 optional **"Advanced"** disclosure. Progress dots at the top ("Step 2 of 6").
+
+*As built* (`_setupSteps` in `web-ui/index.html`; the code wins where it differs from the
+design below): Welcome → Setup code (only when you are not on the box) → Name → Admin passcode
+(skippable) → Who can use it → Focus → Ready to go → All set (the address, the recovery card,
+the first fill). The Storage and "Make it easy to open" screens below are not built.
 
 1. **Welcome** — *"Welcome to Val Ark, your offline knowledge box. This takes about 5 minutes — no accounts, no internet needed."* → **Start**.
 

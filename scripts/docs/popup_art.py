@@ -187,7 +187,7 @@ SCENES = {
         links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side')],
         used=['tests/README.md']),
     'how-it-works': dict(chapter='The Picture Book', title='How it works, in pictures',
-        sub='Ten moving diagrams, in reading order, from one disk to a whole network.', backdrop='hills',
+        sub='Ten moving pictures, in reading order, from one disk to a whole network.', backdrop='hills',
         cards=[('disk', 'Fill', None), ('gear', 'Heal', None), ('globe', 'Serve', None),
                ('lock', 'Protect', None), ('chat', 'Gather', None), ('ark', 'Spread', None)],
         links=[(0, 1, 'side'), (1, 2, 'side'), (2, 3, 'side'), (3, 4, 'side'), (4, 5, 'side')],

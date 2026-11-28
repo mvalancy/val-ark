@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Animated "how it works" diagrams for the Val Ark docs (the picture book's explainer pages).
+"""Animated "how it works" diagrams for the Val Ark docs (the precise view, for the reference guides).
 
 Where popup_art.py draws one pop-up scene at the top of each guide, this draws the
 system itself: boxes for the parts, arrows for what flows between them, and dots that
@@ -55,7 +55,7 @@ DIAGRAMS = {
                ('lib', 'disk', 'downloads', 0), ('loop', 'disk', 'repairs', 0), ('loop', 'lib', 'tops up', 0),
                ('loop', 'site', 'rewrites', 0), ('disk', 'srv', '', 0), ('disk', 'site', 'served from', 0),
                ('srv', 'people', 'web UI', 0), ('site', 'share', 'plain HTML', 0)],
-        used=['docs/ARCHITECTURE.md', 'README.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/ARCHITECTURE.md', 'README.md']),
     'fill': dict(
         title='How the Librarian fills a disk',
         sub='Essentials, then apps, the library, then models, until the disk reaches its reserve.',
@@ -66,8 +66,8 @@ DIAGRAMS = {
             'cat': (143, 200, 'globe', 'Catalogs', 'Kiwix, models, ISOs', 0),
             'cand': (143, 360, 'board', 'Candidates', 'size and value', 1),
             'p0': (390, 200, 'leaf', '0 Essentials', 'water, medicine', 2),
-            'p1': (610, 200, 'cube', '1 Apps', 'installers first', 3),
-            'p2': (830, 200, 'book', '2 Library', 'ZIMs, Lastbook', 4),
+            'p1': (610, 200, 'cube', '1 Apps', 'tools, dev stack', 3),
+            'p2': (830, 200, 'book', '2 Library', 'ZIMs, Lastbook, ISOs', 4),
             'p3': (390, 360, 'brain', '3 Models', 'then bulk', 5),
             'dl': (610, 360, 'play', 'Download', 'each class diverse first', 7),
             'disk': (1068, 200, 'server', 'Data disk', 'stops at the reserve', 0),
@@ -75,7 +75,7 @@ DIAGRAMS = {
         },
         edges=[('cat', 'cand', '', 0), ('cand', 'p0', '', 0), ('p0', 'p1', '', 0), ('p1', 'p2', '', 0),
                ('p2', 'p3', '', 'elbow'), ('p3', 'dl', '', 0), ('dl', 'disk', '', 0), ('trade', 'disk', 'evicts', 0)],
-        used=['docs/LIBRARIAN.md', 'docs/ARCHITECTURE.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/LIBRARIAN.md', 'docs/ARCHITECTURE.md']),
     'heal-loop': dict(
         title='The self-healing loop',
         sub='Every 30 minutes, and after a reboot, the Ark checks itself and fixes what it can.',
@@ -89,13 +89,13 @@ DIAGRAMS = {
             'links': (0, 0, 'magnifier', 'Fix dead links', 'tool, installer URLs', 5),
             'verify': (0, 0, 'check', 'Check files', 'sizes, re-fetch short', 6),
             'tools': (0, 0, 'cube', 'Update apps', 'tools, dev stack', 0),
-            'fill': (0, 0, 'play', 'Top up', 'apps, library, models', 7),
+            'fill': (0, 0, 'play', 'Top up', 'essentials, library, models', 7),
             'run': (0, 0, 'flask', 'Does it run?', 'tools, LLM, API, UI', 1),
             'mod': (0, 0, 'shield', 'Safety sweep', 'new uploads', 2),
             'report': (0, 0, 'eye', 'Report', 'Health page, events', 3),
         },
         centre=('gear', 'loop.sh', 'every 30 min'),
-        used=['docs/ARCHITECTURE.md', 'docs/design/errors-selfheal.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/ARCHITECTURE.md', 'docs/design/errors-selfheal.md']),
     'request': dict(
         title='What happens when you tap Request',
         sub='From one tap on any device to a file on the disk, with live progress on the way.',
@@ -116,7 +116,7 @@ DIAGRAMS = {
         edges=[('tap', 'gate', '', 0), ('gate', 'mode', '', 0), ('mode', 'job', 'checked id', 0),
                ('job', 'pin', 'request', 0), ('pin', 'room', '', 0), ('room', 'dl', '', 0),
                ('dl', 'lib', '', 0), ('job', 'activity', 'progress', 0)],
-        used=['docs/ARCHITECTURE.md', 'docs/design/downloads-monitoring.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/ARCHITECTURE.md', 'docs/design/downloads-monitoring.md']),
     'access': dict(
         title='Who can do what',
         sub='The box is always the Admin; the LAN gets what the Use Mode allows; the internet gets no library.',
@@ -129,14 +129,14 @@ DIAGRAMS = {
             'net': (178, 460, 'globe', 'The internet', 'everyone else', 2),
             'admin': (566, 190, 'key', 'Admin', 'box, or passcode', 3),
             'mode': (566, 330, 'lock', 'Use Mode', 'Open, or sign in', 4),
-            'block': (566, 460, 'shield', 'Refused', 'no reads, no changes', 5),
+            'block': (566, 460, 'shield', 'Refused', 'no library, no changes', 5),
             'set': (988, 190, 'gear', 'Settings, repair', 'moderation, accounts', 6),
             'use': (988, 330, 'book', 'Browse, request', 'library, downloads', 7),
         },
         edges=[('box', 'admin', 'always', 0), ('lan', 'admin', 'passcode', 0), ('lan', 'mode', '', 0),
                ('net', 'block', '', 0), ('admin', 'set', '', 0), ('admin', 'use', '', 0),
                ('mode', 'use', 'Open: anyone here', 0)],
-        used=['docs/design/access-identity.md', 'docs/SERVING.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/design/access-identity.md', 'docs/SERVING.md']),
     'fleet': dict(
         title='One Ark, many machines',
         sub='Share one Ark across the LAN, or set up new ones from it, without the internet.',
@@ -153,7 +153,7 @@ DIAGRAMS = {
         },
         edges=[('ark', 'src', 'copies itself', 0), ('ark', 'peer', 'P2P sync', 0), ('ark', 'mesh', 'NFS export', 0),
                ('ark', 'laptop', 'file share', 0), ('src', 'new', 'installs offline', 0), ('new', 'ark2', '', 0)],
-        used=['docs/OFFLINE.md', 'docs/ARCHITECTURE.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/OFFLINE.md', 'docs/ARCHITECTURE.md']),
     'community': dict(
         title='The village square',
         sub='Chat, mail, boards and file drops run on the box and open inside the web UI.',
@@ -173,7 +173,7 @@ DIAGRAMS = {
         edges=[('env', 'loop', '', 0), ('env', 'start', 'enables', 0), ('start', 'svc', '', 0), ('loop', 'svc', '', 0),
                ('acct', 'svc', '', 0), ('svc', 'proxy', '', 0),
                ('proxy', 'chat', '', 0), ('proxy', 'board', '', 0)],
-        used=['docs/COMMUNITY.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/COMMUNITY.md']),
     'moderation': dict(
         title='Keeping shared files safe',
         sub='Files in the uploads folder are checked on the box by a local model. Doubtful ones wait for the Admin.',
@@ -192,25 +192,25 @@ DIAGRAMS = {
         edges=[('up', 'sweep', '', 0), ('sweep', 'model', '', 0), ('model', 'hold', '', 0),
                ('hold', 'quar', 'flagged or unsure', 0), ('model', 'shared', 'clean', 0),
                ('quar', 'review', '', 0)],
-        used=['docs/design/safety-moderation.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/design/safety-moderation.md']),
     'setup': dict(
         title='Setting up a new box',
-        sub='A few screens in a browser. Then the 24/7 loop fills the disk on its own.',
+        sub='A few screens in a browser. Then the first fill starts; the 24/7 loop keeps it going.',
         h=470,
         zones=[(28, 104, 1144, 340, 'The setup wizard, in order')],
         nodes={
             'welcome': (143, 200, 'house', 'Welcome', 'in any browser', 0),
-            'claim': (363, 200, 'key', 'Claim code', 'from another device', 1),
+            'claim': (363, 200, 'key', 'Setup code', 'shown on the box', 1),
             'name': (583, 200, 'board', 'Name it', 'a name for the box', 2),
-            'pass': (803, 200, 'lock', 'Admin passcode', 'optional', 3),
-            'focus': (1023, 200, 'leaf', 'Focus', 'survival, AI, tools…', 4),
-            'card': (803, 360, 'paste', 'Recovery card', 'print or save it', 5),
-            'fill': (583, 360, 'disk', 'Filling', 'by the 24/7 loop', 6),
-            'open': (363, 360, 'globe', 'Open mode', 'change it later', 7),
+            'pass': (803, 200, 'lock', 'Admin passcode', 'you can skip it', 3),
+            'access': (1023, 200, 'wifi', 'Who can use it', 'open, or signed in', 4),
+            'focus': (803, 360, 'leaf', 'Focus', 'survival, AI, tools…', 5),
+            'ready': (583, 360, 'check', 'Ready to go', 'review, then Set up', 6),
+            'done': (363, 360, 'paste', 'All set', 'recovery card, first fill', 7),
         },
         edges=[('welcome', 'claim', '', 0), ('claim', 'name', '', 0), ('name', 'pass', '', 0),
-               ('pass', 'focus', '', 0), ('focus', 'card', '', 'elbow'), ('card', 'fill', '', 0), ('fill', 'open', '', 0)],
-        used=['docs/design/commissioning.md', 'docs/HOW-IT-WORKS.md']),
+               ('pass', 'access', '', 0), ('access', 'focus', '', 'elbow'), ('focus', 'ready', '', 0), ('ready', 'done', '', 0)],
+        used=['docs/design/commissioning.md']),
     'serving': dict(
         title='Two ways to open an Ark',
         sub='Static pages on any file share, or the live web server. Both work fully offline.',
@@ -228,7 +228,7 @@ DIAGRAMS = {
         },
         edges=[('disk', 'site', '', 0), ('site', 'share', 'static', 0), ('share', 'lap', '', 0),
                ('disk', 'srv', '', 0), ('srv', 'live', 'dynamic', 0), ('live', 'ppl', '', 0)],
-        used=['docs/SERVING.md', 'docs/HOW-IT-WORKS.md']),
+        used=['docs/SERVING.md']),
 }
 
 
@@ -402,10 +402,6 @@ def main(argv):
             print(f'stale or missing: docs/img/flow/{n}')
         for n in extra:
             print(f'not produced by the generator: docs/img/flow/{n}')
-        for d, spec in DIAGRAMS.items():   # every diagram belongs in the picture book too
-            if 'docs/HOW-IT-WORKS.md' not in spec['used']:
-                print(f'{d}: add docs/HOW-IT-WORKS.md to used= (the picture book shows every diagram)')
-                bad.append(d)
         unused = [(d, md) for d, spec in DIAGRAMS.items() for md in spec['used']
                   if f'flow/{d}-light.svg' not in ((ROOT / md).read_text(errors='replace') if (ROOT / md).is_file() else '')]
         for d, md in unused:

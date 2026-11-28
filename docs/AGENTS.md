@@ -42,7 +42,7 @@ Every human-facing doc (guides, design, knowledge, the code READMEs, CONTRIBUTIN
   - an SVG skips `prefers-reduced-motion`, or goes over 40 KB;
   - a scene isn't used as a light/dark pair;
   - a doc listed in a scene's or diagram's `used=` doesn't embed it;
-  - a tracked human-facing doc is missing from `DOC_TREE` (nested `AGENTS.md`, `.github/` and `.agents/` skills are exempt).
+  - a tracked human-facing doc is missing from `DOC_TREE` (nested `AGENTS.md`, `.github/`, `.agents/` skills and the app's `data/dev-stack-guides/` are exempt).
 - The resting state is the fully opened scene, so reduced motion (and any renderer that won't animate) shows the finished picture.
 
 ## Canonical source — edit the owner, link everywhere else

@@ -581,7 +581,8 @@ def tree_missing():
         # Without git we can't tell docs from other .md files on disk (model cards,
         # tool READMEs when the data root is the repo), so only check the tree's own paths.
         return [], gone
-    want = {p for p in tracked if not re.search(r'(^|/)AGENTS\.md$|^\.github/|^\.agents/(skills|knowledge)/', p)}
+    # data/dev-stack-guides/ is app data (the web UI's offline guides, #397), not documentation.
+    want = {p for p in tracked if not re.search(r'(^|/)AGENTS\.md$|^\.github/|^\.agents/(skills|knowledge)/|^data/dev-stack-guides/', p)}
     want.add('AGENTS.md')
     return sorted(want - have), gone
 

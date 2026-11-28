@@ -129,7 +129,7 @@ DIAGRAMS = {
             'net': (178, 460, 'globe', 'The internet', 'everyone else', 2),
             'admin': (566, 190, 'key', 'Admin', 'box, or passcode', 3),
             'mode': (566, 330, 'lock', 'Use Mode', 'Open, or sign in', 4),
-            'block': (566, 460, 'shield', 'Refused', 'no reads, no changes', 5),
+            'block': (566, 460, 'shield', 'Refused', 'no library, no changes', 5),
             'set': (988, 190, 'gear', 'Settings, repair', 'moderation, accounts', 6),
             'use': (988, 330, 'book', 'Browse, request', 'library, downloads', 7),
         },

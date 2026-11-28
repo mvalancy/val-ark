@@ -32,7 +32,7 @@
 @keyframes rise{from{transform:scaleY(0)}}
 @keyframes bob{50%{transform:translateY(46px)}}
 @keyframes wave{to{transform:translateX(-80px)}}
-@keyframes pop{from{transform:scale(.3);opacity:0}}
+@keyframes pop{from{transform:scale(.8)}}
 @keyframes bar{0%{transform:scaleX(.04)}70%,100%{transform:none}}
 @keyframes ring{0%{opacity:0}30%{opacity:1}100%{opacity:.15}}
 @keyframes sway{from{transform:rotate(-4deg)}to{transform:rotate(4deg)}}

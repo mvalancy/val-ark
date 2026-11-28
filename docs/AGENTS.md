@@ -18,7 +18,7 @@ Each file is either a **reference** (describes what the code *is* — keep it ma
 | [COMMUNITY.md](COMMUNITY.md) | Both | Offline community services (chat, mail, boards, file drop) — reference for the services + guide to running them. **Canonical** for comms. |
 | [ENCRYPTION.md](ENCRYPTION.md) | Guide | The local CA + TLS for the offline LAN. **Canonical** for TLS/HTTPS (link here, don't re-explain). |
 | [PLATFORMS.md](PLATFORMS.md) | Guide | Per-platform setup + acceleration; the OpenWRT subset. **Canonical** for the CUDA/Metal source build. |
-| [HOW-IT-WORKS.md](HOW-IT-WORKS.md) | Guide | The picture book: one moving picture per chapter, with a short caption each. Chapters are moving to storybook scenes (`img/story/`), no two in the same form; the precise flow diagram stays in the guide each chapter links to. It links out and doesn't restate the guides. |
+| [HOW-IT-WORKS.md](HOW-IT-WORKS.md) | Guide | The picture book: one moving picture per chapter, with a short caption each. The first six chapters are storybook scenes (`img/story/`), no two in the same form, and the rest are moving to them; the precise flow diagram stays in the guide each chapter links to. It links out and doesn't restate the guides. |
 | [SERVING.md](SERVING.md) | Guide | Static (any file share) vs dynamic (`server.js`) serving: choosing, setup for each, screenshots. **Canonical** for that choice. |
 | [OFFLINE.md](OFFLINE.md) | Guide | Offline operation, P2P sync, and the NFS-shared mesh. |
 | [ARM64-NAS.md](ARM64-NAS.md) | Guide | ARM64 NAS appliances (chips such as the Rockchip RK3588): setup notes + gotchas. |

@@ -78,7 +78,7 @@ def css(t):
 @keyframes rise{{from{{transform:scaleY(0)}}}}
 @keyframes bob{{50%{{transform:translateY(46px)}}}}
 @keyframes wave{{to{{transform:translateX(-80px)}}}}
-@keyframes pop{{from{{transform:scale(.3);opacity:0}}}}
+@keyframes pop{{from{{transform:scale(.8)}}}}
 @keyframes bar{{0%{{transform:scaleX(.04)}}70%,100%{{transform:none}}}}
 @keyframes ring{{0%{{opacity:0}}30%{{opacity:1}}100%{{opacity:.15}}}}
 @keyframes sway{{from{{transform:rotate(-4deg)}}to{{transform:rotate(4deg)}}}}
@@ -324,7 +324,7 @@ def book(t, theme, h):
              f'<path d="M593 132v414l7-9 7 9V132Z" fill="{t["roof"]}"/>')
     # left page: plain pages on a file share
     p.append(text(112, 176, 'ch', 'The side door') + text(112, 204, 'it', 'Plain pages, on any file share', ' style="font-size:21px"'))
-    arc = 'M186 300C240 200 330 200 392 262'
+    arc = 'M186 300C240 224 330 224 392 270'
     p.append(icon('disk', 160, 306, 1.5, ACCENTS[5]) + f'<path d="{arc}" class="ld"/>')
     for k in range(3):
         p.append(f'<g class="go" style="offset-path:path(\'{arc}\');animation-duration:6s;animation-delay:{k * 2:.0f}s">'
@@ -356,7 +356,7 @@ def book(t, theme, h):
     p.append(laptop(950, 250, 130, t, ui))
     p.append(text(716, 386, 'sm m', 'The Ark, switched on') + text(970, 386, 'sm m', 'Phones and laptops nearby'))
     for i, s in enumerate(('The web server shows the whole library in a browser.',
-                           'Request more, chat, send mail, ask the assistant.',
+                           'Request more, ask the assistant; chat and mail if switched on.',
                            'Open to your LAN and tailnet, never to the internet.')):
         p.append(text(650, 428 + i * 22, 'cp', s))
     p.append('</g>')
@@ -448,12 +448,12 @@ def island(t, theme, h):
              + icon('key', cx, cy + 128, .6, ACCENTS[6]) + text(cx, cy + 158, 'sm h m', 'In with the admin passcode')
              + text(cx, cy + 174, 'xs h m', 'settings, repair, moderation'))
     p.append(text(cx, cy - 150, 'ch h m', 'Your network') + text(cx, cy - 130, 'cp h m', 'the LAN and your tailnet'))
-    for x, ic, a, l1, l2 in ((372, 'book', 2, 'Browse and read', 'the whole library'), (836, 'play', 1, 'Request more', 'one tap, if the mode allows')):
+    for x, ic, a, l1, l2 in ((372, 'book', 2, 'Browse and read', 'the library, if the mode allows'), (836, 'play', 1, 'Request more', 'one tap, if the mode allows')):
         p.append(icon(ic, x, cy - 30, 1.0, ACCENTS[a]) + text(x, cy + 8, 'sm h m', l1) + text(x, cy + 25, 'xs h m', l2))
     for i, (x, y, dl) in enumerate(((318, cy + 104, 0), (452, cy + 150, 1.5), (760, cy + 152, .7), (884, cy + 104, 2.2))):
         p.append(house(x, y, 40, 32, t, dl))
     # the sea, and the rule of the house
-    p.append(text(120, 290, 'ch h m', 'The internet') + text(120, 311, 'lb h m', 'Refused') + text(120, 330, 'cp h m', 'no reads, no changes'))
+    p.append(text(120, 290, 'ch h m', 'The internet') + text(120, 311, 'lb h m', 'Refused') + text(120, 330, 'cp h m', 'no library, no changes'))
     p.append(f'<rect x="968" y="90" width="196" height="92" rx="8" fill="{t["wall"]}" stroke="{t["line"]}" stroke-width="2"/>'
              + text(1066, 114, 'ch m', 'Use Mode') + text(1066, 138, 'sm m', 'Open · Passworded · Accounts')
              + text(1066, 157, 'xs m', 'the Admin chooses who gets in;') + text(1066, 172, 'xs m', 'a new box starts Open'))
@@ -488,8 +488,8 @@ SCENES = {
         desc='An open book. Left page, the side door: the Librarian writes plain HTML pages onto the data disk; open them '
              'on any device from an SMB or NFS share or a USB stick, with no server needed; read-only, to browse the '
              'catalog and copy what you need. Right page, the front door: with the Ark switched on, its web server shows '
-             'the whole library in a browser to phones and laptops nearby; request more, chat, send mail, ask the '
-             'assistant; open to your LAN and tailnet, never to the internet. Both work with no internet at all.',
+             'the whole library in a browser to phones and laptops nearby; request more and ask the assistant, plus '
+             'chat and mail if those services are switched on; open to your LAN and tailnet, never to the internet. Both work with no internet at all.',
         used=['docs/HOW-IT-WORKS.md']),
     'strip': dict(
         chapter='Chapter 5', title='One tap, four panels', h=560, draw=strip,
@@ -499,9 +499,9 @@ SCENES = {
     'island': dict(
         chapter='Chapter 6', title='The island and the sea', h=600, draw=island,
         desc='A map of an island. In the middle a keep: the box itself, always the Admin. Around it, inside a wall, your '
-             'network (the LAN and your tailnet): people browse and read the whole library and request more with one tap, '
-             'if the Use Mode allows; the admin passcode opens the keep for settings, repair and moderation. Outside the '
-             'wall is the sea, the internet: ships come near and are refused, with no reads and no changes. A sign gives '
+             'network (the LAN and your tailnet): people browse and read the library and request more with one tap, '
+             'both if the Use Mode allows; the admin passcode opens the keep for settings, repair and moderation. Outside the '
+             'wall is the sea, the internet: ships come near and are refused: no library and no changes. A sign gives '
              'the Use Mode: Open, Passworded or Accounts; the Admin chooses who gets in, and a new box starts Open.',
         used=['docs/HOW-IT-WORKS.md']),
 }

@@ -66,7 +66,6 @@ def css(t):
 .bob{{animation:bob 6s ease-in-out infinite}}
 .wave{{animation:wave 7s linear infinite}}
 .win{{animation:win 24s linear infinite both}}
-.fade{{animation:fade .8s ease-out both}}
 @keyframes go{{0%{{offset-distance:0%;opacity:0}}8%,90%{{opacity:1}}100%{{offset-distance:100%;opacity:0}}}}
 @keyframes drift{{to{{transform:translateX(26px)}}}}
 @keyframes tw{{50%{{opacity:.25}}}}
@@ -76,7 +75,6 @@ def css(t):
 @keyframes bob{{50%{{transform:translateY(46px)}}}}
 @keyframes wave{{to{{transform:translateX(-80px)}}}}
 @keyframes win{{0%,30%,100%{{opacity:.28}}3%,14%{{opacity:1}}}}
-@keyframes fade{{from{{opacity:0}}}}
 @media (prefers-reduced-motion:reduce){{*{{animation:none!important}}.go{{display:none}}}}
 @supports not (offset-path:path('M0 0')){{.go{{display:none}}}}
 """
@@ -146,7 +144,7 @@ def voyage(t, theme, h):
     p.append(f'<path d="M1160 470V428M1140 430H1182l8 7-8 7h-42Z" fill="{t["cream"]}" stroke="{t["line"]}" stroke-width="1.5"/>')
     p.append(text(1026, 348, 'ch h m', 'Your network') + text(1026, 500, 'lb h m', 'The web UI, in any browser')
              + text(1026, 522, 'cp h m', 'and plain pages on a file share'))
-    p.append(text(806, 404, 'it h', 'no internet needed', ' transform="rotate(24 806 404)"'))
+    p.append(text(812, 388, 'it h', 'no internet needed', ' transform="rotate(24 812 388)"'))
     # the Ark on the hill
     p.append(f'<path d="M462 300H738C730 334 700 356 660 356H540C500 356 470 334 462 300Z" fill="{t["wood"]}" '
              f'stroke="{t["wood2"]}" stroke-width="3"/>'
@@ -189,7 +187,7 @@ def voyage(t, theme, h):
 HOLD = (  # bottom-up: (top y, bottom y, accent index, icons, label, caption)
     (466, 524, 4, ('leaf', 'flask', 'book'), '1  Grid-down essentials', 'water, medicine, pocket Wikipedia, tiny assistant'),
     (396, 466, 0, ('cube', 'wrench', 'terminal', 'cube'), '2  Apps and tools', 'mirrored next, each within a share of the space'),
-    (290, 396, 2, ('book', 'map', 'globe', 'book', 'tree'), '3  The library', 'Wikipedia and other ZIMs, Lastbook, installers'),
+    (290, 396, 2, ('book', 'map', 'globe', 'book', 'tree'), '3  The library', "Wikipedia, Lastbook's books and maps, installers"),
     (226, 290, 3, ('brain', 'chip', 'brain', 'spark', 'brain'), '4  AI models', 'after the whole library is planned'),
 )
 
@@ -229,7 +227,7 @@ def hold(t, theme, h):
         p.append(f'<path d="M332 {yc}H{tx}" class="ld"/><circle cx="{tx}" cy="{yc}" r="4" fill="{ACCENTS[ai]}"/>')
         p.append(text(324, yc - 2, 'lb h e', label) + text(324, yc + 16, 'xs h e', cap))
     p.append(f'<path d="M332 198H372" class="ld"/>' + text(324, 196, 'lb h e', 'The reserve')
-             + text(324, 214, 'xs h e', '2% of the disk or 50 GB, whichever is larger'))
+             + text(324, 214, 'xs h e', 'by default 2% of the disk or 50 GB, whichever is larger'))
     # the crane lowers the next crate in
     p.append(f'<path d="M940 316V96M940 104H690M940 150L870 104M920 316h40" fill="none" stroke="{t["wood2"]}" '
              f'stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>')
@@ -239,8 +237,8 @@ def hold(t, theme, h):
              f'<path d="M699 118l42 34M741 118l-42 34" stroke="{t["wood2"]}" stroke-width="2"/></g></g>')
     p.append(text(966, 190, 'lb h', 'The Librarian lowers in') + text(966, 211, 'cp h', 'one of each kind first, then')
              + text(966, 229, 'cp h', 'the most value per byte'))
-    p.append(text(1050, 440, 'sm m', 'Ask for something specific') + text(1050, 459, 'xs m', 'and it makes room: the lowest-value')
-             + text(1050, 475, 'xs m', 'unpinned item is put ashore'))
+    p.append(text(1050, 440, 'sm m', 'Ask for something specific') + text(1050, 459, 'xs m', 'and, if it needs room, the least')
+             + text(1050, 475, 'xs m', 'valuable unpinned item is put ashore'))
     p.append(icon('cube', 1050, 500, .5, t['muted']))
     p.append('</g>')
     return ''.join(p)
@@ -251,7 +249,7 @@ WATCH = (   # (icon, label, caption): the loop's round, in order
     ('globe', 'Keep it up', 'server, apps, network'), ('ark', 'Copy itself', 'for new nodes'),
     ('map', 'Refresh', 'live catalogs'), ('magnifier', 'Fix dead links', 'tool, installer URLs'),
     ('check', 'Check files', 'sizes, re-fetch short'), ('cube', 'Update apps', 'tools, dev stack'),
-    ('play', 'Top up', 'apps, library, models'), ('flask', 'Does it run?', 'tools, LLM, API, UI'),
+    ('play', 'Top up', 'essentials, library, models'), ('flask', 'Does it run?', 'tools, LLM, API, UI'),
     ('shield', 'Safety sweep', 'new uploads'), ('eye', 'Report', 'Health page, events'),
 )
 
@@ -263,7 +261,7 @@ def watch(t, theme, h):
     p = [sky(t, h, rnd, theme, (1090, 92, 28), stars=60, horizon=.5), f'<g clip-path="url(#page)">',
          f'<path d="M0 330C200 300 420 318 640 306S1010 292 1200 312V{h}H0Z" fill="{t["far"]}"/>',
          f'<rect y="392" width="{W}" height="{h - 392}" fill="{t["ground"]}"/>']
-    p.append(text(1046, 98, 'lb h e', 'Every 30 minutes,') + text(1046, 117, 'cp h e', 'and after every reboot'))
+    p.append(text(1028, 90, 'lb h e', 'Every 30 minutes,') + text(1028, 109, 'cp h e', 'and after every reboot'))
     teeth = ''.join(f'M{x} {top}v-12h20v12' for x in range(46, 1150, 40))
     p.append(f'<rect x="36" y="{top}" width="1128" height="72" fill="{t["wall"]}" stroke="{t["line"]}" stroke-width="2"/>'
              f'<path d="{teeth}" fill="{t["wall"]}" stroke="{t["line"]}" stroke-width="2"/>'
@@ -305,10 +303,10 @@ SCENES = {
         chapter='Chapter 2', title='Filling the hold', h=560, draw=hold,
         desc="A ship's hold in cutaway, filling from the keel up. 1: grid-down essentials (water, medicine, a pocket "
              'Wikipedia, a tiny assistant). 2: apps and tools, mirrored next, each within a share of the space. 3: the '
-             'library (Wikipedia and other ZIMs, Lastbook, installers). 4: AI models, after the whole library is planned. '
-             'The top stays empty: the reserve, 2% of the disk or 50 GB, whichever is larger. A crane lowers crates in: '
-             'one of each kind first, then the most value per byte. Ask for something specific and the lowest-value '
-             'unpinned item is removed to make room.',
+             'library (Wikipedia and other ZIMs, Lastbook\'s books and maps, installers). 4: AI models, after the whole library is planned. '
+             'The top stays empty: the reserve, by default 2% of the disk or 50 GB, whichever is larger. A crane lowers crates in: '
+             'one of each kind first, then the most value per byte. Ask for something specific and, if it needs room, the '
+             'least valuable unpinned item is removed.',
         used=['docs/HOW-IT-WORKS.md']),
     'watch': dict(
         chapter='Chapter 3', title='The night watch', h=520, draw=watch,

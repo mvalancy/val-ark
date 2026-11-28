@@ -89,7 +89,7 @@ DIAGRAMS = {
             'links': (0, 0, 'magnifier', 'Fix dead links', 'tool, installer URLs', 5),
             'verify': (0, 0, 'check', 'Check files', 'sizes, re-fetch short', 6),
             'tools': (0, 0, 'cube', 'Update apps', 'tools, dev stack', 0),
-            'fill': (0, 0, 'play', 'Top up', 'apps, library, models', 7),
+            'fill': (0, 0, 'play', 'Top up', 'essentials, library, models', 7),
             'run': (0, 0, 'flask', 'Does it run?', 'tools, LLM, API, UI', 1),
             'mod': (0, 0, 'shield', 'Safety sweep', 'new uploads', 2),
             'report': (0, 0, 'eye', 'Report', 'Health page, events', 3),

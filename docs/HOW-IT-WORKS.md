@@ -7,9 +7,10 @@
 
 [Back to Docs](README.md) | [Back to Project Root](../README.md)
 
-Ten short chapters, one picture each, and every picture moves. The first six are storybook
-scenes; the rest are diagrams whose dots travel along the arrows to show what flows where. Each
-chapter links to the guide that goes deeper, where the precise diagram lives.
+Ten short chapters, one picture each, and every picture moves. No two are drawn the same way:
+a landscape, a ship's hold, a night watch, an open book, a comic strip, an island, a trail, a
+noticeboard, a sorting machine and a star chart. Each chapter links to the guide that goes
+deeper, where the precise diagram lives.
 
 ## 1. The whole thing on one page
 
@@ -80,41 +81,41 @@ The box itself is always the Admin. People on your network get what the Use Mode
 ## 7. Setting up a new box
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="img/flow/setup-dark.svg">
-  <img src="img/flow/setup-light.svg" width="100%" alt="Animated diagram: Setting up a new box. A few screens in a browser. Then the 24/7 loop fills the disk on its own.">
+  <source media="(prefers-color-scheme: dark)" srcset="img/story/trail-dark.svg">
+  <img src="img/story/trail-light.svg" width="100%" alt="Storybook scene: The trail to a working Ark. A trail of eight stepping stones across the hills, the setup screens in order: 1 Welcome (in any browser); 2 Setup code (shown on the box); 3 Name it (a name for the box); 4 Admin passcode (you can skip it); 5 Who can use it (open, or signed in); 6 Focus (survival, AI, tools…); 7 Ready to go (review, then Set up); 8 All set (save the recovery card). The setup code step is skipped on the box itself. At the flag the first fill starts; install the loop to keep it filling and healthy around the clock.">
 </picture>
 
-A few screens in a browser: name the box, optionally set a passcode, pick a focus, and save the recovery card. Then the 24/7 loop fills the disk on its own, once it is installed (`./scripts/loop.sh install 30`).
+A few screens in a browser: name the box, optionally set a passcode, choose who can use it, pick a focus, and save the recovery card. Then the first fill starts, and the 24/7 loop keeps the disk filling once it is installed (`./scripts/loop.sh install 30`).
 
 **More:** [First-boot setup](design/commissioning.md)
 
 ## 8. The village square
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="img/flow/community-dark.svg">
-  <img src="img/flow/community-light.svg" width="100%" alt="Animated diagram: The village square. Chat, mail, boards and file drops run on the box and open inside the web UI.">
+  <source media="(prefers-color-scheme: dark)" srcset="img/story/cork-dark.svg">
+  <img src="img/story/cork-light.svg" width="100%" alt="Storybook scene: The village noticeboard. A cork noticeboard with a note pinned for each community service: Chat (rooms in the browser IRC underneath); Mail (webmail on the box the Admin adds logins); Boards (a forum for the whole network); File drop (share a note or a file by link); Git forge (host your code with Gitea). A wider note says how they switch on: name the ones you want in .env (VALARK_SERVICES); the loop starts them and keeps them running, and Start on the Community page starts one now; each runs on the box and opens inside the web UI, for your network only.">
 </picture>
 
-Chat, mail, message boards and a file drop run on the box and open inside the web UI. Turn them on in `.env`, and the loop keeps them running.
+Chat, mail, message boards, a file drop and a git forge run on the box and open inside the web UI. Turn them on in `.env`, and the loop keeps them running.
 
 **More:** [Community and comms](COMMUNITY.md)
 
 ## 9. Keeping shared files safe
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="img/flow/moderation-dark.svg">
-  <img src="img/flow/moderation-light.svg" width="100%" alt="Animated diagram: Keeping shared files safe. Files in the uploads folder are checked on the box by a local model. Doubtful ones wait for the Admin.">
+  <source media="(prefers-color-scheme: dark)" srcset="img/story/belt-dark.svg">
+  <img src="img/story/belt-light.svg" width="100%" alt="Storybook scene: The sorting machine. A conveyor belt carries new files from the uploads folder (a folder you choose) through a scanner: a local model that checks text and images on the box, with nothing sent anywhere. Clean files leave by the upper chute and stay shared. Files that are flagged, that the model is unsure about, or that hit an error leave by the lower chute into quarantine: set aside, not deleted, until the Admin reviews them and removes or dismisses each. The file drop and mail keep their own stores, which this does not sweep.">
 </picture>
 
-Files in the uploads folder are checked on the box by a local model, with nothing sent anywhere. Anything flagged or uncertain is set aside until the Admin reviews it.
+Files in the uploads folder are checked on the box by a local model, with nothing sent anywhere. Anything flagged or uncertain is set aside until the Admin reviews it. The uploads folder is one you choose; the file drop and mail keep their own stores, which this does not sweep.
 
 **More:** [Safety and moderation](design/safety-moderation.md)
 
 ## 10. One Ark, many machines
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="img/flow/fleet-dark.svg">
-  <img src="img/flow/fleet-light.svg" width="100%" alt="Animated diagram: One Ark, many machines. Share one Ark across the LAN, or set up new ones from it, without the internet.">
+  <source media="(prefers-color-scheme: dark)" srcset="img/story/stars-dark.svg">
+  <img src="img/story/stars-light.svg" width="100%" alt="Storybook scene: The constellation. A star chart. The brightest star is the Ark, with one data disk. Lines join it to the machines around it: a syncing peer (Syncthing copies models and content, P2P), a GPU machine (runs the models over an NFS export), any laptop (static pages from a file share), and its own source (a bundle and bootstrap.sh, which it copies itself). From that source a new machine installs with curl bootstrap.sh, offline, and becomes another Ark, which fills up when it is online. No internet between them.">
 </picture>
 
 Other machines can share one Ark over the network: mount its models, sync a copy, or browse a file share. A new machine can even install Val Ark from an Ark, with no internet at all.
@@ -123,5 +124,5 @@ Other machines can share one Ark over the network: mount its models, sync a copy
 
 ---
 
-The pictures are drawn by [`scripts/docs/flow_art.py`](../scripts/docs/flow_art.py) and checked
+The pictures are drawn by [`scripts/docs/story_art.py`](../scripts/docs/story_art.py) and checked
 against the code; see [Pop-up art](AGENTS.md#pop-up-art-the-chapter-scenes) to add one.

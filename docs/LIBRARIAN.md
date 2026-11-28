@@ -304,6 +304,11 @@ sets and the source bundles are still run by hand (or from your own cron).
 
 ### Developer + security stack (`release_mirror.py`)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/story/blueprint-dark.svg">
+  <img src="img/story/blueprint-light.svg" width="100%" alt="Storybook scene: The parts sheet. A blueprint: a blue drafting sheet with a fine grid. Every developer-stack project that has an offline guide is drawn as a part in outline (white on blue in the dark theme, blue on a pale cyanotype in the light one), under the group name the page filters by: containers (Docker Engine, Compose, Buildx, Registry); cloud (Caddy, Headscale, Gitea, age, Prometheus, node_exporter, Alertmanager); toolchains (CMake, Ninja, Git for Windows, Go, Temurin JDK); storage (rclone, restic, croc); databases (DuckDB); dev-tools (KeePassXC, Ventoy). A dimension line under each group counts its guides. A lit lamp beside a part means it has a run check; a dashed ring means guide only (Temurin JDK, Git for Windows, KeePassXC and Ventoy: a window app, another system, or too big to try). Detail A is the test bench, &quot;does it run?&quot;: the newest copy for this box is unpacked on the bench, run with a time limit, then thrown away; nothing is installed; a pass is remembered for a week and a failure shows on the Health page. The title block in the corner names the sheet, data/dev-stack.tsv, one line per project: add a line and its card appears; none is hand-made.">
+</picture>
+
 `data/dev-stack.tsv` lists upstream projects, not files: each row names a resolver `kind`
 (GitHub latest release, a directory index, a GNU package, go.dev, python.org, PyPI, the PyPI
 top-N list, a URL template, or a snap) and `release_mirror.py` turns it into the current files
@@ -339,6 +344,47 @@ GITHUB_TOKEN=... python3 scripts/lib/release_mirror.py fetch --dest "$DATA_ROOT/
 - **What gets skipped.** Files already complete are skipped. Nothing is written outside `--dest`.
 - **Layout.** Versioned rows land at `<group>/<project>/<version>/<file>`, so a new release sits
   beside the old one. Index rows land at `<group>/<host>/<dir path>/<file>`.
+- **In the web UI (#397).** **Library ▸ Developer stack** shows one card per row, generated
+  from the list: `server.js` joins `data/dev-stack.tsv` with the tree (`GET /api/devstack`,
+  `scripts/lib/devstack.js`: name, note, group, versions held, files with sizes, and the
+  platforms read from the file names) and serves the files at `/api/archive/dev-stack/...`,
+  behind the same read wall and realpath containment as every other download, with HTTP
+  Range, a weak ETag and `If-Range`, so a dropped download resumes and one of a file that
+  was replaced meanwhile starts over. Mirrored projects come first; one that is not on
+  disk yet shows as "Not mirrored yet". The storage breakdown counts the tree.
+  Nothing is added to `web-ui/index.html` for a new row.
+- **Offline guides.** `data/dev-stack-guides/<key>.md` is a short plain-language guide for a
+  project: what it is for with the internet gone, how to install it from the mirrored files
+  on each platform, and the first steps offline. The key is `<owner>__<repo>` for a GitHub
+  row and `<kind>__<ref slug>` for the others (`go`, `index__download.docker.com__...`); a
+  file holding only `see: <key>` shares another project's guide. The card's detail view shows
+  the guide (`GET /api/devstack/guide?ref=<key>`, which answers for catalog keys only), and
+  `fetch` writes it beside the project's files as `INSTALL.txt` (rewritten only when the text
+  changes; `--guides DIR` points at another folder).
+- **Run checks.** `data/dev-stack-checks.tsv` names, per project, which file to take for the
+  host platform, the program inside it, its arguments and the output to expect.
+  `verify.sh` (`verify_devstack`) records PASS / FAIL / SKIP per project in
+  `state/verify.json` (component `apps`). It installs nothing.
+  - **Which file.** The newest mirrored version: the highest version folder, or, for an
+    index row (the Docker static engine), the files whose name carries the highest version,
+    since old releases stay beside the new one in that folder.
+  - **Unpacking.** Only the archive members the row names, and only as plain files (a name
+    that is a folder brings nothing with it), into a temp dir. No unpacked file may grow
+    past `VALARK_DEVSTACK_CHECK_MAX_MB` (default 2048).
+  - **Running.** A timeout (`VALARK_DEVSTACK_CHECK_TIMEOUT`, default 30 s) that ends in
+    KILL, a clean environment (`PATH=/usr/bin:/bin`, `HOME` = the temp dir), stdin closed,
+    output to a file (a child the program leaves behind cannot hold the check open), and,
+    when `unshare` works on the box, an empty network namespace and a PID namespace that
+    dies with the program (skipped where user namespaces are restricted). The program's first output line is kept in a
+    FAIL's label as printable ASCII only.
+  - **Not every cycle.** A PASS is remembered per file (path, size, mtime, ctime and the check
+    row; never one stamped in the future) in `state/devstack-checks.tsv` for `VALARK_DEVSTACK_CHECK_DAYS` (default 7), so a loop
+    cycle doesn't unpack every archive again. A FAIL or SKIP is tried again each time.
+  - **SKIP, not reported, FAIL.** Mirrored but no build for this box's platform, a missing
+    `timeout` / `unzip`, or an archive that will not unpack: SKIP with the reason. Not
+    mirrored: not reported. A check file that cannot be read: FAIL. A killed run removes
+    its temp dir. GUI and installer apps (KeePassXC, Ventoy), Windows-only ones (Git for
+    Windows) and the JDK have no check row.
 - **Volatile rows.** These are files whose name stays the same across upstream versions:
   `=latest` templates such as the Metasploit installers, `SHA256SUMS`, and `current/`
   directories. Those with a digest (the Kali ISOs) are checked against this run's digest,

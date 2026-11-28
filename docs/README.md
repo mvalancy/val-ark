@@ -123,7 +123,7 @@ Each important folder carries local operating notes.
 | `tests/lib/`, `tests/fixtures/` | Shared test helpers (results, ports, doc-link / secret / port-hygiene checkers) and offline fixtures (see [tests/README.md](../tests/README.md)). |
 | `tests/screenshots/` | [tests/screenshots/AGENTS.md](../tests/screenshots/AGENTS.md) — Playwright specs, parametrized over the catalog. |
 | `web-ui/` | [web-ui/AGENTS.md](../web-ui/AGENTS.md) · [web-ui/README.md](../web-ui/README.md) — zero-dep SPA (TOOLS array, TOOL_META, logos, screenshots). |
-| `data/` | [data/AGENTS.md](../data/AGENTS.md) — the six catalog TSVs (installers, models-extra, essentials, dev-stack, apt-sets, source-repos) and their schemas. |
+| `data/` | [data/AGENTS.md](../data/AGENTS.md) — the catalog TSVs (installers, models-extra, essentials, dev-stack, apt-sets, source-repos, dev-stack-checks) and their schemas, plus the dev-stack offline guides (`data/dev-stack-guides/`). |
 | `docs/` | [docs/AGENTS.md](AGENTS.md) — the reference guides (this folder). |
 | `docs/screenshots/` | Screenshots by topic: `web-ui/`, `serving/`, `mirror-honesty/`, and `terminal/` once `scripts/screenshots.sh` records one. |
 | `docs/img/` | Drawn art: `hero/` and the generated `popup/` scenes and docs tree. |

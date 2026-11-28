@@ -188,6 +188,7 @@
 922|gh|rclone/rclone||storage|rclone (sync to/from any S3 + 70 backends)
 922|gh|peak/s5cmd||storage|s5cmd fast S3 client
 922|gh|restic/restic||storage|restic backups (S3 backend)
+922|gh|schollz/croc||storage|croc (send files between two computers; its relay runs on the LAN)
 922|gh|borgbackup/borg||storage|Borg backups
 # --- Databases ----------------------------------------------------------------------------
 920|gh|relatedb/relate||databases|Relate by Neo4j: embedded Rust graph DB (openCypher/GQL) for agents

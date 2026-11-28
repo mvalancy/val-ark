@@ -3546,6 +3546,10 @@ function router() {
         html += renderActivity();
     } else if (route === '/packages') {
         html += renderPackages();
+    } else if (route === '/devstack') {
+        html += renderDevstack();
+    } else if (route.startsWith('/devstack/')) {
+        html += renderDevstackDetail(_devstackKey(route));
     } else if (route === '/health') {
         html += renderHealth();
     } else if (route === '/https' || route === '/trust') {
@@ -3586,6 +3590,9 @@ function router() {
     // '#/route#anchor' links jump to their section after render; plain routes reset to top.
     const anchorEl = getAnchor() && document.getElementById(getAnchor());
     if (anchorEl) anchorEl.scrollIntoView(); else window.scrollTo(0, 0);
+    // On a phone the Library sub-nav scrolls sideways: centre the current tab in it.
+    const libNav = document.querySelector('.library-nav'), libTab = libNav && libNav.querySelector('.lib-tab.active');
+    if (libTab) libNav.scrollLeft += libTab.getBoundingClientRect().left - libNav.getBoundingClientRect().left - (libNav.clientWidth - libTab.offsetWidth) / 2;
 
     // Rebind search if present
     const searchInput = document.getElementById('searchInput');
@@ -3608,6 +3615,7 @@ function router() {
         else if (route === '/models') loadCatalog('models');
         else if (route === '/community') refreshServices();
         else if (route === '/packages') loadPackages();
+        else if (route.startsWith('/devstack')) loadDevstack(_devstackKey(route));
         else if (route === '/health') startHealthLive();
     }
 
@@ -3634,7 +3642,7 @@ function renderNav(route) {
     const activeSection = route === '/' ? 'home' :
         (route.startsWith('/tools') || route.startsWith('/models') ||
          route.startsWith('/content') || route.startsWith('/library') ||
-         route.startsWith('/packages')) ? 'library' :
+         route.startsWith('/packages') || route.startsWith('/devstack')) ? 'library' :
         (route.startsWith('/activity') || route.startsWith('/health')) ? 'activity' :
         route.startsWith('/settings') ? 'settings' : '';
     const navLink = (href, section, label) => {
@@ -3672,6 +3680,7 @@ const _LIBRARY_TABS = [
     { key: 'tools',    href: '#/tools',    label: 'Software' },
     { key: 'models',   href: '#/models',   label: 'AI Models' },
     { key: 'content',  href: '#/content',  label: 'Offline Library' },
+    { key: 'devstack', href: '#/devstack', label: 'Developer stack' },
     { key: 'packages', href: '#/packages', label: 'Downloads' },
 ];
 function renderLibraryNav(active) {
@@ -4118,6 +4127,187 @@ function renderPackages() {
     html += `</tbody></table></div>`;
     html += `<p class="pkg-note">${pkgs.length} package${pkgs.length === 1 ? '' : 's'} available · also machine-readable as JSON at <code>/api/packages</code>.</p>`;
     html += '</div>';
+    return html;
+}
+// Library ▸ Developer stack (#397): GET /api/devstack is data/dev-stack.tsv joined with what
+// the box holds, so every card here is generated — a project added to the list shows up with
+// no change to this file. The detail view adds the project's offline guide
+// (data/dev-stack-guides/, GET /api/devstack/guide).
+const _DEVSTACK_CSS = `<style>
+.ds-card{cursor:pointer}
+.ds-card h3 a{color:inherit;text-decoration:none}
+.ds-card h3 a:hover{text-decoration:underline}
+.ds-absent{opacity:.65}
+.ds-files{margin-top:.6rem;font-size:.85rem}
+.ds-files summary{cursor:pointer;color:var(--text-muted,#8a8f98)}
+.ds-files ul{margin:.4rem 0 0;padding-left:1.1rem}
+.ds-files li{word-break:break-all;margin:.15rem 0}
+.ds-files a,.ds-guide a{color:var(--accent,#4da6ff)}
+.ds-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.ds-chips .tag{white-space:nowrap}
+.ds-guide{max-width:78ch;line-height:1.55;overflow-wrap:anywhere}
+.ds-guide code{overflow-wrap:anywhere}
+.ds-guide h2{font-size:1.25em;margin:1.2rem 0 .5rem}
+.ds-guide h3{font-size:1.05em;margin:1.1rem 0 .4rem}
+.ds-guide pre{background:var(--bg-secondary,#12161d);border:1px solid var(--border,#2a2d34);border-radius:8px;padding:.7rem .9rem;overflow-x:auto;font-size:.88rem}
+.ds-guide ul{padding-left:1.2rem}
+.ds-guide li{margin:.25rem 0}
+.ds-table .pkg-name{overflow-wrap:anywhere}
+@media (max-width:600px){
+  .ds-table th:nth-child(2),.ds-table td:nth-child(2){display:none}
+  .ds-table th,.ds-table td{padding:.5rem .45rem}
+  .ds-table .pkg-name{font-size:.85rem}
+}
+</style>`;
+const _DS_PLATFORM = { 'linux-x86_64': 'Linux x86_64', 'linux-arm64': 'Linux ARM64', 'macos-arm64': 'macOS', 'windows-x64': 'Windows', source: 'Source' };
+const _DS_CARD_FILES = 12;      // files listed on a card; the detail view lists them all
+let _devstackData = null;       // the /api/devstack reply, or false when it could not be read
+let _devstackGroup = 'all';
+const _devstackGuides = {};     // key -> guide text, or false when there is none
+function _devstackKey(route) {
+    try { return decodeURIComponent(route.slice('/devstack/'.length)); } catch (_) { return ''; }
+}
+let _devstackLoading = false;
+function loadDevstack(key) {
+    if (!_devstackData && !_devstackLoading) {
+        _devstackLoading = true;
+        fetch('/api/devstack').then(r => r.ok ? r.json() : false).catch(() => false).then(d => {
+            _devstackLoading = false;
+            _devstackData = d; if (getRoute().startsWith('/devstack')) scheduleRender();
+        });
+    }
+    if (key && _devstackGuides[key] === undefined) {
+        fetch('/api/devstack/guide?ref=' + encodeURIComponent(key)).then(r => r.ok ? r.json() : null).catch(() => null).then(d => {
+            _devstackGuides[key] = (d && d.guide) || false; if (getRoute().startsWith('/devstack/')) scheduleRender();
+        });
+    }
+}
+function setDevstackGroup(group) { _devstackGroup = group; router(); }
+// The list could not be read (server restarting, signed out): try again from the page.
+function retryDevstack() { _devstackData = null; loadDevstack(_devstackKey(getRoute())); router(); }
+// A click anywhere on a card opens its detail view, except on its own links and file list.
+function devstackCardClick(ev, card) {
+    if (!ev.target.closest('a, details')) window.location.hash = card.dataset.href;
+}
+function _devstackChips(p) {
+    let html = `<span class="tag">${esc(p.group)}</span>`;
+    if (!p.mirrored) return html + '<span class="tag ds-status">Not mirrored yet</span>';
+    if (p.versions[0] && p.versions[0].version) html += `<span class="tag tag-count">${esc(p.versions[0].version)}</span>`;
+    if (p.packages) html += `<span class="tag tag-count">${Number(p.packages).toLocaleString()} packages</span>`;
+    for (const x of p.platforms) html += `<span class="tag tag-tool">${esc(_DS_PLATFORM[x] || x)}</span>`;
+    return html;
+}
+function _devstackFileItem(f) {
+    return `<li><a href="${escAttr(f.url)}" download data-known="1">${esc(f.name)}</a> <span style="color:var(--text-muted)">${esc(formatBytes(f.size))}</span></li>`;
+}
+// What both views show until the list is loaded (null once it is).
+function _devstackPending() {
+    if (_devstackData) return null;
+    if (_devstackData === false) return '<p class="activity-empty" id="devstack-list">The developer stack list needs the Val Ark server (open this page from the Ark, signed in if it asks). <button class="cat-btn" id="devstack-retry" onclick="retryDevstack()">Try again</button></p>';
+    return '<p class="activity-empty" id="devstack-list">Loading the list…</p>';
+}
+function renderDevstack() {
+    let html = `${_SHELL_CSS}${_DEVSTACK_CSS}<div class="container" id="main-content">`;
+    html += renderBreadcrumb([{ label: 'Developer stack' }]);
+    html += renderLibraryNav('devstack');
+    html += '<h1>Developer stack</h1>';
+    html += '<p style="color:var(--text-secondary);max-width:70ch;margin-bottom:16px">Compilers, languages, containers, databases, security and everyday tools: the current release of each, for every platform it ships. Open a card for its files and its offline guide.</p>';
+    const pending = _devstackPending();
+    if (pending) return html + pending + '</div>';
+    const all = _devstackData.projects || [];
+    html += `<div class="search-bar">
+        <span class="search-icon">&#x1F50D;</span>
+        <input type="text" id="searchInput" placeholder="Search the developer stack..." aria-label="Search the developer stack">
+    </div>
+    <div id="searchStatus" class="search-status" style="display:none"></div>`;
+    html += '<div class="category-filters" role="group" aria-label="Filter by group" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">';
+    for (const g of ['all', ...(_devstackData.groups || [])]) {
+        const n = g === 'all' ? all.length : all.filter(p => p.group === g).length;
+        html += `<button class="cat-btn ${_devstackGroup === g ? 'active' : ''}" aria-pressed="${_devstackGroup === g}" data-group="${escAttr(g)}" onclick="setDevstackGroup(this.dataset.group)">${esc(g === 'all' ? 'All' : g)} (${n})</button>`;
+    }
+    html += '</div>';
+    // What the box holds comes first; inside each half the list keeps its own order.
+    const inGroup = all.filter(p => _devstackGroup === 'all' || p.group === _devstackGroup);
+    const shown = [...inGroup.filter(p => p.mirrored), ...inGroup.filter(p => !p.mirrored)];
+    const held = inGroup.filter(p => p.mirrored).length;
+    html += `<p style="color:var(--text-muted);font-size:.85em;margin-bottom:16px" id="devstack-count">${held} of ${inGroup.length} ${_devstackGroup === 'all' ? '' : esc(_devstackGroup) + ' '}projects mirrored on this box</p>`;
+    html += '<div class="cards-grid" id="devstack-list">';
+    for (const p of shown) {
+        const href = '#/devstack/' + encodeURIComponent(p.key);
+        let files = '';
+        const v = p.versions[0];
+        if (v) {
+            const more = v.files.length - _DS_CARD_FILES;
+            files = `<details class="ds-files"><summary>${v.files.length}${v.truncated ? '+' : ''} ${v.files.length === 1 && !v.truncated ? 'file' : 'files'} · ${esc(formatBytes(v.bytes))}</summary><ul>
+                ${v.files.slice(0, _DS_CARD_FILES).map(_devstackFileItem).join('')}
+                ${more > 0 ? `<li><a href="${escAttr(href)}">${more} more…</a></li>` : ''}</ul></details>`;
+        }
+        html += `<div class="card ds-card${p.mirrored ? '' : ' ds-absent'}" data-key="${escAttr(p.key)}" data-href="${escAttr(href)}" data-search="${escAttr((p.name + ' ' + p.ref + ' ' + p.note + ' ' + p.group).toLowerCase())}" onclick="devstackCardClick(event, this)">
+            <h3><a href="${escAttr(href)}">${esc(p.name)}</a></h3>
+            <div class="card-desc">${esc(p.note)}</div>
+            <div class="card-meta ds-chips">${_devstackChips(p)}</div>
+            ${files}
+        </div>`;
+    }
+    return html + '</div></div>';
+}
+function renderDevstackDetail(key) {
+    let html = `${_SHELL_CSS}${_PACKAGES_CSS}${_DEVSTACK_CSS}<div class="container" id="main-content">`;
+    const p = _devstackData && (_devstackData.projects || []).find(x => x.key === key);
+    html += renderBreadcrumb([{ label: 'Developer stack', href: '#/devstack' }, { label: p ? p.name : 'Project' }]);
+    html += renderLibraryNav('devstack');
+    const pending = _devstackPending();
+    if (pending) return html + pending + '</div>';
+    if (!p) return html + '<p class="activity-empty" id="devstack-detail">That project is not in the developer stack list.</p></div>';
+    html += `<div id="devstack-detail"><h1 style="overflow-wrap:anywhere">${esc(p.name)}</h1>
+        <p style="color:var(--text-secondary);max-width:70ch">${esc(p.note)}</p>
+        <div class="ds-chips" style="margin:12px 0 20px">${_devstackChips(p)}</div>`;
+    const guide = _devstackGuides[key];
+    // The guide opens with its own "# Name" title; the page already has one.
+    if (guide) html += `<div class="ds-guide" id="devstack-guide">${renderGuideText(guide.replace(/^# .*\n+/, ''))}</div>`;
+    else if (guide === undefined && p.guide) html += '<p class="activity-empty">Loading the offline guide…</p>';
+    html += '<h2 style="font-size:1.2em;margin:24px 0 10px">Files</h2>';
+    if (!p.mirrored) {
+        html += '<p class="activity-empty">Not mirrored yet. The box fetches the developer stack on its weekly cycle, as disk space allows.</p>';
+    } else if (p.packages) {
+        html += `<p class="activity-empty">${Number(p.packages).toLocaleString()} packages, in the box’s <code>dev-stack/${esc(p.group)}/pypi</code> folder. Install with <code>pip install --no-index --find-links &lt;that folder&gt; &lt;name&gt;</code>.</p>`;
+    }
+    for (const v of p.versions) {
+        html += `<div class="pkg-wrap" style="margin-bottom:16px"><table class="pkg-table ds-table"><thead><tr>
+            <th>${esc(v.version || 'File')}</th><th>Platform</th><th class="pkg-size">Size</th><th></th></tr></thead><tbody>`;
+        for (const f of v.files) {
+            html += `<tr class="pkg-row"><td class="pkg-name" style="word-break:break-all">${esc(f.name)}</td>
+                <td>${esc(_DS_PLATFORM[f.platform] || '—')}</td>
+                <td class="pkg-size">${esc(formatBytes(f.size))}</td>
+                <td><a class="pkg-dl" href="${escAttr(f.url)}" download data-known="1">Download</a></td></tr>`;
+        }
+        html += '</tbody></table></div>';
+        if (v.truncated) html += '<p class="pkg-note">Only the first files are listed; the rest are in the same folder on the box.</p>';
+    }
+    return html + '</div></div>';
+}
+// A guide is plain text with a little markdown: # / ## headings, - lists, ``` blocks,
+// `code` and **bold**. Every character is escaped first; nothing in a guide is ever HTML.
+function renderGuideText(text) {
+    const inline = (t) => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    const pre = (lines) => `<pre><code>${esc(lines.join('\n'))}</code></pre>`;
+    let html = '', para = [], list = [], code = null;
+    const flush = () => {
+        if (para.length) { html += `<p>${inline(para.join(' '))}</p>`; para = []; }
+        if (list.length) { html += `<ul>${list.map(i => `<li>${inline(i)}</li>`).join('')}</ul>`; list = []; }
+    };
+    for (const line of String(text).split('\n')) {
+        if (code !== null) {
+            if (line.startsWith('```')) { html += pre(code); code = null; } else code.push(line);
+        } else if (line.startsWith('```')) { flush(); code = []; }
+        else if (/^#{1,2} /.test(line)) { flush(); const h = line.startsWith('## ') ? 'h3' : 'h2'; html += `<${h}>${inline(line.replace(/^#+ /, ''))}</${h}>`; }
+        else if (line.startsWith('- ')) { if (para.length) flush(); list.push(line.slice(2)); }
+        else if (!line.trim()) flush();
+        else if (list.length && /^\s/.test(line)) list[list.length - 1] += ' ' + line.trim();
+        else { if (list.length) flush(); para.push(line.trim()); }
+    }
+    if (code !== null) html += pre(code);
+    flush();
     return html;
 }
 function renderDownloadCard(d) {

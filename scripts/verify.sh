@@ -24,8 +24,10 @@ chk()  { PASS=$((PASS+1)); echo -e "  ${GREEN}PASS${NC} $*"; RESULT_LINES+=("PAS
 bad()  { FAIL=$((FAIL+1)); echo -e "  ${RED}FAIL${NC} $*"; RESULT_LINES+=("FAIL|$*"); }
 skip() { SKIP=$((SKIP+1)); echo -e "  ${YELLOW}SKIP${NC} $*"; RESULT_LINES+=("SKIP|$*"); }
 
-# JSON-escape a controlled string (labels are ours; guard \, ", and whitespace/control).
-_json_str() { local s="$1"; s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\t'/ }; s=${s//$'\n'/ }; s=${s//$'\r'/}; printf '"%s"' "$s"; }
+# JSON-escape a label (guard \, ", and whitespace/control).
+# Any other control character (a program's ANSI colour, a stray \x01) is dropped: raw, it
+# would make the whole report unparseable.
+_json_str() { local s="$1"; s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\t'/ }; s=${s//$'\n'/ }; s=${s//[[:cntrl:]]/}; printf '"%s"' "$s"; }
 # Attribute a check to a Health-page component so faults point at the right thing.
 _verify_comp() {
     case "$1" in
@@ -109,6 +111,126 @@ verify_gitea() {
     fi
 }
 
+# Put the program a dev-stack check names into DIR and print its path; on failure print why
+# and return 1. Only the named archive members are unpacked, and only as plain files: a name
+# that is a folder brings nothing with it ('*' wildcards allowed; the first member is the
+# program, any others are files it cannot start without). A bare, .bz2 or .xz file is the
+# program itself. No unpacked file may grow past VALARK_DEVSTACK_CHECK_MAX_MB (default 2048):
+# the size limit ends a decompression bomb.
+_devstack_program() {
+    local file="$1" dir="$3" exe bin members tool=""
+    read -ra members <<< "$2"; bin="${members[0]}"
+    case "$file" in
+        *.tar.gz|*.tgz|*.tar.xz|*.tar.bz2) tool=tar ;;
+        *.zip) tool=unzip ;;
+        *.bz2) tool=bunzip2 ;;
+        *.xz)  tool=xz ;;
+    esac
+    [ -z "$tool" ] || command -v "$tool" >/dev/null 2>&1 || { echo "$tool not found"; return 1; }
+    (
+        ulimit -f $(( ${VALARK_DEVSTACK_CHECK_MAX_MB:-2048} * 1024 )) 2>/dev/null
+        case "$tool" in
+            tar)   # GNU tar needs --wildcards; bsdtar matches patterns as-is and spells --no-recursion -n
+                timeout -k 5 300 tar -xf "$file" -C "$dir" --no-recursion --wildcards "${members[@]}" 2>/dev/null || \
+                timeout -k 5 300 tar -xf "$file" -C "$dir" -n "${members[@]}" 2>/dev/null ;;
+            unzip)   timeout -k 5 300 unzip -qo "$file" "${members[@]}" -d "$dir" 2>/dev/null ;;
+            bunzip2) timeout -k 5 300 bunzip2 -c "$file" > "$dir/program" 2>/dev/null ;;
+            xz)      timeout -k 5 300 xz -dc "$file" > "$dir/program" 2>/dev/null ;;
+            *)       cp "$file" "$dir/program" 2>/dev/null ;;
+        esac
+    ) 2>/dev/null || { echo "could not be unpacked"; return 1; }
+    [ "$bin" = . ] && bin=program
+    exe=$(find "$dir" -type f -name "${bin##*/}" 2>/dev/null | head -1)
+    [ -n "$exe" ] && chmod +x "$exe" 2>/dev/null && echo "$exe" && return 0
+    echo "could not be unpacked"; return 1
+}
+
+_DEVSTACK_TMP=""      # verify_devstack's temp dir while it runs
+_DEVSTACK_TRAPS=""    # the caller's EXIT / TERM / INT traps, put back when it ends
+# Every way out of verify_devstack: remove the temp dir and give the caller its traps back.
+_devstack_end() {
+    [ -n "$_DEVSTACK_TMP" ] && rm -rf "$_DEVSTACK_TMP"
+    _DEVSTACK_TMP=""
+    [ -n "$_DEVSTACK_TRAPS" ] && eval "$_DEVSTACK_TRAPS"
+    _DEVSTACK_TRAPS=""
+}
+# The shell is exiting (killed, or the caller exited) mid-run: clean up, then run the EXIT
+# trap the caller had set, which ours stood in for.
+_devstack_exit() {
+    _devstack_end
+    eval "set -- $(trap -p EXIT)"
+    [ "$#" -ge 3 ] && [ "$3" != _devstack_exit ] && eval "$3"
+}
+verify_devstack() {
+    # The developer stack's run checks (#397): for each data/dev-stack-checks.tsv row whose
+    # project is mirrored, lib/devstack.js names the newest version's file for THIS platform.
+    # Its program is pulled into a temp dir and run there: a timeout that ends in KILL, a clean
+    # environment (minimal PATH, HOME = the temp dir), stdin closed, output to a file (so a
+    # child the program leaves behind cannot hold the check open), and, where unshare(1) can
+    # give them, an empty network namespace and a PID namespace that dies with the program.
+    # PASS / FAIL / SKIP per project.
+    # A PASS is remembered per file (path + size + mtime + ctime + the check row) in
+    # STATE_DIR/devstack-checks.tsv for VALARK_DEVSTACK_CHECK_DAYS (default 7), so a loop
+    # cycle does not unpack every archive again; a FAIL or SKIP is tried again each time.
+    # Nothing is installed or fetched, and a tree that is not mirrored has nothing to check.
+    # The caller's EXIT / TERM / INT traps are back in place when this returns.
+    # Test seam: VALARK_DEVSTACK_CHECKS = another check file.
+    local platform="$1" data="${_LIB}/../../data" node t n=0 to plan
+    [ -d "$DEVSTACK_DIR" ] || return 0
+    node="$HOME/.local/node/bin/node"; [ -x "$node" ] || node="$(command -v node 2>/dev/null)"
+    [ -n "$node" ] || { skip "dev-stack run checks: node not found"; return 0; }
+    to=$(command -v timeout 2>/dev/null)
+    [ -n "$to" ] || { skip "dev-stack run checks: timeout(1) not found"; return 0; }
+    t=$(mktemp -d "${TMPDIR:-/tmp}/valark-verify-devstack.XXXXXX") || return 0
+    _DEVSTACK_TRAPS="trap - EXIT TERM INT; $(trap -p EXIT TERM INT)"
+    _DEVSTACK_TMP="$t"
+    trap _devstack_exit EXIT; trap 'exit 143' TERM; trap 'exit 130' INT
+    if ! plan=$("$node" "${_LIB}/devstack.js" checks "${VALARK_DEVSTACK_CHECKS:-$data/dev-stack-checks.tsv}" "$data/dev-stack.tsv" "$DEVSTACK_DIR" "$platform" 2>"$t/plan.err"); then
+        bad "dev-stack run checks could not be planned ($(head -1 "$t/plan.err" | LC_ALL=C tr -cd '\40-\176' | cut -c1-120))"
+        _devstack_end; return 0
+    fi
+    local jail=(); local us; us=$(command -v unshare 2>/dev/null)
+    [ -n "$us" ] && "$us" -rn --pid --fork --kill-child true 2>/dev/null && jail=("$us" -rn --pid --fork --kill-child)
+    local cache="${STATE_DIR}/devstack-checks.tsv" secs="${VALARK_DEVSTACK_CHECK_TIMEOUT:-30}" now fresh
+    now=$(date +%s); fresh=$(( now - ${VALARK_DEVSTACK_CHECK_DAYS:-7} * 86400 ))
+    local status name file bin args expect d exe out rc label st spec at
+    : > "$t/cache.new"
+    while IFS=$'\x1f' read -r status name file bin args expect; do
+        [ -n "$status" ] || continue
+        if [ "$status" != run ]; then skip "tool present: dev-stack $name has no $platform build to run"; continue; fi
+        label="tool runs: dev-stack $name (${file##*/})"
+        # size, mtime, ctime: a file swapped in with its old mtime restored still has a new ctime
+        st=$(stat -c $'%s\t%Y\t%Z' "$file" 2>/dev/null || stat -f $'%z\t%m\t%c' "$file" 2>/dev/null); spec="$bin|$args|$expect"
+        # a PASS for this exact file and check row, young enough and not from the future: keep it
+        at=$(F="$file" ST="$st" SPEC="$spec" MIN="$fresh" NOW="$now" awk -F'\t' \
+            '$1==ENVIRON["F"] && ($2 "\t" $3 "\t" $4)==ENVIRON["ST"] && $6==ENVIRON["SPEC"] && $5+0>=ENVIRON["MIN"]+0 && $5+0<=ENVIRON["NOW"]+0 {print $5; exit}' "$cache" 2>/dev/null)
+        if [ -n "$at" ] && [ -n "$st" ]; then
+            chk "$label"; printf '%s\t%s\t%s\t%s\n' "$file" "$st" "$at" "$spec" >> "$t/cache.new"; continue
+        fi
+        n=$((n+1)); d="$t/$n"; mkdir -p "$d"
+        if exe=$(_devstack_program "$file" "$bin" "$d"); then
+            # Output goes to a file, not a pipe: a pipe would be held open by any child the
+            # program left running, and the check would wait for it long past the timeout.
+            # shellcheck disable=SC2086  # args is a space-separated list from our own TSV
+            ( cd "$d" && ulimit -f 65536 2>/dev/null
+              env -i PATH=/usr/bin:/bin HOME="$d" TMPDIR="$d" "${jail[@]}" "$to" -k 5 "$secs" "$exe" $args > "$t/out" 2>&1 </dev/null ); rc=$?
+            out=$(head -c 65536 "$t/out" 2>/dev/null)
+            if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -Eqa -- "$expect"; then
+                chk "$label"; [ -n "$st" ] && printf '%s\t%s\t%s\t%s\n' "$file" "$st" "$now" "$spec" >> "$t/cache.new"
+            else
+                # the program's own words go into the label: printable ASCII only
+                bad "tool present but won't run: dev-stack $name (${file##*/}: $(printf '%s' "$out" | head -1 | LC_ALL=C tr -cd '\40-\176' | cut -c1-120))"
+            fi
+        else
+            skip "tool present: dev-stack $name: $exe (${file##*/})"
+        fi
+        rm -rf "${d:?}"
+    done <<< "$plan"
+    mkdir -p "$STATE_DIR" 2>/dev/null
+    mv -f "$t/cache.new" "$cache" 2>/dev/null
+    _devstack_end
+}
+
 verify_local() {
     echo "── local functional checks ──"
     local td; td=$(native_tools_dir)
@@ -131,6 +253,7 @@ verify_local() {
     done
     [ "$any_tool" = 0 ] && skip "no native tool binaries in $td yet"
     verify_gitea "$td"
+    verify_devstack "${td##*/}"
 
     # 1b) cad-agent's mirrored wheelhouse installs OFFLINE (pip --no-index) into a
     # throwaway venv and the CLI runs. Core package only: the full extras set is

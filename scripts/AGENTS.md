@@ -14,7 +14,7 @@ disk and keep itself healthy 24/7. Start here to understand how a box boots, fil
 | `../start.sh` → `setup.sh` | Repo-root interactive menu; `setup.sh` does first-run dependency checks + directory/layout creation. |
 | `librarian.sh` | Disk-fill + curation engine. `status\|plan\|fill\|verify\|evict\|maintain\|refresh\|scout\|catalog\|request\|pin\|unpin\|pins\|site`. Fills any-size disk from **live** catalogs: essentials, then apps → library → models → bulk (#347), each diversity → small-valuable → fill; `evict` on request. |
 | `loop.sh` | 24/7 self-heal cycle. `once` (one cycle) / `run [SECS]` / `install [MIN]` (flock-guarded cron + `@reboot`) / `uninstall`. |
-| `verify.sh` | Functional checks: tools run, kiwix serves a real ZIM, a tiny LLM infers, the web API answers, fleet nodes reachable over SSH. `[local\|fleet\|all]`. |
+| `verify.sh` | Functional checks: tools run, mirrored dev-stack programs run (`verify_devstack`, `data/dev-stack-checks.tsv`), kiwix serves a real ZIM, a tiny LLM infers, the web API answers, fleet nodes reachable over SSH. `[local\|fleet\|all]`. |
 | `server.js` | **Zero-dependency** Node server: web UI + JSON API + SSE + `/api/archive/` (Range/resumable) + reverse proxies. Auto-launches `kiwix-serve`. (Navigation map below.) |
 | `valark` | Admin & recovery CLI (Phase-2 safety net): `setpassword`, `verify`, `auth {status\|list}`, `usemode`, `claim`, `setup-status`, `reset --tier1\|--tier2`. **Content-safety invariant:** every reset touches only `<state>` — never the content/model libraries. |
 
@@ -39,24 +39,26 @@ disk and keep itself healthy 24/7. Start here to understand how a box boots, fil
 
 ## server.js navigation map
 
-Zero-dep Node HTTP(S) server, ~3.4k lines. Sections are marked by `// ====` banners; line ranges below
+Zero-dep Node HTTP(S) server, ~4k lines. Sections are marked by `// ====` banners; line ranges below
 (re-grep `// ====` if they drift). ~48 `/api/…` routes are dispatched inside **Request Handling**.
 
 | Lines | Section | What lives here |
 |------:|---------|-----------------|
-| 1–149 | Config & bootstrap | requires (incl. `./lib/catalog-parse`), `ROOT`, `APP_VERSION` (repo-root `VERSION`), `.env` parse, listen ports, `resolveDataRoot`, `safeModeState`, `boxCommissioned`. |
-| 150–186 | Input Validation | `isAlphanumDash`, `isCatalogId` — allowlist guards for request ids (no client data reaches a shell). |
-| 187–204 | Status Cache | `invalidateCache` + the SSE/status memo. |
-| 205–329 | Download Manager | `broadcastSSE`, `jobManager` (`lib/jobs.js`), `startFromDesc`, `cancelDownload`, `retryDownload` — spawn librarian/download scripts as honest jobs (real-byte progress, verified result or visible failure), stream over SSE. |
-| 330–508 | Status Helpers (cached) | `getDiskStatus` / `getToolsStatus` / `getContentStatus` / `getModelsStatus` — data behind `/api/status/*`. |
-| 509–958 | Packages manifest | `computePackages`/`getPackages` (`/api/packages` — what THIS box can hand out) + storage/catalog helpers. |
-| 959–1555 | Request Handling | body/CORS/auth helpers (`isLocalhost`, `isAdmin`, `isReadGated`, `readAllowed`, `rateLimitOk`) + **`handleAPI`** — the ~48 `/api/…` routes: `status/*`, `catalog/*`, `request`, `download/*`, `service/*`, `auth/*`, `setup/*`, `moderation/*`, `maintenance/repair`, `ask`, `health`, `packages`. |
-| 1556–2845 | Static File Serving | `serveStatic`, `serveArchive` (`/api/archive/`, HTTP Range, resumable), `pipeProxy` — same-origin reverse proxy to `/kiwix/` and the `/app/<id>/` community services. Path-traversal protection throughout. |
-| 2846–2927 | TLS / local-CA | reads the `tls.sh`-generated cert/key; serves `/ca.crt`; `serveBootstrap` for `/bootstrap.sh`. |
-| 2928–3045 | Server (`handleRequest` + listen) | top-level router (blocks `..`/`%2e` early; routes `/ca.crt`, `/bootstrap.sh`, `/kiwix`, `/sources`, API, static); creates HTTP/HTTPS servers, binds `PORT` + `EXTRA_PORTS`. |
-| 3046–3377 | Kiwix Auto-Launch | scans `content/zim` for complete `.zim`, launches `kiwix-serve` on the internal `KIWIX_PORT`, proxied at `/kiwix/`. |
+| 1–172 | Config & bootstrap | requires (incl. `./lib/catalog-parse`), `ROOT`, `APP_VERSION` (repo-root `VERSION`), `.env` parse, listen ports, `resolveDataRoot`, `safeModeState`, `boxCommissioned`. |
+| 173–210 | Input Validation | `isAlphanumDash`, `isCatalogId` — allowlist guards for request ids (no client data reaches a shell). |
+| 211–228 | Status Cache | `invalidateCache` + the SSE/status memo. |
+| 229–405 | Download Manager | `broadcastSSE`, `jobManager` (`lib/jobs.js`), `startFromDesc`, `cancelDownload`, `retryDownload` — spawn librarian/download scripts as honest jobs (real-byte progress, verified result or visible failure), stream over SSE. |
+| 406–626 | Status Helpers (cached) | `getDiskStatus` / `getToolsStatus` / `getContentStatus` / `getModelsStatus` — data behind `/api/status/*`. |
+| 627–991 | Packages manifest | `computePackages`/`getPackages` (`/api/packages` — what THIS box can hand out) + storage/catalog helpers. |
+| 992–1756 | Request Handling | body/CORS/auth helpers (`isLocalhost`, `isAdmin`, `isReadGated`, `readAllowed`, `rateLimitOk`) + **`handleAPI`** — the ~48 `/api/…` routes: `status/*`, `catalog/*`, `request`, `download/*`, `service/*`, `auth/*`, `setup/*`, `moderation/*`, `maintenance/repair`, `ask`, `health`, `packages`. |
+| 1757–3435 | Static File Serving | `sendFile` (HTTP Range + `Last-Modified` / weak `ETag` / `If-Range`, resumable: one implementation), `contentDisposition` (an ASCII `filename` plus RFC 5987 `filename*` for any name), `serveStatic`, `serveArchive` (`/api/archive/`; a folder streams as `tar.gz`, capped at `VALARK_MAX_ARCHIVE_TAR` in all and fewer per client; a control character in the path is a 404), `pipeProxy` — same-origin reverse proxy to `/kiwix/` and the `/app/<id>/` community services. Path-traversal protection throughout. |
+| 3436–3516 | TLS / local-CA | reads the `tls.sh`-generated cert/key; serves `/ca.crt`; `serveBootstrap` for `/bootstrap.sh`. |
+| 3517–3669 | Server (`handleRequest` + listen) | top-level router (blocks `..`/`%2e` early; routes `/ca.crt`, `/bootstrap.sh`, `/kiwix`, `/sources`, API, static); creates HTTP/HTTPS servers, binds `PORT` + `EXTRA_PORTS`. |
+| 3670–4010 | Kiwix Auto-Launch | scans `content/zim` for complete `.zim`, launches `kiwix-serve` on the internal `KIWIX_PORT`, proxied at `/kiwix/`. |
 
-**Served surfaces:** ~48 `/api/…` routes · `/app/<id>/` (chat/mail/forum/paste/gitea) · `/kiwix/` (offline library) · `/sources/` (self bundle/tarball) · `/bootstrap.sh` (host-aware installer) · `/ca.crt`.
+**Developer stack (#397):** `DEVSTACK_DIR` is one of `serveArchive`'s `ARCHIVE_DIRS` (`/api/archive/dev-stack/…`: the only one that is not a repo-root tree), listed by `getDevstack()` (`lib/devstack.js`, 60 s cache, one scan shared by concurrent requests) for `GET /api/devstack` and `GET /api/devstack/guide?ref=<key>`; both are in `isReadGated`.
+
+**Served surfaces:** ~50 `/api/…` routes · `/app/<id>/` (chat/mail/forum/paste/gitea) · `/kiwix/` (offline library) · `/sources/` (self bundle/tarball) · `/bootstrap.sh` (host-aware installer) · `/ca.crt`.
 
 ## How to work here
 

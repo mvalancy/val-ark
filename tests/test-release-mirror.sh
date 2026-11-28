@@ -492,5 +492,34 @@ check "resolve failure + deferred files -> exit 1, summary names both" '[ $rc -e
 VALARK_STOP_FLAG="$T/stopflag" run fetch --tsv "$T/mix.tsv" --dest "$T/sf" --budget 100 > "$T/sf.out" 2> "$T/sf.err"; rc=$?
 check "STOP flag + resolve failure -> exit 1, summary line names both" '[ $rc -eq 1 ] && grep -q "^summary: resolve_failures=1 fetch_errors=0 deferred=[1-9]" "$T/sf.err" && ! grep -q "^ok	" "$T/sf.out"' || cat "$T/sf.err" >&2
 
+# --- offline guides -> INSTALL.txt beside the files (#397) -------------------------------
+G="$T/guides"; GD="$T/gd"; mkdir -p "$G"
+IDXKEY="index__127.0.0.1-${PORT}__idx"
+printf '# Tool\n\nUnpack it, then run tool.\n' > "$G/o__tool.md"
+printf 'see: o__tool\n' > "$G/$IDXKEY.md"
+printf '# Never\n' > "$G/o__missing.md"
+gfetch() { run fetch --tsv "$T/c.tsv" --only o/tool --only "$B/idx/" --only s --dest "$GD" --guides "$G" > "$T/g.out" 2> "$T/g.err"; }
+gfetch; rc=$?
+I="$GD/dev-tools/o/tool/v1.0/INSTALL.txt"
+check "fetch with guides -> 0" '[ $rc -eq 0 ]' || cat "$T/g.err" >&2
+check "a gh project's guide lands beside its files as INSTALL.txt" 'cmp -s "$G/o__tool.md" "$I"'
+check "an index project gets it in its folder; 'see:' resolves to the named guide" 'cmp -s "$G/o__tool.md" "$GD/dev-tools/127.0.0.1-$PORT/idx/INSTALL.txt"'
+check "a project without a guide gets none; nothing else is written" '[ "$(find "$GD" -name INSTALL.txt | wc -l)" -eq 2 ] && [ -z "$(find "$GD" -name "*.tmp")" ]'
+touch -d '2001-01-01' "$I"; gfetch
+check "idempotent: an unchanged guide is not rewritten" '[ "$(date -r "$I" +%Y)" = 2001 ]'
+printf '# Tool\n\nNew steps.\n' > "$G/o__tool.md"; gfetch
+check "a changed guide is rewritten" 'cmp -s "$G/o__tool.md" "$I"'
+printf 'see: ../../../etc/hostname\n' > "$G/o__tool.md"; rm -f "$I"; gfetch; rc=$?
+check "a 'see:' that is not a plain key is ignored (no file, run still ok)" '[ $rc -eq 0 ] && [ ! -e "$I" ]'
+check "the shipped guides are named by catalog keys, and guide_key matches each row" 'python3 -I - "$PY" "$ROOT/data" <<PYEOF
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("m", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+keys = {m.guide_key(e["kind"], e["ref"]) for e in m.load(sys.argv[2] + "/dev-stack.tsv")}
+names = {n[:-3] for n in os.listdir(sys.argv[2] + "/dev-stack-guides")}
+ok = names <= keys and all(m.read_guide(sys.argv[2] + "/dev-stack-guides", n) for n in names)
+ok = ok and m.guide_key("gh", "caddyserver/caddy") == "caddyserver__caddy" and m.guide_key("go", "-") == "go"
+sys.exit(0 if ok else 1)
+PYEOF'
+
 echo "release-mirror: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

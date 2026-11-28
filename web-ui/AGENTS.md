@@ -53,6 +53,7 @@ line (e.g. `grep -n "function renderHealth" web-ui/index.html`).
 **Render surfaces**
 - Home: `renderHomeStatus` ≈ 3588 · `renderHome` ≈ 4739 · Ask card `renderAskCard` ≈ 3618 / `initAskCard` ≈ 3641 / `askSubmit` ≈ 3693
 - Settings `renderSettings` ≈ 3769 (Use Mode picker `renderUseModeSection` / `setUseMode`, #303) · Activity `renderActivity` ≈ 3834
+- Developer stack (#397, generated from `/api/devstack`; no per-app entries): `renderDevstack` / `renderDevstackDetail` / `loadDevstack` / `renderGuideText` (a guide as escaped text + light markdown), just before `renderDownloadCard`
 - Packages/Downloads: `renderPackages` ≈ 3878 · `renderDownloadCard` ≈ 3906 / `loadDownloads` ≈ 3958 (no `renderDownloads`)
 - Notification center: `renderNotifBell` ≈ 4074 · `renderNotifPanelBody` ≈ 4137 · `loadNotifications` ≈ 4055
 - Health/Safety/self-heal: `renderHealth` ≈ 4413 · `renderSafety` ≈ 4464 · `runSelfHeal` ≈ 4556 · `setDownloadProfile` ≈ 4654

@@ -8,8 +8,10 @@ Commands (stdlib only):
         print TAB rows: url, dest (relative path), size (0 = unknown), digest (algo:hex,
         or '' when upstream publishes none), volatile (1 = the file name does not change
         between upstream versions). No downloads.
-  fetch --dest DIR [--budget BYTES] [same filters]
-        download every planned file under DIR, skipping files already complete.
+  fetch --dest DIR [--budget BYTES] [--guides DIR] [same filters]
+        download every planned file under DIR, skipping files already complete. A project
+        with an offline guide (data/dev-stack-guides/<key>.md; key = owner__repo for gh,
+        <kind>__<ref slug> otherwise) gets it beside its files as INSTALL.txt (#397).
         Disk guards (#347), the same as the librarian fill's: a file is DEFERRED (its
         .part kept, exit 3) when it would cut into the Val Ark reserve (max(
         VALARK_RESERVE_PCT% of the disk, VALARK_RESERVE_MIN_GB GiB), always applied),
@@ -76,6 +78,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TSV = ROOT / "data" / "dev-stack.tsv"
+DEFAULT_GUIDES = ROOT / "data" / "dev-stack-guides"
 UA = "val-ark-release-mirror/1"
 # Overridable for the offline test fixture.
 GH_API = os.environ.get("VALARK_GH_API", "https://api.github.com")
@@ -485,11 +488,54 @@ def plan(entries):
             except Exception as ex_:
                 got = []
                 failures.append(f"{e['kind']} {e['ref']}: {ex_}")
+            if got:  # where this entry's release files live (INSTALL.txt goes beside them)
+                dirs = [os.path.dirname(r[1]) for r in got if not r[4]] or [os.path.dirname(r[1]) for r in got]
+                e["dir"] = os.path.commonpath(dirs)
             for r in got:
                 if r[1] not in seen:
                     seen.add(r[1])
                     rows.append(r)
     return rows, failures
+
+
+def guide_key(kind, ref):
+    """The guide file name of a catalog row (scripts/lib/devstack.js refKey() is the same rule)."""
+    slug = "__".join(safe(p) for p in re.sub(r"^[a-z]+://", "", ref).split("/") if p) or "_"
+    if kind == "gh":
+        return slug
+    return kind if slug == "_" else f"{kind}__{slug}"
+
+
+def read_guide(guides, key):
+    """The guide text for a key, or None. A guide whose whole body is 'see: <key>' stands
+    for that key's guide (one hop)."""
+    def read(k):
+        try:
+            return (Path(guides) / f"{k}.md").read_text() if safe(k) == k else None
+        except OSError:
+            return None
+    text = read(key)
+    see = re.fullmatch(r"see:\s*(\S+)\s*", text or "")
+    return read(see[1]) if see else text
+
+
+def write_guides(entries, base, guides):
+    """INSTALL.txt beside each resolved entry's files, when the entry has a guide and its
+    folder exists (never a whole group's folder, which other projects share). Rewritten only
+    when the text changed; a failure is reported, never fatal."""
+    for e in entries:
+        text = read_guide(guides, guide_key(e["kind"], e["ref"])) if "/" in e.get("dir", "") else None
+        folder = (base / e["dir"]).resolve() if text else None
+        if not text or base not in folder.parents or not folder.is_dir():
+            continue
+        dest = folder / "INSTALL.txt"
+        try:
+            if not dest.exists() or dest.read_text() != text:
+                tmp = dest.with_name(dest.name + ".tmp")
+                tmp.write_text(text)
+                os.replace(tmp, dest)
+        except OSError as ex:
+            print(f"WARN guide {e['dir']}/INSTALL.txt: {ex}", file=sys.stderr)
 
 
 def stamp_path(path):
@@ -732,6 +778,7 @@ def main(argv=None):
     ap.add_argument("--group", action="append", default=[])
     ap.add_argument("--only", action="append", default=[], help="catalog ref to include (repeatable)")
     ap.add_argument("--dest")
+    ap.add_argument("--guides", default=str(DEFAULT_GUIDES), help="fetch: the offline guides written as INSTALL.txt")
     ap.add_argument("--budget", help="fetch: bytes this run may add (the loop passes the librarian's budget)")
     ap.error = lambda msg: (_ for _ in ()).throw(Usage(msg))
     try:
@@ -779,6 +826,7 @@ def main(argv=None):
         except Exception as e:
             print(f"ERROR fetch {dest}: {e}", file=sys.stderr)
             bad += 1
+    write_guides(entries, base, a.guides)
     if deferred:
         print(f"deferred {deferred} file(s) (STOP flag, the reserve or --budget); {GUARD.added} bytes added; "
               f"the .part files resume next run", file=sys.stderr)

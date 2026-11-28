@@ -1,0 +1,41 @@
+# Val Ark - developer-stack run checks: does the mirrored build for THIS box start, offline?
+# Read by scripts/lib/devstack.js (checks) for scripts/verify.sh verify_devstack, which
+# takes the newest mirrored version, pulls the one binary into a temp dir, runs it with a
+# timeout and records PASS / FAIL / SKIP per project in state/verify.json. Nothing is installed.
+#
+# Schema (pipe-delimited):  ref|file|binary|args|expect
+#   ref     the project's ref in data/dev-stack.tsv (exactly)
+#   file    regex (JavaScript) over the file names of the newest version. Only files for the
+#           host platform are tried (linux-x86_64 / linux-arm64 / macos-arm64, inferred from
+#           the name as on the Developer stack page), so the regex only has to pick the
+#           right archive among those. May contain '|'.
+#   binary  path of the program inside the archive ('*' wildcards allowed; only that member
+#           is unpacked), or '.' when the file is the program itself (bare, .bz2 or .xz).
+#           More members may follow, space-separated, when the program cannot start
+#           without them (go needs to see its own pkg/tool folder).
+#   args    arguments, space-separated
+#   expect  extended regex (grep -E) the output must match. Must not contain '|'.
+#
+# Not checked, on purpose:
+#   keepassxreboot/keepassxc, ventoy/Ventoy   GUI / installer apps: nothing to run headless
+#   git-for-windows/git                       Windows only
+#   adoptium/temurin*-binaries                java needs the whole JDK tree unpacked (~300 MB per run)
+go-gitea/gitea|^gitea-[\d.]+-[a-z]+-[a-z0-9]+$|.|--version|^[Gg]itea version [0-9]
+https://download.docker.com/linux/static/stable/x86_64/|^docker-[\d.]+\.tgz$|docker/docker|--version|Docker version [0-9]
+https://download.docker.com/linux/static/stable/aarch64/|^docker-[\d.]+\.tgz$|docker/docker|--version|Docker version [0-9]
+docker/compose|^docker-compose-[a-z]+-[a-z0-9_]+$|.|version|Docker Compose version
+docker/buildx|^buildx-v[\d.]+\.[a-z]+-[a-z0-9]+$|.|version|buildx
+distribution/distribution|^registry_[\d.]+_[a-z]+_[a-z0-9]+\.tar\.gz$|registry|--version|[0-9]+\.[0-9]+
+caddyserver/caddy|^caddy_[\d.]+_[a-z]+_[a-z0-9]+\.tar\.gz$|caddy|version|^v[0-9]+\.[0-9]+
+juanfont/headscale|^headscale_[\d.]+_[a-z]+_[a-z0-9]+$|.|version|[0-9]+\.[0-9]+\.[0-9]+
+Kitware/CMake|^cmake-[\d.]+-(linux-[a-z0-9_]+|macos-universal)\.tar\.gz$|*/bin/cmake|--version|cmake version [0-9]
+ninja-build/ninja|^ninja-[a-z0-9-]+\.zip$|ninja|--version|^[0-9]+\.[0-9]+
+rclone/rclone|^rclone-v[\d.]+-[a-z]+-[a-z0-9]+\.zip$|*/rclone|version|rclone v[0-9]
+restic/restic|^restic_[\d.]+_[a-z]+_[a-z0-9]+\.bz2$|.|version|restic [0-9]
+schollz/croc|^croc_v[\d.]+_[A-Za-z]+-[A-Za-z0-9]+\.tar\.gz$|croc|--version|croc version v?[0-9]
+FiloSottile/age|^age-v[\d.]+-[a-z]+-[a-z0-9]+\.tar\.gz$|age/age|--version|[0-9]+\.[0-9]+
+prometheus/prometheus|^prometheus-[\d.]+\.[a-z]+-[a-z0-9]+\.tar\.gz$|*/prometheus|--version|prometheus, version [0-9]
+prometheus/node_exporter|^node_exporter-[\d.]+\.[a-z]+-[a-z0-9]+\.tar\.gz$|*/node_exporter|--version|node_exporter, version [0-9]
+prometheus/alertmanager|^alertmanager-[\d.]+\.[a-z]+-[a-z0-9]+\.tar\.gz$|*/alertmanager|--version|alertmanager, version [0-9]
+duckdb/duckdb|^duckdb[-_]cli-(linux-(amd64|arm64)|osx-universal)\.(tar\.gz|zip)$|duckdb|--version|^v[0-9]+\.[0-9]+
+-|^go[\d.]+\.[a-z]+-[a-z0-9]+\.tar\.gz$|go/bin/go go/pkg/tool/*/asm|version|go version go[0-9]

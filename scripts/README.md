@@ -108,6 +108,7 @@ Shared library under `lib/` — sourced/required building blocks, not entry poin
 | `lib/jobs.js` | Download/mirror job manager behind `/api/status/downloads` + SSE: real-byte progress, honest terminal states, restart recovery |
 | `lib/tool-scan.js` | Mirrored-tool directory scan + per-platform mirror verification (sees through wrapper dirs) |
 | `lib/release_mirror.py` | Loop step 5d (before the fill) or by hand: the current release of every `data/dev-stack.tsv` project, every platform (`plan` / `fetch`) |
+| `lib/devstack.js` | The developer stack for the web UI and `verify.sh`: `data/dev-stack.tsv` joined with the mirrored tree (`/api/devstack`), the offline guides, and the run-check plan (`checks`) |
 | `lib/hf_scout.py` | Weekly Hugging Face model scout: speech + vision models (any age, ≤ 6 GB) and new open models (≤ 10 GB) as `models-extra.tsv` rows, cached by `catalog.sh` and run by `librarian.sh scout` / `maintain` (bounded by `VALARK_SCOUT_TIMEOUT`, 30 min) |
 | `lib/static_site.py` | Static browse pages (`index.html` + `browse/`) for plain file shares: cards with pictures, descriptions, sizes and relative links; run by `librarian.sh site` / `maintain` |
 | `lib/apt_offline.py` | Standalone: dependency-complete offline APT sets from `data/apt-sets.tsv`, indexed as a flat repo |

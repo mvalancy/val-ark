@@ -7,17 +7,17 @@
 // this header grows — re-grep `// ====` to confirm. Served surfaces: ~48 /api/…
 // routes (dispatched in Request Handling) · /app/<id>/ · /kiwix/ · /sources/ ·
 // /bootstrap.sh · /ca.crt.
-//   L1–167     Config & bootstrap — requires, ROOT, APP_VERSION, .env, listen ports
-//   L168–204   Input Validation — isAlphanumDash / isCatalogId (request-id allowlists)
-//   L205–222   Status Cache — invalidateCache + status/SSE memo
-//   L223–347   Download Manager — broadcastSSE + jobManager (lib/jobs.js) / startFromDesc / cancel / retry (SSE)
-//   L348–526   Status Helpers (cached) — getDisk/Tools/Content/Models (/api/status/*)
-//   L527–976   Packages manifest — getPackages (/api/packages) + storage/catalog helpers
-//   L977–1573  Request Handling — auth/CORS helpers + handleAPI (~48 /api/… routes)
-//   L1574–2863 Static File Serving — serveStatic / serveArchive (Range) / pipeProxy
-//   L2864–2944 TLS / local-CA — cert/key, /ca.crt, serveBootstrap (/bootstrap.sh)
-//   L2945–3063 Server — handleRequest router + HTTP/HTTPS listen (PORT + EXTRA_PORTS)
-//   L3064–end  Kiwix Auto-Launch — scan content/zim, launch kiwix-serve, proxy /kiwix/
+//   L1–172     Config & bootstrap — requires, ROOT, APP_VERSION, .env, listen ports
+//   L173–210   Input Validation — isAlphanumDash / isCatalogId (request-id allowlists)
+//   L211–228   Status Cache — invalidateCache + status/SSE memo
+//   L229–405   Download Manager — broadcastSSE + jobManager (lib/jobs.js) / startFromDesc / cancel / retry (SSE)
+//   L406–626   Status Helpers (cached) — getDisk/Tools/Content/Models (/api/status/*)
+//   L627–991   Packages manifest — getPackages (/api/packages) + storage/catalog helpers + getDevstack (/api/devstack)
+//   L992–1756  Request Handling — auth/CORS helpers + handleAPI (~48 /api/… routes)
+//   L1757–3435 Static File Serving — serveStatic / serveArchive (Range) / pipeProxy
+//   L3436–3516 TLS / local-CA — cert/key, /ca.crt, serveBootstrap (/bootstrap.sh)
+//   L3517–3669 Server — handleRequest router + HTTP/HTTPS listen (PORT + EXTRA_PORTS)
+//   L3670–end  Kiwix Auto-Launch — scan content/zim, launch kiwix-serve, proxy /kiwix/
 // ─────────────────────────────────────────────────────────────────────────────
 
 const http = require('http');
@@ -29,6 +29,7 @@ const { execSync, execFile, execFileSync, spawn, spawnSync } = require('child_pr
 const { parseCatalogTSV } = require('./lib/catalog-parse');
 const { createJobManager, bestReason } = require('./lib/jobs');
 const { shallowDirInfo, scanToolDir, verifyToolMirror } = require('./lib/tool-scan');
+const devstack = require('./lib/devstack');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -99,9 +100,11 @@ const MODEL_ROOT = (() => {
 // <VALARK_HOME>/state, physically separate from the content/model libraries.
 const auth = require('./lib/auth');
 const commission = require('./lib/commission');
-const STATE_DIR = process.env.VALARK_STATE_DIR
-    || (process.env.VALARK_HOME ? path.join(process.env.VALARK_HOME, 'state')
-        : path.join(DATA_ROOT === ROOT ? ROOT : path.join(DATA_ROOT, 'val-ark'), 'state'));
+const VALARK_HOME = process.env.VALARK_HOME || (DATA_ROOT === ROOT ? ROOT : path.join(DATA_ROOT, 'val-ark'));
+const STATE_DIR = process.env.VALARK_STATE_DIR || path.join(VALARK_HOME, 'state');
+// The developer stack (data/dev-stack.tsv, mirrored by lib/release_mirror.py), where
+// valark-env.sh puts it: VALARK_DEVSTACK_DIR, else <VALARK_HOME>/dev-stack.
+const DEVSTACK_DIR = cfg('VALARK_DEVSTACK_DIR') || path.join(VALARK_HOME, 'dev-stack');
 
 // Grandfather existing installs: a box set up the old way (before the wizard) already
 // holds mirrored tools/content/models — don't hijack a working Ark with first-boot
@@ -242,8 +245,14 @@ const sseByIp = new Map();   // clientIp -> live stream count
 // well under the bucket, pin every core for hours on multi-GB trees), so cap the number of
 // concurrent tar spawns globally (mirrors the MAX_SSE_CONNECTIONS 503 pattern). Single-file
 // downloads don't spawn tar and are unaffected — the first-class tool-download path stays open.
-const MAX_ARCHIVE_TAR = Number(process.env.VALARK_MAX_ARCHIVE_TAR) || 3;
+// A whole number from the environment, never under 1 (0 or a negative must not switch a
+// cap off or lock every download out); unset or junk = the default.
+const posInt = (v, d) => { const n = Math.floor(Number(v)); return v === undefined || v === '' || !Number.isFinite(n) ? d : Math.max(1, n); };
+const MAX_ARCHIVE_TAR = posInt(process.env.VALARK_MAX_ARCHIVE_TAR, 3);
 let archiveTarInFlight = 0;
+// One client may not hold every slot: it gets at most MAX_ARCHIVE_TAR - 1 (never under 1).
+const MAX_ARCHIVE_TAR_PER_IP = posInt(process.env.VALARK_MAX_ARCHIVE_TAR_PER_IP, Math.max(1, MAX_ARCHIVE_TAR - 1));
+const archiveTarByIp = new Map();   // clientIp -> directory tar streams running
 
 function broadcastSSE(event, data) {
     const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -891,6 +900,7 @@ async function computeStorage() {
         { key: 'tools',      label: 'Software & Tools',        color: '#4ade80', dir: path.join(ROOT, 'tools') },
         { key: 'installers', label: 'OS Installers',           color: '#fbbf24', dir: path.join(ROOT, 'installers') },
         { key: 'sources',    label: 'Source Code',             color: '#f472b6', dir: path.join(ROOT, 'sources') },
+        { key: 'devstack',   label: 'Developer Stack',         color: '#22d3ee', dir: DEVSTACK_DIR },
     ];
     const categories = [];
     for (const d of defs) {
@@ -913,6 +923,23 @@ function getStorageStatus() {
     // lightweight "computing" placeholder (the UI shows its static estimate until
     // real numbers land, then refines).
     return _storageCache.data || { categories: [], total: 0, zimCount: 0, disk: getDiskStatus(), computing: true };
+}
+
+// The developer stack for Library ▸ Developer stack (#397): every data/dev-stack.tsv row
+// joined with what DEVSTACK_DIR holds (lib/devstack.js: async, bounded reads). Cached like
+// the other status helpers; concurrent requests share one scan.
+const DEVSTACK_GUIDES = path.join(ROOT, 'data', 'dev-stack-guides');
+let _devstackCache = { data: null, ts: 0 };
+let _devstackComputing = null;
+function getDevstack() {
+    if (_devstackCache.data && (Date.now() - _devstackCache.ts) < CACHE_TTL) return Promise.resolve(_devstackCache.data);
+    if (!_devstackComputing) {
+        _devstackComputing = devstack.listing(path.join(ROOT, 'data', 'dev-stack.tsv'), DEVSTACK_GUIDES, DEVSTACK_DIR)
+            .catch(() => ({ groups: [], projects: [] }))
+            .then((data) => { _devstackCache = { data, ts: Date.now() }; return data; })
+            .finally(() => { _devstackComputing = null; });
+    }
+    return _devstackComputing;
 }
 
 // Catalog of downloadable-but-absent resources (live Kiwix OPDS for content, the
@@ -1138,6 +1165,7 @@ function isReadGated(urlPath) {
     // The packages manifest enumerates the library (what's on the box) → gate it
     // like the archive/catalog reads it points at, not like the open UI shell.
     if (urlPath === '/api/packages') return true;
+    if (urlPath === '/api/devstack' || urlPath === '/api/devstack/guide') return true;   // same: what the dev-stack tree holds
     if (urlPath === '/kiwix' || urlPath.startsWith('/kiwix/')) return true;
     if (/^\/app\//.test(urlPath)) return true;
     // The raw data/content trees the static router serves straight from ROOT (the
@@ -1456,6 +1484,19 @@ function handleAPI(req, res, urlPath) {
                 // like the library it enumerates (see isReadGated). Distinct from
                 // /api/catalog/* (the upstream not-yet-downloaded browse feed).
                 return sendJSON(res, req, getPackages());
+            case '/api/devstack':
+                return getDevstack().then((d) => sendJSON(res, req, d));
+            case '/api/devstack/guide': {
+                // ?ref= is only ever compared with the catalog's own keys (never used as a path).
+                let ref = '';
+                try { ref = new URL(req.url, 'http://localhost').searchParams.get('ref') || ''; } catch (_) {}
+                return getDevstack().then(async (d) => {
+                    const p = d.projects.find((x) => x.key === ref);
+                    const text = p ? await devstack.guide(DEVSTACK_GUIDES, p.key, new Set(d.projects.map((x) => x.key))) : null;
+                    if (text === null) return sendJSON(res, req, { error: 'No guide for that project' }, 404);
+                    sendJSON(res, req, { key: p.key, name: p.name, guide: text });
+                });
+            }
             case '/api/downloads/stream': {
                 // SSE connection limits: a global pool cap AND a per-IP cap, so one peer
                 // can't monopolise the progress stream for every other client/tab.
@@ -1742,6 +1783,50 @@ function realpathWithin(target, baseDir) {
     return null;
 }
 
+// Stream one file with HTTP Range support — a mirror serves multi-GB artifacts (models,
+// ZIMs, installers, dev-stack archives) and interrupted downloads must be resumable
+// (curl -C -, wget -c, browser resume). Single-range only; malformed ranges fall through
+// to a normal 200. Shared by serveStatic and serveArchive.
+// A validator pair (Last-Modified + a weak ETag of size and mtime) lets a client resume
+// safely: with If-Range, a range is honoured only while the file is still the one it began
+// downloading; once the file was replaced it gets the whole new file (200), never a splice.
+function sendFile(res, req, filePath, stat, headers) {
+    const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+    const lastModified = new Date(Math.floor(stat.mtimeMs / 1000) * 1000).toUTCString();
+    const baseHeaders = { ...headers, 'Accept-Ranges': 'bytes', 'Last-Modified': lastModified, 'ETag': etag, ...SECURITY_HEADERS };
+    const ifRange = req && req.headers && req.headers['if-range'];
+    const sameFile = !ifRange || ifRange === etag || ifRange === lastModified;
+    const pipe = (opts) => {
+        const stream = fs.createReadStream(filePath, opts);
+        stream.on('error', () => { try { res.destroy(); } catch (_) {} });
+        stream.pipe(res);
+    };
+    const m = sameFile && req && req.headers && req.headers.range
+        && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+    if (m && (m[1] !== '' || m[2] !== '')) {
+        let start, end;
+        if (m[1] === '') {              // bytes=-N : final N bytes
+            start = Math.max(0, stat.size - parseInt(m[2], 10));
+            end = stat.size - 1;
+        } else {
+            start = parseInt(m[1], 10);
+            end = m[2] === '' ? stat.size - 1 : Math.min(parseInt(m[2], 10), stat.size - 1);
+        }
+        if (start >= stat.size || start > end) {
+            res.writeHead(416, { 'Content-Range': `bytes */${stat.size}`, ...SECURITY_HEADERS });
+            return res.end();
+        }
+        res.writeHead(206, {
+            ...baseHeaders,
+            'Content-Length': end - start + 1,
+            'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+        });
+        return pipe({ start, end });
+    }
+    res.writeHead(200, { ...baseHeaders, 'Content-Length': stat.size });
+    pipe();
+}
+
 function serveStatic(res, filePath, req) {
     fs.stat(filePath, (err, stat) => {
         if (err) return send404(res);
@@ -1752,45 +1837,10 @@ function serveStatic(res, filePath, req) {
         }
 
         const ext = path.extname(filePath).toLowerCase();
-        const mime = MIME[ext] || 'application/octet-stream';
-        const baseHeaders = {
-            'Content-Type': mime,
-            'Accept-Ranges': 'bytes',
+        sendFile(res, req, filePath, stat, {
+            'Content-Type': MIME[ext] || 'application/octet-stream',
             'Cache-Control': (ext === '.html' || ext === '.css' || ext === '.js') ? 'no-cache' : 'max-age=3600',
-            ...SECURITY_HEADERS,
-        };
-
-        // HTTP Range support — a mirror serves multi-GB artifacts (models, ZIMs,
-        // installers) and interrupted downloads must be resumable (curl -C -,
-        // wget -c, browser resume). Single-range only; malformed ranges fall
-        // through to a normal 200.
-        const m = req && req.headers && req.headers.range
-            && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
-        if (m && (m[1] !== '' || m[2] !== '')) {
-            let start, end;
-            if (m[1] === '') {              // bytes=-N : final N bytes
-                start = Math.max(0, stat.size - parseInt(m[2], 10));
-                end = stat.size - 1;
-            } else {
-                start = parseInt(m[1], 10);
-                end = m[2] === '' ? stat.size - 1 : Math.min(parseInt(m[2], 10), stat.size - 1);
-            }
-            if (start >= stat.size || start > end) {
-                res.writeHead(416, { 'Content-Range': `bytes */${stat.size}`, ...SECURITY_HEADERS });
-                return res.end();
-            }
-            res.writeHead(206, {
-                ...baseHeaders,
-                'Content-Length': end - start + 1,
-                'Content-Range': `bytes ${start}-${end}/${stat.size}`,
-            });
-            const stream = fs.createReadStream(filePath, { start, end });
-            stream.on('error', () => { try { res.destroy(); } catch (_) {} });
-            return stream.pipe(res);
-        }
-
-        res.writeHead(200, { ...baseHeaders, 'Content-Length': stat.size });
-        fs.createReadStream(filePath).pipe(res);
+        });
     });
 }
 
@@ -1805,63 +1855,93 @@ function escapeHtml(s) {
 // visitors pull app binaries per platform. A file streams as an attachment; a
 // directory streams as a gzipped tar (via system `tar`, zero-dep). Only paths
 // inside the allowed data dirs are served; traversal is rejected.
-const ARCHIVE_DIRS = ['tools', 'models', 'content', 'sources', 'assets', 'installers'];
+// Content-Disposition for a download. Header values must be Latin-1 and the quoted name may
+// not hold a quote or a backslash, so `filename` is an ASCII stand-in and `filename*`
+// (RFC 5987) carries the real name, percent-encoded, for every current browser and curl.
+function contentDisposition(name) {
+    const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, '_');
+    let star = '';
+    try { star = `; filename*=UTF-8''${encodeURIComponent(name).replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())}`; }
+    catch (_) { /* a lone surrogate: the ASCII name alone */ }
+    return `attachment; filename="${ascii}"${star}`;
+}
+
+// Each served name maps to its directory: the repo-root trees (symlinks onto the data
+// disk), and the developer stack, which has no repo symlink and lives at DEVSTACK_DIR.
+const ARCHIVE_DIRS = Object.assign(Object.create(null),
+    Object.fromEntries(['tools', 'models', 'content', 'sources', 'assets', 'installers'].map((d) => [d, path.join(ROOT, d)])),
+    { 'dev-stack': DEVSTACK_DIR });
 function serveArchive(res, req, relPath) {
     let clean;
     try { clean = decodeURIComponent(relPath); } catch (_) { clean = relPath; }
+    // A control character can never be part of a mirrored name, and one in the
+    // Content-Disposition header below would throw inside the stat callback (a hung request).
+    if (/[\x00-\x1f\x7f]/.test(clean)) return send404(res);
     clean = path.normalize(clean).replace(/^([/\\]|\.\.[/\\]?)+/, '');
     const top = clean.split(/[/\\]/)[0];
-    if (!ARCHIVE_DIRS.includes(top)) return send404(res);
-    const target = path.join(ROOT, clean);
-    if (!isPathSafe(target, path.join(ROOT, top))) return send404(res);
+    const topDir = ARCHIVE_DIRS[top];
+    if (!topDir) return send404(res);
+    const target = path.join(topDir, clean.slice(top.length));
+    if (!isPathSafe(target, topDir)) return send404(res);
     // Beyond the lexical check: an in-tree symlink could point outside ROOT and
     // fs.stat would follow it. Require the realpath to stay within the (realpathed)
     // top-level served dir before serving. Dangling links → null → 404. (#101)
-    if (realpathWithin(target, path.join(ROOT, top)) === null) return send404(res);
+    if (realpathWithin(target, topDir) === null) return send404(res);
 
     fs.stat(target, (err, stat) => {
         if (err) return send404(res);
         const base = path.basename(target);
+        const isDir = stat.isDirectory();
+        const disposition = contentDisposition(base + (isDir ? '.tar.gz' : ''));
         // HEAD preflight (the UI probes availability before downloading) — answer the
         // headers without spawning a tar / opening the file for every probe.
         if (req && req.method === 'HEAD') {
             res.writeHead(200, {
-                'Content-Type': stat.isDirectory() ? 'application/gzip' : 'application/octet-stream',
-                'Content-Disposition': `attachment; filename="${base}${stat.isDirectory() ? '.tar.gz' : ''}"`,
+                'Content-Type': isDir ? 'application/gzip' : 'application/octet-stream',
+                'Content-Disposition': disposition,
+                ...(isDir ? {} : { 'Content-Length': stat.size, 'Accept-Ranges': 'bytes' }),
                 ...SECURITY_HEADERS,
             });
             return res.end();
         }
-        if (stat.isDirectory()) {
+        if (isDir) {
             // Cap concurrent tar+gzip streams so a few cheap GETs can't pin every core on
-            // large trees. Fail politely (503 + Retry-After) before writing 200 headers.
-            if (archiveTarInFlight >= MAX_ARCHIVE_TAR) {
+            // large trees (a whole served dir, the ~194 GB dev stack included, is a legal
+            // target and streams without buffering): MAX_ARCHIVE_TAR in all, fewer per client.
+            // Fail politely (503 + Retry-After) before writing 200 headers.
+            const tarIp = clientIp(req) || 'local';
+            if (archiveTarInFlight >= MAX_ARCHIVE_TAR || (archiveTarByIp.get(tarIp) || 0) >= MAX_ARCHIVE_TAR_PER_IP) {
                 res.writeHead(503, { 'Content-Type': 'text/plain', 'Retry-After': '10', ...SECURITY_HEADERS });
                 return res.end('Too many concurrent archive downloads — please retry shortly.\n');
             }
             archiveTarInFlight++;
+            archiveTarByIp.set(tarIp, (archiveTarByIp.get(tarIp) || 0) + 1);
             let tarReleased = false;
-            const releaseTar = () => { if (tarReleased) return; tarReleased = true; archiveTarInFlight--; };
-            res.writeHead(200, {
-                'Content-Type': 'application/gzip',
-                'Content-Disposition': `attachment; filename="${base}.tar.gz"`,
-                ...SECURITY_HEADERS,
-            });
-            const tar = spawn('tar', ['-czf', '-', '-C', path.dirname(target), base]);
-            tar.stdout.pipe(res);
-            tar.on('error', () => { releaseTar(); try { res.destroy(); } catch (_) {} });
-            tar.on('close', releaseTar);          // normal exit, error, or req-close kill — always freed
-            req.on('close', () => { try { tar.kill(); } catch (_) {} });
+            const releaseTar = () => { if (tarReleased) return; tarReleased = true; archiveTarInFlight--;
+                const n = (archiveTarByIp.get(tarIp) || 1) - 1;
+                if (n <= 0) archiveTarByIp.delete(tarIp); else archiveTarByIp.set(tarIp, n);
+            };
+            try {   // nothing below may leave the slot taken: a throw here used to lock the client out
+                res.writeHead(200, {
+                    'Content-Type': 'application/gzip',
+                    'Content-Disposition': disposition,
+                    ...SECURITY_HEADERS,
+                });
+                // tar gets the folder's real name (the header's is a sanitised copy)
+                const tar = spawn('tar', ['-czf', '-', '-C', path.dirname(target), '--', base]);
+                tar.stdout.pipe(res);
+                tar.on('error', () => { releaseTar(); try { res.destroy(); } catch (_) {} });
+                tar.on('close', releaseTar);          // normal exit, error, or req-close kill — always freed
+                req.on('close', () => { try { tar.kill(); } catch (_) {} });
+            } catch (e) {
+                releaseTar();
+                try { res.destroy(); } catch (_) {}
+            }
         } else {
-            res.writeHead(200, {
+            sendFile(res, req, target, stat, {
                 'Content-Type': 'application/octet-stream',
-                'Content-Length': stat.size,
-                'Content-Disposition': `attachment; filename="${base}"`,
-                ...SECURITY_HEADERS,
+                'Content-Disposition': disposition,
             });
-            const stream = fs.createReadStream(target);
-            stream.on('error', () => { try { res.destroy(); } catch (_) {} });
-            stream.pipe(res);
         }
     });
 }
